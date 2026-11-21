@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { decodePairingCode } from '@althar/transport-node'
 import { connectionCredentials, type ProtectCredential } from './credentials'
 import { Effect } from 'effect'
-import { BrowserWindow, ipcMain, MessageChannelMain, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
@@ -11,7 +12,28 @@ import { homeController } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { homeStore, savedHome } from './store'
+import { findRelease, HOST_RELEASE_KEYS } from './release'
+import { homeSetups, nativeSetupSystem } from './setup'
+import { homeStore, homeTarget, savedHome } from './store'
+
+/**
+ * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
+ * (ALTHAR_HOST_RELEASE_KEY, a public key's PEM file, and ALTHAR_HOST_RELEASE_MANIFEST, its manifest's address), and
+ * another folder's OpenSSH programs, as the end-to-end specs give a server of their own (ALTHAR_SETUP_SSH_TOOLS).
+ */
+const releaseSource = () => {
+  const own = app.isPackaged ? undefined : process.env.ALTHAR_HOST_RELEASE_KEY
+  let keys = HOST_RELEASE_KEYS
+  try {
+    // oxlint-disable-next-line althar/off-the-thread -- not a process: one small file, read once as main starts.
+    if (own !== undefined) keys = [...keys, readFileSync(own, 'utf8')]
+  } catch {
+    // Without it, the pinned keys alone.
+  }
+  const manifest = app.isPackaged ? undefined : process.env.ALTHAR_HOST_RELEASE_MANIFEST
+  const tools = app.isPackaged ? undefined : process.env.ALTHAR_SETUP_SSH_TOOLS
+  return { keys, ...(manifest === undefined ? {} : { manifest }), ...(tools === undefined ? {} : { tools }) }
+}
 
 export const startHomeConnections = ({
   profile,
@@ -111,6 +133,15 @@ export const startHomeConnections = ({
     overviewChanged,
     glances,
   })
+  // A home being set up over SSH: one for the whole app, told to every window as it goes.
+  const source = releaseSource()
+  const setups = homeSetups(
+    nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
+    (setup) => {
+      for (const window of BrowserWindow.getAllWindows())
+        if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+    },
+  )
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Home connections are available only in Althar’s own window.')
@@ -186,6 +217,20 @@ export const startHomeConnections = ({
     } catch {
       // Nothing to answer: the window reports again as its projects change.
     }
+  })
+  ipcMain.handle('althar:homes-setup', (event) => {
+    owner(event)
+    return setups.state()
+  })
+  ipcMain.handle('althar:homes-set-up', (event, target: unknown) => {
+    owner(event)
+    setups.start(homeTarget(target))
+  })
+  ipcMain.handle('althar:homes-setup-act', (event, action: unknown) => {
+    owner(event)
+    if (action !== 'trust' && action !== 'stop' && action !== 'resume' && action !== 'upload' && action !== 'dismiss')
+      throw new Error('Choose what to do with the setup.')
+    void setups.act(action).catch(() => undefined)
   })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
@@ -276,6 +321,7 @@ export const startHomeConnections = ({
     connect,
     stopAll: async () => {
       controller.stopping()
+      await setups.stop()
       await keyChanges
       for (const held of forgottenKeys.values()) clearTimeout(held.timer)
       forgottenKeys.clear()

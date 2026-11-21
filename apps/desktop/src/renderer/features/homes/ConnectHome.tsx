@@ -1,30 +1,24 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import {
-  Button,
-  Caret,
-  Code,
-  CopyButton,
-  Dialog,
-  Disclosure,
-  DisclosureTrigger,
-  Field,
-  Fold,
-  Icon,
-  Problem,
-  Spinner,
-  Segmented,
-} from '@althar/ui'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { Button, Code, CopyButton, Dialog, Field, Problem, Spinner } from '@althar/ui'
 
 import type { CheckedHome, HomesHost, SshHomeTarget } from '../../../homes'
+import { device } from '../../shared/device'
+import { Board, CodeField, HostField, LaterProblem, MethodSwitch, NameField, Options, Routes, type Route, type View } from './Drawing'
+import { InstallDone, installActions, InstallSteps, useSetup } from './SetUp'
+import { useFlow } from './useFlow'
 import { homeProblem, nameFrom } from './useHomes'
 import s from './Homes.module.css'
-import { usePairStep } from './PairHome'
+import c from './Connect.module.css'
 
 /*
- * Connecting a home: the host, checked first (read-only, and cancelled by any
- * edit), then the home's identity with the line that compares it on the
- * host, then its name, which starts as the host's until it is typed.
- * Connecting saves it and opens its window.
+ * Connecting a home, drawn: this computer and the home joined by a line drawn as the connection stands, the home's
+ * card filling in as it's typed and found. Over SSH, the host is checked first (read-only, and cancelled by any
+ * edit), then its identity shows with the line that compares it on the host, then its name, which starts as the
+ * host's until it is typed; or a pairing code reads where it leads. Connecting saves it and opens its window.
+ *
+ * A first home opens on what a home is, then how to set one up: over SSH, where Althar installs althar-host as a run
+ * of steps (SetUp.tsx), or with a pairing code from a server set up by hand.
  */
 
 export type Phase = 'idle' | 'checking' | 'checked' | 'refused' | 'connecting'
@@ -192,44 +186,6 @@ export function Identity({ homeId }: { homeId: string }) {
   )
 }
 
-/**
- * The home a check or a code found, as Manage homes shows a home: its glyph, where it is (or what it is, where the
- * dialog shows where already), its identity to compare, and a line on what to compare it with.
- */
-export function FoundHome({
-  where,
-  homeId,
-  label,
-  children,
-}: {
-  /** Where it is, where the dialog doesn't already show it; its identity is named instead. */
-  where?: string
-  homeId: string
-  label: string
-  children: ReactNode
-}) {
-  return (
-    <section className={s.found} aria-label={label}>
-      <div className={s.foundHead}>
-        <span className={s.glyph}>
-          <Icon name="home" size={15} />
-        </span>
-        <span className={s.foundWords}>
-          {where === undefined ? (
-            <span className={s.foundLabel}>Identity</span>
-          ) : (
-            <span className={s.foundWhere} title={where}>
-              {where}
-            </span>
-          )}
-          <Identity homeId={homeId} />
-        </span>
-      </div>
-      <p className={s.foundNote}>{children}</p>
-    </section>
-  )
-}
-
 /** A refused check or connection, under what it was about. */
 export function Refusal({ problem, id }: { problem: string; id?: string }) {
   return (
@@ -249,133 +205,219 @@ export function Working({ children }: { children: string }) {
   )
 }
 
-/** What a way of connecting puts in the dialog: its fields, its main button, what Enter does, and whether it is at work. */
-export interface Step {
-  readonly body: ReactNode
-  readonly action: ReactNode
-  readonly submit: () => void
-  readonly busy: boolean
-  /** Switched away from: what it had under way in main is cancelled, as if its form were left. */
-  readonly leave: () => void
+/**
+ * One page of the dialog becoming another as a morph: the dialog takes its new height, the drawing and its cards move
+ * with it, and what's under the drawing crosses over (Connect.module.css names each). At once where motion is reduced.
+ */
+const morph = (change: () => void) => {
+  if (typeof document.startViewTransition !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return change()
+  document.startViewTransition(() => flushSync(change))
 }
 
-/**
- * One dialog for both ways of connecting: switching between them keeps the dialog where it is, and what was typed in
- * each.
- */
-export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () => void }) {
-  const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
+export function ConnectHome({
+  homes,
+  first = false,
+  onClose,
+  onHide = onClose,
+}: {
+  homes: HomesHost
+  /** The person's first home: it opens on what a home is. */
+  first?: boolean
+  onClose: () => void
+  /** Closed while a home is being set up: the setup goes on, on the window's homes chip. */
+  onHide?: () => void
+}) {
+  const finished = useRef(() => {})
+  const flow = useFlow(homes, () => finished.current())
+  const install = useSetup(homes, flow)
+  useEffect(() => {
+    finished.current = () => {
+      if (install.setup !== null) install.dismiss()
+      onClose()
+    }
+  })
+  const [view, setView] = useState<View>(first ? 'intro' : 'form')
+  const [route, setRoute] = useState<Route>('ssh')
+  // Came through setting up over SSH, or opened on a setup under way: Althar installs it there, as a run of steps.
+  const [chose, setChose] = useState(false)
   // The first field takes the keys as the dialog opens; a method chosen after keeps focus on its switch.
   const [switched, setSwitched] = useState(false)
-  const ssh = useSshStep(homes, onClose, !switched)
-  const pair = usePairStep(homes, onClose, !switched)
-  const step = method === 'pair' ? pair : ssh
+  const installs = (chose || install.setup !== null) && homes.setUp !== undefined
+  // Opened on a setup under way: it opens where that got to.
+  const under = install.setup !== null
+  useEffect(() => {
+    if (!under) return
+    setView('form')
+    if (flow.method !== 'ssh') flow.setMethod('ssh')
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once a setup is known, not on every change of the form
+  }, [under])
+  const running = view === 'form' && installs && flow.method === 'ssh' && flow.found === null
+  const installing = running && install.phase !== 'idle'
+  const stage = !installing
+    ? view === 'form'
+      ? flow.stage
+      : view
+    : install.phase === 'failed' || (install.phase === 'done' && flow.stage === 'refused')
+      ? 'refused'
+      : install.phase === 'running' || install.phase === 'reconnecting' || install.phase === 'done'
+        ? 'checking'
+        : 'draft'
+  const go = () => {
+    if (view === 'intro') return morph(() => setView('setup'))
+    if (view === 'setup')
+      return morph(() => {
+        flow.setMethod(route === 'ssh' ? 'ssh' : 'pair')
+        setChose(route === 'ssh')
+        setView('form')
+      })
+    if (running) {
+      if (install.phase === 'idle') return install.start()
+      if (install.phase === 'failed' && install.problem?.retry === true) return install.retry()
+      if (install.phase === 'trust') return install.trust()
+      if (install.phase === 'stopped') return install.resume()
+      if (install.phase === 'done' && flow.stage === 'refused') return install.reread()
+      return
+    }
+    flow.submit()
+  }
+  const run = running ? installActions(install) : null
+  // A setup under way, or waiting on the person, outlives the dialog: closing it hides it, and the chip brings it back.
+  const underWay = installs && install.phase !== 'idle' && flow.stage !== 'connecting' && flow.stage !== 'connected'
+  const cancel = () => {
+    if (install.setup !== null) install.dismiss()
+    onClose()
+  }
+  const back = () => morph(() => setView(first ? 'intro' : 'form'))
+  const title = view === 'intro' ? 'Your first home' : view === 'setup' ? 'Set up a home' : 'Connect a home'
+  const how = view === 'intro' ? 'always on' : (view === 'setup' ? route === 'ssh' : flow.method === 'ssh') ? 'ssh' : 'https'
   return (
     <Dialog
-      title="Connect a home"
-      width={480}
-      holding={step.busy}
-      onClose={onClose}
-      onSubmit={step.submit}
+      title={title}
+      width={660}
+      className={c.dialog}
+      holding={flow.busy || install.busy}
+      // Its steps, or what it set up: more of the window, its buttons kept in sight.
+      tall={view === 'form' && installs && flow.method === 'ssh' && install.phase !== 'idle'}
+      onClose={underWay ? onHide : onClose}
+      onBack={view === 'setup' ? back : undefined}
+      onSubmit={go}
       actions={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          {step.action}
-        </>
+        running ? (
+          <>
+            {run?.secondary === 'Stop' ? <Button onClick={install.stop}>Stop</Button> : <Button onClick={cancel}>Cancel</Button>}
+            {run?.other === 'upload' && (
+              <Button variant={run.primary === null ? 'signal' : undefined} onClick={install.send}>
+                Send it from here
+              </Button>
+            )}
+            {(run === null || run.primary !== null) && (
+              <Button
+                type="submit"
+                variant="signal"
+                busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
+                disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
+              >
+                {run === null
+                  ? install.phase !== 'done'
+                    ? 'Set it up'
+                    : flow.stage === 'refused'
+                      ? 'Try again'
+                      : 'Reading its identity…'
+                  : run.primary}
+              </Button>
+            )}
+          </>
+        ) : view === 'form' ? (
+          <>
+            <Button onClick={cancel}>Cancel</Button>
+            {flow.action}
+          </>
+        ) : (
+          <>
+            <Button onClick={onClose}>{view === 'intro' ? 'Not now' : 'Cancel'}</Button>
+            <Button type="submit" variant="signal">
+              {view === 'intro' ? 'Set one up' : route === 'ssh' ? 'Continue' : 'Paste its code'}
+            </Button>
+          </>
+        )
       }
     >
-      <div className={s.form}>
-        {homes.pair !== undefined && (
-          <Segmented
-            label="Connection method"
-            value={method}
-            onChange={(next) => {
-              if (next === method) return
-              step.leave()
-              setSwitched(true)
-              setMethod(next)
-            }}
-            className={s.method}
-            options={[
-              { value: 'pair', label: 'Pairing code', disabled: step.busy },
-              { value: 'ssh', label: 'SSH', disabled: step.busy },
-            ]}
-          />
+      <Board flow={flow} view={view} stage={stage} how={how} />
+      <div className={c.body}>
+        {view === 'intro' && (
+          <div className={c.intro}>
+            <h3 className={c.lede}>Work that keeps going while {device.this} sleeps</h3>
+            <p className={c.copy}>
+              A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its projects
+              from here, each in a window of its own.
+            </p>
+          </div>
         )}
-        {step.body}
+        {view === 'setup' && <Routes route={route} onRoute={(next) => morph(() => setRoute(next))} />}
+        {view === 'form' && (
+          <div className={c.form} key="form">
+            {!installing && install.phase !== 'done' && homes.pair !== undefined && (
+              <MethodSwitch
+                flow={flow}
+                onChange={(next) => {
+                  setSwitched(true)
+                  morph(() => flow.setMethod(next))
+                }}
+              />
+            )}
+            {flow.method === 'ssh' ? (
+              <HostField
+                flow={flow}
+                readOnly={install.phase !== 'idle' && install.phase !== 'failed'}
+                focus={!first && !under && !switched}
+                problem={install.refused}
+                help={
+                  installs && install.phase === 'idle' ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined
+                }
+              />
+            ) : (
+              <CodeField
+                flow={flow}
+                focus={!first && !switched}
+                help={
+                  <>
+                    On the home, <Code>althar-host pair</Code> prints one.{' '}
+                    {homes.setUp !== undefined && (
+                      <button type="button" className={c.link} onClick={() => morph(() => setView('setup'))}>
+                        Not set up yet?
+                      </button>
+                    )}
+                  </>
+                }
+              />
+            )}
+            {installing && <InstallSteps install={install} />}
+            {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && install.phase === 'idle' && (
+              <Options flow={flow} />
+            )}
+            {flow.found !== null && (
+              <>
+                {installs && flow.method === 'ssh' && install.phase === 'done' ? (
+                  // Althar made this home itself, over a key the person trusted: there's no identity to compare.
+                  <InstallDone install={install} />
+                ) : (
+                  <p className={c.note}>
+                    {flow.method === 'ssh' ? (
+                      <>
+                        On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
+                      </>
+                    ) : (
+                      'Tasks and conversations are available. Approvals need a trusted device.'
+                    )}
+                  </p>
+                )}
+                <NameField flow={flow} />
+              </>
+            )}
+            <LaterProblem flow={flow} />
+          </div>
+        )}
       </div>
     </Dialog>
   )
-}
-
-function useSshStep(homes: HomesHost, onClose: () => void, focus: boolean): Step {
-  const id = useId()
-  const form = useConnect(homes, onClose)
-  const checked = form.checked !== null && (form.phase === 'checked' || form.phase === 'connecting') ? form.checked : null
-  const problem = form.phase === 'refused' ? form.problem : null
-  return {
-    busy: form.phase === 'checking' || form.phase === 'connecting',
-    leave: () => form.reset(form.target, form.options),
-    submit: () => (checked !== null ? form.connect() : form.check()),
-    action:
-      checked !== null ? (
-        <Button type="submit" variant="signal" busy={form.phase === 'connecting'} disabled={form.name.trim() === ''}>
-          {form.phase === 'connecting' ? 'Connecting…' : 'Connect'}
-        </Button>
-      ) : (
-        <Button type="submit" busy={form.phase === 'checking'} disabled={form.target.trim() === '' || form.phase === 'checking'}>
-          {form.phase === 'checking' ? 'Checking…' : 'Check host'}
-        </Button>
-      ),
-    body: (
-      <>
-        <div className={s.field}>
-          <label className={s.fieldLabel} htmlFor={`${id}-host`}>
-            SSH host
-          </label>
-          <Field
-            id={`${id}-host`}
-            value={form.target}
-            invalid={problem !== null}
-            aria-describedby={problem === null ? undefined : `${id}-problem`}
-            placeholder="user@host, or a Host from your SSH config"
-            spellCheck={false}
-            autoComplete="off"
-            maxLength={4096}
-            className={s.mono}
-            // While it connects, the host it connects to stays as it is.
-            readOnly={form.phase === 'connecting'}
-            // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to type a host; its first field takes the keys.
-            autoFocus={focus}
-            onChange={(event) => form.setTarget(event.currentTarget.value)}
-          />
-          {problem !== null && <Refusal problem={problem} id={`${id}-problem`} />}
-        </div>
-        {checked === null ? (
-          <Disclosure>
-            <DisclosureTrigger>
-              <button type="button" className={s.more}>
-                Connection options <Caret />
-              </button>
-            </DisclosureTrigger>
-            <Fold bleed={false}>
-              <OptionFields form={form} />
-            </Fold>
-          </Disclosure>
-        ) : (
-          <>
-            <FoundHome homeId={checked.homeId} label="The home on this host">
-              On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
-            </FoundHome>
-            <div className={s.field}>
-              <label className={s.fieldLabel} htmlFor={`${id}-name`}>
-                Name
-              </label>
-              <Field id={`${id}-name`} value={form.name} maxLength={120} onChange={(event) => form.setName(event.currentTarget.value)} />
-            </div>
-          </>
-        )}
-      </>
-    ),
-  }
 }

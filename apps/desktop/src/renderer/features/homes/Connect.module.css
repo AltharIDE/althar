@@ -1,4 +1,4 @@
-/* A · The drawing: the Welcome's dotted board, this computer and the home joined by a line drawn as the connection stands. */
+/* Connect a home: the drawing board, this computer and the home joined by a line drawn as the connection stands. */
 
 .board {
   display: grid;
@@ -296,11 +296,6 @@
   line-height: 1.55;
   color: var(--t-2);
 }
-.need {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--t-3);
-}
 
 /* setting the home up: two ways, then what each takes */
 .setup {
@@ -396,31 +391,6 @@
 .termCopy {
   flex: none;
 }
-.ticks {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: tick;
-}
-.ticks li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12.5px;
-  line-height: 18px;
-  color: var(--t-2);
-  counter-increment: tick;
-}
-.ticks li::before {
-  content: counter(tick);
-  flex: none;
-  width: 14px;
-  font: 500 11px/18px var(--mono);
-  color: var(--t-4);
-}
 .aside {
   margin: 0;
   font-size: 12px;
@@ -445,7 +415,7 @@
 }
 
 /*
- * One page becoming the next (morph in a.tsx): the dialog's box takes its new height, its title and buttons ride
+ * One page becoming the next (morph in ConnectHome.tsx): the dialog's box takes its new height, its title and buttons ride
  * with it, the drawing and its two cards move as one, and what's under the drawing crosses over: the old page leaves
  * quickly, the new one arrives once the box has mostly moved.
  */
@@ -473,7 +443,14 @@
 .body {
   view-transition-name: connect-body;
 }
-:global(::view-transition-group(*)) {
+:global(::view-transition-group(connect-dialog)),
+:global(::view-transition-group(connect-actions)),
+:global(::view-transition-group(connect-title)),
+:global(::view-transition-group(connect-board)),
+:global(::view-transition-group(connect-here)),
+:global(::view-transition-group(connect-home)),
+:global(::view-transition-group(connect-wire)),
+:global(::view-transition-group(connect-body)) {
   animation-duration: var(--move);
   animation-timing-function: var(--ease-move);
 }
@@ -567,4 +544,49 @@
   .line .comet {
     display: none;
   }
+}
+
+/* The fields it asks for. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.mono::placeholder {
+  font-family: var(--font);
+}
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+  transition: color var(--fast) var(--ease);
+}
+.more:hover {
+  color: var(--t-1);
+}
+.kind {
+  color: var(--t-4);
+}
+.group + .group {
+  margin-left: 0.45em;
 }

@@ -208,6 +208,16 @@
     transition: none;
   }
 }
-:global([data-ask]) svg {
+.askIcon {
   color: var(--signal);
+}
+
+.link {
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.link:hover {
+  text-decoration-color: currentColor;
 }

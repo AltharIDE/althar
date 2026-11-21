@@ -6,7 +6,8 @@ import type { Host } from '../../data/services'
 import { useServices } from '../../data/services'
 import { ConnectHome } from './ConnectHome'
 import { ManageHomes } from './ManageHomes'
-import { homesUi, livenessOf, openedAgo, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
+import { SetupChip } from './SetUp'
+import { homesUi, livenessOf, openedAgo, useHomeSetup, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
 import s from './Homes.module.css'
 
 /*
@@ -103,6 +104,8 @@ export function HomeButton() {
 export function Chip({ homes }: { homes: HomesHost }) {
   const here = useHomeState(homes)
   const overview = useHomesOverview(homes)
+  const setup = useHomeSetup(homes)
+  const { dialog } = useHomesUi()
   const drawn = here !== null
   useEffect(() => {
     if (!drawn) return
@@ -110,20 +113,29 @@ export function Chip({ homes }: { homes: HomesHost }) {
     return () => homesUi.set({ chips: homesUi.get().chips - 1, menu: false })
   }, [drawn])
   if (here === null || !drawn) return null
+  // A home being set up with its dialog closed: where it's got to, beside the chip, and a press brings it back.
+  const setting =
+    setup !== null && dialog !== 'connect' ? (
+      <SetupChip setup={setup} onShow={() => homesUi.set({ dialog: 'connect', menu: false })} />
+    ) : null
   if (here.current.kind === 'local')
     return (
-      <HomesMenu
-        homes={homes}
-        here={here}
-        overview={overview}
-        trigger={<ChromeButton icon="plug" label="Homes" kbd={SHORTCUT} compact />}
-      />
+      <span className={s.chipRow}>
+        {setting}
+        <HomesMenu
+          homes={homes}
+          here={here}
+          overview={overview}
+          trigger={<ChromeButton icon="plug" label="Homes" kbd={SHORTCUT} compact />}
+        />
+      </span>
     )
   const { home } = here.current
   const down = here.connection === 'disconnected'
   const connecting = here.connection === 'connecting'
   return (
     <span className={s.chipRow}>
+      {setting}
       <HomesMenu
         homes={homes}
         here={here}
@@ -176,7 +188,8 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
   }, [host.homes, overview])
   if (host.homes === undefined) return null
   const close = () => homesUi.set({ dialog: null })
-  if (dialog === 'connect') return <ConnectHome homes={host.homes} onClose={close} />
+  if (dialog === 'connect')
+    return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} />
   if (dialog === 'manage')
     return (
       <ManageHomes

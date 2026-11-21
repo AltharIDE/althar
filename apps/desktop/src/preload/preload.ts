@@ -1,5 +1,14 @@
 import { isStartupStage, type StartupStage } from '../startup'
-import { isHomesOverview, isHomeState, type HomeProject, type HomesOverview, type HomeState } from '../homes'
+import {
+  isHomeSetup,
+  isHomesOverview,
+  isHomeState,
+  type HomeProject,
+  type HomeSetup,
+  type HomesOverview,
+  type HomeState,
+  type SetupAction,
+} from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
@@ -134,6 +143,11 @@ ipcRenderer.on('althar:home-state', (_event, value: unknown) => {
 ipcRenderer.on('althar:homes-open', () => {
   for (const listener of homeDialogs) listener()
 })
+/* A home being set up over SSH, as it goes: for Connect a home and the chip. */
+const setups = new Set<(setup: HomeSetup | null) => void>()
+ipcRenderer.on('althar:home-setup', (_event, value: unknown) => {
+  if (isHomeSetup(value)) for (const listener of setups) listener(value)
+})
 /* What main knows of every home, as it changes: for the chip's menu and Manage homes. */
 const overviews = new Set<(overview: HomesOverview) => void>()
 ipcRenderer.on('althar:homes-overview', (_event, value: unknown) => {
@@ -165,6 +179,15 @@ contextBridge.exposeInMainWorld('althar', {
     restore: (id: string) => ipcRenderer.invoke('althar:homes-restore', id),
     report: (projects: ReadonlyArray<HomeProject>): void => ipcRenderer.send('althar:homes-report', projects),
     cancelCheck: () => ipcRenderer.invoke('althar:homes-cancel'),
+    setup: () => ipcRenderer.invoke('althar:homes-setup'),
+    setUp: (target: unknown) => ipcRenderer.invoke('althar:homes-set-up', target),
+    setupAct: (action: SetupAction) => ipcRenderer.invoke('althar:homes-setup-act', action),
+    onSetup: (listener: (setup: HomeSetup | null) => void) => {
+      setups.add(listener)
+      return () => {
+        setups.delete(listener)
+      }
+    },
     reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
     onState: (listener: (state: HomeState) => void) => {
       homeStates.add(listener)
