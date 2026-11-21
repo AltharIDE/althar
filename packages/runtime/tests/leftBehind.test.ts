@@ -237,7 +237,7 @@ describe.skipIf(windows)('a task that settles', () => {
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance
       yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-      const { task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
+      const { project, task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
       // Its preview remains running before merge, but completed work reserves no agent place.
       yield* until(holdersOf(task.taskId), (holders) => holders.length === 0)
       github.mergeByHand(1)
@@ -246,13 +246,10 @@ describe.skipIf(windows)('a task that settles', () => {
       const took = yield* nothingLeft(task.taskId)
       assert.isBelow(took, 10_000)
       yield* stopped(marked)
+      // Process death is visible before the run's finalizers finish and remove its entry from Launches.
+      yield* until((yield* LeftBehind).stopping, (stopping) => !stopping.has(task.taskId), 'merged task cleanup')
       assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-      assert.deepStrictEqual(
-        yield* (yield* Launches).ofProject(
-          (yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${task.taskId}`)[0]?.projectId ?? '',
-        ),
-        [],
-      )
+      assert.deepStrictEqual(yield* (yield* Launches).ofProject(project.projectId), [])
       // Keeping a place no longer lists it.
       assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
     }).pipe(
