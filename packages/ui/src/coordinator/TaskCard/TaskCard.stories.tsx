@@ -4,12 +4,13 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { STAGES, T432 } from '../../fixtures/coordinator'
 import { CODEX, OPUS, SONNET } from '../../fixtures/models'
+import { Brand } from '../../foundations/brands/brands'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Thread } from '../../thread/Thread/Thread'
-import { TaskCard, TaskMark } from './TaskCard'
+import { TaskCard, taskCardText, TaskMark } from './TaskCard'
 
 const meta = {
   title: 'Coordinator/TaskCard',
@@ -34,6 +35,18 @@ export const Running: Story = {
   },
 }
 
+/** From several issues, on any trackers: each one's mark and key in its foot. */
+export const FromSeveralIssues: Story = {
+  args: {
+    from: { mark: Brand.Linear, id: 'DEV-211', linear: true, also: [{ mark: Brand.Linear, id: 'DEV-37', linear: true }] },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('DEV-211')).toBeVisible()
+    await expect(c.getByText('DEV-37')).toBeVisible()
+  },
+}
+
 /** Its lead at an effort it was set to, by the coordinator or the person: said beside its model. */
 export const WithEffort: Story = {
   args: { effort: 'High' },
@@ -54,6 +67,35 @@ export const WaitingOnYou: Story = {
     now: 'Verify on staging · a command that reaches staging',
     steps: ['Triage', 'Implement', 'Review', 'Security review', 'Verify', 'Draft PR'],
     at: 4,
+  },
+}
+
+/**
+ * Its failing checks brought to you by its lead, as nothing the change can fix: violet, it waits on you, in the board's word,
+ * with its lead's line. Nothing asks a question, so the button opens it rather than answering.
+ */
+export const ChecksHandedBack: Story = {
+  args: {
+    task: '433',
+    status: TaskStatus.Yours,
+    asks: false,
+    title: 'Fix the remaining disclosure eval fails',
+    lead: OPUS,
+    effort: 'High',
+    from: undefined,
+    started: '5h ago',
+    now: 'OpenRouter is out of credit: both evals get 402 Payment Required, even with one eval running alone',
+    pr: 'MR !89',
+    steps: ['Implement', 'Review'],
+    at: 1,
+    text: { status: { ...taskCardText.status, [TaskStatus.Yours]: 'Not ready to accept' } },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Not ready to accept')).toBeVisible()
+    await expect(c.queryByRole('button', { name: /Answer/ })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: /Open task/ }))
+    await expect(args.onOpen).toHaveBeenCalledWith('433')
   },
 }
 

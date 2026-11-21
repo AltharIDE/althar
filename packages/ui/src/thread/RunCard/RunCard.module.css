@@ -111,6 +111,12 @@
   flex-direction: column;
   max-height: min(380px, calc(var(--radix-popover-content-available-height, 380px) - 8px));
 }
+/* as tall as what holds it */
+.fill {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
 .head {
   display: flex;
   align-items: flex-start;

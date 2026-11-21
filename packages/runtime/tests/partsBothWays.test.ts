@@ -24,7 +24,7 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until 
  * Every part of a task changes either way on the person's word to its lead (a task is a conversation plus parts; the person's
  * note of 12 November): a prototype becomes a change in one move, its reviewer added and its pull request ending set, and Ship
  * then runs the review and opens the pull request; a change goes back to a prototype, its review off and its pull request
- * closed, its branch staying; the ending, the reviewer and the lead change on the lead's own task, with nothing refused.
+ * staying open as it is, nothing more going to it until it is a change again; the ending, the reviewer and the lead change on the lead's own task, with nothing refused.
  */
 
 const runtimeWith = (github: FakeService, fake: Parameters<typeof runtime>[1] = {}) =>
@@ -284,7 +284,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('makes a change a prototype again: its review off, its pull request closed, back to its branch', () => {
+  it.live('makes a change a prototype again: its review off, its pull request open as it is, back to its branch', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const task = yield* finished(working, false)
@@ -308,7 +308,13 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
         /reviewer set to .+, reading what ships next/,
       )
       const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
-      assert.match(said, /made it a Prototype: no review, ending with its branch, PR #1 closed, its branch staying/)
+      assert.match(said, /made it a Prototype: no review, ending with its branch, PR #1 stays open as it is/)
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      // Removing its pull request as a part is what closes it, its branch staying.
+      assert.match(
+        yield* callTool(task.lead, 'remove_part', { part: 'ending', why: 'the person said to close it' }),
+        /PR #1 closed, its branch staying/,
+      )
       assert.strictEqual(github.changes[0]?.state, 'closed')
       const plan = yield* planOf(task.taskId)
       assert.strictEqual(plan.end, 'none')

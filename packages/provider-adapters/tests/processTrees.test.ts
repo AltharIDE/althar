@@ -224,8 +224,12 @@ describe('a process tree on Windows', () => {
 describe('a process tree on macOS and Linux', () => {
   it.live('is the process group, spawned detached, which can be asked to stop and outlives its leader', () =>
     Effect.gen(function* () {
-      assert.strictEqual(platformTrees('darwin'), unixTrees)
-      assert.strictEqual(platformTrees('linux'), unixTrees)
+      for (const platform of ['darwin', 'linux'] as const) {
+        const trees = platformTrees(platform)
+        assert.deepStrictEqual(yield* trees.launch('/bin/sh', ['-c', 'true']), yield* unixTrees.launch('/bin/sh', ['-c', 'true']))
+        assert.isTrue(trees.asks)
+        assert.isTrue(trees.outlivesRoot)
+      }
       assert.deepStrictEqual(yield* unixTrees.launch('/bin/sh', ['-c', 'true']), {
         command: '/bin/sh',
         args: ['-c', 'true'],

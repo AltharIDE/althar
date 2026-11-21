@@ -26,6 +26,26 @@
   display: flex;
   flex-direction: column;
 }
+/* under the conversation bar: its edge, once the thread has scrolled beneath it (--lift-pop's shadow, neutral and short) */
+.edge {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  z-index: 2;
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 2px 8px -1px var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--fast) var(--ease);
+}
+[data-scrolled] > .edge {
+  opacity: 1;
+}
+/* under a bar: the thread fades out over its first 24px, where it passes beneath, rather than ending in a cut */
+.fades {
+  mask-image: linear-gradient(to bottom, transparent, #000 24px);
+}
 .scroll {
   flex: 1;
   min-height: 0;

@@ -1,5 +1,5 @@
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
-import type { Ledger } from '@althar/persistence-sqlite'
+import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -24,6 +24,7 @@ import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
+import { blockedIn } from './waits'
 
 /*
  * A task's plan before it runs (docs/architecture/04): its steps and who does
@@ -37,6 +38,9 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * (`reads`): it has no run, and starting it starts its lead (Reviews.lead);
  * its lead is only ever one its session holds to reading.
  */
+
+/** How long the record's changes are gathered before a plan due that waits for other tasks is looked at again. */
+const BLOCKED_GATHER = Duration.millis(300)
 
 type Store =
   | SqlClient.SqlClient
@@ -140,6 +144,7 @@ export class Plans extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
       const wake = yield* Queue.sliding<void>(1)
+      const ledger = yield* Ledger
 
       const load = (planId: string) =>
         Effect.gen(function* () {
@@ -193,6 +198,7 @@ export class Plans extends Context.Service<
           worksIn?: WorksIn
           worksInWhy?: string | null
           proposal?: string
+          preset?: string
           reviewAfterMerge?: boolean
           smallChange?: boolean
         }
@@ -308,10 +314,19 @@ export class Plans extends Context.Service<
           if (held.length > 0) yield* Queue.offer(wake, undefined)
         })
 
-      /** Starts a proposed plan: when the person says, or, `due`, when its countdown has ended and it isn't held. */
+      /**
+       * Starts a proposed plan: when the person says, or, `due`, when its countdown has ended, it isn't held, and nothing it
+       * waits for is open (waits.ts). The person's own start doesn't wait.
+       */
       const start = (planId: string, actorId: ActorId, due = false) =>
         Effect.gen(function* () {
           const at = yield* timestamp
+          if (due) {
+            const sql = yield* SqlClient.SqlClient
+            const [blocked] = yield* sql<{ id: string }>`
+              SELECT p.id FROM task_plans p WHERE p.id = ${planId} AND ${sql.unsafe(blockedIn('p'))}`
+            if (blocked !== undefined) return null
+          }
           const accepted = yield* transition(
             planId,
             (plan) => (due ? counting(plan) && plan.startsAt !== null && plan.startsAt <= at : plan.state === 'proposed'),
@@ -386,25 +401,33 @@ export class Plans extends Context.Service<
       const tries = backoff()
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes. One that couldn't start
-      // is due again once it has waited, and the others start in their time meanwhile.
+      // is due again once it has waited, and the others start in their time meanwhile. One that waits for a task still open
+      // is looked at again when its time comes, and once its time came, whenever the record changes (a merge, a wait taken
+      // off), as nothing else says so.
+      const grown = yield* ledger.listen
       const countdown = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         for (;;) {
-          const counting = yield* sql<{ id: string; startsAt: string }>`
-            SELECT id, starts_at FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL`
+          const counting = yield* sql<{ id: string; startsAt: string; blocked: number }>`
+            SELECT p.id, p.starts_at, ${sql.unsafe(blockedIn('p'))} AS blocked
+            FROM task_plans p WHERE p.state = 'proposed' AND p.starts_at IS NOT NULL`
+          const now = yield* Clock.currentTimeMillis
+          const blocked = counting.filter((plan) => plan.blocked === 1).map((plan) => Date.parse(plan.startsAt))
+          const waiting = blocked.some((at) => at <= now)
           const [next] = counting
+            .filter((plan) => plan.blocked !== 1)
             .map((plan) => ({ id: plan.id, at: Math.max(Date.parse(plan.startsAt), tries.until(plan.id)) }))
             .toSorted((a, b) => a.at - b.at)
-          if (next === undefined) {
-            yield* Queue.take(wake)
+          if (next !== undefined && next.at <= now) {
+            yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
             continue
           }
-          const wait = next.at - (yield* Clock.currentTimeMillis)
-          if (wait > 0) {
-            yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(wait)))
-            continue
-          }
-          yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
+          // The record changing, gathered for a moment, while a plan due waits for another task.
+          const changed = waiting ? Effect.andThen(grown, Effect.sleep(BLOCKED_GATHER)) : Effect.never
+          // The soonest time to look again: the next plan's, or a blocked one's yet to come.
+          const at = Math.min(next?.at ?? Infinity, ...blocked.filter((one) => one > now))
+          const timer = Number.isFinite(at) ? [Effect.sleep(Duration.millis(at - now))] : []
+          yield* Effect.raceAll([Queue.take(wake), changed, ...timer])
         }
       })
 
@@ -412,8 +435,10 @@ export class Plans extends Context.Service<
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // One that waits for another task still does: it starts by itself once they have merged, not unannounced now.
           const overdue = yield* sql<{ id: string }>`
-            SELECT id FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL AND starts_at < ${yield* timestamp}`
+            SELECT p.id FROM task_plans p WHERE p.state = 'proposed' AND p.starts_at IS NOT NULL AND p.starts_at < ${yield* timestamp}
+              AND NOT ${sql.unsafe(blockedIn('p'))}`
           for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
           // Acceptance and run admission are separate durable writes: a crash between them is held as an overdue plan is.
           yield* holdUnstarted(null)
@@ -447,6 +472,8 @@ export class Plans extends Context.Service<
                   ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                   ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
+                  // The preset it was planned from: its card names it while its parts still have that preset's shape.
+                  ...(before.preset === undefined ? {} : { preset: before.preset }),
                 })
               }
               // Any agent Althar has may lead a review.
@@ -484,6 +511,8 @@ export class Plans extends Context.Service<
                   JSON.stringify({
                     ...planFromPreset(parametersOf(now), preset.parts, models, projectEnd),
                     smallChange: preset.id === 'builtin:small-change',
+                    // Its card names the preset it was planned from, rather than guessing it from the parts.
+                    preset: preset.name,
                   }),
                 actorId,
                 undefined,

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AfterMergeRule, ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
+import type { AfterMergeRule, ProjectInk, ProjectList, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -22,9 +22,9 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
-/** A rule set from General: one of its switches, where new tasks start (ADR-091), or what an explicitly requested review after merge brings back. */
-export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview'
+export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'linkIssues' | 'repositoryFiles'
+/** A rule set from General: one of its switches, where new tasks start (ADR-091), what an explicitly requested review after merge brings back, or the review bots its leads hear. */
+export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview' | 'trustedBots'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -54,12 +54,16 @@ export interface ProjectSettingsModel {
   readonly setPushCommits: (on: boolean) => void
   /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
   readonly setPostScreenshots: (on: boolean) => void
+  /** Whether its leads hear a bot, by its account (code-hosts § Review and triage bots): trusted, or not. */
+  readonly setTrustsBot: (login: string, on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
   readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue along with it: to In Progress as it starts, In Review and Done with its pull request. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Links a task's pull request on its issue as it opens: on ClickUp, by a comment on the task. */
+  readonly setLinkIssues: (on: boolean) => void
   /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
@@ -80,18 +84,36 @@ export interface ProjectSettingsModel {
   readonly remove: () => Promise<void>
 }
 
+/** A rule the person switched, held over what is read: which change it was, and the revision its reply kept it as, once it came. */
+interface HeldRule {
+  readonly value: unknown
+  readonly change: number
+  readonly revision: number | null
+}
+
 /** A name or ink the person chose, and which change it was, in the order they were made. */
 interface Chosen {
   readonly name?: { readonly value: string; readonly change: number }
   readonly ink?: { readonly value: ProjectInk; readonly change: number }
 }
 
+/** No ink taken by another project. */
+const NONE_TAKEN: Partial<Record<ProjectInk, string>> = {}
+
+/** What a project's settings read of the projects: itself, and which inks the others took, by the first to take each. */
+const settingsOf = (list: ProjectList, projectId: string) => {
+  const taken: Partial<Record<ProjectInk, string>> = {}
+  for (const other of list.projects) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
+  return { project: list.projects.find((each) => each.id === projectId) ?? null, taken }
+}
+
 export const useProjectSettings = (projectId: string, onRemoved: () => void): ProjectSettingsModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const listed = useQuery(read.projects()).data
-  const project = listed?.projects.find((each) => each.id === projectId) ?? null
-  const rules = useQuery(read.rules(projectId)).data ?? null
+  // Only what the settings say of the list, this project and the inks others took: another's change of name draws nothing here.
+  const listed = useQuery({ ...read.projects(), select: useCallback((list: ProjectList) => settingsOf(list, projectId), [projectId]) }).data
+  const project = listed?.project ?? null
+  const rulesRead = useQuery(read.rules(projectId))
   const notes = useQuery(read.notes(projectId)).data ?? null
 
   // What the person chose, shown until the runtime says the same or says no.
@@ -135,15 +157,53 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
 
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
   const [ruleFailed, setRuleFailed] = useState<{ readonly rule: GeneralRule; readonly message: string } | null>(null)
+  // Each switched, held over what is read until a read of the rules has it, by its own change: one switched a moment after
+  // another never flicks back as the first's reply, or a read from between them, lands (foundations.md, The UI is instant).
+  const [switched, setSwitched] = useState<ReadonlyMap<GeneralRule, HeldRule>>(new Map())
+  const switchedNow = useRef(switched)
+  // Read by a press, not in render: what is held as of the last render.
+  useEffect(() => {
+    switchedNow.current = switched
+  })
+  const ruleMade = useRef(0)
+  const readRules = rulesRead.data
+  // A read that has a switch's own revision says it from here.
+  if (readRules !== undefined && [...switched.values()].some((one) => one.revision !== null && readRules.revision >= one.revision))
+    setSwitched((now) => new Map([...now].filter(([, one]) => one.revision === null || readRules.revision < one.revision)))
+  const rules = useMemo(
+    () =>
+      readRules === undefined
+        ? null
+        : switched.size === 0
+          ? readRules
+          : { ...readRules, ...Object.fromEntries([...switched].map(([rule, one]) => [rule, one.value])) },
+    [readRules, switched],
+  )
   const setRule = useCallback(
     <R extends GeneralRule>(rule: R, value: ProjectRulesView[R]) => {
       const key = keys.rules(projectId)
+      const mine = ++ruleMade.current
       setRuleFailed(null)
+      setSwitched((now) => new Map([...now, [rule, { value, change: mine, revision: null }]]))
       cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: value }))
+      const own = (change: (one: HeldRule) => HeldRule | null) =>
+        setSwitched((now) => {
+          const one = now.get(rule)
+          if (one?.change !== mine) return now
+          const next = new Map(now)
+          const changed = change(one)
+          if (changed === null) next.delete(rule)
+          else next.set(rule, changed)
+          return next
+        })
       queue.current = queue.current.then(async () => {
         try {
-          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: value }))
+          const kept = await client.setProjectRules({ projectId, [rule]: value })
+          // Held until a read has this revision; the reply is that read only where no switch was made since, whose own is newer.
+          own((one) => ({ ...one, revision: kept.revision }))
+          if (mine === ruleMade.current) cache.setQueryData(key, kept)
         } catch (failure) {
+          own(() => null)
           setRuleFailed({ rule, message: messageOf(failure) })
           await cache.invalidateQueries({ queryKey: key, exact: true })
         }
@@ -159,11 +219,38 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   }, [client, projectId])
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
   const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
+  // The list goes whole, as last shown with this bot switched; a bot untrusted stays suggested, to trust again.
+  const setTrustsBot = useCallback(
+    (login: string, on: boolean) => {
+      const key = keys.rules(projectId)
+      const now = cache.getQueryData<ProjectRulesView>(key)
+      if (now === undefined) return
+      const bot = [...now.trustedBots, ...now.suggestedBots].find((one) => one.login === login) ?? { login, name: login }
+      const trustedBots = on
+        ? [...now.trustedBots.filter((one) => one.login !== login), bot]
+        : now.trustedBots.filter((one) => one.login !== login)
+      const suggestedBots = on ? now.suggestedBots.filter((one) => one.login !== login) : [bot, ...now.suggestedBots]
+      setRuleFailed(null)
+      cache.setQueryData<ProjectRulesView>(key, { ...now, trustedBots, suggestedBots })
+      queue.current = queue.current.then(async () => {
+        try {
+          cache.setQueryData(key, await client.setProjectRules({ projectId, trustedBots: trustedBots.map((one) => one.login) }))
+        } catch (failure) {
+          setRuleFailed({ rule: 'trustedBots', message: messageOf(failure) })
+          await cache.invalidateQueries({ queryKey: key, exact: true })
+        }
+      })
+    },
+    [cache, client, projectId],
+  )
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  const setLinkIssues = useCallback((on: boolean) => setRule('linkIssues', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
   const setRepositoryFile = useCallback(
     (file: RepositoryFile, on: boolean) => {
-      const now = cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
+      const now =
+        (switchedNow.current.get('repositoryFiles')?.value as ProjectRulesView['repositoryFiles'] | undefined) ??
+        cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
       if (now !== undefined) setRule('repositoryFiles', { ...now, [file]: on })
     },
     [cache, projectId, setRule],
@@ -171,8 +258,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const setWorksIn = useCallback((worksIn: WorksIn) => setRule('worksIn', worksIn), [setRule])
   const setAfterMergeReview = useCallback((rule: AfterMergeRule) => setRule('afterMergeReview', rule), [setRule])
 
-  const taken: Partial<Record<ProjectInk, string>> = {}
-  for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
+  const taken = listed?.taken ?? NONE_TAKEN
 
   const [noteFailed, setNoteFailed] = useState<string | null>(null)
   const dropNote = useCallback(
@@ -248,9 +334,11 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setResolveConflicts,
     setPushCommits,
     setPostScreenshots,
+    setTrustsBot,
     lookForConflicts,
     looked,
     setMoveIssues,
+    setLinkIssues,
     setRepositoryFile,
     setWorksIn,
     setAfterMergeReview,
@@ -270,14 +358,17 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
  */
 export const useWhenRemoved = (projectId: string | undefined, onRemoved: () => void) => {
   const { client } = useServices()
-  const listed = useQuery(reads(client).projects()).data
-  const there = projectId !== undefined && (listed?.projects.some((each) => each.id === projectId) ?? false)
+  // Only whether it is listed: another project's change draws nothing here. Undefined until the list is read.
+  const there = useQuery({
+    ...reads(client).projects(),
+    select: useCallback((list: ProjectList) => projectId !== undefined && list.projects.some((each) => each.id === projectId), [projectId]),
+  }).data
   const seen = useRef(false)
   useEffect(() => {
-    if (there) seen.current = true
-    else if (seen.current && listed !== undefined) {
+    if (there === true) seen.current = true
+    else if (seen.current && there === false) {
       seen.current = false
       onRemoved()
     }
-  }, [there, listed, onRemoved])
+  }, [there, onRemoved])
 }

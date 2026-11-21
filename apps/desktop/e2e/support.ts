@@ -121,7 +121,12 @@ export const launch = async (
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
-        name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_') && name.toUpperCase() !== 'PATH' && !DESKTOP_NAMES.includes(name),
+        name !== 'ELECTRON_RUN_AS_NODE' &&
+        // The real keychain is for a spec that asks for it (pairing.spec.ts), never one inherited from the shell.
+        name !== 'ALTHAR_NATIVE_KEYRING' &&
+        !name.startsWith('GIT_') &&
+        name.toUpperCase() !== 'PATH' &&
+        !DESKTOP_NAMES.includes(name),
     ),
   )
   const electronApp = await electron.launch({
@@ -205,6 +210,12 @@ export const openFirstProject = async (electronApp: ElectronApplication, page: P
  */
 export const shown = (page: Page, text: string | RegExp, options?: { readonly exact?: boolean }) =>
   page.getByText(text, options).filter({ visible: true })
+
+/**
+ * Ship on a change's card, named by its route: its stops after Ship, as "Ship push" or "Ship review, then push, then
+ * ready". The header's and the board card's say how many commits instead.
+ */
+export const SHIP_ON_CARD = /^Ship (review|push)(, then (push|ready|merge))*$/
 
 /**
  * Once the window is still, for a screenshot: the launch has played over it,

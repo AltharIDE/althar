@@ -14,6 +14,7 @@ import type { AskedAction, AskedResult, FreshAction } from './Errands'
 import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
 import { branchOn, commitsOf, fetchBranch, fetchInto, fetchSpecs, git, PUSHED, pushTo } from './git'
+import { redacted } from './gitSaid'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
 import type { Tool, ToolAccess } from './ToolServer'
@@ -667,7 +668,7 @@ const createBranch = (projectId: string, input: unknown) =>
                   refused(
                     typeof there === 'string'
                       ? `${where} has a branch ${branch} now, made while Althar was making it. Althar never moves a branch that is there: tell the person.`
-                      : `${where} didn't take ${branch}: ${error.stderr.trim() || error.message}`,
+                      : `${where} didn't take ${branch}: ${redacted(error.stderr.trim() || error.message)}`,
                   ),
                 ),
               ),

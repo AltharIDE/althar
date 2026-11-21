@@ -2,21 +2,22 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ConnectionList, type ProjectRepository } from '@althar/contracts'
-import { Brand, ChangeTarget, HostReach, RepositoryRole } from '@althar/ui'
+import { ApiError, type ConnectionList, type HostRepository, type ProjectRepository } from '@althar/contracts'
+import { Brand, ChangeTarget, HostReach } from '@althar/ui'
 
+import type { Client } from '../src/renderer/data/client'
 import type { Opening } from '../src/renderer/features/connections/ConnectDialog'
 import { ForkOffer, useForkOffer } from '../src/renderer/features/repositories/ForkOffer'
 import { entryOf, hostsOf, Repositories } from '../src/renderer/features/repositories/Repositories'
 import { useRepositories } from '../src/renderer/features/repositories/useRepositories'
-import { connectionList, fakeClient, project, repositories } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, project, repositories } from './fixtures'
 import { withServices } from './render'
 
 /*
  * A project's repositories as the map draws them, where the rest of their
  * tests don't go: one not on this Mac, in a folder of a repository, on no
  * branch, staying here, or on a host Althar doesn't know or must sign in to
- * again; and the part for a project not listed yet.
+ * again; the part for a project not listed yet; and one cloned into it.
  */
 
 const [api, web, infra] = repositories as [ProjectRepository, ProjectRepository, ProjectRepository]
@@ -25,7 +26,7 @@ describe('a repository on the map', () => {
   it('says where it is, inside a repository too, and nothing of a place or branch it hasn’t', () => {
     expect(entryOf({ ...api, folder: 'packages/sdk' })).toMatchObject({ where: '~/code/meridian-api/packages/sdk' })
     const away = entryOf({ ...api, path: null, branch: null, host: null })
-    expect(away).toEqual({ id: 'repo_api', name: 'meridian-api', role: RepositoryRole.Service, tasks: 1 })
+    expect(away).toEqual({ id: 'repo_api', name: 'meridian-api', tasks: 1 })
   })
 
   it('names a remote with no page to open, on a host Althar doesn’t know', () => {
@@ -78,6 +79,38 @@ describe('a project’s repositories part', () => {
     expect(onConnect).toHaveBeenCalledWith({ service: 'gitlab' })
   })
 
+  it('changes the branch a repository’s new tasks work toward from its card, saying what that changes, at once', async () => {
+    // The runtime keeps what it's told.
+    let kept: string | null = null
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getRepositories: vi.fn(async () => [{ ...api, defaultBranch: 'main', workToward: kept, branches: ['main', 'release/2.4'] }]),
+      setRepository: vi.fn(async (change: { workToward?: string | null }) => {
+        kept = change.workToward ?? null
+      }),
+    })
+    withServices(<Part connections={connectionList} onConnect={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: main' }))
+    expect(await screen.findByText(/New tasks start from this branch and open their pull requests into it/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('option', { name: /release\/2\.4/ }))
+    expect(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: release/2.4' })).toBeTruthy()
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: 'release/2.4' }),
+    )
+  })
+
+  it('says the branch new tasks work toward for a repository with no remote too, not the one checked out', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getRepositories: vi.fn(async () => [
+        { ...api, host: null, branch: 'spike', defaultBranch: 'main', workToward: 'next', branches: ['main', 'next', 'spike'] },
+      ]),
+    })
+    withServices(<Part connections={connectionList} onConnect={vi.fn()} />, client)
+    expect(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: next' })).toBeTruthy()
+    expect(screen.queryByText('spike')).toBeNull()
+  })
+
   it('names the project’s worktrees where they are made', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })) })
     withServices(<Part connections={null} onConnect={vi.fn()} />, client)
@@ -86,24 +119,274 @@ describe('a project’s repositories part', () => {
   })
 })
 
+describe('a repository cloned into a project that has some', () => {
+  const hosted = (path: string): HostRepository => ({
+    path: path.split('/'),
+    description: null,
+    private: true,
+    pushedAt: null,
+    webUrl: `https://github.com/${path}`,
+    archived: false,
+  })
+  const connected: ConnectionList = { ...connectionList, connections: [githubConnection] }
+
+  function Part() {
+    return <Repositories model={useRepositories('p1')} connections={connected} onConnect={vi.fn()} />
+  }
+
+  const opened = (overrides: Parameters<typeof fakeClient>[0] = {}, host: Parameters<typeof fakeHost>[0] = {}) => {
+    const fake = fakeClient({
+      getRepositories: vi.fn(async () => [api, web]),
+      listHostRepositories: vi.fn(async () => [hosted('meridian/api'), hosted('meridian/mobile')]),
+      cloneRepository: vi.fn(async () => ({ grant: 'grant_mobile', path: '/Users/me/code/mobile' })),
+      ...overrides,
+    })
+    const fakes = fakeHost(host)
+    withServices(<Part />, fake.client, fakes)
+    return { ...fake, host: fakes }
+  }
+
+  it('offers your repositories it hasn’t, clones the one chosen where you keep code, and adds it, shown on the map at once', async () => {
+    let cloned: (value: { grant: string; path: string }) => void = () => undefined
+    const { client, host } = opened({
+      cloneRepository: vi.fn(() => new Promise<{ grant: string; path: string }>((resolve) => (cloned = resolve))),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    const rows = await panel.findAllByRole('button', { name: /^Clone [a-z]/ })
+    // meridian/api is the project's already.
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['Clone meridian/mobile'])
+    await userEvent.click(rows[0]!)
+    // Where it lands, on the row chosen.
+    expect(await panel.findByText('~/code/mobile')).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Clone' }))
+    // Put away at once, folding away, the clone waiting where it goes.
+    expect(screen.getByRole('button', { name: 'Clone a repository' }).getAttribute('aria-expanded')).toBe('false')
+    expect(await within(screen.getByRole('list', { name: /^On / })).findByText('~/code/mobile')).toBeTruthy()
+    expect(host.clonePlace).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(client.cloneRepository).toHaveBeenCalledWith('grant_code', {
+        connectionId: githubConnection.id,
+        path: ['meridian', 'mobile'],
+      }),
+    )
+    cloned({ grant: 'grant_mobile', path: '/Users/me/code/mobile' })
+    await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_mobile'))
+    expect(client.prepareFolder).toHaveBeenCalledWith('grant_mobile', '/Users/me/code/mobile')
+  })
+
+  it('stops a sign-in started in the panel the moment it is put away: one answered after is cancelled, and opens nothing', async () => {
+    type Started = Awaited<ReturnType<Client['startSignIn']>>
+    let started: (value: Started) => void = () => undefined
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    // GitHub signed in to in the browser, through its app.
+    const browsing: ConnectionList = {
+      ...connectionList,
+      products: connectionList.products.map((one) => (one.product === 'github' ? { ...one, browserSignIn: true } : one)),
+    }
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => browsing),
+      getRepositories: vi.fn(async () => [api, web]),
+      getConnectGuide: vi.fn(async () => ({ service: 'github' as const, places: [], clis: [], email: null, tokenPages: [] })),
+      startSignIn: vi.fn(() => new Promise<Started>((resolve) => (started = resolve))),
+    })
+    function Unconnected() {
+      return <Repositories model={useRepositories('p1')} connections={browsing} onConnect={vi.fn()} />
+    }
+    withServices(<Unconnected />, client)
+    const toggle = await screen.findByRole('button', { name: 'Clone a repository' })
+    await userEvent.click(toggle)
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.click(await panel.findByRole('button', { name: 'Connect GitHub' }))
+    await userEvent.click(await panel.findByRole('button', { name: /^Continue with GitHub/ }))
+    await waitFor(() => expect(client.startSignIn).toHaveBeenCalled())
+    // Put away while GitHub is still being asked; then GitHub answers.
+    await userEvent.click(toggle)
+    started({ flowId: 'flow_late', kind: 'browser', url: 'https://github.com/login/oauth/authorize' })
+    await waitFor(() => expect(client.cancelSignIn).toHaveBeenCalledWith('flow_late'))
+    expect(open).not.toHaveBeenCalled()
+    // Opened again, it starts afresh: no walk left from before.
+    await userEvent.click(toggle)
+    expect(
+      await within(await screen.findByRole('region', { name: 'Clone a repository' })).findByRole('button', { name: 'Connect GitHub' }),
+    ).toBeTruthy()
+    open.mockRestore()
+  })
+
+  it('clones one a URL names, into a folder the person chooses', async () => {
+    const { client, host } = opened()
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.type(screen.getByRole('searchbox'), 'https://gitlab.com/someone/elsewhere.git')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone someone/elsewhere' }))
+    expect(await screen.findByText('~/code/elsewhere')).toBeTruthy()
+    // Another folder, from beside Clone: the row says it lands there now.
+    await userEvent.click(screen.getByRole('button', { name: 'Choose where it goes' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Another folder…' }))
+    expect(await screen.findByText('~/elsewhere/elsewhere')).toBeTruthy()
+    expect(host.pickClonePlace).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    await waitFor(() =>
+      expect(client.cloneRepository).toHaveBeenCalledWith('grant_elsewhere', { url: 'https://gitlab.com/someone/elsewhere.git' }),
+    )
+    await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_mobile'))
+  })
+
+  it('says why a clone didn’t happen, and adds nothing', async () => {
+    const { client } = opened({
+      cloneRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'GitFailed', message: 'There’s a folder called mobile in ~/code already.' })
+      }),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone meridian/mobile' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('There’s a folder called mobile in ~/code already.')
+    expect(client.addRepositories).not.toHaveBeenCalled()
+  })
+
+  it('offers the same path on another host, which is another repository', async () => {
+    // The project's meridian/api is on GitLab; GitHub's meridian/api is another one.
+    const onGitLab = {
+      ...api,
+      host: { ...api.host!, product: 'gitlab' as const, name: 'GitLab', url: 'https://gitlab.com/meridian/api', account: null },
+    }
+    opened({ getRepositories: vi.fn(async () => [onGitLab, web]) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    expect(await panel.findByRole('button', { name: 'Clone meridian/api' })).toBeTruthy()
+    expect(panel.getByRole('button', { name: 'Clone meridian/mobile' })).toBeTruthy()
+  })
+
+  /** A checkout named mobile on this computer, its remote `remote`. */
+  const withCheckout = (remote: string) =>
+    [
+      {
+        readFolder: vi.fn(async () => ({
+          kind: 'repository' as const,
+          name: 'mobile',
+          repositories: [{ path: '/Users/me/code/mobile', folder: null, name: 'mobile', branch: 'main', remote, commits: true }],
+          project: null,
+        })),
+      },
+      {
+        findRepositories: vi.fn(async () => ({
+          lookedIn: ['~/code'],
+          repositories: [{ id: 'found_mobile', name: 'mobile', where: '~/code/mobile', branch: 'main', worked: 0 }],
+        })),
+      },
+    ] as const
+
+  it('clones one of the same name as a checkout here that is another repository, saying where it goes', async () => {
+    const [client, host] = withCheckout('git@github.com:someone-else/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await waitFor(() => expect(opening.client.readFolder).toHaveBeenCalledWith('grant_found_mobile'))
+    await userEvent.click(await panel.findByRole('button', { name: 'Clone meridian/mobile' }))
+    expect(panel.getByText('~/code/mobile')).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Clone' }))
+    await waitFor(() =>
+      expect(opening.client.cloneRepository).toHaveBeenCalledWith('grant_code', {
+        connectionId: githubConnection.id,
+        path: ['meridian', 'mobile'],
+      }),
+    )
+  })
+
+  it('adds the checkout here that is the repository, chosen from the list or by its URL pasted, and clones nothing', async () => {
+    const [client, host] = withCheckout('git@github.com:meridian/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.click(await panel.findByRole('button', { name: 'Add meridian/mobile' }))
+    expect(panel.getByText('At ~/code/mobile')).toBeTruthy()
+    expect(panel.queryByRole('button', { name: 'Choose where it goes' })).toBeNull()
+    await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/meridian/mobile')
+    await userEvent.click(await panel.findByRole('button', { name: /meridian\/mobile$/ }))
+    await userEvent.click(panel.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(opening.client.addRepositories).toHaveBeenCalledWith('p1', 'grant_found_mobile'))
+    expect(opening.client.cloneRepository).not.toHaveBeenCalled()
+  })
+
+  it('adds the checkout here a pasted URL names that the host’s list hasn’t, showing Add where it is', async () => {
+    const [client, host] = withCheckout('git@github.com:someone/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/someone/mobile')
+    await userEvent.click(await panel.findByRole('button', { name: 'Add someone/mobile' }))
+    expect(panel.getByText('At ~/code/mobile')).toBeTruthy()
+    expect(panel.queryByRole('button', { name: 'Choose where it goes' })).toBeNull()
+    await userEvent.click(panel.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(opening.client.addRepositories).toHaveBeenCalledWith('p1', 'grant_found_mobile'))
+    expect(opening.client.cloneRepository).not.toHaveBeenCalled()
+  })
+
+  it('asks where it goes where there’s nowhere usual, and clones nothing if the person cancels', async () => {
+    const { client, host } = opened({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone meridian/mobile' }))
+    expect(screen.getByRole('button', { name: 'Choose where it goes' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    await waitFor(() => expect(host.pickClonePlace).toHaveBeenCalled())
+    expect(screen.getByRole('region', { name: 'Clone a repository' })).toBeTruthy()
+    expect(client.cloneRepository).not.toHaveBeenCalled()
+  })
+})
+
 describe('a fork’s branches going upstream', () => {
   const fork = (set: Partial<NonNullable<ProjectRepository['fork']>>): ProjectRepository => ({
     ...web,
-    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream', canPush: true, offer: true, ...set },
+    fork: {
+      fork: 'you/meridian-web',
+      upstream: 'meridian/web',
+      remote: 'upstream',
+      by: 'names',
+      target: 'upstream',
+      canPush: true,
+      offer: true,
+      ...set,
+    },
   })
 
   function Offer() {
     return <ForkOffer offer={useForkOffer('p1', useRepositories('p1').repositories)} />
   }
 
+  function Settings() {
+    return <Repositories model={useRepositories('p1')} connections={connectionList} onConnect={() => {}} />
+  }
+
   it('tells the map what the host said, and nothing where it hasn’t', () => {
-    expect(entryOf(fork({ canPush: false })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream, canPush: false })
+    expect(entryOf(fork({ canPush: false })).fork).toEqual({
+      upstream: 'meridian/web',
+      target: ChangeTarget.Upstream,
+      canPush: false,
+      remote: 'upstream',
+    })
     expect(entryOf(fork({ target: 'upstream_branch' })).fork).toEqual({
       upstream: 'meridian/web',
       target: ChangeTarget.UpstreamBranch,
       canPush: true,
+      remote: 'upstream',
     })
-    expect(entryOf(fork({ canPush: null })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream })
+    expect(entryOf(fork({ canPush: null })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream, remote: 'upstream' })
+  })
+
+  it('offers to add the repository it was forked from as a remote where its host says it is one, and adds it', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ remote: null, by: 'host', offer: false })]) })
+    withServices(<Settings />, client)
+    expect(await screen.findByText('Your clone has no remote for it.')).toBeTruthy()
+    vi.mocked(client.getRepositories).mockResolvedValue([fork({ remote: 'upstream', by: 'host', offer: false })])
+    await userEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    expect(client.addParentRemote).toHaveBeenCalledWith('p1', web.id)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add remote' })).toBeNull())
+  })
+
+  it('names the remote its clone has the repository it forks as', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ remote: 'base', by: 'host', offer: false })]) })
+    withServices(<Settings />, client)
+    expect(await screen.findByText('The repository it forks, as base')).toBeTruthy()
   })
 
   it('offers it once: accepting sets the project and takes the offer away, with no remote touched', async () => {

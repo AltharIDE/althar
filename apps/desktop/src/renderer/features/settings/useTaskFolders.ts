@@ -8,6 +8,7 @@ import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
 import { ago } from '../../shared/time'
+import { sizeChanged } from './useStorage'
 
 /*
  * Finished tasks' folders, as Work on this computer shows them (ADR-056): when
@@ -93,11 +94,16 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
         (done) => {
           setBusy(null)
           setFreed((was) => (was ?? 0) + done.freed)
+          // Whatever it says it freed (a folder it couldn't measure, or the disk filling meanwhile, can read as none),
+          // the runtime forgot the task folders' size: About measures them anew.
+          sizeChanged('worktrees')
           if (done.failed > 0) setError(text.someFailed(done.failed))
           void cache.invalidateQueries({ queryKey: keys.folders })
         },
         (failure: unknown) => {
           setBusy(null)
+          // Some may have gone before it failed.
+          sizeChanged('worktrees')
           setError(
             failure instanceof ApiError && (failure.reason === 'ChangedSinceSeen' || failure.reason === 'TaskRefused')
               ? failure.message

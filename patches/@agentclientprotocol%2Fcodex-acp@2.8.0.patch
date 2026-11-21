@@ -1,8 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
-index 5f73e89..3405be6 100755
+index 0000000..0000000 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -43588,12 +43588,18 @@ var CodexAcpClient = class _CodexAcpClient {
+@@ -44952,12 +44952,18 @@
      return await this.codexClient.runTurn({
        threadId: request.sessionId,
        input: input2,

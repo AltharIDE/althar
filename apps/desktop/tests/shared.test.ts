@@ -208,6 +208,54 @@ describe('reads that come back out of order', () => {
     )
     expect(failed).toHaveLength(1)
   })
+
+  it('keeps from one read of several things, at once, those no read began after; behind a head under way, with it', async () => {
+    const newest = newestReads('head')
+    const kept: Array<ReadonlyArray<readonly [string, string]>> = []
+    const keep = (values: ReadonlyMap<string, string>) => void kept.push([...values])
+    const fail = vi.fn()
+    const together = Promise.withResolvers<ReadonlyMap<string, string>>()
+    const reading = newest.many(['a', 'b', 'c'], together.promise, keep, fail)
+    // A later read of b alone answers first.
+    await newest.many(['b'], Promise.resolve(new Map([['b', 'b2']])), keep, fail)
+    together.resolve(
+      new Map([
+        ['a', 'a1'],
+        ['b', 'b1'],
+        ['c', 'c1'],
+      ]),
+    )
+    await reading
+    // One keep for what the first read still says: never the b the later one replaced.
+    expect(kept).toEqual([
+      [['b', 'b2']],
+      [
+        ['a', 'a1'],
+        ['c', 'c1'],
+      ],
+    ])
+    // Wholly overtaken, it keeps nothing.
+    const overtaken = Promise.withResolvers<ReadonlyMap<string, string>>()
+    const late = newest.many(['a'], overtaken.promise, keep, fail)
+    await newest.many(['a'], Promise.resolve(new Map([['a', 'a3']])), keep, fail)
+    overtaken.resolve(new Map([['a', 'a2']]))
+    await late
+    expect(kept.at(-1)).toEqual([['a', 'a3']])
+    expect(kept).toHaveLength(3)
+    // Behind a head under way, it waits, and shows with it.
+    const head = Promise.withResolvers<string>()
+    const heads: Array<string> = []
+    const withHead = newest('head', head.promise, (value) => void heads.push(value), fail)
+    await newest.many(['d'], Promise.resolve(new Map([['d', 'd1']])), keep, fail)
+    expect(kept).toHaveLength(3)
+    head.resolve('head')
+    await withHead
+    expect(heads).toEqual(['head'])
+    expect(kept.at(-1)).toEqual([['d', 'd1']])
+    // A read that fails says so.
+    await newest.many(['e'], Promise.reject(new Error('The port closed')), keep, fail)
+    expect(fail).toHaveBeenCalledOnce()
+  })
 })
 
 describe('a clock', () => {
@@ -241,6 +289,82 @@ describe('the time now', () => {
       })
       expect(minutes.result.current).toBe('2026-10-03T12:01:00.000Z')
       expect(still.result.current).toBe('2026-10-03T12:00:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('the one clock', () => {
+  it('ticks once for every place that reads it at a pace, so they say the same time in the same frame', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const timers = vi.spyOn(globalThis, 'setInterval')
+      const header = renderHook(() => useNow(true))
+      const thread = renderHook(() => useNow(true))
+      expect(timers).toHaveBeenCalledTimes(1)
+      act(() => {
+        vi.advanceTimersByTime(2_000)
+      })
+      expect(header.result.current).toBe('2026-10-03T12:00:02.000Z')
+      expect(thread.result.current).toBe(header.result.current)
+      // A place that stops keeps what it last said; the clock goes on for the other.
+      thread.rerender()
+      header.unmount()
+      act(() => {
+        vi.advanceTimersByTime(1_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:00:03.000Z')
+      thread.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says the time from now to a place that starts reading it, never earlier than it said before', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const home = renderHook(() => useNow(true, 60_000))
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      // Read a minute's pace half a minute after its last tick: from now, not from that tick.
+      const later = renderHook(({ ticking }) => useNow(ticking, 60_000), { initialProps: { ticking: false } })
+      expect(later.result.current).toBe('2026-10-03T12:00:30.000Z')
+      later.rerender({ ticking: true })
+      expect(later.result.current).toBe('2026-10-03T12:00:30.000Z')
+      act(() => {
+        vi.advanceTimersByTime(0)
+      })
+      expect(home.result.current).toBe('2026-10-03T12:00:30.000Z')
+      home.unmount()
+      later.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('the time now, read at another pace', () => {
+  it('never goes back as a place goes from each second to each minute', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const minutes = renderHook(() => useNow(true, 60_000))
+      const thread = renderHook(({ every }) => useNow(true, every), { initialProps: { every: 1000 } })
+      act(() => {
+        vi.advanceTimersByTime(5_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:00:05.000Z')
+      // Its turn over, it reads the minute's clock, which last said 12:00: it still says what it said, then moves on from now.
+      thread.rerender({ every: 60_000 })
+      expect(thread.result.current).toBe('2026-10-03T12:00:05.000Z')
+      act(() => {
+        vi.advanceTimersByTime(55_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:01:00.000Z')
+      expect(minutes.result.current).toBe(thread.result.current)
+      minutes.unmount()
+      thread.unmount()
     } finally {
       vi.useRealTimers()
     }

@@ -15,7 +15,16 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { sending, settled } from '../src/renderer/shared/items'
+import {
+  mergeItems,
+  queuedOf,
+  queueShown,
+  readingLocallyOf,
+  readingNow,
+  releaseSending,
+  sending,
+  settled,
+} from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
@@ -178,6 +187,46 @@ describe('a thread as blocks', () => {
     ])
     // With no agent to take it, what waits is in the queue too.
     expect(shown(false, true)).toEqual(shown(true))
+  })
+
+  it('keeps an idle send in the thread through acceptance, claim, and delivery, while later sends wait', () => {
+    const sent = sending([], { text: 'Hello', queued: false, interrupting: false })
+    const optimistic = sent.items[0]!
+    const stored = { ...items.you('Hello', { state: 'queued', interrupting: false }), id: 'stored', sequence: 1 }
+    const claimed = { ...stored, input: { state: 'queued' as const, interrupting: false, claimed: true } }
+    const delivered = { ...stored, input: { state: 'delivered' as const, interrupting: false } }
+    const states = [
+      { item: optimistic, session: null, sending: true, accepting: 'now' as const },
+      { item: stored, session: null, sending: false, accepting: 'now' as const },
+      { item: stored, session: { turnRunning: false, held: false, state: 'starting' }, sending: false, accepting: 'now' as const },
+      { item: claimed, session: { turnRunning: true, held: true, state: 'active' }, sending: false, accepting: 'queued' as const },
+      { item: delivered, session: { turnRunning: true, held: true, state: 'active' }, sending: false, accepting: 'queued' as const },
+    ]
+    mergeItems(sent.items, [stored])
+    for (const state of states) {
+      const queue = queueShown(state.session, state.sending, state.accepting, [state.item])
+      const reading = readingNow(state.session, state.sending, false, state.accepting)
+      const readingLocally = readingLocallyOf(state.session, state.accepting)
+      expect(queuedOf([state.item], queue, readingLocally)).toEqual([])
+      expect(
+        blocksOf(
+          { ...source([state.item]), turnRunning: state.session?.turnRunning ?? false, queue, reading, readingLocally },
+          new Map(),
+          at,
+        ),
+      ).toContainEqual(expect.objectContaining({ kind: 'you', text: 'Hello', delivery: Delivery.Delivered }))
+    }
+    const waiting = items.you('Later', { state: 'queued', interrupting: false })
+    expect(queuedOf([claimed, waiting], true).map((item) => item.text)).toEqual(['Later'])
+    expect(queueShown(null, false, 'queued')).toBe(true)
+    expect(readingNow(null, false, true, 'now')).toBe(false)
+    expect(readingLocallyOf(null, 'now', true)).toBe(false)
+    expect(readingLocallyOf(null, 'queued')).toBe(false)
+    expect(readingLocallyOf({ turnRunning: false }, 'now')).toBe(false)
+    expect(queuedOf([waiting], true, true)).toHaveLength(1)
+    releaseSending(sent.id)
+    expect(queuedOf([stored], true, true)).toHaveLength(1)
+    expect(queueShown(null, true, 'now', [stored])).toBe(true)
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {
@@ -481,6 +530,11 @@ describe('thinking, as it goes and once it is done', () => {
     const ended = after(items.says(''), 14).createdAt
     expect(parts(turnOf(ended)).at(-1)).toMatchObject({ kind: 'thought', took: '12s' })
     expect(turnOf(ended)).toMatchObject({ took: '13s' })
+    // The person stopped it: the line that says so comes after it, and its thought still ran until then.
+    const stopped = [...thread, after(items.notice({ source: 'runtime', role: 'interrupted', title: 'Interrupted by you.' }, null), 14)]
+    const interrupted = blocksOf({ ...source(stopped), turnEnded: ended }, new Map(), at)
+    expect(interrupted.map((block) => block.kind)).toContain('interrupted')
+    expect(parts(interrupted.find((block) => block.kind === 'turn')).at(-1)).toMatchObject({ kind: 'thought', took: '12s' })
     // Not known, it says only that it thought.
     expect(parts(turnOf(null)).at(-1)).toMatchObject({ took: null })
     // Asked again since, the end said is a later turn's.

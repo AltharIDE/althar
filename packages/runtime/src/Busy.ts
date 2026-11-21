@@ -14,23 +14,16 @@ import { treeMembers, workedBetween } from './processTree'
 import { plannedSmall, QUICK_LANE } from './quickLane'
 import { timestamp } from './records'
 import { Sessions } from './Sessions'
+import { readPressure } from './machine'
+import { PressureAdmission } from './resourcePressure'
 
 /*
  * How many agents are at work at once on this machine, and what waits for a
  * place among them (DEV-58, ADR-032). An agent at work takes a place: a
- * task's lead, while a step of its run is admitted or under way (implement,
- * settle), it is asked about a conflict or the checks on one, it is starting,
- * or it is in a turn; and a task's reviewer, while a review is admitted or
- * under way, or in a turn. Either one with something it left running that is
- * at work takes its place too while the task is unfinished: its process tree uses
- * real CPU, or did within the last `quiet` (`working`). A server left running
- * and sitting idle takes none. What a task's agents left running is part of
- * the task's place, not another: kept only by that, a task holds one place,
- * and none beside an agent of its own at work. A lead or reviewer waiting on the person, on
- * a question or a permission, keeps its place for `askGrace` (five minutes,
- * while its agent's cache is warm, so an answer soon goes on where it was),
- * then takes none, unless what it left running is at work; nor once the
- * person answered, while an answer kept before waits to be told. The
+ * task's lead, reviewer or helper while it starts or is in a turn. A
+ * task takes one place for background work using CPU, if no agent of its
+ * already holds one. An idle session, a finished step's leftover commands
+ * and an agent waiting on the person take no place. The
  * coordinator, its asides, the permission judge and the runs Althar makes itself take no
  * place. An aside's lead starts and takes every turn at once, including after a restart;
  * once it leaves Scratch it takes a task's place again.
@@ -147,6 +140,7 @@ export interface Holder extends Agent {
   readonly threadId: string | null
   /** Its step and turns are done: what it left running, which is at work, is what keeps its place. */
   readonly kept: boolean
+  readonly reason: 'starting' | 'turn' | 'background'
 }
 
 /** How many of a task's helpers are at work at once (ADR-087); more wait for a place, up to ten (Helpers.ts). */
@@ -242,7 +236,13 @@ export class Busy extends Context.Service<
     set(count: number | null): Effect.Effect<void, SqlError.SqlError>
     /** How many agents are at work now, and how many may be. */
     readonly now: Effect.Effect<
-      { readonly busy: number; readonly atOnce: number; readonly holders: ReadonlyArray<Holder> },
+      {
+        readonly busy: number
+        readonly atOnce: number
+        readonly configured: number
+        readonly offline: boolean
+        readonly holders: ReadonlyArray<Holder>
+      },
       SqlError.SqlError
     >
     /**
@@ -301,10 +301,10 @@ export class Busy extends Context.Service<
       const live = yield* Live
       const connectivity = yield* Connectivity
       const options = (yield* RuntimeConfig).busy ?? {}
+      const pressure = new PressureAdmission()
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
-      const askGrace = Duration.toMillis(options.askGrace ?? Duration.minutes(5))
       const automationsAtOnce = options.automations ?? AUTOMATIONS_AT_ONCE
       const quickLane = options.quick ?? QUICK_LANE
       /**
@@ -361,6 +361,7 @@ export class Busy extends Context.Service<
       const scope = yield* Effect.scope
       const lock = Semaphore.makeUnsafe(1)
       const wakes = yield* Queue.sliding<void>(1)
+      const pressureWakes = yield* Queue.sliding<void>(1)
       const sources: Array<Effect.Effect<ReadonlyArray<Waiter>, unknown>> = []
       /* The agents whose waiting work has been started and is on its way, each held until its start ends, by how many hold it. */
       const starting = new Map<string, number>()
@@ -403,7 +404,7 @@ export class Busy extends Context.Service<
         { pid: number | null; at: number; tree: ReadonlyMap<number, number> | null; busyAt: number; working: boolean }
       >()
 
-      const wake = Queue.offer(wakes, undefined).pipe(Effect.asVoid)
+      const wake = Effect.andThen(Queue.offer(wakes, undefined), Queue.offer(pressureWakes, undefined)).pipe(Effect.asVoid)
 
       const atOnce = Effect.gen(function* () {
         const [kept] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${KEY}`
@@ -411,6 +412,8 @@ export class Busy extends Context.Service<
         return { count: own ?? machine.count, own, machine } satisfies AtOnce
       })
 
+      const capacity = ({ count }: AtOnce) => pressure.capacity(count)
+      const admission = Effect.map(atOnce, capacity)
       /**
        * Reads the CPU of what sessions left running, and keeps whether each is at work. A server that sits idle isn't:
        * it takes no place however long it runs (ADR-032). One just started, or whose CPU can't be read, counts, until
@@ -464,11 +467,29 @@ export class Busy extends Context.Service<
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
           LEFT JOIN threads s ON s.task_id = r.task_id AND s.kind = 'step' AND s.node_key = 'review'
           WHERE r.state = 'running' AND a.state IN ('admitted', 'running') AND n.node_key IN ('implement', 'settle', 'review')
-            -- A round of work after the plan counts as its lead's turns do (ADR-034): in one, or starting, not between them.
-            AND NOT (r.plan_id IS NULL AND n.node_key = 'implement' AND a.state = 'running')
+            -- Reserve startup until a turn takes over this admission. Resuming can reuse the attempt and the session.
+            AND (a.state = 'admitted' OR (EXISTS (
+              SELECT 1 FROM provider_sessions p WHERE p.id = a.provider_session_id AND p.state = 'active'
+            ) AND NOT EXISTS (
+              SELECT 1 FROM record_events requested
+              WHERE requested.aggregate_type = 'turn_delivery' AND requested.type = 'turn_delivery.requested'
+                AND requested.aggregate_id = (
+                  SELECT d.id FROM turn_deliveries d WHERE d.provider_session_id = a.provider_session_id
+                    AND d.requested_at >= a.admitted_at ORDER BY d.rowid DESC LIMIT 1
+                )
+                AND requested.sequence > coalesce((
+                  SELECT admitted.sequence FROM record_events admitted
+                  WHERE admitted.aggregate_type = 'node_attempt' AND admitted.aggregate_id = a.id
+                    AND admitted.type IN ('node_attempt.admitted', 'node_attempt.resumed', 'node_attempt.external_ready')
+                  ORDER BY admitted.sequence DESC LIMIT 1
+                ), 0)
+            )))
           UNION ALL
           SELECT c.task_id, t.id, 0, NULL FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL
+            -- A round reserves its place until the turn carrying its ask takes over.
+            AND NOT EXISTS (SELECT 1 FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id
+              WHERE i.thread_id = t.id AND i.sequence = c.asked_sequence)
           UNION ALL
           -- A helper starting takes a place of its own, by its thread (ADR-087).
           SELECT h.task_id, h.id, h.kind = 'step' AND coalesce(h.node_key, '') NOT LIKE 'helper:%',
@@ -484,10 +505,14 @@ export class Busy extends Context.Service<
             under.map((row) => row.taskId),
             taskSessions.map((session) => session.taskId),
           )
-        const ended = yield* sql<{ id: string; state: string; runState: string | null }>`
-          SELECT k.id, k.state,
-            (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1) AS run_state
-          FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify([...new Set(candidateIds)])}))`
+        const ended = yield* sql<{ id: string; state: string; runState: string | null; publishing: number }>`
+          SELECT k.id, k.state, r.state AS run_state,
+            EXISTS (SELECT 1 FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id
+              JOIN node_attempts a ON a.node_id = n.id WHERE e.run_id = r.id
+                AND n.node_key = 'publish' AND a.state IN ('admitted', 'running', 'held')) AS publishing
+          FROM tasks k LEFT JOIN runs r ON r.id = (
+            SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1
+          ) WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify([...new Set(candidateIds)])}))`
         const stale = new Set(
           ended
             .filter((task) => task.state === 'done' || task.state === 'abandoned' || task.runState === 'suspended')
@@ -495,51 +520,71 @@ export class Busy extends Context.Service<
         )
         const finished = new Set(
           ended
-            .filter((task) => stale.has(task.id) || (task.runState !== null && task.runState !== 'running' && task.runState !== 'admitted'))
+            .filter(
+              (task) =>
+                stale.has(task.id) ||
+                task.publishing === 1 ||
+                (task.runState !== null && task.runState !== 'running' && task.runState !== 'admitted'),
+            )
             .map((task) => task.id),
         )
-        // An agent waiting on the person's answer, to a question or a permission, keeps its place a few minutes, so an answer
-        // soon goes on where it was; past that it isn't using the machine, nor while an answer kept before waits for a place.
-        // What it left running still is.
-        const askedBefore = new Date((yield* Clock.currentTimeMillis) - askGrace).toISOString()
+        // A turn waiting on the person releases its place. An open call can outlive the session or be set aside.
         const asking = new Set(
-          (yield* sql<{ threadId: string | null }>`
-            SELECT json_extract(payload, '$.threadId') AS thread_id FROM attention_requests WHERE kind = 'question'
-              AND ((state = 'open' AND created_at <= ${askedBefore})
+          (yield* sql<{ sessionId: string | null }>`
+            SELECT json_extract(payload, '$.sessionId') AS session_id FROM attention_requests WHERE kind = 'question'
+              AND (state = 'open'
                 OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL))
             UNION ALL
-            SELECT s.thread_id FROM attention_requests q JOIN permission_requests r ON r.id = q.permission_request_id
-            JOIN provider_sessions s ON s.id = r.provider_session_id
-            WHERE q.kind = 'permission' AND q.state = 'open' AND q.created_at <= ${askedBefore}`).map((row) => row.threadId),
+            SELECT r.provider_session_id FROM attention_requests q JOIN permission_requests r ON r.id = q.permission_request_id
+            WHERE q.kind = 'permission' AND q.state = 'open' AND coalesce(json_extract(q.payload, '$.setAside'), 0) != 1`).map(
+            (row) => row.sessionId,
+          ),
         )
         const holders = new Map<string, Holder>()
-        const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean, helper?: string) => {
+        const take = (taskId: string, review: boolean, threadId: string | null, reason: Holder['reason'], helper?: string) => {
           if (chatting({ taskId, review, helper }, scratch)) return
           const key = keyOf(taskId, review, helper)
-          // What is under way is taken first, so an agent at work in its step or a turn is never kept only by what it left running.
-          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept, ...(helper === undefined ? {} : { helper }) })
+          const held = holders.get(key)
+          if (held === undefined || reason === 'turn' || (held.threadId === null && reason === 'starting'))
+            holders.set(key, {
+              taskId,
+              review,
+              threadId,
+              kept: reason === 'background',
+              reason,
+              ...(helper === undefined ? {} : { helper }),
+            })
         }
+        const liveThreads = new Map(
+          taskSessions.map((session) => [
+            waiterKey({
+              taskId: session.taskId,
+              review: session.reviewer,
+              ...(session.helper ? { helper: session.threadId } : {}),
+            }),
+            session.threadId,
+          ]),
+        )
         for (const key of starting.keys()) {
           const agent = agentOf(key)
-          take(agent.taskId, agent.review === true, null, false, agent.helper)
+          take(agent.taskId, agent.review === true, liveThreads.get(key) ?? null, 'starting', agent.helper)
         }
         for (const row of under)
-          if (!stale.has(row.taskId) && (row.threadId === null || !asking.has(row.threadId)))
-            take(row.taskId, row.review === 1, row.threadId, false, row.helper ?? undefined)
-        // What the person said to an agent, still to be delivered, is its next turn on its way: the place isn't given to
-        // anything else in between.
+          if (!stale.has(row.taskId)) take(row.taskId, row.review === 1, row.threadId, 'starting', row.helper ?? undefined)
+        // What the person said to an agent, still to be delivered, is its next turn on its way.
         const told = new Set(
           (yield* sql<{ threadId: string }>`
             SELECT DISTINCT i.thread_id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.state = 'queued' AND a.kind = 'person'`).map((row) => row.threadId),
         )
         for (const session of taskSessions) {
-          // Left running and idle, it is nothing to wait for; not yet read, it counts.
-          const working = !finished.has(session.taskId) && session.background && (sampled.get(session.threadId)?.working ?? true)
-          const turning =
-            (session.turnRunning || (session.acceptingTurns !== false && told.has(session.threadId))) && !asking.has(session.threadId)
-          if (working || turning)
-            take(session.taskId, session.reviewer, session.threadId, !turning, session.helper ? session.threadId : undefined)
+          const helper = session.helper ? session.threadId : undefined
+          if (session.turnRunning && !asking.has(session.sessionId))
+            take(session.taskId, session.reviewer, session.threadId, 'turn', helper)
+          else if (!session.turnRunning && session.acceptingTurns !== false && told.has(session.threadId))
+            take(session.taskId, session.reviewer, session.threadId, 'starting', helper)
+          else if (!finished.has(session.taskId) && session.background && (sampled.get(session.threadId)?.working ?? true))
+            take(session.taskId, session.reviewer, session.threadId, 'background', helper)
         }
         // One task, one place: what its agents left running counts once, and not at all beside an agent of its at work.
         const placed = new Set([...holders.values()].flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
@@ -568,12 +613,21 @@ export class Busy extends Context.Service<
         )
 
       /** Everything waiting, from every source, and the turns that wait. */
-      const everything = Effect.map(
+      const readEverything = Effect.map(
         Effect.forEach(sources, (source) =>
-          source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
+          source.pipe(
+            Effect.map((waiters) => ({ waiters, failed: false })),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('Could not read what waits for a place', cause), {
+                waiters: [] as ReadonlyArray<Waiter>,
+                failed: true,
+              }),
+            ),
+          ),
         ),
-        (read): ReadonlyArray<Waiter> => [...read.flat(), ...turns.values()],
+        (read) => ({ waiters: [...read.flatMap((one) => one.waiters), ...turns.values()], failed: read.some((one) => one.failed) }),
       )
+      const everything = Effect.map(readEverything, (read) => read.waiters)
 
       /**
        * What waits, in the order it starts: what the person did, then work
@@ -653,6 +707,38 @@ export class Busy extends Context.Service<
       /** Everything waiting, in the order it starts. */
       const waiting = Effect.flatMap(everything, rank)
 
+      if (options.pressure !== false) {
+        const observe = options.pressure?.read ?? readPressure()
+        let warned = false
+        yield* Effect.forkScoped(
+          Effect.forever(
+            Effect.gen(function* () {
+              const active = (yield* sessions.onTasks).filter((one) => one.turnRunning || one.background)
+              if (active.length === 0 && (yield* waiting).length === 0) {
+                if (pressure.reset()) yield* wake
+                yield* Queue.take(pressureWakes)
+                return
+              }
+              const configured = (yield* atOnce).count
+              const reading = yield* observe
+              warned = false
+              if (pressure.observe(reading, configured, active.length)) yield* wake
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.gen(function* () {
+                      if (pressure.reset()) yield* wake
+                      if (!warned) yield* Effect.logDebug('Host pressure unavailable; keeping normal background scheduling', cause)
+                      warned = true
+                    }),
+              ),
+              Effect.andThen(Effect.sleep(options.pressure?.every ?? Duration.seconds(5))),
+            ),
+          ),
+        )
+      }
+
       /** A task at work, or gone from Up next: where the person put it there no longer stands. */
       const unplace = (taskId: string) => sql`UPDATE tasks SET line_at = NULL WHERE id = ${taskId} AND line_at IS NOT NULL`
 
@@ -677,7 +763,7 @@ export class Busy extends Context.Service<
           // A task's helpers, or automations' runs, as many at work as may be: it waits its turn, whatever is free.
           if (helpersFull(agent, at)) return false
           if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
-          const most = (yield* atOnce).count
+          const most = yield* admission
           // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
           const beyond = at.size >= most
           if (beyond && at.size >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
@@ -719,10 +805,13 @@ export class Busy extends Context.Service<
        */
       const look = lock.withPermits(1)(
         Effect.gen(function* () {
-          const queue = yield* waiting
-          if (queue.length === 0) return false
+          const read = yield* readEverything
+          const queue = yield* rank(read.waiters)
+          // A failed source may hide waiting work. Keep polling even if all the readable sources are empty.
+          if (queue.length === 0) return read.failed
           const { at: busy, holders } = yield* atWork
-          const most = (yield* atOnce).count
+          const settings = yield* atOnce
+          const most = capacity(settings)
           const tasks = yield* automated
           const online = yield* connectivity.online
           const scratch = yield* asides
@@ -776,6 +865,7 @@ export class Busy extends Context.Service<
               if (turn === waiter) {
                 turns.delete(threadId)
                 yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${threadId}`
+                yield* Effect.ignore(provide(touchTask(waiter.taskId)))
               }
             const done = releaseOnce(key)
             yield* Effect.forkIn(
@@ -795,14 +885,14 @@ export class Busy extends Context.Service<
           // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next:
           // read again when either changes.
           const shown = `${holders
-            .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)}${holder.kept ? ' kept' : ''}`)
+            .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)} ${holder.reason} ${holder.threadId ?? ''}`)
             .toSorted()
-            .join(',')} ${most} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
+            .join(',')} ${most}/${settings.count} ${online} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
           if (shown !== said) {
             said = shown
             yield* Effect.forEach(new Set(left), (taskId) => Effect.ignore(provide(touchTask(taskId))), { discard: true })
           }
-          return left.length > 0
+          return left.length > 0 || read.failed
         }),
       )
 
@@ -854,7 +944,9 @@ export class Busy extends Context.Service<
                   said = ''
                   return wake
                 })
-              : event._tag === 'TurnEnded' ||
+              : event._tag === 'SessionStarted' ||
+                  event._tag === 'TurnStarted' ||
+                  event._tag === 'TurnEnded' ||
                   event._tag === 'AttentionNeeded' ||
                   event._tag === 'AttentionClosed' ||
                   event._tag === 'Connection'
@@ -1129,7 +1221,8 @@ export class Busy extends Context.Service<
         set,
         now: Effect.gen(function* () {
           const { at, holders } = yield* atWork
-          return { busy: at.size, atOnce: (yield* atOnce).count, holders }
+          const settings = yield* atOnce
+          return { busy: at.size, atOnce: capacity(settings), configured: settings.count, offline: !(yield* connectivity.online), holders }
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>

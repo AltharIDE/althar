@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
-import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from 'effect'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -14,7 +14,9 @@ import { startOf } from './Projects'
 import { bringBackThen } from './bringBack'
 import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
+import { git } from './git'
 import { Instance } from './Instance'
+import { filesNamed } from './keptRuns'
 import { makeKeyedLock } from './keyedLock'
 import { NotFound } from './errors'
 import { endingLine, printedMore, readable, servingAt, uncoloured } from './leftRunning'
@@ -101,6 +103,8 @@ interface Launch {
   readonly ref: Ref | null
   readonly bindingId: string
   readonly command: string
+  /** The folder it runs in: where a terminal opened from it opens. */
+  readonly folder: string
   readonly startedAt: string
   readonly scope: Scope.Closeable
   /** Its process, the leader of its group. */
@@ -159,6 +163,8 @@ interface Kept {
   readonly command: string | null
   readonly actorKind: string | null
   readonly agentId: string | null
+  /** The task it was kept for, by its lead: it goes once that task's worktrees are cleaned up. */
+  readonly taskId: string | null
 }
 
 type Store = SqlClient.SqlClient | Crypto.Crypto | Instance | RuntimeConfig | Live | Ledger
@@ -207,6 +213,18 @@ export class Launches extends Context.Service<
     stopAll(projectId: string, taskId?: string, startedBy?: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
+    /**
+     * Where a terminal opens: the folder the run named ran in, while it is
+     * there; else the task's worktree, or the project's own repository, at
+     * the folder in it the project is about; the first repository of several.
+     * With where that is, in words: the run's, the task's title, or the
+     * repository's name.
+     */
+    terminalFolder(input: {
+      readonly projectId: string
+      readonly taskId: string | null
+      readonly launchId?: string
+    }): Effect.Effect<{ readonly path: string; readonly where: string }, unknown>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
     /**
@@ -226,7 +244,10 @@ export class Launches extends Context.Service<
     /**
      * Keeps something for the project to run: a new one, at the end of the
      * list, unless the same is kept already; or, by id, a change to one. A
-     * null command is its repository's own way. Says which it is.
+     * null command is its repository's own way. Kept for a task, by its lead,
+     * it goes once that task's worktrees are cleaned up (`dropCleanedUp`);
+     * kept or changed by anyone else, it belongs to no task. One the person
+     * kept or changed stays theirs, whoever changes it after. Says which it is.
      */
     keepRunnable(input: {
       readonly projectId: string
@@ -235,9 +256,22 @@ export class Launches extends Context.Service<
       readonly command: string | null
       readonly repository?: string
       readonly actorId: ActorId
+      readonly taskId?: string | null
     }): Effect.Effect<{ readonly id: string; readonly name: string | null; readonly repository: string }, unknown>
     /** Drops one of the project's runnables; a run of it goes on until stopped. */
     dropRunnable(input: { readonly projectId: string; readonly id: string; readonly actorId: ActorId }): Effect.Effect<void, unknown>
+    /**
+     * Drops the runnables tasks' leads kept, of the task named or of every
+     * task, once all that task's worktrees are cleaned up, each with a line
+     * in its project's record: what they run mostly lived only on the task's
+     * branch. One whose every file it names is on its repository's default
+     * branch, as when its config merged, or whose files can't be told for
+     * sure, stays, and belongs to no task from then; so does one the person
+     * kept or changed. One whose repository can't be read here now waits for
+     * the next sweep. Only one still as it was read goes. Says the names of
+     * those dropped.
+     */
+    dropCleanedUp(taskId?: string): Effect.Effect<ReadonlyArray<string>, unknown>
     /** Puts the project's runnables in this order, the first its default; any not named keep theirs, after. */
     orderRunnables(input: {
       readonly projectId: string
@@ -344,7 +378,7 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<Kept>`
-            SELECT r.id, r.binding_id, r.name, r.command, a.kind AS actor_kind, a.agent_id
+            SELECT r.id, r.binding_id, r.name, r.command, a.kind AS actor_kind, a.agent_id, r.task_id
             FROM runnables r LEFT JOIN actors a ON a.id = r.kept_by_actor_id
             WHERE r.project_id = ${projectId} AND r.dropped_at IS NULL
             ORDER BY r.position, r.created_at, r.rowid`
@@ -749,6 +783,7 @@ export class Launches extends Context.Service<
               ref: input.branch?.ref ?? null,
               bindingId: binding.id,
               command: run.command,
+              folder,
               startedAt: yield* timestamp,
               scope,
               pid: owned.pid,
@@ -1022,6 +1057,7 @@ export class Launches extends Context.Service<
         readonly command: string | null
         readonly repository?: string
         readonly actorId: ActorId
+        readonly taskId?: string | null
       }) =>
         provide(
           Effect.gen(function* () {
@@ -1072,19 +1108,23 @@ export class Launches extends Context.Service<
                     position: (last?.position ?? -1) + 1,
                     keptByActorId: input.actorId,
                     createdAt: at,
+                    taskId: input.taskId ?? null,
                   })}`
                   yield* recorded(input.projectId, input.actorId, 'project.runnable_kept', { name, command, repository: binding.name })
                 }),
               )
               return { id, name, repository: binding.name }
             }
+            // One the person kept or changed stays theirs, whoever changes it after: no task's, so it never goes with one.
+            const theirs = was.actorKind === 'person'
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 yield* sql`UPDATE runnables SET ${sql.update({
                   bindingId: binding.id,
                   name,
                   command,
-                  keptByActorId: input.actorId,
+                  ...(theirs ? {} : { keptByActorId: input.actorId }),
+                  taskId: theirs ? null : (input.taskId ?? null),
                 })}, revision = revision + 1 WHERE id = ${was.id}`
                 yield* recorded(input.projectId, input.actorId, 'project.runnable_kept', {
                   id: was.id,
@@ -1134,6 +1174,126 @@ export class Launches extends Context.Service<
                 yield* recorded(input.projectId, input.actorId, 'project.runnables_ordered', { ids: order.map((one) => one.id) })
               }),
             )
+          }),
+        )
+
+      /**
+       * What becomes of a run a task kept once its worktrees went: `keep` where every file it names is on its repository's
+       * default branch, as fetched or here, or where what it needs can't be told for sure; `drop` where it names none, or one
+       * its branch, read, doesn't have; `later` where its repository, its branch or a folder it runs in can't be read here
+       * now (on another device, missing, or git failing), to look again as Althar next starts.
+       */
+      const fateOf = (binding: Binding | undefined, command: string, within: string | null) =>
+        Effect.gen(function* () {
+          const named = filesNamed(command, within)
+          if (named === null) return 'keep' as const
+          // A folder outside the repository it runs in: there, what it needs there can't be told; not here, it may be another
+          // device's, so it waits for one that has it.
+          if (named.outside.length > 0) return named.outside.every((folder) => existsSync(folder)) ? ('keep' as const) : ('later' as const)
+          if (named.files.length === 0) return 'drop' as const
+          if (binding === undefined || !existsSync(binding.repository)) return 'later' as const
+          const { remote, base } = yield* startOf({
+            repository: binding.repository,
+            base: binding.defaultBase,
+            changeTarget: binding.changeTarget,
+          }).pipe(Effect.orElseSucceed(() => ({ remote: 'origin', base: binding.defaultBase ?? 'main' })))
+          const refs: Array<string> = []
+          for (const ref of [`refs/remotes/${remote}/${base}`, `refs/heads/${base}`])
+            if (
+              yield* git(binding.repository, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`).pipe(
+                Effect.as(true),
+                Effect.orElseSucceed(() => false),
+              )
+            )
+              refs.push(ref)
+          if (refs.length === 0) return 'later' as const
+          // Its branch read, a file it lists nothing for isn't there; where git can't list it, it can't be told yet.
+          for (const ref of refs) {
+            let holds = true
+            for (const file of named.files) {
+              const listed = yield* git(
+                binding.repository,
+                '--literal-pathspecs',
+                'ls-tree',
+                '-z',
+                '--name-only',
+                '--full-tree',
+                ref,
+                '--',
+                file,
+              ).pipe(Effect.option)
+              if (Option.isNone(listed)) return 'later' as const
+              if (listed.value === '') {
+                holds = false
+                break
+              }
+            }
+            if (holds) return 'keep' as const
+          }
+          return 'drop' as const
+        })
+
+      const dropCleanedUp = (taskId?: string) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            // A task's that had a worktree, every one cleaned up now, on any device; a review's copy is no worktree of its.
+            const cleanedUp = (one: string | null) => sql`
+              r.dropped_at IS NULL AND r.task_id IS NOT NULL AND r.command IS NOT NULL
+                AND (${one} IS NULL OR r.task_id = ${one})
+                AND coalesce((SELECT a.kind FROM actors a WHERE a.id = r.kept_by_actor_id), '') <> 'person'
+                AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL)
+                AND NOT EXISTS (SELECT 1 FROM workspaces w
+                  WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL AND w.state <> 'cleaned')`
+            const gone = yield* sql<{
+              id: string
+              projectId: string
+              bindingId: string
+              name: string | null
+              command: string
+              taskId: string
+              revision: number
+            }>`
+              SELECT r.id, r.project_id, r.binding_id, r.name, r.command, r.task_id, r.revision
+              FROM runnables r WHERE ${cleanedUp(taskId ?? null)}
+              ORDER BY r.project_id, r.position`
+            const dropped: Array<string> = []
+            const bindings = new Map<string, ReadonlyArray<Binding>>()
+            for (const run of gone) {
+              const of = bindings.get(run.projectId) ?? (yield* bindingsOf(run.projectId))
+              bindings.set(run.projectId, of)
+              const binding = of.find((one) => one.id === run.bindingId)
+              const fate = yield* fateOf(binding, run.command, binding?.within ?? null)
+              if (fate === 'later') continue
+              const at = yield* timestamp
+              // Only as it was read, and still its task's to drop: changed meanwhile, as by the person, or dropped by
+              // another sweep, it is left, and nothing is said.
+              const still = sql`r.id = ${run.id} AND r.revision = ${run.revision} AND r.task_id = ${run.taskId} AND ${cleanedUp(run.taskId)}`
+              if (fate === 'keep') {
+                // It runs as kept on the default branch, or can't be told not to: the project's now, not the task's.
+                yield* sql`UPDATE runnables AS r SET task_id = NULL, revision = revision + 1 WHERE ${still}`
+                continue
+              }
+              const went = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const changed = yield* sql<{ id: string }>`UPDATE runnables AS r SET ${sql.update({
+                    droppedAt: at,
+                    droppedByActorId: instance.systemId,
+                  })}, revision = revision + 1 WHERE ${still} RETURNING id`
+                  if (changed.length === 0) return false
+                  yield* recorded(run.projectId, instance.systemId, 'project.runnable_dropped', {
+                    id: run.id,
+                    name: run.name,
+                    command: run.command,
+                    task: run.taskId,
+                    why: 'worktree_cleaned',
+                  })
+                  return true
+                }),
+              )
+              if (went) dropped.push(run.name ?? run.command)
+            }
+            return dropped
           }),
         )
 
@@ -1271,6 +1431,8 @@ export class Launches extends Context.Service<
                 command,
                 ...(asked.repository === undefined ? {} : { repository: asked.repository }),
                 actorId: actorOf(access),
+                // A lead's is its task's: it goes as that task's worktree does.
+                taskId: access.role === 'lead' ? access.taskId : null,
               })
               return `Kept: ${name} runs with \`${command}\`. ${yield* listed(access.projectId)}`
             }),
@@ -1503,6 +1665,12 @@ export class Launches extends Context.Service<
       // One set for leads and the coordinator (ADR-097): each reads its role where they differ.
       const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
       yield* toolServer.serve(POOL, [screenshotTool, runTool, stopTool, keepTool(actorOf), keepRunTool(actorOf)])
+      // What tasks' leads kept for tasks whose worktrees went while Althar was away, or before it said which task kept each,
+      // goes now: away from the start, as it reads each repository's default branch.
+      yield* Effect.forkIn(
+        dropCleanedUp().pipe(Effect.catchCause((cause) => Effect.logWarning('Could not drop what finished tasks kept to run', cause))),
+        launchesScope,
+      )
 
       return Launches.of({
         start,
@@ -1517,6 +1685,27 @@ export class Launches extends Context.Service<
           }),
         stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
+        terminalFolder: ({ projectId, taskId, launchId }) =>
+          provide(
+            Effect.gen(function* () {
+              const launch = launchId === undefined ? undefined : (launches.get(launchId) ?? leftBehind.get(launchId))
+              if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
+              const [place] = yield* placesOf(projectId, taskId, undefined)
+              if (place === undefined)
+                return yield* new LaunchRefused({
+                  why: 'elsewhere',
+                  message:
+                    taskId === null ? 'The project has no repository on this computer.' : 'The task has no worktree on this computer.',
+                })
+              const sql = yield* SqlClient.SqlClient
+              const [task] = taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+              // A finished task's folder that was removed opens in its repository's own folder, as its runs say (ADR-056).
+              return {
+                path: within(place.binding, existsSync(place.root) ? place.root : place.binding.repository),
+                where: task?.title ?? place.binding.name,
+              }
+            }),
+          ),
         processes: () =>
           Effect.sync(() =>
             [...launches.values()].flatMap((launch) =>
@@ -1535,6 +1724,7 @@ export class Launches extends Context.Service<
         keep,
         keepRunnable,
         dropRunnable,
+        dropCleanedUp,
         orderRunnables,
         scripts,
       })

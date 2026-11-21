@@ -1,6 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
+const retainedNotices = new Map([
+  // This release omits LICENSE from its npm tarball. Keep the tagged license and the bundled BSD notice.
+  ['@bufbuild/protobuf@2.17.0', new URL('./notices/bufbuild-protobuf-2.17.0.LICENSE', import.meta.url)],
+])
+
 /** Build-time only: retain the notices of modules actually included in the JavaScript bundle. */
 export const releaseLicenses = () => ({
   name: 'host-release-licenses',
@@ -43,11 +48,13 @@ export const releaseLicenses = () => ({
           const files = readdirSync(directory)
             .filter((name) => /^(license|licence|copying|notice)(?:[.-].*)?$/i.test(name))
             .sort()
-          if (files.length === 0) throw new Error(`Missing license notice for ${metadata.name}`)
-          packages.set(
-            `${metadata.name}@${metadata.version}`,
-            files.map((name) => `${name}\n${readFileSync(join(directory, name), 'utf8')}`).join('\n\n'),
-          )
+          const packageVersion = `${metadata.name}@${metadata.version}`
+          const retained = retainedNotices.get(packageVersion)
+          if (retained !== undefined) packages.set(packageVersion, readFileSync(retained, 'utf8'))
+          else {
+            if (files.length === 0) throw new Error(`Missing license notice for ${packageVersion}`)
+            packages.set(packageVersion, files.map((name) => `${name}\n${readFileSync(join(directory, name), 'utf8')}`).join('\n\n'))
+          }
         }
         break
       }

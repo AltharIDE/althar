@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import type { EndpointRead } from '@althar/provider-adapters'
+import { type EndpointRead, probeClaudeSandbox } from '@althar/provider-adapters'
 import type { PageDone } from '@althar/runtime/pageBridge'
 import {
   AfterOpen,
@@ -29,6 +29,7 @@ import {
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
+import { keepCompiledNow } from '../compileCache'
 import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
 import { runtimeWork } from './atWork'
@@ -138,6 +139,15 @@ const pages = pagesWith((message) => parent.postMessage(message))
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
 const opened = Effect.runPromise(Deferred.await(firstScreen))
+
+/*
+ * Whether Claude Code's sandbox can start here, worked out off the thread once the first screen is drawn (on Linux it
+ * starts bubblewrap): a Claude Code session started sooner waits for it, and starts it if it hasn't (registry.ts).
+ */
+void opened.then(() => probeClaudeSandbox())
+
+/* What this launch compiled is kept for the next (compileCache.ts), a while after the first screen, so it doesn't compete with its reads. */
+void opened.then(() => void setTimeout(keepCompiledNow, 5_000).unref())
 const fetchNow = appFetchOf(net)
 const appFetch: Fetch = async (input, init) => {
   await opened
@@ -296,7 +306,7 @@ const program = Effect.gen(function* () {
           },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
-          busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
@@ -348,7 +358,7 @@ const program = Effect.gen(function* () {
   // The ports the runtime listens on, which no canvas may reach (ADR-104).
   parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
-  // A development build's log says when the runtime's thread ran late, and which window's calls took long (lag.ts).
+  // The log says when the runtime's thread ran late, and which window's calls took long (lag.ts), packaged or not.
   if (lagLogged()) yield* watchLag()
   // Socket access is opt-in; its private descriptor grants only the restricted socket role.
   if (process.env.ALTHAR_API_SOCKET === '1')

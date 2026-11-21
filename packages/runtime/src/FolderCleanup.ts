@@ -21,6 +21,7 @@ import { git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { quickIn } from './kinds'
 import { Launches } from './Launches'
+import { Terminals } from './Terminals'
 import { change, fact, timestamp } from './records'
 import { reviewCopyOf } from './reviewCopy'
 import { Sessions } from './Sessions'
@@ -85,7 +86,7 @@ const KEY = 'folder_wait'
 
 const DAY = Duration.toMillis(Duration.days(1))
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | RuntimeConfig | Sessions | Launches | Changes
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | RuntimeConfig | Sessions | Launches | Terminals | Changes
 
 /** Why a folder went: its wait was up, the disk ran low, the person cleaned up, or removed it by hand. */
 type Why = 'wait' | 'low' | 'clean' | 'hand'
@@ -360,6 +361,7 @@ export class FolderCleanup extends Context.Service<
       const config = yield* RuntimeConfig
       const sessions = yield* Sessions
       const launches = yield* Launches
+      const terminals = yield* Terminals
       const changes = yield* Changes
       const scope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const diskAt = config.disk ?? diskOf
@@ -398,7 +400,8 @@ export class FolderCleanup extends Context.Service<
             (SELECT t.id FROM threads t WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY t.created_at, t.rowid LIMIT 1) AS thread_id
           FROM tasks k JOIN projects p ON p.id = k.project_id
           WHERE k.state IN ('done', 'abandoned') AND k.settled_at IS NOT NULL AND p.archived_at IS NULL
-            AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL)
+            AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL
+              AND w.made_by IS NULL)
           ORDER BY k.settled_at DESC, k.id`
         const workspaces = yield* sql<Workspace>`
           SELECT w.id, w.task_id, w.project_id, w.path, w.access, w.branched_at IS NOT NULL AS branched, w.base_commit, l.path AS repository,
@@ -408,6 +411,8 @@ export class FolderCleanup extends Context.Service<
           JOIN repository_bindings b ON b.id = w.binding_id
           JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
           WHERE w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL AND k.state IN ('done', 'abandoned')
+            -- A folder another tool made is that tool's to remove, never Althar's (Elsewhere.ts).
+            AND w.made_by IS NULL
           ORDER BY b.created_at, b.rowid`
         return tasks.map((task): Candidate => {
           const opened = task.openedAt === null ? null : Date.parse(task.openedAt)
@@ -682,12 +687,17 @@ export class FolderCleanup extends Context.Service<
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
               } else if ((yield* runningFrom(now)) || holdOf(false, lost, yield* openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
-              // What still runs from them, from before it settled, stops first.
+              // What still runs from them, from before it settled, stops first, and the person's terminals in them close.
               yield* launches.stopAll(now.projectId, now.taskId)
+              yield* terminals.closeAll(now.projectId, now.taskId)
               // Measured again, as it is now: what it holds may have changed since it was listed.
               const bytes = yield* sizeOfAll(now)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
               facts.delete(now.taskId)
+              // What its lead kept to run goes with its worktree: it ran what was on its branch.
+              yield* launches
+                .dropCleanedUp(now.taskId)
+                .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not drop what a finished task kept to run', cause)))
               const thread = yield* taskThreadOf(now.taskId)
               if (thread !== null)
                 yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {

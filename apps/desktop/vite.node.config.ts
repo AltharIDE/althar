@@ -8,7 +8,8 @@ import { defineConfig, loadEnv } from 'vite-plus'
  * is inlined but Electron and Node's own modules, since Node can't run the
  * workspace's TypeScript as it is. The agent adapters stay packages: they run
  * as processes of their own. So does sherpa-onnx, a native addon that finds
- * its binaries beside it in node_modules, and electron-updater, whose
+ * its binaries beside it in node_modules, as node-pty, the terminals'
+ * pseudo-terminals, does, and electron-updater, whose
  * CommonJS would otherwise share a chunk with the runtime's process.
  */
 /** PostHog's project key and host for usage data (src/main/usageData.ts), for a packaged build; empty for any other. */
@@ -41,11 +42,18 @@ export default defineConfig(({ mode }) => ({
     target: 'node24',
     sourcemap: true,
     rollupOptions: {
-      input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
+      // The main process and the runtime start from a file that keeps V8's compiled code first, then loads the rest (compileCache.ts).
+      input: {
+        'main/main': 'src/main/boot.ts',
+        'runtime/runtime': 'src/runtime/boot.ts',
+        'speech/speech': 'src/speech/speech.ts',
+        'connection/connection': 'src/connection/connection.ts',
+      },
       external: [
         'sharp',
         'electron',
         'sherpa-onnx-node',
+        'node-pty',
         'electron-updater',
         ...builtinModules,
         ...builtinModules.map((name) => `node:${name}`),

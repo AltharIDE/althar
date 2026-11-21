@@ -6,15 +6,16 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, reveal, say, showPanes, shown, still, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, reveal, say, SHIP_ON_CARD, shown, showPanes, still, toConversation } from './support'
 
 /*
  * Every part of a task changes either way, just by the person telling its lead (a task is a conversation plus parts; the
  * person's note of 12 November), in a real window with the fake agent and the fake GitHub. Each direction is driven only by
  * what the person writes in the task's composer: the fake lead does what it is told, `[lead:call <tool> <json>]`, as a lead
  * acts on the person's word, and nothing asks them again. A prototype becomes a change, its reviewer and pull request ending on
- * at once, and its visible Ship action reviews it and opens the pull request; a change goes back to a prototype, its review off and its pull
- * request closed; a chat becomes a change and a chat again; the review, the ending, the lead and where it works change. The
+ * at once, and its visible Ship action reviews it and opens the pull request; a change with an open pull request steps back
+ * into prototyping, its review off and its pull request left as it is, and on into a change again, which the same pull request
+ * carries on; a chat becomes a change and a chat again; the review, the ending, the lead and where it works change. The
  * menu's Make it a change does the first in one press. Its shots are test-results/parts-*.png.
  */
 
@@ -107,7 +108,7 @@ test('a prototype becomes a change in one move on the person’s word, and Ship 
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Outputs/ })
       .click()
-    const ship = page.getByRole('button', { name: /^Ship \d+ commits?$/ })
+    const ship = page.getByRole('button', { name: SHIP_ON_CARD })
     await expect(ship).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open a draft pull request', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Push to origin/ })).toHaveCount(0)
@@ -126,24 +127,80 @@ test('a prototype becomes a change in one move on the person’s word, and Ship 
   }
 })
 
-test('a change goes back to a prototype on the person’s word: ready first, another reviewer, then no review and no pull request', async () => {
+test('a change with an open pull request steps back into prototyping and on into a change again, on one task, branch and pull request', async () => {
   const { electronApp, page } = await setup()
   try {
     await planned(page, 'Rate-limit refunds per partner. [coordinator:plan] [lead:finish] [lead:edit] [review:pass]', 'pull request')
+    const title = 'Rate-limit refunds per partner'
+    const header = page.locator(`header[aria-label="${title}"]`)
+    const work = page.getByRole('region', { name: 'The project’s work' })
+    const card = work.locator('article', { has: page.getByRole('button', { name: title }) })
+    const toBoard = async () => {
+      await page.getByRole('button', { name: /^Back to / }).click()
+      await showPanes(page, { conversation: false, board: true })
+    }
+    const toTask = async () => {
+      await work.getByRole('button', { name: title }).click()
+      await toConversation(page)
+    }
+    const shootCard = async (name: string) => {
+      await expect(card).toBeVisible()
+      await page.mouse.move(1190, 780)
+      await card.screenshot({ path: `test-results/parts-card-${name}.png`, animations: 'disabled', scale: 'css' })
+    }
 
-    // Its ending: from a draft to ready for review, the open draft marked ready.
+    // Its ending: from a draft to ready for review, the open draft marked ready; then another reviewer for what ships next.
     await tell(page, `Make it ready for review. ${call('change_part', { part: 'ending', end: 'ready' })}`)
     await expect(line(page, /Its lead changed its parts: ending in a pull request ready for review, PR #1 marked ready/)).toBeVisible()
-
-    // Its reviewer, once its review ran: another reads what ships next.
     await tell(page, `Have Claude review it from now on. ${call('change_part', { part: 'checked_by', review: { agent: 'claude-code' } })}`)
     await expect(line(page, /Its lead changed its parts: reviewer set to .+, reading what ships next/)).toBeVisible()
 
-    // Back to a prototype: no review, ending with its branch, the pull request closed and its branch kept.
-    await tell(page, `Actually, keep it as a prototype. ${call('change_part', { part: 'preset', preset: 'Prototype' })}`)
-    const back = line(page, /Its lead made it a Prototype: no review, ending with its branch, PR #1 closed, its branch staying/)
+    // Its track shows while its lead is at work: in the header and on the board's card, with Review where it has one.
+    const track = header.locator('ol li')
+    const review = track.filter({ hasText: /^Review/ })
+    const cardReview = card.locator('ol li').filter({ hasText: /^Review/ })
+    /** A turn of its lead's, shot at work, header and card: Review on its track or not, as `reviews` says. */
+    const atWork = async (words: string, name: string, reviews: boolean, commits: number) => {
+      await tell(page, `${words} [lead:slowly] [lead:commit]`)
+      // At work: a track of its steps where it has more than one; without its review, its lead's step alone, so its word.
+      await expect(reviews ? track.first() : header.getByText(/^(Following up|Working|Implementing)$/)).toBeVisible()
+      await expect(review).toHaveCount(reviews ? 1 : 0)
+      await page.mouse.move(1190, 780)
+      await header.screenshot({ path: `test-results/parts-header-${name}.png`, animations: 'disabled', scale: 'css' })
+      await toBoard()
+      if (reviews) await expect(card.locator('ol li').first()).toBeVisible()
+      await expect(cardReview).toHaveCount(reviews ? 1 : 0)
+      await shootCard(name)
+      await expect(card.getByText(`${commits} commit${commits === 1 ? '' : 's'} not shipped`)).toBeVisible()
+      await toTask()
+    }
+
+    // A change: Review on its track, and what its lead commits waits for Ship.
+    await atWork('Tighten the limit.', 'change', true, 1)
+
+    // "Let's step back and prototype this": the same task, in place. No review, its pull request open as it is.
+    await tell(page, `Let's step back and prototype the design. ${call('change_part', { part: 'preset', preset: 'Prototype' })}`)
+    const back = line(page, /Its lead made it a Prototype: no review, ending with its branch, PR #1 stays open as it is/)
     await expect(back).toBeVisible()
     await shoot(page, back, 'change-to-prototype')
+
+    // Prototyping: no Review step on its track, and what its lead tries stays on the branch here.
+    await atWork('Try a flatter panel.', 'prototyping', false, 2)
+
+    // The person picks a direction: a change again, on the same task; the same pull request carries on.
+    await tell(page, `Go with the flat one, build it. ${call('change_part', { part: 'preset', preset: 'Change' })}`)
+    const on = line(page, /Its lead made it a Change: reviewer set to .+, its work goes on in PR #1 again/)
+    await expect(on).toBeVisible()
+    await shoot(page, on, 'prototype-to-change-again')
+    await atWork('Build the flat panel.', 'change-again', true, 3)
+
+    // Shipped: one review over what came since the last, then up to the same pull request; no other opens.
+    await header.getByRole('button', { name: 'Ship', exact: true }).click()
+    await expect(shown(page, /Shipped 3 commits to PR #1/).first()).toBeVisible()
+    await expect(page.getByText('PR #2')).toHaveCount(0)
+    await expect(header.getByText(/not shipped/)).toHaveCount(0)
+    await toBoard()
+    await shootCard('shipped')
   } finally {
     await electronApp.close()
   }
@@ -166,7 +223,7 @@ test('a chat becomes a change on the person’s word, ships as one, and becomes 
     await expect(page.getByText('PR #1').first()).toBeVisible()
 
     await tell(page, `Make it just a chat again. ${call('change_part', { part: 'preset', preset: 'Chat' })}`)
-    const chat = line(page, /Its lead made it a Chat: no review, nothing going up until it ships, PR #1 closed, its branch staying/)
+    const chat = line(page, /Its lead made it a Chat: no review, nothing going up until it ships, PR #1 stays open as it is/)
     await expect(chat).toBeVisible()
     await shoot(page, chat, 'change-to-chat')
   } finally {

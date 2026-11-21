@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { StorageSize } from '@althar/contracts'
+import { waitFor } from '@althar/testing'
 
 import { REFRESH_TIMEOUT, storageSizes } from '../src/StorageSizes'
 
@@ -52,6 +53,16 @@ describe('the sizes kept for a session', () => {
     expect(calls).toBe(2)
   })
 
+  it('measures a place anew once it is forgotten, as after its folders were removed', async () => {
+    let calls = 0
+    const sizes = storageSizes(places, async () => done(++calls * 10))
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(10)
+    sizes.forget('worktrees')
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(20)
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(20)
+    expect(calls).toBe(2)
+  })
+
   it('leaves the logs and task folders out of the profile where they sit inside it', async () => {
     const calls: Record<string, ReadonlyArray<string> | undefined> = {}
     const sizes = storageSizes(
@@ -71,55 +82,72 @@ describe('the sizes kept for a session', () => {
 
 describe('giving up on a size', () => {
   const places = { profile: '/p', logs: '/p/logs', worktrees: '/w' }
-  /** A walk that only ends when it is stopped. */
-  const endless = (stopped: string[]) =>
+  const approximate: StorageSize = { state: 'done', bytes: 1, approximate: true, unreadable: 0 }
+  /**
+   * A walk that only ends when it is stopped, as `measure` does: one asked
+   * with a signal already stopped ends at once. Where a place really is is
+   * read before the walk is asked, so a giving-up can come first.
+   */
+  const endless = (stopped: string[], walking: string[] = []) =>
     ((root: string, options?: { signal?: AbortSignal }) =>
       new Promise<StorageSize>((resolve) => {
-        options?.signal?.addEventListener('abort', () => {
+        walking.push(root)
+        const stop = () => {
           stopped.push(root)
-          resolve({ state: 'done', bytes: 1, approximate: true, unreadable: 0 })
-        })
+          resolve(approximate)
+        }
+        if (options?.signal?.aborted === true) stop()
+        else options?.signal?.addEventListener('abort', stop, { once: true })
       })) as never
 
   it('stops the walk when the only one waiting on it gives up, and rejects that call', async () => {
     const stopped: string[] = []
-    const sizes = storageSizes(places, endless(stopped))
+    const walking: string[] = []
+    const sizes = storageSizes(places, endless(stopped, walking))
     const stop = new AbortController()
     const asked = sizes.size('worktrees', false, stop.signal)
-    await new Promise((go) => setTimeout(go, 5))
+    await waitFor(() => walking.length === 1)
     stop.abort()
     await expect(asked).rejects.toThrow('Stopped measuring.')
     expect(stopped).toEqual([resolve('/w')])
   })
 
-  it('lets the walk go on while another still waits on it', async () => {
+  it('stops a walk given up on before it began', async () => {
     const stopped: string[] = []
     const sizes = storageSizes(places, endless(stopped))
     const stop = new AbortController()
+    const asked = sizes.size('worktrees', false, stop.signal)
+    stop.abort()
+    await expect(asked).rejects.toThrow('Stopped measuring.')
+    await waitFor(() => stopped.length === 1)
+    expect(stopped).toEqual([resolve('/w')])
+  })
+
+  it('lets the walk go on while another still waits on it', async () => {
+    const stopped: string[] = []
+    const walking: string[] = []
+    const sizes = storageSizes(places, endless(stopped, walking))
+    const stop = new AbortController()
     const first = sizes.size('logs', false, stop.signal)
     void sizes.size('logs')
-    await new Promise((go) => setTimeout(go, 5))
+    await waitFor(() => walking.length === 1)
     stop.abort()
     await expect(first).rejects.toThrow()
     expect(stopped).toEqual([])
   })
 
   it('does not keep a walk that was stopped: the next look measures anew', async () => {
-    let calls = 0
-    const sizes = storageSizes(
-      places,
-      ((_root: string, options?: { signal?: AbortSignal }) =>
-        new Promise<StorageSize>((resolve) => {
-          if (++calls > 1) resolve(done(9))
-          options?.signal?.addEventListener('abort', () => resolve({ state: 'done', bytes: 1, approximate: true, unreadable: 0 }))
-        })) as never,
-    )
+    const stopped: string[] = []
+    const stopping = endless(stopped) as (root: string, options?: { signal?: AbortSignal }) => Promise<StorageSize>
+    // The stopped walk is the one asked with its signal stopped; the next is measured.
+    const sizes = storageSizes(places, ((root: string, options?: { signal?: AbortSignal }) =>
+      options?.signal?.aborted === true ? stopping(root, options) : Promise.resolve(done(9))) as never)
     const stop = new AbortController()
     const asked = sizes.size('profile', false, stop.signal)
-    await new Promise((go) => setTimeout(go, 5))
     stop.abort()
-    await asked.catch(() => {})
-    await new Promise((go) => setTimeout(go, 5))
+    await expect(asked).rejects.toThrow('Stopped measuring.')
+    // Asked again at once, before the stopped walk has even begun, it measures anew rather than join it.
     expect(bytesOf(await sizes.size('profile'))).toBe(9)
+    await waitFor(() => stopped.length === 1)
   })
 })

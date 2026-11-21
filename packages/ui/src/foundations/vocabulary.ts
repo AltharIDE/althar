@@ -15,6 +15,7 @@ export enum SourceKind {
   Jira = 'jira',
   Confluence = 'confluence',
   Trello = 'trello',
+  ClickUp = 'clickup',
   Opsgenie = 'opsgenie',
   Statuspage = 'statuspage',
   Loom = 'loom',
@@ -226,6 +227,21 @@ export enum TaskStatus {
   Queued = 'queued',
   /** Stopped by you. */
   Stopped = 'stopped',
+}
+
+/**
+ * How a task another waits for stands (tasks wait for their blockers): not
+ * started yet, at work, stuck on you or stopped, in review, merged (its work
+ * in, so it holds nothing up), or abandoned, when what waits for it waits on
+ * you instead.
+ */
+export enum BlockerStands {
+  Planned = 'planned',
+  Working = 'working',
+  Stuck = 'stuck',
+  Review = 'review',
+  Merged = 'merged',
+  Abandoned = 'abandoned',
 }
 
 /**
@@ -706,4 +722,26 @@ export enum MemoryPressure {
   Warning = 'warning',
   /** It moves memory to disk, and everything runs slower. */
   Critical = 'critical',
+}
+
+/** A stop on a Ship's route, in the order it takes them. */
+export enum ShipStop {
+  /** Its reviewer reads what waits, and the lead settles what it finds. */
+  Review = 'review',
+  /** What waits goes up to its pull request, or opens one. */
+  Push = 'push',
+  /** Its pull request is marked ready for review. */
+  Ready = 'ready',
+  /** Its pull request merges, once the checks main requires pass. */
+  Merge = 'merge',
+}
+
+/** How far a Ship goes: the last stop it takes. */
+export enum ShipFar {
+  /** As far as a push: a draft stays one. */
+  Push = 'push',
+  /** Ready for review. */
+  Ready = 'ready',
+  /** Merged. */
+  Merge = 'merge',
 }

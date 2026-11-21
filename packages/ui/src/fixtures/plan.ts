@@ -119,8 +119,8 @@ export const CLAUDE_TWO: PlanAgent = {
       age: null,
       fault: null,
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00' },
-        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00' },
+        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00', resets: 'in 2h 10m', resetsTitle: 'Resets 17:00 · in 2h 10m' },
+        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00', resets: 'in 3d 18h', resetsTitle: 'Resets Mon 09:00 · in 3d 18h' },
       ],
     },
     {
@@ -129,8 +129,48 @@ export const CLAUDE_TWO: PlanAgent = {
       age: 'read 2 hours ago',
       fault: 'Claude Code didn’t answer when it was last asked; these are its last numbers.',
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40' },
-        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00' },
+        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
+        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+      ],
+    },
+  ],
+}
+
+/**
+ * Claude Code's detail in each state a reset can be in: a window with time left, one that reset since it was read (no figure,
+ * never an empty limit), and one the provider gave no reset time for.
+ */
+export const CLAUDE_RESETS: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 45,
+  limit: 'weekly limit',
+  until: 'Fri 09:00',
+  accounts: [
+    {
+      id: 'claude-personal',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5 hours',
+          left: 0,
+          until: '14:00',
+          resets: 'reset 14:00',
+          resetsTitle: 'Reset at 14:00 · not read since',
+          note: 'not read since',
+          unread: true,
+        },
+        { id: 'weekly', label: 'Week', left: 45, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+        {
+          id: 'weekly:Opus',
+          label: 'Opus week',
+          left: 70,
+          until: null,
+          resets: 'no reset time',
+          resetsTitle: 'The provider gave no reset time for this window.',
+        },
       ],
     },
   ],
@@ -193,4 +233,49 @@ export const OPENCODE_GO_SIGN_IN: PlanAgent = {
   stopped: 'Signed out',
   signIn: true,
   accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', windows: [] }],
+}
+
+/** 40% through the week with 65% left: use is a little under the clock's pace, so the fill runs past the tick (at the 60% of the week left). */
+export const CLAUDE_AHEAD: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 65,
+  limit: 'weekly limit',
+  until: 'Fri 09:00',
+  elapsed: 40,
+  accounts: [
+    {
+      id: 'claude-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        // Even pace: 30% through, 70% left, the fill ends on the tick.
+        { id: 'five_hour', label: '5 hours', left: 70, until: '17:00', elapsed: 30 },
+        { id: 'weekly', label: 'Week', left: 65, until: 'Fri 09:00', elapsed: 40 },
+        // Behind, though much is left: 40% through with 50% left ends the fill before the tick.
+        { id: 'weekly:Opus', label: 'Opus week', left: 50, until: 'Fri 09:00', elapsed: 40 },
+      ],
+    },
+  ],
+}
+
+/** Used faster than the clock: 70% through the week with 20% left, the fill ending well before the tick at 30%. */
+export const CODEX_BEHIND: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 20,
+  limit: 'weekly limit',
+  until: 'Sun 18:12',
+  elapsed: 70,
+  accounts: [
+    {
+      id: 'codex-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 20, until: '18:40', elapsed: 90 },
+        { id: 'weekly', label: 'Week', left: 20, until: 'Sun 18:12', elapsed: 70 },
+      ],
+    },
+  ],
 }

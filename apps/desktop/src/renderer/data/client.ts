@@ -1,7 +1,19 @@
-import type { SearchDocuments } from '@althar/contracts'
-import type { AcpCatalog, AcpConnection } from '@althar/contracts'
+import {
+  API_VERSION,
+  socketCanCall,
+  type BroughtIn,
+  type ClientIdentity,
+  type ConnectionInfo,
+  type Elsewhere,
+  type FeedPosition,
+  type SearchDocuments,
+} from '@althar/contracts'
+import { checkedPosition, checkedWatch } from './checkedWatch'
+import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
+  type ShownTerminal,
+  type TerminalChunk,
   type PlaceId,
   type StorageSize,
   type CanvasDetail,
@@ -12,6 +24,7 @@ import {
   type MoveOutcome,
   type Preset,
   type PresetParts,
+  type PresetTuning,
   type WorksIn,
   type AccountSignInState,
   type SignInEnding,
@@ -43,9 +56,12 @@ import {
   type SealStyle,
   Api,
   ApiError,
+  BACKGROUND,
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  LANE_HEADER,
+  THREAD_ITEMS_AT_ONCE,
   type ConnectGuide,
   type ConnectionCheck,
   type ConnectionList,
@@ -59,6 +75,7 @@ import {
   type DocumentText,
   type DomMessagePort,
   domPort,
+  untraced,
   type FileDiff,
   type TaskFindings,
   type TaskLineComments,
@@ -121,15 +138,19 @@ import { RpcClient } from 'effect/rpc'
  * Effect inside; what it hands the view models is plain promises and a
  * subscription, so they stay ordinary React hooks.
  *
- * Every command gets an id here. When a command's answer doesn't come back
+ * Every command gets an id here. On a local connection, when its answer doesn't come back
  * (the runtime didn't answer, rather than said no), it is tried once more
  * with the same id, and the runtime answers the retry from the first one's
- * receipt instead of doing it twice. `watch` picks up from the last change it
- * heard when its stream breaks.
+ * receipt instead of doing it twice. Remote commands are sent once and never replayed automatically.
+ * A local `watch` picks up after a broken stream; remote watches use checked home positions.
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<
+  Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox' | 'trustedBots' | 'suggestedBots'>
+> & {
+    /** The bots its leads hear, by their accounts, the list whole (code-hosts § Review and triage bots). */
+    readonly trustedBots?: ReadonlyArray<string>
     /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
     readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
@@ -142,11 +163,22 @@ export type OnePress =
   | { readonly attentionId: string; readonly action: OnePressAction }
 
 export interface Client {
+  readonly connection?: ConnectionInfo
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
+  readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
+  /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
+  readonly bringIn: (input: {
+    readonly projectId: string
+    readonly worktrees: ReadonlyArray<string>
+    readonly setups: ReadonlyArray<string>
+    readonly conversations: ReadonlyArray<string>
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<BroughtIn>
   /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
@@ -205,6 +237,17 @@ export interface Client {
   ) => Promise<ThreadSnapshot>
   /** One item of a thread; null for one it keeps for Althar and never shows. */
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
+  /**
+   * Several items of a thread in one call, as `getThreadItem` reads each: by id, null for one it keeps for Althar and
+   * never shows, or that has gone. Asked of more than one call takes, it reads in as many.
+   */
+  readonly getThreadItems: (threadId: string, itemIds: Iterable<string>) => Promise<ReadonlyMap<string, ThreadItem | null>>
+  /**
+   * Runs `start`, and every read it starts goes behind (`BACKGROUND`): a read nobody waits on, as the change feed starts
+   * them to keep what a screen holds current, which the runtime answers a few at a time, after a press. What `start`
+   * returns, as it returned it.
+   */
+  readonly behind: <A>(start: () => A) => A
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
@@ -322,6 +365,8 @@ export interface Client {
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
   readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
+  /** Makes a route the person's default for every Ship; null goes back to each task's own. */
+  readonly setShipRoute: (route: ShipRoute | null) => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -352,6 +397,10 @@ export interface Client {
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Tunes a built-in preset as the person's own: its lead and reviewer, their efforts, and its brief. */
+  readonly tunePreset: (id: string, tuning: PresetTuning) => Promise<void>
+  /** Takes a built-in preset back to its default. */
+  readonly resetPreset: (id: string) => Promise<void>
   /** Says not to offer a task's parts as a preset again. */
   readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
@@ -510,6 +559,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
@@ -541,7 +592,8 @@ export interface Client {
   /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
   readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
   /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
+  /** Whether a task does only part of an issue it came from: the one named by its ref, or its first. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean, issue?: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -595,6 +647,8 @@ export interface Client {
   /** Adds the repositories at the folder a grant names. */
   readonly addRepositories: (projectId: string, grant: string) => Promise<void>
   readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone, where none of its remotes is that repository. */
+  readonly addParentRemote: (projectId: string, repositoryId: string) => Promise<void>
   readonly setRepository: (input: {
     readonly projectId: string
     readonly repositoryId: string
@@ -602,7 +656,8 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
-    readonly setup?: RepositorySetup
+    /** The setup the person edited; null clears it, for a lead to record again. */
+    readonly setup?: RepositorySetup | null
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>
@@ -619,6 +674,8 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** Trusts a bot in a task's project, from the thread where it spoke: its leads hear it from then on (code-hosts § Review and triage bots). */
+  readonly trustBot: (taskId: string, login: string) => Promise<void>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -703,7 +760,10 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
-  readonly ship: (taskId: string, change?: string) => Promise<void>
+  /** Ships what waits, on `route` where the person chose one for this Ship, else the task's own. */
+  readonly ship: (taskId: string, change?: string, route?: ShipRoute) => Promise<void>
+  /** Changes the route of the task's Ship under way. */
+  readonly routeShip: (taskId: string, route: ShipRoute) => Promise<void>
   /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
@@ -739,6 +799,23 @@ export interface Client {
   ) => Promise<Launch>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
+  /** What Althar runs of the project itself, its tasks' too. */
+  readonly listLaunches: (projectId: string) => Promise<ReadonlyArray<Launch>>
+  /** Opens a terminal by the id the window gave it: in the run's folder, else the task's worktree, else the project's repository. */
+  readonly openTerminal: (input: {
+    readonly id: string
+    readonly projectId: string
+    readonly taskId: string | null
+    readonly launchId?: string
+    readonly cols: number
+    readonly rows: number
+  }) => Promise<ShownTerminal>
+  readonly listTerminals: (projectId: string) => Promise<ReadonlyArray<ShownTerminal>>
+  /** What a terminal prints, from what it printed so far, until it ends or `stop` is called; `onEnd` once the stream ends either way but `stop`. */
+  readonly attachTerminal: (id: string, onChunk: (chunk: TerminalChunk) => void, onEnd: (failure?: unknown) => void) => () => void
+  readonly writeTerminal: (id: string, data: string) => Promise<void>
+  readonly resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
+  readonly closeTerminal: (id: string) => Promise<void>
   /** Keeps something for the project to run: a new one, or, by id, a change to one; a null command is its repository's own way. */
   readonly keepRunnable: (input: {
     readonly projectId: string
@@ -782,7 +859,12 @@ export interface Client {
    * listening, at first and again after it broke, when what streams only to
    * those listening (an agent's words, a command's output) may have been missed.
    */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
+  readonly watch: (
+    listener: (event: WatchEvent) => void,
+    since?: number | FeedPosition,
+    onWatching?: () => void,
+    onReset?: () => void,
+  ) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -837,12 +919,51 @@ const uuidV7 = (now: number) => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
+/**
+ * How deep the window is in `behind`: a read started meanwhile goes behind. It is said as the call is made, which is
+ * synchronous, so only what `behind`'s `start` starts is behind, never a call made after it returns.
+ */
+let behindNow = 0
+
+/** The header a read nobody waits on carries. */
+const laneHeaders = { [LANE_HEADER]: BACKGROUND }
+
+/**
+ * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it, or stops it with
+ * `signal`. One made while `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it
+ * comes either way.
+ */
 const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
-  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
+  Effect.runPromiseExit(
+    behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect,
+    signal === undefined ? undefined : { signal },
+  ).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/**
+ * A message as it streams, whole again, from what a watch that asked for deltas sends: each item's text as far as it
+ * came, by id, for this run of the watch, the latest few more than the runtime keeps for it (`SENT_KEPT`), so any it
+ * sends what was added to is here.
+ */
+const STREAMED_KEPT = 256
+const wholeAgain = () => {
+  const texts = new Map<string, string>()
+  return (event: WatchEvent): WatchEvent | undefined => {
+    if (event._tag !== 'Streaming' || event.offset === undefined) return event
+    const { offset, ...rest } = event
+    const before = offset === 0 ? '' : texts.get(event.itemId)
+    // What came before it never came on this watch: nothing to add it to. The runtime sends each item whole first.
+    if (before === undefined || before.length !== offset) return undefined
+    const text = before + event.text
+    texts.delete(event.itemId)
+    texts.set(event.itemId, text)
+    const oldest = texts.keys().next()
+    if (texts.size > STREAMED_KEPT && oldest.done !== true) texts.delete(oldest.value)
+    return { ...rest, text }
+  }
+}
 
 /** How long before a command with no answer is tried again, once. */
 const RETRY_AFTER = Duration.millis(300)
@@ -851,7 +972,7 @@ const RETRY_AFTER = Duration.millis(300)
 const REWATCH_AFTER = Duration.seconds(1)
 
 /** A command, under one id however often it is tried: once more when the runtime didn't answer, never when it said no. */
-const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
+const retryingCommand = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
   const commandId = newCommandId()
   return settle(
     Effect.catchCause(run(commandId), (cause) => {
@@ -862,18 +983,64 @@ const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Prom
 }
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
-export const connect = async (port: DomMessagePort): Promise<Client> => {
+export const connect = async (port: DomMessagePort, expected?: ClientIdentity): Promise<Client> => {
   const scope = await Effect.runPromise(Scope.make())
-  const api = await Effect.runPromise(
+  const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-    }).pipe(Scope.provide(scope)),
+      return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onError(() => Scope.close(scope, Exit.void)),
+    ),
   )
+  let connection: ConnectionInfo | undefined
+  try {
+    if (expected !== undefined) {
+      connection = await settle(rawApi.GetConnectionInfo({}).pipe(Effect.timeout('10 seconds')))
+      if (connection.apiVersion !== API_VERSION)
+        throw new ApiError({
+          reason: 'ApiVersionMismatch',
+          message: 'This home and app use different API versions.',
+          clientVersion: API_VERSION,
+          runtimeVersion: connection.apiVersion,
+        })
+      if (
+        expected.role !== 'socket' ||
+        connection.identity.role !== 'socket' ||
+        connection.identity.homeId !== expected.homeId ||
+        connection.identity.actorId !== expected.actorId ||
+        connection.identity.deviceId !== expected.deviceId
+      )
+        throw new ApiError({ reason: 'AuthenticationFailed', message: 'This connection changed its expected home or authority.' })
+      checkedPosition(connection.position, expected.homeId)
+    }
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+    throw error
+  }
+  const command =
+    expected === undefined ? retryingCommand : <A>(run: (id: string) => Effect.Effect<A, unknown>) => settle(run(newCommandId()))
+  const api =
+    expected === undefined
+      ? rawApi
+      : new Proxy(rawApi, {
+          get(target, tag, receiver): unknown {
+            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+              return () =>
+                Effect.fail(
+                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
+                )
+            return Reflect.get(target, tag, receiver)
+          },
+        })
   return {
+    ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    lookElsewhere: (at) => settle(api.LookElsewhere(at)),
+    bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     prepareFolder: (grant, path) =>
@@ -900,6 +1067,25 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    getThreadItems: (threadId, itemIds) => {
+      const asked = [...new Set(itemIds)]
+      const calls = Array.from({ length: Math.ceil(asked.length / THREAD_ITEMS_AT_ONCE) }, (_, at) =>
+        settle(api.GetThreadItems({ threadId, itemIds: asked.slice(at * THREAD_ITEMS_AT_ONCE, (at + 1) * THREAD_ITEMS_AT_ONCE) })),
+      )
+      return Promise.all(calls).then((read) => {
+        const found = new Map<string, ThreadItem | null>(asked.map((id) => [id, null]))
+        for (const item of read.flat()) found.set(item.id, item)
+        return found
+      })
+    },
+    behind: (start) => {
+      behindNow += 1
+      try {
+        return start()
+      } finally {
+        behindNow -= 1
+      }
+    },
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
@@ -954,6 +1140,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
+    setShipRoute: (route) => command((commandId) => api.SetShipRoute({ commandId, route })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -964,6 +1151,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    tunePreset: (id, tuning) => command((commandId) => api.TunePreset({ commandId, id, tuning })),
+    resetPreset: (id) => command((commandId) => api.ResetPreset({ commandId, id })),
     declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
@@ -1040,6 +1229,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
@@ -1061,7 +1251,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
-    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
+    setTaskIssuePart: (taskId, partOf, issue) =>
+      command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf, ...(issue === undefined ? {} : { issue }) })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -1093,6 +1284,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    addParentRemote: (projectId, repositoryId) => command((commandId) => api.AddParentRemote({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
@@ -1101,6 +1293,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    trustBot: (taskId, login) => command((commandId) => api.TrustBot({ commandId, taskId, login })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>
@@ -1150,7 +1343,11 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
     removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
+    ship: (taskId, change, route) =>
+      command((commandId) =>
+        api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }), ...(route === undefined ? {} : { route }) }),
+      ),
+    routeShip: (taskId, route) => command((commandId) => api.RouteShip({ commandId, taskId, route })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     leaveAfterMerge: (taskId, url) =>
       command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
@@ -1176,25 +1373,63 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getRunnableRefs: (projectId, text) => settle(api.GetRunnableRefs({ projectId, ...(text === undefined ? {} : { text }) })),
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
+    listLaunches: (projectId) => settle(api.ListLaunches({ projectId })),
+    openTerminal: (input) => command((commandId) => api.OpenTerminal({ commandId, ...input })),
+    listTerminals: (projectId) => settle(api.ListTerminals({ projectId })),
+    attachTerminal: (id, onChunk, onEnd) => {
+      const fiber = Effect.runFork(
+        Stream.runForEach(api.AttachTerminal({ id }), (chunk) => Effect.sync(() => onChunk(chunk))).pipe(
+          Effect.matchCause({
+            onSuccess: () => onEnd(),
+            onFailure: (cause) => {
+              if (!Cause.hasInterruptsOnly(cause)) onEnd(Cause.squash(cause))
+            },
+          }),
+        ),
+      )
+      return () => void Effect.runFork(Fiber.interrupt(fiber))
+    },
+    // Each key as it is pressed: never tried twice, which would type it twice.
+    writeTerminal: (id, data) => settle(api.WriteTerminal({ id, data })),
+    resizeTerminal: (id, cols, rows) => settle(api.ResizeTerminal({ id, cols, rows })),
+    closeTerminal: (id) => command((commandId) => api.CloseTerminal({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
-    watch: (listener, since, onWatching) => {
-      let cursor = since
+    watch: (listener, since, onWatching, onReset) => {
+      if (expected !== undefined) {
+        const position = checkedPosition(since, expected.homeId)
+        const watching = checkedWatch(
+          { watch: (position) => api.WatchFrom({ position }), snapshot: () => api.ListProjects() },
+          expected.homeId,
+          position,
+          listener,
+          onWatching,
+          onReset,
+        )
+        const fiber = Effect.runFork(Effect.catchCause(watching, () => Scope.close(scope, Exit.void)))
+        return () => void Effect.runFork(Fiber.interrupt(fiber))
+      }
+      let cursor = typeof since === 'number' ? since : since?.cursor
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
-      const heard = Effect.suspend(() =>
-        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
-          Effect.sync(() => {
-            if (event._tag === 'Changed') cursor = event.cursor
-            listener(event)
-          }),
-        ),
-      )
+      // An agent's message comes as what was added since this run of the watch last sent it, and goes to listeners whole.
+      const heard = Effect.suspend(() => {
+        const whole = wholeAgain()
+        return Stream.runForEach(
+          Stream.onStart(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), started),
+          (event) =>
+            Effect.sync(() => {
+              if (event._tag === 'Changed') cursor = event.cursor
+              const shown = whole(event)
+              if (shown !== undefined) listener(shown)
+            }),
+        )
+      })
       const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },
@@ -1203,13 +1438,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
 }
 
 /** The port the preload hands the page, once the main process has made it. */
-export const receivePort = (target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): Promise<DomMessagePort> =>
-  new Promise((resolve) => {
+export const receivePort = (
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window,
+  signal?: AbortSignal,
+): Promise<DomMessagePort> =>
+  new Promise((resolve, reject) => {
+    const aborted = () => {
+      target.removeEventListener('message', onMessage)
+      reject(new Error('The connection was cancelled.'))
+    }
+    if (signal?.aborted === true) {
+      reject(new Error('The connection was cancelled.'))
+      return
+    }
     const onMessage = (event: MessageEvent) => {
       const port = event.ports[0]
       if (event.data !== 'althar:port' || port === undefined) return
       target.removeEventListener('message', onMessage)
+      signal?.removeEventListener('abort', aborted)
       resolve(port)
     }
     target.addEventListener('message', onMessage)
+    signal?.addEventListener('abort', aborted, { once: true })
   })

@@ -259,7 +259,8 @@ describe('dictating with the model here', () => {
     setDraftText('thread:kept', 'Ask Alpha')
     setDraftDictated('thread:kept', true)
     setDraftText('thread:typed', 'Ask Althar')
-    // A window that starts again reads them from its storage.
+    // A window that starts again reads them from its storage, written as the last one went.
+    window.dispatchEvent(new Event('pagehide'))
     forgetDrafts()
     expect(draftOf('thread:kept')).toMatchObject({ text: 'Ask Alpha', dictated: true })
     expect(draftOf('thread:typed')).toMatchObject({ text: 'Ask Althar', dictated: false })
@@ -297,17 +298,23 @@ describe('dictating with the model here', () => {
   })
 
   it('keeps what was said when it couldn’t be written down, to try again or throw away', async () => {
-    const transcribe = vi.fn<DictationHost['transcribe']>().mockRejectedValueOnce(new Error('no')).mockResolvedValueOnce('second time')
+    const transcribe = vi
+      .fn<DictationHost['transcribe']>()
+      .mockRejectedValueOnce(new Error('no'))
+      .mockRejectedValueOnce(new Error('no'))
+      .mockRejectedValueOnce(new Error('no'))
+      .mockResolvedValueOnce('second time')
     const host = fakeDictation(state({}, { ready: true }), { transcribe })
     show(host.dictation, fakeRecord().record)
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     expect(await screen.findByText('Couldn’t write that down')).toBeTruthy()
+    expect(transcribe).toHaveBeenCalledTimes(3)
     expect(screen.getByText('What you said (0:00) is kept.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'second time'))
-    expect(transcribe).toHaveBeenCalledTimes(2)
-    expect(transcribe.mock.calls[0]?.[0]).toBe(transcribe.mock.calls[1]?.[0])
+    expect(transcribe).toHaveBeenCalledTimes(4)
+    expect(transcribe.mock.calls.every(([samples]) => samples === transcribe.mock.calls[0]?.[0])).toBe(true)
   })
 
   it('throws away what couldn’t be written down', async () => {

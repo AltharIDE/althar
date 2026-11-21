@@ -18,7 +18,8 @@ const meta = {
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
     worktrees: '~/Althar/meridian',
-    onRoleChange: fn(),
+    onTowardChange: fn(),
+    onTowardCreate: fn(),
     onTargetChange: fn(),
     onLeaveOut: fn(),
     onOpen: fn(),
@@ -90,7 +91,7 @@ export const ChangingTarget: Story = {
   },
 }
 
-const forkWith = (fork: { target: ChangeTarget; canPush?: boolean }) =>
+const forkWith = (fork: { target: ChangeTarget; canPush?: boolean; remote?: string | null }) =>
   MAP_HALYARD.map((one) => (one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...fork } }))
 
 /** The host says the person can't push to the repository it forks: there's no such choice, and it says so. */
@@ -127,6 +128,27 @@ export const ForkPushingUpstream: Story = {
     await expect(await map.findByText('pushes, pull requests')).toBeInTheDocument()
     await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(1)
     await expect(map.getByText('It pushes to halyard/api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+  },
+}
+
+/** Its host says it is a fork, and its clone calls the repository it forks `base`: the map says so. */
+export const ForkParentNamedOtherwise: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, remote: 'base' }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('The repository it forks, as base')).toBeVisible()
+    await expect(map.queryByRole('button', { name: 'Add remote' })).toBeNull()
+  },
+}
+
+/** Its host says it is a fork, and none of its clone's remotes is the repository it forks: adding it is offered there. */
+export const ForkParentNotARemote: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, remote: null }), worktrees: '~/Althar/halyard', onAddRemote: fn() },
+  play: async ({ args, canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('Your clone has no remote for it.')).toBeVisible()
+    await userEvent.click(map.getByRole('button', { name: 'Add remote' }))
+    await expect(args.onAddRemote).toHaveBeenCalledWith('halyard')
   },
 }
 
@@ -276,11 +298,23 @@ export const LeavingOutQuietly: Story = {
   },
 }
 
-export const ChangingRole: Story = {
+/** The branch new tasks work toward, said on each card: pointed at, a picker that says what changing it does. */
+export const ChangingTheBranch: Story = {
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Role of meridian-infra' }))
-    await userEvent.click(await within(document.body).findByRole('option', { name: 'Library' }))
-    await expect(args.onRoleChange).toHaveBeenCalledWith('infra', RepositoryRole.Library)
+    const page = within(document.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Branch new tasks in meridian-api work toward: main' }))
+    await expect(await page.findByText(/New tasks start from this branch and open their pull requests into it/)).toBeVisible()
+    await userEvent.click(page.getByRole('option', { name: /release\/2\.4/ }))
+    await expect(args.onTowardChange).toHaveBeenCalledWith('api', 'release/2.4')
+  },
+}
+
+/** No role to pick, and no line saying Althar opens the pull requests where it does. */
+export const Quiet: Story = {
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.queryByRole('combobox', { name: /Role of/ })).toBeNull()
+    await expect(map.queryByText('Althar opens the pull requests')).toBeNull()
   },
 }
 

@@ -197,7 +197,10 @@ first lead in a repository works it out, and Althar replays it.
   `set_run_command` is still read, after a recorded one.
 - **A setup that fails never holds the task up.** The lead starts, told what
   failed and the end of what it printed, and is asked to get the folder ready
-  and record the setup that works, which replaces the old one.
+  and record the setup that works, which replaces the old one, unless the
+  person edited it: then `record_setup` has Althar ask the person (a question
+  in the lead's thread, showing both setups), waits for their answer, and
+  replaces it only if they say so; it also tells them in the thread that it did.
   `install_dependencies` runs the setup again on the lead's request, never a
   command it names. A Local task's lead runs it in the person's checkout,
   which Althar never sets up by itself and keeps no record of; there is no
@@ -207,7 +210,10 @@ first lead in a repository works it out, and Althar replays it.
 - **The person can see and change it** in the project's settings, under
   Running: a tab per repository, its commands and the files copied, as
   numbered lines typed in place. A change there replaces what the lead
-  recorded. Nothing has to be written there.
+  recorded and is the person's: it is kept with no task id, and a lead's
+  `record_setup` asks the person before replacing it, and never takes the
+  lead's word that they agreed. Clearing it (after a confirm) keeps nothing, so the next lead records it again. Nothing has
+  to be written there.
 - **A lead's sandbox writes to its tools' caches,** so Electron's build,
   Playwright's browsers and Bun's packages download inside it. One list
   (`toolPlaces.ts`) holds each tool's caches on a Mac and on Linux, never
@@ -260,6 +266,8 @@ tasks' folders go after a wait, and come back when the task needs them.
   task's folder once empty. The branch stays, and the folder's last commit is
   kept under `refs/althar/kept/<workspace>`. The thread says so in a line
   ("Folder removed 3 days after the task finished · 2.3 GB").
+- **A folder another tool made never goes** ([bringing in other tools'
+  work](#bringing-in-other-tools-work)): it is that tool's to remove.
 - **What holds a folder back:** uncommitted changes; an abandoned change
   whose commits were pushed nowhere; something running from it or setting it
   up; being opened from Althar today; or git not being able to say what's in
@@ -291,6 +299,52 @@ Off by default was turned down because nobody would turn it on.
 Right-away removal was turned down because a merged task is often run or
 followed up in the next days.
 
+## A worktree whose link broke
+
+A worktree and its repository name each other: the worktree's `.git` file
+names its git directory under the repository's `.git/worktrees/`, and that
+directory's `gitdir` file names the worktree back. Moving either side, as a
+profile moved from the Flatpak to a native build does, breaks the link, and
+every git command in the folder fails with `fatal: gitfile does not point to
+a valid repository` while `git worktree list` still shows it healthy.
+
+- **Althar repairs it by itself**, for a task's worktree or its review copy
+  (`.review/<task>/<repository>`) whose `.git` file names no git directory,
+  one that isn't there, or whose record names another place. It runs `git
+  worktree repair <folder>` from the main checkout of the repository the
+  worktree was made from.
+- **When:** as Althar starts, for every worktree it keeps that isn't
+  cleaned, and the first time git's own `fatal:`/`error:` line in a worktree
+  says its link broke. That command runs once more, only after a repair that
+  finished while it ran. A repository's broken worktrees are repaired and
+  recorded together, as git repairs them together.
+- **Judged by the link, not git's exit code:** git can exit 1 having
+  repaired it; what counts is whether the link reads right afterwards.
+- **Never another worktree's record.** Records are named by folder name
+  (`<name>`, `<name>1`, …), and a prune frees a moved folder's name for the
+  next worktree, so a moved folder's `.git` can name another task's record.
+  Before running git, Althar finds the record the repair would join the
+  folder to, and repairs only where it names this folder or one that isn't
+  there, and isn't on a branch other than the task's (for a review copy, on
+  no branch). Otherwise it changes nothing and says why.
+- **What it records:** a `workspace.repaired` or `workspace.repair_failed`
+  fact, one line in the task's thread ("Folder link repaired", "…, and its
+  review copy's"), and an INFO line in the log.
+- **What it never does:** move, remove, reset or prune anything. Where git
+  can't repair a folder, or the repair would take another's record, the
+  folder stays as it is and the thread says so with a way out: the task's
+  commits are on its branch and the folder can be moved aside and added back;
+  a review copy can be removed, as the next review makes it again; an old
+  profile's copy can be removed. Git's line comes after, redacted, and goes
+  to the log. A failure is recorded, said and logged once, not at each
+  start. A worktree whose folder is missing is left to "its folder isn't on
+  this computer".
+
+Asking first was turned down: the repair only rewrites two pointer files to
+what they must be, and the task can't work until it's done. `git worktree
+prune` and adding again was turned down, as prune drops what the worktree
+held but hadn't committed.
+
 ## Running the project
 
 Althar runs the project itself, with no agent: running it needs no model,
@@ -310,6 +364,29 @@ Agents keep it current, since they make the changes that move it:
 by name, and `run_project` runs one by name, or the default without one. The
 list shows who said how: worked out, the person, the coordinator, or an
 agent. It is kept in the store (`runnables`).
+
+**What a task kept goes with its worktree.** One a task's lead keeps is that
+task's: what it runs, such as a prototype's lab, mostly lives only on the
+task's branch. Once every worktree of the task is cleaned up, it is dropped,
+with a `project.runnable_dropped` line in the project's record naming the
+task. Three kinds stay. One the person kept, or changed after, is theirs,
+whoever changes it later. One whose command names files that are all on its
+repository's default branch (its config merged, say) still runs as kept
+there, and belongs to the project from then on; so does one whose files can't
+be told for sure, read as the shell reads it (what the shell works out, such
+as `"$CONFIG"`, or a `cd` out of the repository). A command that names no file,
+only a port or a script's name, is taken as the task's own and goes: the
+person keeps it back by hand. Where its repository, its branch or a folder
+it runs in can't be read on this device now, or git fails reading it, it
+waits for the next look, as Althar starts: only a file the branch, read, lacks
+drops it. Only a run still as
+it was read goes, so one the person changes meanwhile stays, and two sweeps
+at once drop it, and say so, once. Runs kept before a run remembered its task
+are linked to it only on evidence of that run: each `project.runnable_kept`
+line that set its name, command and repository, paired with the leads'
+`keep_run` calls it answered, all of one task; else the run its task started,
+by its id, as it was kept. A command kept in two repositories isn't taken for
+the other's. Those of tasks already cleaned up go as Althar starts.
 
 Before a run, a copy with nothing installed is set up first.
 
@@ -353,6 +430,11 @@ does.
 - A pull request from the repository's own branch is fetched into
   `origin/<branch>`. A fork's comes from the host's ref (`refs/pull/N/head`,
   `refs/merge-requests/N/head`) into `refs/althar/pull/N`.
+- A fork's own pull requests open on the repository it was forked from, so
+  they are listed and fetched there, by the remote that has it. Where none
+  does, Althar reaches it at its address through its host's connection and
+  fetches into `refs/althar/pull/N`, or says to add it as a remote
+  ([code hosts](code-hosts.md#a-forks-branches)).
 - The picker lists the remote's open pull requests (the newest fifty, and a
   search beyond that), then its branches. A number it didn't list still runs
   that pull request. An unknown branch is refused with the names like it.
@@ -364,9 +446,20 @@ because it puts a card on the board for what is only a look.
 
 ### Where runs show
 
-A run is said in three places that share one state, so they agree:
+A run is said in four places that share one state, so they agree:
 
 - **Run's list,** above.
+- **The status line** along the foot of the project's screen and its
+  tasks': there once the project runs something or a terminal is open, so a
+  screen where nothing runs is as it was, for a designer as for anyone. Each
+  of the project's runs, its tasks' too, by its mark, its name and how it
+  stands (Starting…, its address, Exited 1), and each terminal (below). A
+  press raises a drawer over the screen's lower part, which moves nothing
+  under it: a run's output, following the end, with Open, Stop or Run again,
+  Help me fix it where it failed, and a terminal where it ran. Its top edge
+  drags it taller; Escape, outside a terminal, lowers it. Pointed at, each
+  has an X in its mark's place: a run that ended goes at once; one still
+  running asks first, since closing it stops it.
 - **The pill over the composer.** A task's lists what its lead left running
   and the task's runs, one row each: name, address, how long it has been up,
   and Stop. The coordinator's lists the project's runs of no task ("Run on
@@ -387,6 +480,42 @@ A run is said in three places that share one state, so they agree:
 Where a run answers is read from the first local address it prints. One that
 answers nowhere (an app's window, a watcher) is taken as starting for ten
 seconds, then as running with no address.
+
+### Terminals
+
+The person's own shell, in a pseudo-terminal, as an editor's terminal is:
+opened from the status line's end, from Run's list (Open a terminal), with
+Ctrl+` (again: the last one, then lowered; with Shift, a new one), or from a
+run in the drawer, in the folder it ran in. Otherwise a terminal opens where
+the screen is: a task's worktree on a task's screen, the project's
+repository on the project's. It is the person's login shell, with their
+PATH, as an xterm-256color terminal with true colour.
+
+- **It shows at once.** The window gives it its id and draws it in the
+  frame it is asked for; the runtime starts the shell behind it at the size
+  it was drawn, and what was typed meanwhile goes as it starts. A shell that
+  can't start says why in the terminal, which stays to close.
+- **The runtime owns it** (node-pty, in the runtime's process, so a home on
+  another machine runs it where its files are). What it prints goes to each
+  window attached as it comes, a few milliseconds' worth at a time; its end
+  (about a million characters) is kept, so a window that attaches again, after
+  a reload or another project, shows it as it was. A window that can't keep
+  up holds the shell rather than Althar keeping all it printed.
+- **What runs in front** of the shell is read every second: the status line
+  names it (a terminal with `bun` running in it), and closing that terminal
+  asks first, since it stops it. A shell that ends well (`exit`) closes its
+  terminal; one that ends badly stays to say how. None outlives Althar, so
+  Quit counts those running something among what it would stop and asks
+  first (an idle shell holds nothing to lose); removing the project, or a
+  finished task's folder going, closes its terminals.
+- **An editor's keys:** copy (with a selection), paste, select all, clear
+  and find, on each system's keys; a word and a line at a time on a Mac;
+  links open with the primary key held; a dropped file types its path. The
+  window never reads the clipboard itself: paste goes through the Edit
+  menu's own. What a shell prints never reaches the clipboard (no OSC 52):
+  copy is only ever the person's selection.
+- **Only the person's own window** opens one: a paired device or another
+  connection can't, as it can't other calls the window alone makes.
 
 ## Fetching for leads
 
@@ -462,8 +591,83 @@ settling stops the agents and runs Althar tracks. Codex gives no output file
 for a command, so what it left running is stopped through it alone, and the
 sweep finds the rest.
 
+## Bringing in other tools' work
+
+Moving to Althar from another tool should feel like a move, not a fresh
+start (DEV-211, DEV-37). As a project is made, on the welcome's step for it
+and beside a new project's folders, Althar lists what other tools left for
+its repositories on this computer, a tile a tool: their worktrees, the setup
+they keep, and Claude Code's and Codex's conversations there. Nothing is
+taken at first: a press takes all of a tool, its chevron opens what's in it
+to pick one by one (`OtherTools` in the kit). What was picked comes in
+behind the window, which moves on at once.
+
+**Read only, to the byte.** Nothing of another tool's is written: its
+stores are copied, with their write-ahead logs, into a folder of Althar's
+own and read there, so not even SQLite's shared-memory index of their files
+is touched, and git reads a worktree's state with its optional locks off,
+so it neither takes the index's lock nor writes a refreshed index back.
+
+**Found through git, named by the tools.** `git worktree list` names every
+worktree of a repository, whoever made it, so one made by a tool Althar
+doesn't know, or by hand, is found too. Each tool's own records only say
+whose it is and what it's called, as its code writes them: Orca's profile
+store (its `worktreeMeta`, split into parts), T3 Code's threads' projection,
+Paradev's host store (Superset's before it), Codex's mark in the worktree's
+git folder; Conductor's store isn't documented, so its worktrees are known
+by where Conductor makes them. Each is read on its own: a store that can't
+be read finds nothing, and the rest are read. Althar's own worktrees, review
+copies and its agents' sessions are never offered.
+
+**What each becomes, in the task model:**
+
+| Brought in | Becomes |
+|---|---|
+| A worktree on a branch | A change in place: the task's workspace is that folder, on its branch, with what it holds (`workspaces.made_by` names the tool). Its plan, on the person's lead, is held, so it waits Up next until they start it; its thread opens with where it came from. Its pull request, opened from its branch, is its own as any is |
+| A detached worktree (Codex makes them) | A quick task's, whose branch is made where its lead first writes |
+| A worktree on the default branch | Not offered: it can't be a task's branch |
+| A conversation that ran in a worktree brought in | That task's history, whether picked or not: its person's words and the agent's replies, at their own times, after a line saying where it came from |
+| Any other conversation | An aside on Scratch, its history the same, its copy of the default branch made only once the person writes to it |
+| A setup (`conductor.json`, `orca.yaml`, `t3.json`, `.paradev/config.toml`, `.cursor/worktrees.json`) | Its repository's recorded setup, one per repository; a command that reads the tool's variables for where the checkout is (`$CONDUCTOR_ROOT_PATH` and the like) has them set first, and Conductor's `.worktreeinclude` names the files to copy in |
+
+**A folder another tool made stays that tool's.** Althar never sets it up
+(the tool did), never commits in it to leave it, never rewinds, moves or
+switches it, and never removes it: finished, it isn't cleaned up; a change
+in one can't be dropped or joined into another; it can't move to Local. Where
+its tool removed it, the work comes back from its branch in a folder of
+Althar's own, never in the tool's place, and is Althar's from then on. A
+detached one, on no branch, has its commit kept as it comes in, under
+`refs/althar/kept/<workspace>` as a removed folder's last commit is, so it
+comes back at that commit rather than where it branched off.
+
+**Carrying a conversation on** is how any thread carries on: the next
+session's brief has the thread so far, the conversation brought in with it,
+an aside's first one too. Claude Code's own `--resume` of a copied session
+was turned down for now: it would carry one agent's session only, where the
+brief carries any conversation to any agent.
+
+**Twice is once.** What came in is kept by its key (a worktree's folder, a
+setup's tool and checkout, a conversation's agent and id, in `brought_in`),
+so bringing it in again finds it, and listing again says what it became.
+Each thing comes in in a transaction of its own (an aside together with its
+history): one that can't come in says why, and the rest come in. The window
+has moved on by then, so what didn't come in, or a bringing in that failed as
+a whole, is said in the project's conversation, where it stays: each by name
+and why, with Try again for what another try could bring in. One the runtime
+never got (refused before it answered) it can't say, so the window keeps what
+was picked, by project and past a reload, and says it there the same way
+until another try goes through.
+
+Not built yet: offering what's new since from a project's settings, for a
+project made before this, or one still worked on in another tool; the board
+card saying where a task came from; and Cursor's own chats, which it keeps
+in its editor's storage.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.
+- 8 Nov 2026: Althar repairs a worktree whose link to its repository broke (#654).
 - 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 17 Nov 2026: bringing in other tools' worktrees, setups and conversations (DEV-211, DEV-37): each worktree a task in place, which Althar never sets up, moves or removes.
+- 19 Nov 2026: the status line along the foot, and terminals: picked from a prototype of five places for runs and a terminal (beside the conversation, along the foot, in the thread, a tab of its own, and three spin-offs of the foot).

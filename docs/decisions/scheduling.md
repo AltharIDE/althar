@@ -42,9 +42,9 @@ its installs, builds and tests easily takes several GB and many cores.
 
 ### What counts as an agent at work
 
-- **These count:** a task's lead while a step of its run is under way, while
-  it resolves a conflict or fixes checks, or while it is in a turn. A task's
-  reviewer counts while a review is under way, or while it is in a turn.
+- **These count:** a task's lead or reviewer while starting or in a turn,
+  including turns to resolve conflicts or fix checks. A step reserves its place
+  until its first turn takes over.
   Each of a lead's helpers takes a place of its own while it starts or is in
   a turn, apart from its lead's and its reviewer's: four of a task's at
   once, the rest waiting their turn whatever is free ([tasks §
@@ -53,10 +53,8 @@ its installs, builds and tests easily takes several GB and many cores.
   Althar makes itself (`run_project`). They are light or the person's own, and
   counting the coordinator would let a task waiting on its plan deadlock the
   line.
-- **An agent waiting on the person keeps its place for five minutes**
-  (`askGrace`), on a question or a permission. An answer that comes soon then
-  goes on while the agent's prompt cache is still warm. After that the agent
-  takes no place.
+- **An agent waiting on the person releases its place immediately.** The
+  person's answer can start its next turn even if all places are in use.
 - **What an agent left running counts only while it works.** A test run in
   the background counts. A dev server waiting for a browser does not. Every 2
   seconds, while anything is left running, Althar reads the process tree with
@@ -120,6 +118,8 @@ the same order. A waiting task can be stopped, and resumed it waits again.
 While its first step waits, its plan can still be changed. Its card and view
 say what it waits for, such as "Waiting: 4 of 4 agents busy on this Mac". A
 waiting task is left out of its own count, so it never waits behind itself.
+Up next shows the machine-wide count and any temporary limit from host pressure,
+and lists each occupied place while work waits.
 
 ## The quick lane
 
@@ -199,10 +199,9 @@ that goes on by itself, in the order it will.
   ahead.
   Otherwise the person is told nothing names it, and its lead hears with its
   next turn.
-- **Nothing moves under the person.** While the pointer is over Running or Up
-  next, or a row is being dragged, a task that would change lanes stays where
-  it is and moves once the pointer leaves. When it moves, the card travels to
-  its new lane ([desktop-app.md](desktop-app.md) covers motion).
+- **The lanes follow admission immediately.** A task that starts moves
+  from Up next to Running, including while the pointer rests on the board.
+  The card travels to its new lane ([desktop-app.md](desktop-app.md) covers motion).
 
 ## A lost connection and a failing service
 
@@ -384,10 +383,52 @@ services can feed the same lifecycle later. Repository maintainers own this
 decision; revisit the transport when polling latency or request volume
 justifies a receiver.
 
+## Tasks wait for their blockers
+
+A task can name other tasks it waits for, its blockers. Its plan counts down
+as any plan does, but doesn't start on its own while any of them is open: it
+starts by itself once they have all merged. Up next says so in its row
+("Starts when Pairing merges"), and its card and page name each blocker with
+how it stands.
+
+- **Plain blockers, set by word.** The person tells the coordinator ("start
+  Reconnect after Pairing"); the coordinator or a lead sets them with
+  `wait_for_tasks`, or `propose_plan`'s `waits_for`. There is no graph planned
+  and run as a whole: the person decided on 15 Nov that a task waiting for its
+  blockers covers what is needed for now.
+- **Kept in the record.** `task_waits` holds one row for each blocker, in the
+  order named; adding or removing one is a fact on the task. A task can't
+  wait for itself, nor for one that waits for it however far along: neither
+  would ever start. One merged already is nothing to wait for.
+- **Merged means done, once.** A blocker counts once its task is done: its
+  pull request merged, or, for a task with none, marked done. Cleared then, it
+  stays cleared (`cleared_at`), though it opens again for follow-up work or is
+  abandoned after. The countdown looks again when a waiting plan's time comes,
+  and then whenever the record changes, so it starts as soon as its last
+  blocker is done. A plan that waits stays waiting across a restart, rather
+  than being held as an overdue one is.
+- **It starts with what they merged.** A worktree made with its draft is
+  moved up, unused, to its base as the remote has it when its lead starts, so
+  it has what its blockers merged meanwhile.
+- **Only an abandoned blocker asks the person.** The waiting task leaves Up
+  next for Needs you, counted wherever Needs you is (`waitingOn`), and
+  notified: its page and plan card start it anyway, reopen the blocker, or
+  stop waiting for it. Everything else goes on by itself.
+- **The person's word comes first.** Start now starts a waiting plan at once,
+  and a held plan stays held whatever its blockers do. Stop waiting takes one
+  blocker off.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 16 Nov 2026: tasks wait for their blockers, plain ones the coordinator and leads set, and start by themselves once they have merged (DEV-228, DEV-230).
 - 12 Nov 2026: leads can yield on durable external conditions and resume when they are met, without holding an agent place (DEV-176).
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).
 - 15 Nov 2026: completed or stopped tasks release background-only places; live lead and helper turns still count, whatever the task’s recorded state.
+
+## How agent process families share the machine
+
+ADR-106 gives each provider session a worker identity. Commands and ordinary child processes share that worker's CPU allocation where the platform supports it: delegated CPU groups on Linux, optional shared CPU-weight jobs on Windows, and background policy on macOS. Native tool calls from the same session share an identity. Background priority remains the fallback, so a new language needs no scheduler adapter or resource setup.
+
+Sustained contention or memory pressure temporarily paces additional autonomous work through the existing queue; recovery restores admission within the person's configured cap. Existing builds keep running, the saved setting stays intact, and direct user actions retain their priority. Idle CPU remains available. External services can escape a worker's process family, so this is automatic best-effort scheduling rather than a hard memory or universal CPU guarantee. [ADR-106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the controls, failure handling and native validation.

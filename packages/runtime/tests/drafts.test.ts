@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { callBegan, callEnded, drafted, inputWritten, noDrafts, resolved, turnEnded } from '../src/drafts'
+import { callBegan, callEnded, discardedDrafts, drafted, inputWritten, noDrafts, plannedAnyway, resolved, turnEnded } from '../src/drafts'
 
 const OPUS = { agentId: 'claude-code', model: 'opus', effort: 'high' }
 const CODEX = { agentId: 'codex', model: 'gpt', effort: null }
@@ -73,10 +73,45 @@ describe('a task followed as the coordinator drafts it', () => {
     state = callBegan(state, 'p', 'propose_plan')
     state = resolved(inputWritten(state, 'p', { task: '1', lead: { model: 'x' } }).state, 'p', 'lead', OPUS)
     state = callEnded(state, 'p', false)
-    expect(state.drafts[0]).toMatchObject({ planning: false, lead: null, planned: false, slug: '1', title: 'One' })
+    expect(state.drafts[0]).toMatchObject({ planning: false, lead: null, planned: false, slug: '1', title: 'One', unplanned: true })
+    // Another plan's call for it: it is on its way again.
+    state = callBegan(state, 'p2', 'propose_plan')
+    expect(state.drafts[0]).toMatchObject({ planning: true, unplanned: false })
 
     let refused = callBegan(noDrafts, 'd2', 'draft_task')
     refused = callEnded(inputWritten(refused, 'd2', { title: 'Too long' }).state, 'd2', false)
     expect(refused.drafts).toEqual([])
+  })
+
+  it('says it has no plan once its plan failed, keeping the hold the person gave it', () => {
+    let state = drafted(noDrafts, { taskId: 't1', slug: '1', title: 'One' })
+    state = { ...state, drafts: state.drafts.map((draft) => ({ ...draft, held: true })) }
+    state = callBegan(state, 'p', 'propose_plan')
+    state = callEnded(inputWritten(state, 'p', { task: '1' }).state, 'p', false)
+    expect(state.drafts[0]).toMatchObject({ unplanned: true, held: true, planned: false })
+  })
+
+  it('is planned after all where its plan is in though its call failed', () => {
+    let state = drafted(noDrafts, { taskId: 't1', slug: '1', title: 'One' })
+    state = callBegan(state, 'p', 'propose_plan')
+    state = callEnded(inputWritten(state, 'p', { task: '1' }).state, 'p', false)
+    state = plannedAnyway(state, 't1')
+    expect(state.drafts[0]).toMatchObject({ planned: true, unplanned: false })
+    expect(plannedAnyway(state, 't1')).toBe(state)
+  })
+
+  it('says it was discarded, whether it was being planned or its plan never came', () => {
+    let state = drafted(noDrafts, { taskId: 't1', slug: '1', title: 'One' })
+    state = drafted(state, { taskId: 't2', slug: '2', title: 'Two' })
+    state = callBegan(state, 'p', 'propose_plan')
+    state = inputWritten(state, 'p', { task: '1' }).state
+    state = discardedDrafts(state, new Set(['t1', 't2']))
+    expect(state.drafts.map((draft) => [draft.discarded, draft.planning])).toEqual([
+      [true, false],
+      [true, false],
+    ])
+    // Told again, nothing changes.
+    expect(discardedDrafts(state, new Set(['t1']))).toBe(state)
+    expect(discardedDrafts(noDrafts, new Set(['t1']))).toBe(noDrafts)
   })
 })

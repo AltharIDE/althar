@@ -18,6 +18,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PressureReading } from './resourcePressure'
 import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
@@ -53,6 +54,11 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
   readonly storage?: { readonly profile: string; readonly logs: string }
+  /**
+   * Where other tools keep their work (`Elsewhere.ts`): the person's home and the variables the tools read, such as
+   * `CODEX_HOME`. Without it, the person's own, as this process has them.
+   */
+  readonly elsewhere?: { readonly home: string; readonly env: Readonly<Record<string, string | undefined>> }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**
@@ -158,6 +164,11 @@ export interface RuntimeOptions {
    * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
    */
   readonly checksAppear?: Duration.Duration
+  /**
+   * How long the look at a pull request that heard its checks fail has to tell its lead before the card says nobody is on
+   * them: a minute unless a test says otherwise.
+   */
+  readonly checksTold?: Duration.Duration
   /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
   readonly checksStuck?: Duration.Duration
   /**
@@ -170,6 +181,11 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /**
+   * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
+   * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
+   */
+  readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
@@ -210,6 +226,8 @@ export interface RuntimeOptions {
   readonly local?: { readonly every?: Duration.Duration }
   /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
   readonly automations?: AutomationOptions
+  /** The zone the computer is in now, as a lead and the coordinator are told the person's local time in (`localTime.ts`): its clock's. */
+  readonly zone?: () => string
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
 }
@@ -255,6 +273,13 @@ export interface IdleOptions {
 }
 
 export interface BusyOptions {
+  /** Automatic pressure-aware admission; false for a test that is not about this host's load. */
+  readonly pressure?:
+    | false
+    | {
+        readonly read?: Effect.Effect<PressureReading, unknown>
+        readonly every?: Duration.Duration
+      }
   /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
@@ -263,8 +288,6 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
-  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
-  readonly askGrace?: Duration.Duration
   /** How many automations' tasks may be at work at once: one. */
   readonly automations?: number
   /** How many places beyond the number tasks planned small may take (quickLane.ts): one; none turns the quick lane off. */

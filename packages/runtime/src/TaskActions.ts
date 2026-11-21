@@ -19,13 +19,14 @@ import { TITLES_FOLLOW_WORK } from './presetBrief'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
-import { CantMerge, PushRefused } from './errors'
+import { CantMerge, PushRefused, ShipRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
-import { answeredIn, quickIn } from './kinds'
+import { answeredIn, keepWaitsIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
 import { shelve } from './scratch'
+import { taskShipRoute } from './shipRoute'
 import { branchOnFirstWrite } from './firstWrite'
 import { Projects } from './Projects'
 import { Plans } from './Plans'
@@ -39,6 +40,7 @@ import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { blockersOf, stopWaiting, waitFor } from './waits'
 import { expected, words } from './words'
 
 /*
@@ -312,12 +314,14 @@ export class TaskActions extends Context.Service<
             projectId: ProjectId
             threadId: string
             change: number
+            pullOpen: number
             reviews: number
             answered: number
           }>`
             SELECT k.id, k.slug, k.title, k.project_id, t.id AS thread_id,
               CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
                 THEN 0 ELSE 1 END AS change,
+              ${sql.unsafe(keepWaitsIn('k'))} AS pull_open,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
               ${sql.unsafe(answeredIn('k'))} AS answered
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -527,8 +531,12 @@ export class TaskActions extends Context.Service<
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
             }
             case 'keep': {
-              if (task.change === 1)
-                return nothing(`${task.slug} is a change: it waits on its pull request, not in Needs you, so there is nothing to keep.`)
+              // Any kind keeps, a prototype or a chat ending on its branch included; one with its pull request open, or commits held
+              // for Ship, waits on that.
+              if (task.pullOpen === 1)
+                return nothing(
+                  `${task.slug} has its pull request open, or commits waiting for Ship: it waits on that, so there is nothing to keep.`,
+                )
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
                 ? did(`Kept ${task.slug} for later: out of Needs you as it is, under Kept for later. Writing to it brings it back.`)
@@ -568,6 +576,12 @@ export class TaskActions extends Context.Service<
         updateItem(projectId, itemId, { ...card, state, said } satisfies TaskAskContent)
 
       const Asked = Schema.Struct({ task: Schema.String, why: Schema.optional(Schema.String) })
+      const Waiting = Schema.Struct({
+        task: Schema.String,
+        on: Schema.optional(Schema.Array(Schema.String)),
+        stop: Schema.optional(Schema.Array(Schema.String)),
+        why: Schema.optional(Schema.String),
+      })
       const Settling = Schema.Struct({
         task: Schema.optional(Schema.String),
         how: Schema.Literals(['done', 'keep', 'discard']),
@@ -909,7 +923,13 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
-      const ShipAsked = Schema.Struct({ task: Schema.optional(Schema.String), change: Schema.optional(Schema.String) })
+      // Its route, where the person said one: as far as a push, or ready for review; merging stays the person's own Ship.
+      const ShipAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        change: Schema.optional(Schema.String),
+        review: Schema.optional(Schema.Boolean),
+        far: Schema.optional(Schema.Literals(['push', 'ready'])),
+      })
       const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
       const NewChange = Schema.Struct({
         task: Schema.optional(Schema.String),
@@ -1047,19 +1067,70 @@ export class TaskActions extends Context.Service<
           return `${task.slug}: ${holds}. ${threadsSaying(access, task)}.`
         })
 
+      /**
+       * The route of a Ship an agent asks for, on the person's word: what they said of its review and how far, the rest the
+       * task's own, as its card offers it. Never as far as a merge, which is the person's own Ship, or the coordinator's
+       * merge on their word: one their default would merge goes as far as ready for review.
+       */
+      const agentRoute = (taskId: string, asked: { readonly review?: boolean | undefined; readonly far?: 'push' | 'ready' | undefined }) =>
+        Effect.map(taskShipRoute(changes, taskId), (own) => ({
+          // With no reviewer yet, its review is on: a reviewer the turn adds before it ships still reads it.
+          review: asked.review ?? (own.route.review || !own.reviewable),
+          far: asked.far ?? (own.route.far === 'merge' ? ('ready' as const) : own.route.far),
+        }))
+
+      /** How far a Ship goes, as an agent is told. */
+      const FAR_SAID = {
+        push: 'a push (a draft pull request stays a draft, a new one opens as one)',
+        ready: 'ready for review (an open draft is marked ready, a new pull request opens ready)',
+        merge: 'a merge, once the checks its target requires pass',
+      } as const satisfies Record<'push' | 'ready' | 'merge', string>
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
           const task = yield* named(access, asked.task)
+          // A Ship under way, with a route said: that Ship takes it, as the person's RouteShip does, from where it stands.
+          if (asked.review !== undefined || asked.far !== undefined) {
+            const said = yield* envelope(
+              'task.route_ship',
+              { taskId: task.id, review: asked.review ?? null, far: asked.far ?? null },
+              undefined,
+              actorOf(access),
+            )
+            const rerouted = yield* runs
+              .routeShip({
+                envelope: said,
+                taskId: task.id,
+                route: {
+                  ...(asked.review === undefined ? {} : { review: asked.review }),
+                  ...(asked.far === undefined ? {} : { far: asked.far }),
+                },
+              })
+              .pipe(
+                Effect.catchIf(
+                  (error) => error instanceof ShipRefused && error.why === 'not_shipping',
+                  () => Effect.succeed(undefined),
+                ),
+                (rerouting) => plainly(rerouting, task.slug),
+              )
+            if (rerouted !== undefined) {
+              yield* did(access, input, task, `Changed “${task.title}”’s Ship`, 'changed the route of its Ship')
+              const review = asked.review === false && !rerouted.review ? ', without its review (one under way stops)' : ''
+              return `Changed ${task.slug}’s Ship: it now goes as far as ${FAR_SAID[rerouted.far]}${review}. read_task shows where it stands. ${threadsSaying(access, task)}.`
+            }
+          }
           // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
           const own = access.role === 'lead' && task.id === access.taskId
-          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null }, undefined, actorOf(access))
+          const route = yield* agentRoute(task.id, asked)
+          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null, route }, undefined, actorOf(access))
           yield* plainly(
             runs.ship({
               envelope: said,
               taskId: task.id,
               ...(own ? { afterTurn: true } : {}),
               ...(asked.change === undefined ? {} : { change: asked.change }),
+              route,
             }),
             task.slug,
           )
@@ -1167,7 +1238,7 @@ export class TaskActions extends Context.Service<
        * Its review before it ships, as asked: put on, by the model named or as `reviewerFor` picks it, or taken off (null),
        * one under way stopping and nothing reading it after the merge either. What changed, in a few words each.
        */
-      const reviewTo = (actorId: ActorId, task: Task, pick: typeof StepPick.Type | null | undefined) =>
+      const reviewTo = (actorId: ActorId, task: Task, pick: typeof StepPick.Type | null | undefined, atShip = false) =>
         Effect.gen(function* () {
           const { plan, lead, review } = yield* teamOf(task)
           if (plan.parameters.reads === true)
@@ -1202,7 +1273,7 @@ export class TaskActions extends Context.Service<
               message: 'No agent can review it now: each is out of usage or signed out. Name one with review, or try once one is back.',
             })
           const step: PlanStep = { key: 'review', ...pickedStep(reviewer), skipped: false }
-          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [step], actorId }), task.slug)
+          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [step], actorId, atShip }), task.slug)
           if (changed.review === undefined) return []
           const when =
             changed.review.when === 'next_round'
@@ -1237,13 +1308,15 @@ export class TaskActions extends Context.Service<
         })
 
       /**
-       * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready, closed where
-       * it ends with its branch or here (its branch stays, and reopen_pull_request opens it again). One ready already stays
-       * so where it ends as a draft: no host Althar knows turns one back. Null: on its branch, as a project on no host Althar
-       * knows ends. `chosen`: the person's own ending rather than the project's, which a preset saved from the task keeps.
-       * What changed, in a few words each.
+       * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready. Where it ends
+       * with its branch or here (a change stepped back to prototyping, say), it stays open as it is and nothing more goes to it
+       * until the task ends in a pull request again, when the same one carries on: every part changes either way, on the same
+       * task, branch and pull request. Only `close`, its pull request removed as a part, closes it (its branch stays, and
+       * reopen_pull_request opens it again). One ready already stays so where it ends as a draft: no host Althar knows turns one
+       * back. Null: on its branch, as a project on no host Althar knows ends. `chosen`: the person's own ending rather than the
+       * project's, which a preset saved from the task keeps. What changed, in a few words each.
        */
-      const endTo = (actorId: ActorId, task: Task, end: TaskEnding | null, chosen: boolean) =>
+      const endTo = (actorId: ActorId, task: Task, end: TaskEnding | null, chosen: boolean, close = false) =>
         Effect.gen(function* () {
           const { was } = yield* plainly(runs.reshape({ taskId: task.id, end, chosen, actorId: actorId }), task.slug)
           const said: Array<string> = was === end ? [] : [endingWords(end)]
@@ -1253,11 +1326,14 @@ export class TaskActions extends Context.Service<
             if (end === 'ready' && one.draft) {
               yield* plainly(changes.markReady(task.id, one.url), task.slug)
               said.push(`${name} marked ready for review`)
-            } else if (end === 'draft' && !one.draft) said.push(`${name} stays ready for review, and the next opens as a draft`)
-            else if (end === 'none' || end === 'here') {
+            } else if ((end === 'none' || end === 'here') && close) {
               yield* plainly(changes.close(task.id, one.url, { deleteBranch: false }), task.slug)
               said.push(`${name} closed, its branch staying`)
-            }
+            } else if (end === 'none' || end === 'here') {
+              if (was !== 'none' && was !== 'here')
+                said.push(`${name} stays open as it is, and nothing more goes to it until it ends in a pull request again`)
+            } else if (was === 'none' || was === 'here') said.push(`its work goes on in ${name} again`)
+            else if (end === 'draft' && !one.draft) said.push(`${name} stays ready for review, and the next opens as a draft`)
           }
           return said
         })
@@ -1342,12 +1418,14 @@ export class TaskActions extends Context.Service<
                 ? undefined
                 : presetPick(preset.parts.reviewer)
               : (reviewOverride ?? undefined)
+          // A review the preset puts on reads the work at its next Ship, even where a pull request of it is open already: its lead
+          // builds it now (a change stepped back from prototyping), and its review reads what it built.
           said.push(
             ...(checked === 'none'
               ? yield* reviewTo(actorId, task, null)
               : checked === 'after'
                 ? yield* reviewAfterMergeTo(actorId, task, reviewer)
-                : yield* reviewTo(actorId, task, reviewer)),
+                : yield* reviewTo(actorId, task, reviewer, true)),
             ...ends,
           )
           const shelf = preset.parts.shelf === 'scratch' ? 'scratch' : null
@@ -1437,8 +1515,16 @@ export class TaskActions extends Context.Service<
               )
             case 'ending': {
               const end = removing ? 'none' : yield* endingAsked(asked, task.slug)
-              // The person asked for it: their choice, as an ending changed on the plan card is, which a preset saved keeps.
-              return yield* shapeSaid(access, input, task, asked, 'changed its parts', yield* endTo(actorOf(access), task, end, true))
+              // The person asked for it: their choice, as an ending changed on the plan card is, which a preset saved keeps. Its
+              // pull request removed as a part is closed; an ending changed keeps it open, for the task to carry on in.
+              return yield* shapeSaid(
+                access,
+                input,
+                task,
+                asked,
+                'changed its parts',
+                yield* endTo(actorOf(access), task, end, true, removing),
+              )
             }
             default: {
               if (asked.preset === undefined || asked.preset.trim() === '')
@@ -1709,8 +1795,10 @@ export class TaskActions extends Context.Service<
           }
           const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
           const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
+          // Its route read once the fix is in, when what waits for Ship is the fix.
+          const fixShipped = Effect.flatMap(agentRoute(task.id, {}), (route) => runs.ship({ envelope: said, taskId: task.id, route }))
           yield* Effect.forkDetach(
-            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId: task.id })).pipe(
+            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), fixShipped).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
             ),
           )
@@ -1850,6 +1938,65 @@ export class TaskActions extends Context.Service<
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),
         tool(
+          'wait_for_tasks',
+          'Makes a task wait for other tasks, its blockers, or stop waiting for some: its plan starts by itself once every task it waits for has merged, after its countdown, as the board says ("Starts when Pairing merges"). Only a blocker that is abandoned comes to the person, who starts it anyway, reopens the blocker or stops it waiting. Use it when the person says one task should come after another; propose_plan takes waits_for for a task planned to wait. A task can’t wait for itself, nor for one that waits for it, however far along; one merged already is nothing to wait for. The person’s Start now (restart_task) still starts it at once, and a held plan stays held. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task,
+              on: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tasks it waits for from now, by slug, as list_tasks shows them.',
+              },
+              stop: { type: 'array', items: { type: 'string' }, description: 'Tasks it stops waiting for, by slug.' },
+              why,
+            },
+            required: ['task'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(Waiting, input)
+              const target = yield* taskOf(access.projectId, asked.task)
+              const on = yield* Effect.forEach(asked.on ?? [], (one) => taskOf(access.projectId, one))
+              const stop = yield* Effect.forEach(asked.stop ?? [], (one) => taskOf(access.projectId, one))
+              if (on.length === 0 && stop.length === 0)
+                return yield* new ToolRefused({ message: 'Name the tasks it waits for (on), or stops waiting for (stop).' })
+              const actorId = actorOf(access)
+              const outcomes = yield* waitFor({ taskId: target.id, on: on.map((one) => one.id), actorId })
+              const stopped: Array<Task> = []
+              for (const one of stop) if (yield* stopWaiting({ taskId: target.id, on: one.id, actorId })) stopped.push(one)
+              const added = on.filter((one) => outcomes.some((outcome) => outcome.on === one.slug && 'added' in outcome && outcome.added))
+              const as = becauseOf(asked.why)
+              const who = access.role === 'lead' && access.taskId === target.id ? 'Its lead' : yield* whoOf(access)
+              const titles = (tasks: ReadonlyArray<Task>) => tasks.map((one) => `“${one.title}”`).join(' and ')
+              if (added.length > 0) yield* line(target.projectId, target.threadId, `${who} made it wait for ${titles(added)}${as}`)
+              if (stopped.length > 0)
+                yield* line(target.projectId, target.threadId, `${who} stopped it waiting for ${titles(stopped)}${as}`)
+              const sql = yield* SqlClient.SqlClient
+              const now = yield* blockersOf(target.id)
+              const named = yield* Effect.forEach(now, (id) =>
+                Effect.map(sql<{ slug: string; state: string }>`SELECT slug, state FROM tasks WHERE id = ${id}`, (rows) => rows[0]),
+              )
+              const [started] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${target.id} LIMIT 1`
+              const said = [
+                ...outcomes.flatMap((outcome) =>
+                  'refused' in outcome
+                    ? [`Not ${outcome.on}: ${outcome.refused}`]
+                    : !outcome.added && outcome.why === 'merged'
+                      ? [`${outcome.on} has merged already: nothing to wait for.`]
+                      : [],
+                ),
+                ...stop.filter((one) => !stopped.includes(one)).map((one) => `It didn’t wait for ${one.slug}.`),
+                named.length === 0
+                  ? `${target.slug} waits for no task now.`
+                  : `${target.slug} waits for ${named.map((one) => (one === undefined ? '' : one.state === 'done' ? `${one.slug} (merged)` : one.state === 'abandoned' ? `${one.slug} (abandoned: the person decides)` : one.slug)).join(', ')}.`,
+                ...(started !== undefined ? ['It has started already: waiting only holds a plan that hasn’t.'] : []),
+              ]
+              return said.join(' ')
+            }),
+        ),
+        tool(
           'restart_task',
           'Restarts a task, as its Start now, Resume and Reopen do: a held one starts, a stopped one carries on from its step with its last lead, and a discarded one opens again on its worktree and branch. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
@@ -1858,7 +2005,7 @@ export class TaskActions extends Context.Service<
         {
           ...tool(
             'settle_task',
-            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done and keep are for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
+            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done is for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. keep is for any task, a prototype or a chat ending on its branch included, except one with its pull request open or commits waiting for Ship, which wait on those. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
             {
               type: 'object',
               properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] }, why },
@@ -1916,7 +2063,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'ship_task',
-          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
+          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. Where the task has a Ship under way, review and far change that Ship instead, from where it stands, as the person’s own change of its route does: review false stops a review under way, and far applies where it hasn’t gone past it (once ready for review, it can’t be a draft again); with neither, a Ship under way is refused as it is. It acts at once, with a line in your thread and the task’s.',
           {
             type: 'object',
             properties: {
@@ -1925,6 +2072,17 @@ export class TaskActions extends Context.Service<
               change: {
                 type: 'string',
                 description: 'One change to ship, by its name or branch, with what waits beneath it; else every change waiting.',
+              },
+              review: {
+                type: 'boolean',
+                description:
+                  'Only where the person said: false ships without its review, which then never runs for it, and stops one under way. Left out, as the task goes, or as its Ship under way goes now.',
+              },
+              far: {
+                type: 'string',
+                enum: ['push', 'ready'],
+                description:
+                  'Only where the person said how far: push leaves a draft pull request a draft and opens a new one as a draft; ready marks an open draft ready for review and opens a new one ready. Left out, as the task goes, or as its Ship under way goes now. Merging is the person’s own Ship.',
               },
             },
           },
@@ -1990,7 +2148,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {

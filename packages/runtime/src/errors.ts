@@ -1,5 +1,7 @@
 import { Schema } from 'effect'
 
+import { gitSummary } from './gitSaid'
+
 /**
  * A git command failed: what git wrote to stderr, never the command line in
  * its place. Where it wrote nothing, how it ended says why: its exit code, the
@@ -16,7 +18,12 @@ export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   signal: Schema.optional(Schema.String),
   timedOut: Schema.optional(Schema.Boolean),
   timeout: Schema.optional(Schema.Number),
-}) {}
+}) {
+  /** What git said, in a line with no secret in it, so a pretty-printed cause, as a log's, says it after `GitFailed:`. */
+  override get message() {
+    return gitSummary(this)
+  }
+}
 
 /** The folder opened as a project is not inside a git repository. */
 export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARepository', {
@@ -237,7 +244,11 @@ export class ChangeRefused extends Schema.TaggedError<ChangeRefused>()('ChangeRe
 
 export class ShipRefused extends Schema.TaggedError<ShipRefused>()('ShipRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['held', 'working', 'nothing']),
+  /**
+   * `not_shipping`: no Ship of the task is under way, for RouteShip to change the route of. `merging`: its merge went to
+   * its host before RouteShip took it no further than ready.
+   */
+  why: Schema.Literals(['held', 'working', 'nothing', 'not_shipping', 'merging']),
 }) {}
 
 /**
@@ -282,7 +293,9 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  * failed in a way none of these says (`failed`, all it said in `detail`). Replacing a
  * pull request's commits also stops where the pull request moved on from
  * the head the person saw (`moved`), and where the project's rules never
- * allow a force push (`never`).
+ * allow a force push (`never`). A contributor's branch rejects force pushes
+ * (`contributor_force_push`) and needs the author's current permission for a
+ * plain push (`maintainer_edits_disabled`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
@@ -297,6 +310,8 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
     'failed',
     'moved',
     'never',
+    'contributor_force_push',
+    'maintainer_edits_disabled',
     'fork_gone',
     'unplaced',
     'no_push_address',

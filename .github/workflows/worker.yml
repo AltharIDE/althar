@@ -1,0 +1,122 @@
+name: worker
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/worker/**'
+      - 'apps/host/**'
+      - 'packages/worker-protocol/**'
+      - 'packages/testing/**'
+      - '.github/workflows/worker.yml'
+      - '.bun-version'
+      - '.node-version'
+      - 'bun.lock'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'lint/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Rust worker protocol
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/worker-protocol --filter @althar/host
+      - run: rustup show
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked -p althar-worker --all-targets -- -D warnings
+      - run: cargo test --locked -p althar-worker
+      - run: cargo build --locked -p althar-worker --bins --examples
+      - working-directory: apps/host
+        run: bun run build
+      - name: Check Protobuf compatibility
+        env:
+          BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          if git cat-file -e "$BASE:packages/worker-protocol/buf.yaml" 2>/dev/null; then
+            baseline="$(mktemp -d "$RUNNER_TEMP/worker-protocol.XXXXXXXX")"
+            git archive "$BASE" packages/worker-protocol | tar -x -C "$baseline"
+            cd packages/worker-protocol
+            bun x --no-install buf breaking --against "$baseline/packages/worker-protocol"
+          else
+            echo "This change introduces the first worker protocol schema."
+          fi
+      - name: Start the Linux worker user service manager
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - working-directory: packages/worker-protocol
+        env:
+          ALTHAR_TEST_SYSTEMD: '1'
+        run: |
+          bun run generate
+          test -z "$(git status --short -- src/gen)" || { git status --short -- src/gen; git diff -- src/gen; exit 1; }
+          bun run check
+          bun run test
+          bun run test:interop
+          bun run test:execution
+
+  preview:
+    name: Linux preview (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/host
+      - name: Build the portable preview
+        run: bash apps/host/preview/package.sh "$RUNNER_TEMP/althar-preview"
+      - name: Validate the distributed package
+        env:
+          PREVIEW_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          name="althar-preview-linux-$PREVIEW_ARCH.tar.gz"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$name" althar-preview
+          mkdir "$RUNNER_TEMP/preview-test"
+          tar -xzf "$RUNNER_TEMP/$name" -C "$RUNNER_TEMP/preview-test"
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          cd "$RUNNER_TEMP/preview-test/althar-preview"
+          ./demo
+          cd "$RUNNER_TEMP"
+          sha256sum "$name" > "althar-preview-linux-$PREVIEW_ARCH.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: althar-preview-linux-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/althar-preview-linux-${{ matrix.arch }}.tar.gz
+            ${{ runner.temp }}/althar-preview-linux-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          retention-days: 30

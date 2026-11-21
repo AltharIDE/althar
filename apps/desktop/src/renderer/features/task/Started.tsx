@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useCallback } from 'react'
 
 import type { AgentStatus, BoardSnapshot, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { StartedTask, TaskStatus, type TaskPartModel } from '@althar/ui'
@@ -18,15 +19,34 @@ import { type Stands, standsOf, startedText } from '../board/started'
  * second time: a task's thread keeps no line for what became of another.
  */
 
-/** The project's board as the window has read it, for what shows the tasks a lead started; null until it is read. */
-export const useStartedBoard = (projectId: string | undefined): BoardSnapshot | null => {
+/** What of the project's board shows the tasks a lead started: their cards, and the calls they wait on. */
+export type StartedBoard = Pick<BoardSnapshot, 'tasks' | 'calls'>
+
+/**
+ * The project's board as the window has read it, for what shows the tasks a lead started: only those tasks and their
+ * calls, so the task's screen is drawn again where one of them changes, not wherever the board does. Null until it is read.
+ */
+export const useStartedBoard = (
+  projectId: string | undefined,
+  taskId: string | undefined,
+  started: ThreadSnapshot['started'],
+): StartedBoard | null => {
   const { client } = useServices()
-  const read = useQuery({ ...reads(client).board(projectId ?? ''), enabled: projectId !== undefined })
-  return read.data ?? null
+  const threads = (started ?? []).map((one) => one.threadId).join(' ')
+  const theirs = useCallback(
+    (board: BoardSnapshot): StartedBoard => {
+      const ids = new Set(threads.split(' '))
+      const tasks = board.tasks.filter((task) => (taskId !== undefined && task.startedBy?.taskId === taskId) || ids.has(task.threadId))
+      const these = new Set(tasks.map((task) => task.taskId))
+      return { tasks, calls: board.calls.filter((call) => call.taskId !== null && these.has(call.taskId)) }
+    },
+    [taskId, threads],
+  )
+  return useQuery({ ...reads(client).board(projectId ?? ''), enabled: projectId !== undefined, select: theirs }).data ?? null
 }
 
 /** The tasks a task's lead started, oldest first, as the board has them. */
-export const startedBy = (board: BoardSnapshot | null, taskId: string | undefined): ReadonlyArray<BoardTask> =>
+export const startedBy = (board: StartedBoard | null, taskId: string | undefined): ReadonlyArray<BoardTask> =>
   board === null || taskId === undefined
     ? []
     : board.tasks.filter((task) => task.startedBy?.taskId === taskId).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -42,7 +62,7 @@ export interface StartedEntry {
  * Every task a task's lead started, oldest first: its thread's own list of them, which holds all, and the board's card for
  * each it still holds, since the board only keeps the most recently settled (the rest say they settled, and still open).
  */
-export const startedIn = (board: BoardSnapshot | null, started: ThreadSnapshot['started']): ReadonlyArray<StartedEntry> =>
+export const startedIn = (board: StartedBoard | null, started: ThreadSnapshot['started']): ReadonlyArray<StartedEntry> =>
   board === null
     ? []
     : (started ?? []).map((one) => ({
@@ -56,7 +76,7 @@ export const countsDown = (task: BoardTask) => task.phase === 'planned' && task.
 
 /** What a task's started tasks look like to read: the board, the clock, who works on what, and how one opens. */
 export interface StartedReading {
-  readonly board: BoardSnapshot
+  readonly board: StartedBoard
   readonly now: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly onOpen: (threadId: string) => void

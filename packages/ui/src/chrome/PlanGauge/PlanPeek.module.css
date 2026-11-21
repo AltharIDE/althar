@@ -4,21 +4,11 @@
   gap: 12px;
   padding: 12px 12px 10px;
 }
-.head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
 .heading {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--t-1);
-}
-.level {
-  font-size: 11.5px;
-  color: var(--t-3);
 }
 
 ul.agents,
@@ -98,13 +88,24 @@ ul.windows {
   height: 4px;
   border-radius: 99px;
   background: var(--chip);
-  overflow: hidden;
 }
 .bar i {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 99px;
   background: var(--t-4);
+}
+/* where the time left sits on the bar: a thin tick, a little taller than it; the fill ends on it when use keeps to the clock */
+.now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  margin-left: -0.75px;
+  border-radius: 1px;
+  background: var(--t-1);
+  /* a halo of the surface, so it keeps an edge on a fill of its own ink as well as on the track */
+  box-shadow: 0 0 0 1px var(--paper);
 }
 [data-tone='half'] .bar i {
   background: var(--t-3);
@@ -158,7 +159,7 @@ ul.windows {
 }
 .window {
   display: grid;
-  grid-template-columns: 74px minmax(40px, 1fr) 34px 66px;
+  grid-template-columns: 74px minmax(40px, 1fr) 34px 72px;
   align-items: center;
   column-gap: 8px;
   font-size: 11.5px;
@@ -177,8 +178,24 @@ ul.windows {
   color: var(--t-1);
   font-weight: 600;
 }
-.windowUntil {
+.windowUnknown {
+  grid-column: span 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* when it resets, at the row's end: the time left, with the exact time on hover */
+.windowUntil {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.window[data-unread] .windowUnknown {
+  color: var(--t-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

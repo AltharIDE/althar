@@ -17,6 +17,19 @@ export interface PlanWindow {
   left: number
   /** When it resets, as the consumer words a time: 14:00, Mon 09:00. */
   until: string | null
+  /**
+   * The end of the window's row, short: the time left ("in 2h 10m"), the time it reset where it has and no one has read it
+   * since, or that the provider gave no time. Absent: `until`.
+   */
+  resets?: string
+  /** The same in full, for hover: "Resets Fri 09:00 · in 2h 10m", "Reset at 14:00 · not read since". */
+  resetsTitle?: string
+  /** What stands where the bar would, for a window that has reset: "not read since". */
+  note?: string
+  /** How far through the window now is, 0 to 100: only where its start and reset are both known. */
+  elapsed?: number
+  /** It has reset since it was read: how much of it is used no one has said yet, so no figure or bar, and never an empty limit. */
+  unread?: boolean
 }
 
 export interface PlanAccount {
@@ -40,6 +53,8 @@ export interface PlanAgent {
   /** The window that figure is of, as a sentence names it: five-hour limit, weekly Opus limit. */
   limit: string
   until: string | null
+  /** How far through that window now is, 0 to 100, where known. */
+  elapsed?: number
   /** That account's name, where the agent has several. */
   account: string | null
   /** Every account read, tightest first. */

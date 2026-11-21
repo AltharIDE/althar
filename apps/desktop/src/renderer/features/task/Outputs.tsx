@@ -37,6 +37,7 @@ import { commitsToShip } from '../../shared/shipping'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
 import { ScreenshotsOnPullRequest, screenshotsTarget } from './ScreenshotsOnPullRequest'
+import { type ShipModel, ShipControl } from './ShipControl'
 
 /*
  * A task's outputs, as wide as the window: what it made on the left, what
@@ -92,13 +93,6 @@ export const text = {
   /** Opening a pull request from here opens a draft: its lead's work may not be done. */
   openChange: 'Open a draft pull request',
   openNewChange: 'Open a new draft pull request',
-  /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
-  ship: (n: number) => (n === 1 ? 'Ship 1 commit' : `Ship ${n} commits`),
-  /** Merge, with commits not shipped: one review of what waits, then it goes up and merges. */
-  reviewAndMerge: 'Review and merge',
-  /** Or up and merged at once, reviewed after the merge. */
-  mergeNow: 'Merge now',
-  mergeWays: 'Other ways to merge',
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
   earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
     `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
@@ -215,8 +209,7 @@ export function Outputs({
   onMergeHere,
   onOpenChange,
   onPush,
-  onShip,
-  onMergeWaiting,
+  ship,
   onMarkReady,
   onMarkAllReady,
   merging = null,
@@ -284,10 +277,11 @@ export function Outputs({
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
-  /** Ships what waits on its branch for Ship; without it, nothing is offered for it here. */
-  onShip?: () => void
-  /** Merge, with commits not shipped: Review and merge, or Merge now (a task is a conversation plus parts). */
-  onMergeWaiting?: (how: 'review' | 'now') => void
+  /**
+   * Ship: what waits on its branch goes up on its route, the one chosen for this Ship else its own, which reaches as far as
+   * a merge, so no Merge or Push is offered beside it; without it, nothing is offered for it here.
+   */
+  ship?: ShipModel
   /** The pull request a push was refused by for commits on it that aren't here, by its address. */
   refused?: string | null
   /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
@@ -362,19 +356,21 @@ export function Outputs({
       {text.openNewChange}
     </Button>
   )
+  // Ship under way, as the runtime says it or as pressed here: the same button, greyed at its stop, and nothing beside it.
+  const shipUnder = ship === undefined ? null : (task.shipping ?? ship.shipPressed)
   const shipAction =
-    !waitsForShip ||
-    !(ready || task.phase === 'stopped') ||
-    snapshot.session?.turnRunning === true ||
-    onShip === undefined ||
-    (toShip > 0 && snapshot.host == null) ? null : toShip > 0 && snapshot.host?.connected === false ? (
+    ship !== undefined && shipUnder !== null ? (
+      <ShipControl key="ship" snapshot={snapshot} model={ship} />
+    ) : !waitsForShip ||
+      !(ready || task.phase === 'stopped') ||
+      snapshot.session?.turnRunning === true ||
+      ship === undefined ||
+      (toShip > 0 && snapshot.host == null) ? null : toShip > 0 && snapshot.host?.connected === false ? (
       <Button key="connect" variant="signal" onClick={onConnect}>
         {text.connect(snapshot.host.name)}
       </Button>
     ) : (
-      <Button key="ship" variant="signal" {...pressed(doing.ship)} onClick={onShip}>
-        {text.ship(held?.commits ?? toShip)}
-      </Button>
+      <ShipControl key="ship" snapshot={snapshot} model={ship} disabled={pending && acting !== doing.ship} />
     )
 
   // Its pull requests, as one change: merged once all are, a draft while any is, else ready to accept.
@@ -386,7 +382,8 @@ export function Outputs({
             ? ChangeState.Merged
             : open.some((one) => one.state === 'open' && one.draft)
               ? ChangeState.Draft
-              : shownQueued(task.changes)
+              : // In its queue as read, or as pressed: going into it, it is there once Merge has answered the press.
+                shownQueued(task.changes) || (open.length === 1 && mergeStanding?.(first.url) === 'queued')
                 ? ChangeState.Queued
                 : ChangeState.Ready
           const brand = productBrand(first.product)
@@ -403,35 +400,8 @@ export function Outputs({
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && held === undefined
           const firstStanding = mergeStanding?.(first.url) ?? null
           if (open.length > 1) return track(accepting)
-          // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
-          const mergingWaiting =
-            held !== undefined &&
-            onMergeWaiting !== undefined &&
-            ready &&
-            state === ChangeState.Ready &&
-            first.state === 'open' &&
-            !first.draft
-              ? firstStanding === 'merging'
-                ? [<MergeButton key="merge-waiting" variant="signal" standing="merging" />]
-                : [
-                    <SplitButton
-                      key="merge-waiting"
-                      moreLabel={text.mergeWays}
-                      {...pressed(doing.mergeWaiting)}
-                      onClick={() => onMergeWaiting('review')}
-                      menu={(trigger) => (
-                        <Menu trigger={trigger} label={text.mergeWays} align="end">
-                          <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
-                        </Menu>
-                      )}
-                    >
-                      {text.reviewAndMerge}
-                    </SplitButton>,
-                  ]
-              : []
           const actions: ReactNode[] = [
             ...(shipAction === null ? [] : [shipAction]),
-            ...mergingWaiting,
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
             ...pushes
               .filter((one) => !waitsForShip && personPushes(one))
@@ -480,7 +450,8 @@ export function Outputs({
                     />,
                   ]
               : []),
-            ...drafts.map((one) => (
+            // Ship marks them ready where its route goes that far: under way, not Mark ready beside it.
+            ...(shipUnder === null ? drafts : []).map((one) => (
               <Button key={`ready-${one.url}`} {...pressed(doing.markReady(one.url))} onClick={() => onMarkReady(one.url)}>
                 {several ? text.markReadyIn(nameOf(one.repository)) : text.markReady}
               </Button>
@@ -524,15 +495,18 @@ export function Outputs({
         ? 'merged'
         : refusedAt === one.url
           ? 'refused'
-          : merging === one.url || mergeStanding?.(one.url) === 'merging'
-            ? 'merging'
-            : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
-              ? 'waiting'
-              : one.queued === true
-                ? 'queued'
-                : one.draft
-                  ? 'draft'
-                  : 'open'
+          : // Going into its queue, it is in it once Merge has answered the press, not when the host has.
+            mergeStanding?.(one.url) === 'queued'
+            ? 'queued'
+            : merging === one.url || mergeStanding?.(one.url) === 'merging'
+              ? 'merging'
+              : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
+                ? 'waiting'
+                : one.queued === true
+                  ? 'queued'
+                  : one.draft
+                    ? 'draft'
+                    : 'open'
     const stops = open.map((one, i): TrackStop => {
       const brand = productBrand(one.product)
       // Its files are under its repository's folder here, which needn't be named as the host names it.
@@ -638,7 +612,7 @@ export function Outputs({
           </Button>
         )),
       ...(accept === null ? [] : [accept]),
-      ...(markReady === null ? [] : [markReady]),
+      ...(markReady === null || shipUnder !== null ? [] : [markReady]),
       ...(openNew === false ? [] : [openNew]),
     ]
     return (
@@ -838,7 +812,7 @@ export function Outputs({
           pullRequest={text.pullRequest(one, several)}
           named={text.named(one)}
           // Only from the head the person saw it at: what anyone pushed since is never replaced.
-          {...(kind === 'rewritten' && one.head !== null
+          {...(kind === 'rewritten' && one.head !== null && one.maintainerEdit !== true
             ? { onReplace: () => onReplace(one.localHead ?? '', one.head ?? '', one.url) }
             : {})}
           onMerge={() => onBringIn(one.url)}

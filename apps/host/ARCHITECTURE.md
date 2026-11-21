@@ -12,7 +12,7 @@ flowchart LR
   Host -->|one owning scope| Runtime[Shared runtime]
   Runtime --> DB[(Locked profile and SQLite)]
   Runtime --> Agents[Local ACP agents and worktrees]
-  Client[Authenticated client] <-->|private versioned API| Runtime
+  Client[Authenticated client] <-->|versioned socket or HTTPS/WSS API| Runtime
   Runtime --> Vault[Encrypted secret files]
   Host -->|separate master key| Vault
 ```
@@ -29,7 +29,7 @@ The master key is outside the profile/backups/worktree roots, including canonica
 
 ## Trust and lifecycle
 
-A fresh private socket launch secret grants `socket` authority. SSH access is not person authority. The host does not create a window connection, protected paired-client key or an approval bypass. Signed owner keys, version negotiation, revocation, durable admission and feed positions use the shared API's existing contracts. No public port, relay or remote filesystem is added. API health authenticates and reads connection information rather than probing agents; it is bounded to 10 seconds, or 30 seconds with readiness retry. Disk/crypto work uses asynchronous filesystem operations; no blocking subprocess runs on the host thread. Parsing is bounded by private-file size limits.
+A fresh private socket launch secret grants `socket` authority. SSH access is not person authority. The host does not create a window connection, protected paired-client key or an approval bypass. Signed owner keys, version negotiation, revocation, durable admission and feed positions use the shared API's existing contracts. A public/private-network TLS listener is optional and separate from the private socket; no relay or remote filesystem is added. API health authenticates and reads connection information rather than probing agents; it is bounded to 10 seconds, or 30 seconds with readiness retry. Disk/crypto work uses asynchronous filesystem operations; no blocking subprocess runs on the host thread. Parsing is bounded by private-file size limits.
 
 The systemd unit delivers a private or OS-sealed credential, announces actual API readiness, rate-limits restart loops and terminates the full cgroup on shutdown. Helper arguments are passed without shell interpolation; unit paths escape systemd quoting/specifiers and suppress environment expansion in ExecStart. A small generated shell launcher uses fixed, quoted arguments and selects one immutable release for both Node and JavaScript. Installer writes only marked managed user units, reloads, and starts the home only when asked. It never changes lingering policy.
 
@@ -72,3 +72,30 @@ The private program root is separate from profile, worktrees and master key. Ret
 `vite.config.ts` builds for Node 24 and uses the shared medium test budget. Unit tests exercise encryption, tamper/permission refusal, atomic files and injected disk-sync failures, signed releases, hostile archives, bounded downloads, argument handling and service generation. Integration tests use the actual runtime, git, SQLite and authenticated Unix sockets, including single-writer exclusion, client disconnect during an agent turn, restart persistence, migration recovery and preservation of post-start writes. Built-process tests use an empty fixture home, no stdin, no GUI and real SIGTERM/SIGINT, including signed upgrade/fallback through the stable launcher. They do not load a developer's credentials. Service calls are injected and no host user's service is deployed by CI. The portable-release smoke separately checks real native provider binaries and locked adapter packages outside workspace resolution. Systemd/reboot and provider headless sign-in need real VPS validation before release. The dedicated workflow gates this app and runs again in the merge queue; changed-test stress runs also build before tests.
 
 There is no graphical interface in this app. Help, safe actionable errors, JSON command results and stderr diagnostics are its operator interface. Keep stdout suitable for automation. Maintain the shared 90% coverage floor in CI; process entry wiring is excluded from source instrumentation only because it runs as a separate built process, which its lifecycle tests exercise.
+
+## Direct ingress and operator pairing
+
+`network.ts` persists explicit origin, IP bind address, port and private TLS
+file paths in versioned `network.json`. It validates the certificate/key pair
+and canonical key location outside profile/worktree storage. The host reads
+this configuration independently of service/update launcher flags. It starts
+the configured network listener before publishing its private health endpoint,
+so managed readiness cannot pass while network startup has failed. Listener
+changes require an explicit restart; key rotation requires re-pairing clients.
+
+The shared runtime's `DevicePairings` stores at most 32 invitation hashes for
+five minutes, serialized claims and durable socket-authority registrations.
+`pairing.ts` is the local operator API client for issuing codes, paged device
+listing and revocation. The local OS-user boundary may issue connection-only
+keys; it cannot mint person authority through this path. Both the invitation
+and WSS proof bind the home, with one-use authentication nonces. Network
+clients cannot issue invitations or manage credentials. No launch secret is
+accepted over the network.
+
+The HTTPS listener checks Host and Origin, bounds headers/bodies, applies
+per-address request limits without trusting forwarded addresses, and caps
+pending requests and live connections. It consumes the signed proof before
+WebSocket upgrade, disables compression, owns keepalive/teardown and reuses
+the shared RPC's admission, receipts, history and authorization. Device
+revocation closes live connections and every call rechecks credentials.
+Desktop/host updates remain independent; existing updater recovery rules hold.

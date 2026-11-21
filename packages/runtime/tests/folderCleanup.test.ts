@@ -20,7 +20,8 @@ import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { Setups } from '../src/Setups'
 import { Tasks } from '../src/Tasks'
-import { repository, ROOMY_DISK, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, repository, ROOMY_DISK, runtime, until } from './support'
 
 /*
  * Finished tasks' folders (ADR-056): one goes once its wait is up, keeping
@@ -617,6 +618,91 @@ describe('a task whose folder was removed', () => {
       assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, 'GONE.md')))._tag, 'NotFound')
       assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, '../outside.md')))._tag, 'DocumentRefused')
       assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, 'retry.ts')))._tag, 'DocumentRefused')
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('drops what its lead kept to run as its folder goes, saying so, but not what runs on the default branch or another’s', () =>
+    Effect.gen(function* () {
+      // A lab whose config merged is on main; the task's own lab is only on its branch.
+      const task = yield* finished('done', 4, 'Draft a lab', (root) => {
+        mkdirSync(join(root, 'lab'))
+        commit(root, 'lab/merged.js', 'merged\n')
+        commit(root, 'lab/my lab.js', 'spaced\n')
+      })
+      commit(task.worktree, 'lab/drafting.js', 'drafting\n')
+      const launches = yield* Launches
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const other = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: task.projectId,
+        title: 'Still at work',
+      })
+      const leadOf = (taskId: string, threadId: string): ToolAccess => ({
+        role: 'lead',
+        projectId: task.projectId,
+        threadId,
+        sessionId: 'none',
+        taskId,
+      })
+      const lead = leadOf(task.taskId, task.threadId)
+      yield* callTool(lead, 'keep_run', { name: 'Drafting lab', command: 'node lab/drafting.js' })
+      yield* callTool(lead, 'keep_run', { name: 'Merged lab', command: 'cd lab && node merged.js' })
+      yield* callTool(lead, 'keep_run', { name: 'Spaced lab', command: 'node "lab/my lab.js"' })
+      // A variable's name looks like no file, yet the shell may make it one on the default branch: it stays.
+      yield* callTool(lead, 'keep_run', { name: 'Config lab', command: 'vp dev --config "$CONFIG"' })
+      yield* callTool(lead, 'keep_run', { name: 'Storybook 6136', command: 'npm run storybook -- --port 6136' })
+      yield* callTool(lead, 'keep_run', { name: 'Notes', command: 'node lab/notes.js' })
+      yield* callTool(leadOf(other.taskId, other.threadId), 'keep_run', { name: 'Other lab', command: 'node lab/other.js' })
+      yield* launches.keepRunnable({ projectId: task.projectId, name: 'Mine', command: 'node mine.js', actorId: instance.personId })
+      // The person's Storybook, which the lead keeps again by its name, and then changes: it stays the person's.
+      yield* launches.keepRunnable({
+        projectId: task.projectId,
+        name: 'Storybook',
+        command: 'npm run storybook',
+        actorId: instance.personId,
+      })
+      yield* callTool(lead, 'keep_run', { name: 'Storybook', command: 'npm run storybook' })
+      yield* callTool(lead, 'keep_run', { name: 'Storybook', command: 'npm run storybook -- --quiet' })
+      // The person changes one the lead kept: it is theirs now.
+      const notes = (yield* launches.runnables(task.projectId, null)).find((one) => one.name === 'Notes')
+      yield* launches.keepRunnable({
+        projectId: task.projectId,
+        id: notes?.id ?? '',
+        name: 'Notes',
+        command: 'node notes.js',
+        actorId: instance.personId,
+      })
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(task.worktree))
+      assert.deepStrictEqual(
+        (yield* launches.runnables(task.projectId, null)).flatMap((one) => (one.own ? [] : [[one.name, one.from]])),
+        [
+          ['Merged lab', 'agent'],
+          ['Spaced lab', 'agent'],
+          ['Config lab', 'agent'],
+          ['Notes', 'person'],
+          ['Other lab', 'agent'],
+          ['Mine', 'person'],
+          ['Storybook', 'person'],
+        ],
+      )
+      // Each dropped says so in the project's record, by the task that kept it.
+      const said = yield* sql<{ payload: string }>`
+        SELECT payload FROM record_events WHERE type = 'project.runnable_dropped' ORDER BY sequence`
+      assert.deepStrictEqual(
+        said
+          .map((row) => JSON.parse(row.payload) as { name: string; task: string; why: string })
+          .map((one) => [one.name, one.task, one.why]),
+        [
+          ['Drafting lab', task.taskId, 'worktree_cleaned'],
+          ['Storybook 6136', task.taskId, 'worktree_cleaned'],
+        ],
+      )
+      // The merged one is the project's now: the task coming back and going again leaves it.
+      const [merged] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM runnables WHERE name = 'Merged lab'`
+      assert.isNull(merged?.taskId)
     }).pipe(Effect.provide(withCleanup())),
   )
 })

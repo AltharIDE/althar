@@ -351,7 +351,7 @@ describe('the board’s lanes', () => {
         const next = within(screen.getByRole('region', { name: 'Up next' }))
         expect(next.getAllByText('Continues · Implement')).toHaveLength(2)
         expect(next.getByText('Continues · Review')).toBeTruthy()
-        expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
+        expect(next.getAllByText(/^4 agents busy$/)).toHaveLength(2)
         expect(next.getByText('Waiting for the connection')).toBeTruthy()
         expect(next.getByText('Paused')).toBeTruthy()
         // The line's places come after what continues; every row Althar orders for a place has a grip, what is paused none.
@@ -394,30 +394,64 @@ describe('the board’s lanes', () => {
         expect(next.queryByText(/^Continues/)).toBeNull()
       })
 
-      it('stays in the lane it was in while the person points at the board, and moves once they look away', async () => {
-        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
-        // Its turn has its place: it is at work.
-        const after = lanesOf(
+      it('lists every machine-wide place while work waits', () => {
+        const lanes = lanesOf(
+          board({
+            tasks: [working, continuing('x', 1)],
+            workPlaces: {
+              busy: 2,
+              atOnce: 2,
+              configured: 5,
+              offline: false,
+              holders: [
+                {
+                  taskId: 'elsewhere',
+                  title: 'An agent in another project',
+                  threadId: 't1',
+                  role: 'lead',
+                  reason: 'turn',
+                  kept: false,
+                  running: [],
+                },
+                {
+                  taskId: 'elsewhere',
+                  title: 'An agent in another project',
+                  threadId: 't2',
+                  role: 'reviewer',
+                  reason: 'starting',
+                  kept: false,
+                  running: [],
+                },
+              ],
+            },
+          }),
+        )
+        withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+        const next = within(screen.getByRole('region', { name: 'Up next' }))
+        const summary = next.getByText('2 of 5 agent places in use · Temporarily limited to 2')
+        summary.closest('details')!.open = true
+        const holders = within(next.getByRole('list', { name: 'Agents using a place' }))
+        expect(holders.getAllByText('An agent in another project')).toHaveLength(2)
+        expect(holders.getByText('Lead · In a turn')).toBeTruthy()
+        expect(holders.getByText('Reviewer · Starting')).toBeTruthy()
+      })
+
+      it('moves into Running on its admission update alone while the pointer is in Up next', async () => {
+        const getBoard = vi.fn(async () => board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        const { client, emit } = fakeClient({ getBoard })
+        withServices(<Project />, client)
+        await pickLayout('Conversation')
+        await screen.findByRole('region', { name: 'The project’s work' })
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        await userEvent.hover(await region('Up next').findByText('Going on x'))
+        getBoard.mockResolvedValue(
           board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
         )
-        let change: (lanes: typeof before) => void = () => undefined
-        function Changing() {
-          const [lanes, setLanes] = useState(before)
-          change = setLanes
-          return <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
-        }
-        withServices(<Changing />, fakeClient().client)
-        const region = (name: string) => within(screen.getByRole('region', { name }))
-        await userEvent.hover(region('Up next').getByText('Going on x'))
-        act(() => change(after))
-        expect(region('Up next').getByText('Going on x')).toBeTruthy()
-        expect(region('Running').queryByText('Going on x')).toBeNull()
-        await userEvent.unhover(screen.getByRole('region', { name: 'Up next' }))
-        await userEvent.hover(document.body)
-        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
+        await act(async () => emit(changed('card', 'x', 'th-x')))
+        expect(await region('Running').findByText('Going on x')).toBeTruthy()
         expect(region('Up next').queryByText('Going on x')).toBeNull()
       })
-      it('lets go once its screen hides with the pointer on it, as kept (`KeptScreens`), and moves as it shows again', async () => {
+      it('shows admitted work in Running when a kept board reopens', async () => {
         const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
         const after = lanesOf(
           board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
@@ -1722,7 +1756,7 @@ describe('every state the board shows', () => {
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
-    expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(screen.getByText('4 agents busy')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
     expect(screen.getByText("Couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
@@ -1825,7 +1859,7 @@ describe('every state the board shows', () => {
           startedAt: '2026-10-01T09:30:00.000Z',
         }),
       )
-      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      expect(screen.getByText('4 agents busy')).toBeTruthy()
       const track = screen.getByRole('list', { name: 'Steps' })
       expect(within(track).getByText('Implement').closest('li')?.className).toMatch(/done/)
       // The step it waits on isn't drawn as running: the kit's track stands still and empty for a waiting task.
@@ -2313,8 +2347,12 @@ describe('a ready card’s next step, done from the card', () => {
         keptAt: '2026-09-30T11:00:00.000Z',
       }),
     ]
-    const markTaskDone = vi.fn(async () => {})
-    const keepTaskForLater = vi.fn(async () => {})
+    // Each kept as the runtime keeps it: the board read after says so.
+    const moved = (phase: BoardTask['phase']) => async (taskId: string) => {
+      tasks = tasks.map((one) => (one.taskId === taskId ? { ...one, phase } : one))
+    }
+    const markTaskDone = vi.fn(moved('settled'))
+    const keepTaskForLater = vi.fn(moved('kept'))
     const settledWithOnePress = vi.fn(async () => {})
     const onOpen = vi.fn()
     withServices(
@@ -2327,7 +2365,7 @@ describe('a ready card’s next step, done from the card', () => {
     // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))
     await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
-    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await userEvent.click((await cardOf('Spike the limits')).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(settledWithOnePress).toHaveBeenCalledOnce()

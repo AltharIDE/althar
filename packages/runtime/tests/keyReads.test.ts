@@ -2,12 +2,13 @@ import { execFileSync } from 'node:child_process'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option, Tracer } from 'effect'
+import { Duration, Effect, Layer, Option, Tracer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Models } from '../src/Models'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
@@ -21,7 +22,8 @@ import { fakeConnectors, HOST, hosted, runtime, until } from './support'
  * board, the home and a task's view read the store on every change an agent
  * makes, so none of their statements may go through every row of a table
  * that grows with each turn; one that did (the reply each card reads) took a
- * third of a second a read on the person's store. And Ship answers once its
+ * third of a second a read on the person's store. Nor may the models'
+ * catalogue, which a model picker reads again after each change in it. And Ship answers once its
  * run is admitted, while its reviewer's agent is still starting.
  */
 
@@ -95,7 +97,7 @@ const statements = () => {
 }
 
 /** Where a statement reads every row of a growing table, by SQLite's plan for it: none for one that finds its rows. */
-const scansIn = (text: string) =>
+const scansIn = (text: string, growing: ReadonlyArray<string> = GROWING) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     if (!/^\s*(SELECT|WITH)\b/i.test(text) && !/^\s*--/.test(text)) return []
@@ -115,7 +117,7 @@ const scansIn = (text: string) =>
       const scanned = /^SCAN (\w+)/.exec(row.detail)?.[1]
       const by = /USING (?:COVERING )?INDEX (\w+)/.exec(row.detail)?.[1]
       const table = scanned === undefined ? undefined : (aliases.get(scanned) ?? scanned)
-      return table === undefined || !GROWING.includes(table) || (by !== undefined && partial.has(by))
+      return table === undefined || !growing.includes(table) || (by !== undefined && partial.has(by))
         ? []
         : [`${row.detail} (${table})\n  in ${text.replace(/\s+/g, ' ').slice(0, 300)}`]
     })
@@ -157,10 +159,20 @@ describe('the reads the person waits on', () => {
         ...(yield* traced.during(queries.coordinator(project.projectId))),
       ]
       assert.isAbove(read.length, 20)
-      const scans = (yield* Effect.forEach([...new Set(read)], scansIn)).flat()
+      const scans = (yield* Effect.forEach([...new Set(read)], (text) => scansIn(text))).flat()
       assert.deepStrictEqual(scans, [])
+      // What a model picker reads again after each change the person makes in it: each agent's latest session among all of them.
+      const catalog = yield* traced.during((yield* Models).catalog)
+      assert.isNotEmpty(catalog)
+      const scanned = (yield* Effect.forEach(catalog, (text) => scansIn(text, [...GROWING, 'provider_sessions']))).flat()
+      assert.deepStrictEqual(scanned, [])
     }).pipe(
-      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))),
+      // Cards kept between reads, as Althar keeps them: what the watcher reads to work them out is read here too.
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), keptFor: Duration.hours(1) })),
+        ),
+      ),
       Effect.provide(traced.layer),
     )
   })

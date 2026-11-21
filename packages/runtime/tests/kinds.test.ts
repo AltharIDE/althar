@@ -99,8 +99,8 @@ const cardOnce = (
 const row = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [task] = yield* sql<{ state: string; settledAt: string | null; seenAt: string | null }>`
-      SELECT state, settled_at, seen_at FROM tasks WHERE id = ${taskId}`
+    const [task] = yield* sql<{ state: string; settledAt: string | null; seenAt: string | null; keptAt: string | null }>`
+      SELECT state, settled_at, seen_at, kept_at FROM tasks WHERE id = ${taskId}`
     return task ?? assert.fail('no task')
   })
 
@@ -352,10 +352,9 @@ describe('settling a task that isn’t a change', () => {
       }
       assert.strictEqual((yield* queries.card(question.taskId)).phase, 'ready')
 
-      // Done settles nothing that is a change, or at work; nor does Keep for later a change.
+      // Done settles nothing that is a change, or at work.
       assert.isFalse(yield* markDone(working.taskId))
       assert.isFalse(yield* markDone(change.taskId))
-      assert.isFalse(yield* keep(change.taskId))
       assert.strictEqual((yield* row(change.taskId)).state, 'open')
       assert.strictEqual((yield* row(working.taskId)).state, 'open')
 
@@ -382,6 +381,66 @@ describe('settling a task that isn’t a change', () => {
       assert.isTrue(yield* markDone(working.taskId))
       assert.strictEqual((yield* row(working.taskId)).state, 'done')
       yield* (yield* Sessions).stop(working.threadId)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps any kind for later, a change ending on its branch as a prototype does, but not one with its pull request open', () =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* open
+      const sketch = yield* planned(project.projectId, 'Prototype the tabs', '[lead:finish] [lead:edit]')
+      const opened = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
+      yield* cardOnce(sketch.taskId, (card) => card.phase === 'ready' && card.kind === 'change')
+      yield* cardOnce(opened.taskId, (card) => card.phase === 'ready')
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'4'.repeat(32)}`,
+        projectId: project.projectId,
+        taskId: opened.taskId,
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '8',
+        ref: '8',
+        key: '8',
+        url: 'https://github.com/acme/app/pull/8',
+        snapshot: JSON.stringify({ number: 8, title: 'Retry', url: 'https://github.com/acme/app/pull/8', state: 'open', draft: false }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      // Its pull request open, it waits on that: nothing to keep.
+      assert.isFalse(yield* keep(opened.taskId))
+      assert.isNull((yield* row(opened.taskId)).keptAt)
+      // Commits of it held for Ship wait on Ship: nothing to keep while they do.
+      const [worktree] = yield* sql<{ id: string }>`SELECT id FROM workspaces WHERE task_id = ${sketch.taskId} LIMIT 1`
+      assert.isDefined(worktree)
+      yield* sql`UPDATE workspaces SET held_at = ${at} WHERE id = ${worktree!.id}`
+      assert.isFalse(yield* keep(sketch.taskId))
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE id = ${worktree!.id}`
+      // Ending on its branch, with nothing of it open on a host: kept for later, out of Needs you, open still.
+      assert.isTrue(yield* keep(sketch.taskId))
+      assert.deepInclude(yield* row(sketch.taskId), { state: 'open' })
+      assert.strictEqual((yield* cardOnce(sketch.taskId, (card) => card.phase === 'kept')).kind, 'change')
+      assert.isNotNull((yield* row(sketch.taskId)).keptAt)
+      assert.strictEqual((yield* queries.card(opened.taskId)).phase, 'ready')
+      // A pull request of it opening after it was kept: it is ready again, to accept, not a kept row.
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'5'.repeat(32)}`,
+        projectId: project.projectId,
+        taskId: sketch.taskId,
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '9',
+        ref: '9',
+        key: '9',
+        url: 'https://github.com/acme/app/pull/9',
+        snapshot: JSON.stringify({ number: 9, title: 'Tabs', url: 'https://github.com/acme/app/pull/9', state: 'open', draft: false }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      assert.strictEqual((yield* cardOnce(sketch.taskId, (card) => card.phase !== 'kept')).phase, 'ready')
     }).pipe(Effect.provide(withQueries())),
   )
 

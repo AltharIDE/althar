@@ -67,11 +67,11 @@ test('lists reviews and a task waiting for an agent in Up next, and starts them 
       await say(page, `Review https://github.test/meridian/api/pull/${index + 1} [coordinator:review]`)
       // A review starts from a plan of its lead alone: started at once, not after its countdown.
       await page.getByRole('button', { name: 'Start now' }).last().click()
-      await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1)
+      await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(index + 1)
     }
     // Planned work waits for a task place; an aside from start_task would start outside this line.
     await startTask(page, 'Try the double jump', '[lead:wait]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4)
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(4)
 
     await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })

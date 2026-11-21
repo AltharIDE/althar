@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
 import { Context, Layer } from 'effect'
 
@@ -23,11 +24,13 @@ import { Issues } from './Issues'
 import { IntegrationTools } from './IntegrationTools'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { PtySpawner, Terminals } from './Terminals'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
@@ -60,6 +63,7 @@ import { SignIns } from './SignIns'
 import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
+import { WorktreeRepair } from './WorktreeRepair'
 import { ApiCommands } from './ApiCommands'
 import { ClientIdentities } from './ClientIdentities'
 
@@ -113,7 +117,10 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.provideMerge(
         Errands.layer.pipe(
           Layer.provideMerge(
-            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+            DevicePairings.layer.pipe(
+              Layer.provideMerge(Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer)),
+              Layer.provideMerge(startupLayer('instance', Instance.layer)),
+            ),
           ),
         ),
       ),
@@ -168,13 +175,18 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
-      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, startupLayer('connections', Connections.layer)).pipe(
-        Layer.provideMerge(judging),
-      ),
+      Layer.mergeAll(
+        Permissions.layer,
+        Setups.layer.pipe(Layer.provideMerge(Questions.layer)),
+        startupLayer('connections', Connections.layer),
+      ).pipe(Layer.provideMerge(judging)),
     ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.
-  const busy = Layer.mergeAll(Busy.layer, LeftBehind.layer).pipe(Layer.provideMerge(core))
+  // The person's own terminals, in a task's worktree, the project's repository or where a run ran (workspaces-and-runs.md, Terminals).
+  const busy = Layer.mergeAll(Busy.layer, LeftBehind.layer, Terminals.layer.pipe(Layer.provide(PtySpawner.node))).pipe(
+    Layer.provideMerge(core),
+  )
   // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
@@ -188,7 +200,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
-  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
+  // Worktrees whose link to their repository broke are repaired as Althar starts, or as git fails in one (decisions: workspaces-and-runs, A worktree whose link broke).
+  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer, WorktreeRepair.layer).pipe(
     Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(startupLayer('runs', Runs.layer).pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
@@ -210,6 +223,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         PageTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
         Canvases.layer,
+        // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
+        Elsewhere.layer,
         MachineLoad.layer,
         Overlaps.layer,
         // A child that ended, and a call that waits while the person is away (Situations.ts).

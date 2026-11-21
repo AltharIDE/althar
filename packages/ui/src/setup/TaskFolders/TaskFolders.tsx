@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -185,6 +185,8 @@ export interface TaskFoldersProps {
   busy?: string | null
   /** What went wrong, in words. */
   error?: string
+  /** The person was sent here to free space: the row comes into view and lights for a moment, so they see where they landed. */
+  lit?: boolean
   text?: Partial<TaskFoldersText>
 }
 
@@ -343,9 +345,27 @@ export function TaskFolders({
   freed = null,
   busy = null,
   error,
+  lit = false,
   text,
 }: TaskFoldersProps) {
   const t = { ...taskFoldersText, ...text, waits: { ...taskFoldersText.waits, ...text?.waits } }
+  const row = useRef<HTMLDivElement>(null)
+  const [glow, setGlow] = useState(lit)
+  useEffect(() => {
+    if (!lit) return
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+    row.current?.scrollIntoView?.({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    const off = window.setTimeout(() => setGlow(false), 1100)
+    return () => window.clearTimeout(off)
+  }, [lit])
+  // Where they landed takes focus too, while it's lit: Clean up, else the list of folders, else the wait. A list
+  // read again as they land can bring Clean up in, which takes it then.
+  const cleanable = goes.length > 0
+  useEffect(() => {
+    if (!glow) return
+    const at = row.current?.querySelector<HTMLElement>('[data-lands]') ?? row.current?.querySelector<HTMLElement>('button, [tabindex="0"]')
+    at?.focus({ preventScroll: true })
+  }, [glow, cleanable])
   const going = total(goes)
   const holding = total(held)
   const on = (disk: FolderDisk, folders: ReadonlyArray<FinishedFolder>) => folders.filter((one) => one.disk === disk.id)
@@ -353,6 +373,8 @@ export function TaskFolders({
   const none = !any && !measuring && freed === null
   return (
     <SettingRow
+      ref={row}
+      className={cx(lit && s.lit, glow && s.glow)}
       title={t.title}
       note={t.waits[wait].note}
       glyph={<Icon name="folder" size={15} />}
@@ -382,7 +404,7 @@ export function TaskFolders({
                   width={480}
                   padded={false}
                   trigger={
-                    <button type="button" className={s.keys}>
+                    <button type="button" className={s.keys} {...(goes.length > 0 ? {} : { 'data-lands': '' })}>
                       {goes.length > 0 && (
                         <span className={s.key}>
                           <i className={s.hatch} aria-hidden="true" />
@@ -426,7 +448,7 @@ export function TaskFolders({
               <span className={s.grow} />
               {freed !== null && <span>{t.freed(freed)}</span>}
               {goes.length > 0 && (
-                <Button size="small" busy={busy === 'clean'} onClick={onCleanUp}>
+                <Button size="small" busy={busy === 'clean'} onClick={onCleanUp} data-lands="">
                   {t.cleanUp}
                 </Button>
               )}

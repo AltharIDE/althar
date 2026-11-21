@@ -453,6 +453,8 @@ const SETTLED_AGAIN = 'This task is settled:'
 
 /** How the runtime's reminder to report begins, which the person's words waiting for the turn go after (the runtime's Runs.ts). */
 const REMINDED = /^Your (step|review) isn't done until you call Althar's /
+/** The line Althar puts first in a turn to tell the time again (the runtime's `timeAgainLine`), with the blank line after it. */
+const TIME_AGAIN = /^\(It is now [^\n]* on the person's computer\.\)\n\n/
 
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
@@ -672,10 +674,13 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
- * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does; `[coordinator:plan-fails]` with a
+ * plan Althar refuses, so the draft never gets one; `[coordinator:plan-another-fails]` drafts a second after it, in the same
+ * turn, whose plan Althar refuses; `[coordinator:plan-prototype]` from the Prototype preset, its lead on
+ * the large model), `[coordinator:discard]` discards each task named `[discard:<slug>]`,
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
- * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
  * person gave, `[coordinator:keep-note]` keeps what the person said
  * before it as one of the project's notes, and `[coordinator:automate]`
@@ -697,7 +702,9 @@ const playStall = async (
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting; `[lead:fix-tiny]` settles with one line in README.md, the file
- * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
+ * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-untracked]` also leaves an untracked picture as evidence;
+ * `[lead:fix-binary]` changes that named file as binary;
+ * `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to; `[lead:nothing]` says it built
@@ -978,8 +985,11 @@ const playRole = async (
   await client.connect(transport as Parameters<typeof client.connect>[0])
   try {
     const available = new Set((await client.listTools()).tools.map((tool) => tool.name))
+    // Whether the last call was refused: streamed, a refused call ends failed, as an agent's does.
+    let refused = false
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = await client.callTool({ name, arguments: args })
+      refused = result.isError === true
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
@@ -1015,7 +1025,7 @@ const playRole = async (
       await notify({
         sessionUpdate: 'tool_call_update',
         toolCallId,
-        status: 'completed',
+        status: refused ? 'failed' : 'completed',
         content: [{ type: 'content', content: { type: 'text', text: answer } }],
         _meta: meta,
       })
@@ -1172,6 +1182,10 @@ const playRole = async (
           }
         }
         if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-open]')) {
+          const answer = await told('canvas_open', { name: 'sign-in' })
+          return `${answer} The repository also has a \`README.md\`.`
+        }
         if (text.includes('[lead:canvas-again]')) {
           await told('canvas_get', { name: 'sign-in' })
           const read = await told('canvas_read', { name: 'sign-in' })
@@ -1225,7 +1239,10 @@ const playRole = async (
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         // `[lead:fix-tiny]` fixes in a line of the file the finding named, README.md: a fix too small to check again.
+        if (session.markers.has('[lead:fix-binary]')) appendFileSync(join(session.cwd, 'README.md'), '\0')
         if (!aside) await commitIn(session.cwd, session.markers.has('[lead:fix-tiny]') ? 'README.md' : 'settled.txt', 'Settle the review')
+        if (session.markers.has('[lead:fix-untracked]'))
+          writeFileSync(join(session.cwd, 'untracked.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
         // `[lead:fix-elsewhere]` names a commit from before the round, which made none of the fix.
         const fix = aside
           ? null
@@ -1255,7 +1272,9 @@ const playRole = async (
               ],
               unverified: [],
             }
-          : {}
+          : session.markers.has('[lead:fix-untracked]')
+            ? { evidence: [{ kind: 'screenshot', caption: 'An untracked file', path: 'untracked.png' }] }
+            : {}
         // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
         const built = aside ? {} : { built: BUILT_SETTLED }
         if (session.markers.has('[lead:built-unsaid]') && !aside) {
@@ -1507,6 +1526,13 @@ const playRole = async (
       const said = (ask.slice(0, ask.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
+    // Told to discard tasks, `[discard:<slug>]` each, it discards them, one after another.
+    if (available.has('settle_task') && ask.includes('[coordinator:discard]')) {
+      const said: Array<string> = []
+      for (const [, task] of ask.matchAll(/\[discard:([a-z0-9-]+)\]/g))
+        said.push(await callStreamed('settle_task', { task, how: 'discard', why: 'One task, not several.' }))
+      return said.join('\n')
+    }
     // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
     if (available.has('propose_automation') && ask.includes('[coordinator:automate]')) {
       return await call('propose_automation', {
@@ -1555,21 +1581,38 @@ const playRole = async (
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
       const drafted = which === undefined ? first : await callStreamed('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
+      const after = /\[after:([a-z0-9-]+)\]/.exec(ask)?.[1]
       const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
-          agent: 'claude-code',
+          // `[coordinator:plan-fails]`: on a model nobody has, so its plan is refused and never comes.
+          agent: ask.includes('[coordinator:plan-fails]') ? 'no-such-agent' : 'claude-code',
           // `[coordinator:plan-effort]`: on its large model, thinking hard.
           ...(ask.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          // `[coordinator:plan-prototype]`: on its large model, whatever the preset's own is.
+          ...(ask.includes('[coordinator:plan-prototype]') ? { model: 'large' } : {}),
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
+        // `[coordinator:plan-prototype]`: planned from the Prototype preset.
+        ...(ask.includes('[coordinator:plan-prototype]') ? { preset: 'Prototype' } : {}),
+        // `[after:<slug>]`: it waits for that task, and starts by itself once it has merged.
+        ...(after === undefined ? {} : { waits_for: [after] }),
       })
       // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
       if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
         await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      // `[coordinator:plan-another-fails]`: a second task drafted in the same turn, "…, the rest", whose plan Althar refuses.
+      if (ask.includes('[coordinator:plan-another-fails]')) {
+        const another = await callStreamed('draft_task', { ...draft, title: `${title}, the rest` })
+        await callStreamed('propose_plan', {
+          task: /Drafted ([^\s,.]+)/.exec(another)?.[1] ?? '',
+          lead: { agent: 'no-such-agent', reason: 'It knows the code.' },
+          review: { agent: 'codex' },
+        })
+      }
       return planned
     }
     return undefined
@@ -1867,7 +1910,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Told the time first, on a new day or after a long gap (the runtime's localTime.ts), it reads what it was asked after it:
+      // the time is no part of the ask, so a check that fails just after midnight is fixed as at any other time.
+      const whole = (filled === null ? prompted : prompted.slice(0, filled.index)).replace(TIME_AGAIN, '')
       // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
@@ -1970,6 +2015,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           })
           await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
           return ended()
+        }
+        // With `[lead:compact-reports]`, it reports the compaction as such (ACP's `compaction_update`), with its summary in
+        // pieces, as Claude Code, Codex and OpenCode do for a client that takes them.
+        if (session.markers.has('[lead:compact-reports]')) {
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'in_progress' })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'We were ' },
+          })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'fixing the checkout retry.' },
+          })
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'completed' })
         }
         await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
         await say('Compacted the conversation.')

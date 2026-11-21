@@ -14,7 +14,7 @@ import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftOf } from './drafts'
+import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -56,6 +56,8 @@ export interface Outgoing {
   readonly comments?: ReadonlyArray<LineComment>
   /** The person's comments on canvases, kept with the message as it is sent (ADR-104). */
   readonly canvasComments?: ReadonlyArray<SentCanvasComment>
+  /** Runs in the window as soon as the runtime accepts the message. */
+  readonly onAccepted?: () => void
 }
 
 /** What a send or a switch carries of a message's images, files and comments on the diff and of its being dictated: nothing where it has none. */
@@ -131,15 +133,18 @@ export interface Attachments {
     readonly fileNote?: string
   }
   /** What goes with a message now; null where it can't go yet, with the composer saying why. */
-  readonly take: (receiver: Receiver) => Outgoing | null
+  readonly take: (receiver: Receiver, readingCrop?: boolean) => Outgoing | null
   /** Takes every image and file off, once its message is sent. */
   readonly clear: () => void
   /** Puts back what went with a message Althar didn't take, before any added since, bytes and all, to send again. */
   readonly giveBack: (outgoing: Outgoing) => void
   /** Whether a queued message's images and files fit beside those waiting, to take it back to edit; saying why not where they don't. */
   readonly fits: (said: Said) => boolean
-  /** Puts back the images and files of a message taken back from the queue, after any already there. */
-  readonly restore: (said: Said) => void
+  /**
+   * Puts back the images and files of a message taken back from the queue, after any already there; returns how to take
+   * exactly those off again, leaving any added or removed since as they are, as where the lead had the message already.
+   */
+  readonly restore: (said: Said) => () => void
 }
 
 /** A file main measured and granted, as it waits to go and as the window's copy of its message shows it. */
@@ -159,7 +164,8 @@ const readyOf = (attached: Extract<Attached, { ok: true }>): NonNullable<Waiting
 
 /** The images and files waiting in the draft kept under `key` (`drafts.ts`). */
 export function useAttachments(key: string, host: Attacher, shrink: Shrink = shrinkInWindow): Attachments {
-  const { images: waiting, files: waitingFiles, dictated } = useDraftOf<Waiting, WaitingFile>(key)
+  // Not the words: a screen with its images isn't drawn again for each one typed.
+  const { images: waiting, files: waitingFiles, dictated } = useDraftAttached<Waiting, WaitingFile>(key)
   const setWaiting = (change: (now: ReadonlyArray<Waiting>) => ReadonlyArray<Waiting>) => setDraftImages(key, change)
   const setFiles = (change: (now: ReadonlyArray<WaitingFile>) => ReadonlyArray<WaitingFile>) => setDraftFiles(key, change)
   const [note, setNote] = useState<string | null>(null)
@@ -273,7 +279,7 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
     }
   }
 
-  const take = (receiver: Receiver): Outgoing | null => {
+  const take = (receiver: Receiver, readingCrop = false): Outgoing | null => {
     if (waiting.length > 0 && receiver.takes === false) return null
     // More than a message carries, as after one given back beside others added meanwhile: none is dropped, and the person picks.
     if (waiting.length > MESSAGE_IMAGES.count) {
@@ -284,7 +290,7 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       setNote(filesText.tooMany)
       return null
     }
-    if (waiting.some((one) => one.ready === null)) {
+    if (readingCrop || waiting.some((one) => one.ready === null)) {
       setNote(text.stillReading)
       return null
     }
@@ -349,18 +355,19 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
     restore: (said) => {
       // Kept by the store, they go again by their digests; the files by the copies Althar made of them.
       const kept = said.pictures.flatMap((picture) => (picture.digest === null ? [] : [{ ...picture, digest: picture.digest }]))
-      setWaiting((now) => [
-        ...now,
-        ...kept.map((picture, index) => ({
-          id: next(),
-          name: picture.name ?? text.image(index + 1),
-          ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
-        })),
-      ])
-      setFiles((now) => [
-        ...now,
-        ...said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } })),
-      ])
+      const pictures = kept.map((picture, index) => ({
+        id: next(),
+        name: picture.name ?? text.image(index + 1),
+        ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
+      }))
+      const files = said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } }))
+      setWaiting((now) => [...now, ...pictures])
+      setFiles((now) => [...now, ...files])
+      const put = new Set([...pictures, ...files].map((one) => one.id))
+      return () => {
+        setWaiting((now) => now.filter((one) => !put.has(one.id)))
+        setFiles((now) => now.filter((one) => !put.has(one.id)))
+      }
     },
   }
 }

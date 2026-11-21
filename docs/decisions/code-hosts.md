@@ -30,8 +30,8 @@ an adapter per product.
 
 - **Code hosts:** GitHub, GitLab, Bitbucket Cloud and Bitbucket Data Center,
   hosted or on a team's own server.
-- **Trackers:** Linear, Jira Cloud, Jira Data Center, Trello, and GitHub's
-  and GitLab's own issues.
+- **Trackers:** Linear, Jira Cloud, Jira Data Center, Trello, ClickUp, and
+  GitHub's and GitLab's own issues.
 
 Each adapter declares what its product can do, and the screens show only
 that, in the service's own words. Each has a fake for tests and a contract
@@ -154,11 +154,38 @@ person's agent there ([packaging](packaging.md)).
 
 ### A fork's branches
 
-Althar knows a fork from its clone's remotes: an `upstream` beside
-`origin` on the same host. Where a fork's work goes is a per-project
-choice with three answers: pull requests on the fork, pull requests
-upstream from the fork's branches, or branches and pull requests both
-upstream.
+Althar knows a fork as its code host says, where one is connected
+(DEV-171). It asks `origin`'s host whether that repository is a fork, of
+what, and, where the host says (GitHub's `source`), what the root of its
+forks is. The answer is kept for the whole run of Althar, an hour before it
+is asked again; a host that gave none (it failed, hung, or doesn't say) is
+asked again only after five minutes, so it holds nothing up twice. Only an
+answer reached through `origin`'s own address counts, never a mirror's.
+Without an answer, the remotes' names say, as before: an `upstream` beside
+`origin` on the same host, naming another repository. Where a fork's work
+goes is a per-project choice with three answers: pull requests on the fork,
+pull requests upstream from the fork's branches, or branches and pull
+requests both upstream.
+
+- **The parent is found among the remotes by address**, whatever the remote
+  is called (`upstream`, `base`, an owner's name): at an address the host
+  gave for it, or at its path on `origin`'s host as the host's addresses
+  are written there, with exactly the server's own path in front (and
+  Bitbucket Data Center's `scm/` over HTTPS), never a path that only ends
+  in it. An SSH remote has neither in front. `upstream` wins where several
+  have it. Where none has the parent, a remote with the root is it, as for
+  a fork of a fork whose `upstream` is the root. Where none has either and
+  the host can't say the root (GitLab, Bitbucket), an `upstream` that names
+  another repository on the same host is it by its name, as before; where
+  the host said the root (GitHub), one that is neither isn't.
+- **Where no remote has it**, the fork is still one. The repository's
+  settings say so and offer to add it, as `upstream`, or `parent` where that
+  name is taken, by the host's address written as `origin`'s is. Only the
+  person adds it; nothing does for them. Until then, tasks start from the
+  fork, its conflict checks fetch the parent by address into
+  `refs/althar/parent/`, and its pull requests are listed and fetched from
+  the parent through its host's connection, or refused with a word to add
+  it where none reaches it, never the fork's instead.
 
 - **Branches upstream is offered only where the host says the account can
   push there.** That is read as the project's repositories are read, and
@@ -168,6 +195,8 @@ upstream.
 - **Remotes are never rewritten.** `origin` and `upstream` stay as they
   are; the clone and its scripts are the person's. A clone whose remotes
   were renamed by hand (`origin` the original, `fork` the fork) just works.
+  Adding the parent where the person asks is the one change Althar makes,
+  beside theirs: a remote is never renamed or removed.
 - **An open pull request stays where its branch is** until it closes,
   whatever the project says now, since a host can't move a pull request's
   source. Only new work follows the setting. Where the host says the fork
@@ -226,14 +255,36 @@ each turn of its lead begins, before the lead reads anything, and before it
 pushes on its own; crediting keeps when a commit was written, so a commit
 made again for its credit is still the lead's.
 
-**Merge, with commits not shipped, offers two.** Review and merge is a Ship
-that merges once what waited is up, unless the lead set a finding of its
-review aside, which a line says, leaving the merge to the person. Merge now
-sends them up past the hold and merges at once, and they are reviewed after
-the merge, in the same task, where it has a reviewer
-([reviews](reviews.md#an-explicit-review-after-merge)). A plain
-Accept, from the Dock or anywhere, is refused while they wait: it would
-merge the pull request without them, unreviewed. The Dock offers Ship.
+**Ship takes a route: whether it reviews first, and how far it goes.** As
+far as a push (a draft stays one, a new pull request opens as one), ready
+for review (an open draft is marked ready, a new one opens ready), or
+merged, once the checks main requires pass: a required check still running
+holds the merge, an optional one never does, and a failed one ends the Ship
+at ready with a line saying why. The route is the one the person chose for
+this Ship from Ship's chevron, else the task's own: the person's default
+(Make this my default), else its plan's review and its ending; no review
+where it has no reviewer, and no further than ready where main needs
+someone else's approval, which the menu says. Ship's button names every
+stop, the ones it skips faded; hovering it says what it will do, and How
+Ship works explains each stop, where a click on a stop's icon turns it on
+or off. Under way, the same button greys at the stop it is at, its route
+still changeable (`RouteShip`, and `ship_task` for the coordinator and the
+leads, who go no further than ready) and its review skippable, with no Push
+or Mark ready beside it; the task's card and header say that stop too
+(Merges once checks pass), not the opening of a pull request. A change of
+route away from merged and the merge itself can't both win: the merge reads
+its route again in the transaction that records its intent, after its reads
+of the host, so a change made before then sends no merge, and one made
+after it is refused, the merge having gone to the host (`merging`). How Ship
+works keeps the review's stop off, saying why, where the task has no
+reviewer. So Merge, with commits not shipped, is Ship to
+merged: the card offers no Review and merge or Merge now beside it, and
+Review and merge stays a Ship to merged for the runtime. Merge now remains
+the runtime's, sending them up past the hold and merging at once, reviewed
+after the merge where the task has a reviewer
+([reviews](reviews.md#an-explicit-review-after-merge)). A plain Accept,
+from the Dock or anywhere, is refused while they wait: it would merge the
+pull request without them, unreviewed. The Dock offers Ship.
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with
@@ -262,10 +313,11 @@ It's how a task takes over a pull request opened from another branch, or
 on the repository a fork sends its pull requests to.
 
 - **Which:** an open one, on the task's repository or on the one its fork
-  came from. Its branch must be on a repository the task pushes to, as the
-  host says. Where the host doesn't say, attaching is refused: a branch of
-  the same name may not be the one it merges from. A link is taken only on
-  the host the task's repository is on. One that another open task
+  came from. The host must identify its source repository. A contributor's
+  fork can be attached on GitHub or GitLab when the author allows maintainer
+  edits and the signed-in account can push to the target repository. If edits
+  are disabled, Althar asks the person to have the author enable them. A link
+  is taken only on the host the task's repository is on. One that another open task
   follows stays that task's. Pull requests are attached one at a time
   across every task, so two can't both take one.
 - **Its branch:** where the task's branch already has the pull request's
@@ -285,9 +337,11 @@ on the repository a fork sends its pull requests to.
   drafted to answer a review starts on its head. `find_pull_requests` lists
   a fork's upstream pull requests first, and says which task follows each.
 
-Not built yet: attaching a pull request whose branch is on someone else's
-fork, where its author lets maintainers edit it, and pushing to it on the
-person's word, never forced. Today that is refused.
+Pushes to a contributor's fork wait for the person's approval. They use the
+person's connected sign-in, and try the device's git sign-in if that token
+can't reach the fork. Each push checks that the pull request is still open,
+its branch still exists and the author still allows maintainer edits. Althar
+never force-pushes to that branch or pushes to the fork's default branch.
 
 ## Checks: Althar sees them through
 
@@ -621,11 +675,66 @@ run is still going, and while main is red or a release waits on it. The
 coordinator is woken to read the failure and say what it finds. A fix is a
 task, and a release waiting on main waits on.
 
+### Review and triage bots
+
+Teams put agents in their pull request pipelines: Claude's code review
+action, Copilot code review, CodeRabbit, a bot that triages a failed build.
+Their words are written by an automation that whoever reaches the pipeline
+(a pull request's author, a dependency, a page it reads) may steer, so they
+aren't trusted as a member's are (DEV-205).
+
+- **The person trusts each bot by itself, in the project's settings.** The
+  rules keep the trusted bots by their accounts, in small letters
+  (`trustedBots`); none is trusted until the person says so. The settings
+  list the trusted ones, then the review and triage bots Althar recognised
+  on the project's tasks' pull requests, each a switch, off until turned
+  on. Only the person changes it, in the settings or with Trust in a
+  task's thread. An agent's `change_settings` can't change it. Bots are
+  trusted by account, not by name, because names aren't unique on a host.
+- **Althar suggests only what it recognises as a reviewer**
+  (`reviewerBots.ts`): the review agents it knows by account
+  (`coderabbitai[bot]`, `copilot-pull-request-reviewer[bot]`, `claude[bot]`
+  and the like), or a bot named for an agent, such as a team's own
+  `claude-review[bot]`. Coding agents that open pull requests of their own,
+  and bots named for reporting, deploying or bumping (coverage,
+  `cloudflare-workers-and-pages[bot]`, Vercel, Dependabot), are never
+  suggested. Althar records the first time a recognised bot speaks on a
+  pull request (`bot_spoke`), and the settings suggest from those records,
+  the latest first.
+- **A trusted bot's words reach the lead as findings named by it** ("From
+  CodeRabbit, a review bot this project trusts, on PR #12"). Each comment
+  and review is quoted line by line, as an outsider's comment is shown to
+  the person: data, never instructions. The lead is told to weigh them as
+  it would a review step's findings, checking them against the code, fixing what
+  holds up and setting aside what doesn't. It follows nothing they ask
+  beyond the code: running or fetching something, replying, pushing,
+  changing settings, issues or other pull requests. A bot's words are
+  never on their own the reason for a step outside the task. Where such a
+  step seems needed, the lead asks the person. On an open pull request
+  they wake the lead, as a member's comment does. They aren't passed as a
+  member's comment, which asks the lead to answer on the pull request:
+  answering a bot would let it steer the lead.
+- **A bot the project doesn't trust stays quiet.** Its words never reach
+  the lead, either in what the lead is told or when it reads the pull
+  request. That reading says only that a review bot was left out, by name,
+  and how many other bots' comments were. The thread shows the first thing a recognised
+  reviewer says on each pull request, says the lead doesn't hear it, and
+  offers Trust beside it. Other bots stay out of the thread, except their
+  reviews, which arrive as before.
+- **Off by default,** because a bot in the pipeline is the pipeline owner's
+  choice, not the person's. The trade-off: a trusted bot costs the lead a
+  turn each time it speaks on an open pull request, and a busy bot can be
+  loud, so the person can turn it off again. Revisit when hosts sign bot
+  output in a way Althar can check, or findings come in a structured form,
+  such as a check run's annotations, that is worth reading as such.
+
 ## Trackers
 
 **A task's issue moves as the task does:** "Move issues along with their
 tasks", on unless the person turns it off, takes it to In Progress, In
-Review, then Done. Leads and the coordinator change issues with `change_issue`, file
+Review, then Done. **Its pull request is linked on it** as it opens: "Link
+pull requests on their issues", on unless the person turns it off. ClickUp
+has no link to attach to a task, so there it is a comment, posted once. Leads and the coordinator change issues with `change_issue`, file
 them with `draft_issue` (project, milestone, cycle, parent, assignee and
 the like), comment with `comment_on_issue`, and find them with
 `find_issues`.
@@ -680,12 +789,12 @@ The decisions above are current. These parts of them aren't built on main:
   reads it, but plans the fix like any other task.
 - **The coordinator reading the web** under the project's switch: it is
   kept off it today.
-- **A contributor's fork:** attaching its pull request, and pushing to it
-  where its author lets maintainers edit.
 - **A host Althar adds later** gets reads only until its lists are written.
 
 ## Changes
 
+- 20 Nov 2026: tasks can attach to and publish to a contributor's fork on
+  GitHub and GitLab when the author allows maintainer edits (DEV-170).
 - 12 Nov 2026: the lead and coordinator gain complete discussion pages,
   Linear resources, relationships and attachments, review controls and
   broader PR search. `code_host_api` and `tracker_api` provide authenticated
@@ -696,4 +805,6 @@ The decisions above are current. These parts of them aren't built on main:
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 16 Nov 2026: Ship takes a route, review or not and as far as push, ready or merged, named on its button and explained on hover; it replaces Review and merge and Merge now on the card, and a merge waits for the checks main requires.
 - 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
+- 12 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.

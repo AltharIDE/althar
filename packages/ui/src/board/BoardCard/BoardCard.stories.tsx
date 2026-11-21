@@ -566,16 +566,37 @@ export const PlainWorking: Story = {
     await expect(card.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument()
   },
 }
-/** A change that built nothing: what its lead leaves to the person under the title, Done alone in its corner, no Accept. */
+/** A change that built nothing: what its lead leaves to the person under the title, Done and Keep for later in its corner, no Accept. */
 export const ChangeNothingBuilt: Story = {
-  args: { ...CHANGE_NOTHING_BUILT, corner: <SettleWays onDone={fn()} doneHint="Settle it where it is." /> },
+  args: { ...CHANGE_NOTHING_BUILT, corner: <SettleWays onDone={fn()} onKeep={fn()} doneHint="Settle it where it is." /> },
   play: async ({ canvasElement }) => {
     const card = within(canvasElement)
     await expect(card.getByText('Nothing built')).toBeInTheDocument()
     await userEvent.hover(card.getByText('Nothing built'))
     await expect(card.getByRole('button', { name: 'Done' })).toBeInTheDocument()
-    await expect(card.queryByRole('button', { name: 'Keep for later' })).not.toBeInTheDocument()
+    await expect(card.getByRole('button', { name: 'Keep for later' })).toBeInTheDocument()
     await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
+  },
+}
+/**
+ * A prototype that finished on its branch, with no pull request: Keep for later in its corner, as any kind of task has, and
+ * no Done, as it settles by being accepted or discarded.
+ */
+export const PrototypeOnItsBranch: Story = {
+  args: {
+    status: TaskStatus.Yours,
+    word: 'Ready to accept',
+    kind: TaskKind.Change,
+    at: 'Nov 18',
+    title: 'Prototype: a terminal and runs you can see',
+    object: <BranchChip name="althar/prototype-a-terminal-and-runs" add={642} del={38} />,
+    corner: <SettleWays onKeep={fn()} keepHint="Take it out of Needs you as it is. Writing to it brings it back." />,
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await userEvent.hover(card.getByText('Ready to accept'))
+    await expect(card.getByRole('button', { name: 'Keep for later' })).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument()
   },
 }
 /** Finished: its Done and Keep for later in its corner, shown as it is hovered or has the focus. */
@@ -778,7 +799,90 @@ export const StartedByALead: Story = {
     startedBy: 'Prototype the browser',
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Started by Prototype the browser')).toBeVisible()
+    await expect(within(canvasElement).getByText('Started by').closest('p')).toHaveTextContent('Started by Prototype the browser')
+  },
+}
+
+/** The line is one line high and stays inside its card. */
+async function expectOneLine(line: HTMLElement) {
+  const card = line.closest('article')!.getBoundingClientRect()
+  await expect(line.getBoundingClientRect().height).toBeLessThan(18)
+  for (const el of [line, ...line.querySelectorAll(':scope > *, :scope > * > *:not([role=listitem])')]) {
+    const box = el.getBoundingClientRect()
+    // what overflows is clipped by its own box, so the box itself must sit in the card
+    await expect(box.right).toBeLessThanOrEqual(card.right)
+  }
+  for (const el of line.querySelectorAll('span, button')) {
+    if (el.scrollWidth > el.clientWidth)
+      await expect(getComputedStyle(el).textOverflow === 'ellipsis' || getComputedStyle(el).overflow === 'hidden').toBe(true)
+  }
+}
+
+/** A long parent title never makes the foot run to two lines: "Started by" stays whole and the title is cut with "…". */
+export const StartedByALongTitle: Story = {
+  args: {
+    ...StartedByALead.args,
+    title: "Prototype: redesign the issue switch under a task's issue",
+    startedBy: 'Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
+    onOpenStartedBy: fn(),
+  },
+  decorators: [(Story) => <div style={{ width: 220 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const link = within(canvasElement).getByRole('button', { name: /Only-part-of/ })
+    await expectOneLine(link.closest('p')!)
+    await expect(link.scrollWidth).toBeGreaterThan(link.clientWidth)
+    await expect(link.closest('p')).toHaveAttribute(
+      'title',
+      'Started by Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
+    )
+  },
+}
+
+/** The same without a link, at the narrowest a lane goes: the label stays whole, the title gives way. */
+export const StartedByALongTitleNoLink: Story = {
+  args: { ...StartedByALongTitle.args, onOpenStartedBy: undefined },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const label = within(canvasElement).getByText('Started by')
+    await expectOneLine(label.closest('p')!)
+    await expect(label.scrollWidth).toBe(label.clientWidth)
+  },
+}
+
+/** An automation's long name and a changes count with marks: each footer keeps to one line inside the card. */
+export const LongFooters: Story = {
+  args: {
+    ...StartedByALead.args,
+    startedBy: undefined,
+    from: 'A nightly automation with a name much too long for a narrow lane to hold',
+    changes: 3,
+    marks: [
+      { name: 'a', says: 'a: checks passing', tone: 'ok' },
+      { name: 'b', says: 'b: checks failing', tone: 'ok' },
+    ],
+  },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const from = within(canvasElement).getByText(/A nightly automation/)
+    await expectOneLine(from.closest('p')!)
+    await expect(from.closest('p')).toHaveAttribute('title', expect.stringContaining('A nightly automation'))
+    await expectOneLine(within(canvasElement).getByText('3 changes').closest('p')!)
+  },
+}
+
+/** More marks than the card is wide: the row stays one line and inside the card; each mark keeps its meaning on hover. */
+export const CrowdedMarks: Story = {
+  args: {
+    ...StartedByALead.args,
+    startedBy: undefined,
+    changes: 40,
+    marks: Array.from({ length: 40 }, (_, at) => ({ name: `c${at}`, says: `c${at}: checks passing`, tone: 'ok' as const })),
+  },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const row = within(canvasElement).getByText('40 changes').closest('p')!
+    await expectOneLine(row)
+    await expect(within(row).getAllByRole('listitem')[0]).toHaveAttribute('title', 'c0: checks passing')
   },
 }
 
@@ -824,3 +928,32 @@ export const BranchWithPictures: Story = {
 }
 export const PullRequestWithPictures: Story = { args: CHANGE_PR_PICTURES }
 export const RepliedWithPictures: Story = { args: CHANGE_REPLIED_PICTURES }
+
+/** A card's foot where Althar couldn't look at a conflict for a git failure, with what git said. */
+const unsentFoot = (why: string): Story => ({
+  args: {
+    ...CHANGE_CONFLICT,
+    why: undefined,
+    foot: (
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          {why}
+        </Fact>
+      </FactLine>
+    ),
+    next: (
+      <NextStep signal onPress={resolveNow}>
+        Resolve now
+      </NextStep>
+    ),
+  },
+})
+export const CouldntFetch: Story = unsentFoot(
+  "Althar couldn’t fetch main to merge it with the branch here: could not read Username for 'https://github.com': terminal prompts disabled.",
+)
+export const CouldntFetchDark: Story = { ...CouldntFetch, globals: { theme: 'dark' } }
+/** Git's line, as when the folder's link to its repository broke. */
+export const CouldntRead: Story = unsentFoot(
+  'Althar couldn’t read the branch here: gitfile does not point to a valid repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
+)
+export const CouldntReadDark: Story = { ...CouldntRead, globals: { theme: 'dark' } }

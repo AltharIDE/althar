@@ -16,6 +16,7 @@ import {
 } from '@althar/provider-adapters'
 import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { afterEach } from 'vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -42,7 +43,9 @@ import {
   TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
+import { forgetTold } from '../src/forks'
 import { Projects } from '../src/Projects'
+import { Terminals } from '../src/Terminals'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
@@ -1139,6 +1142,21 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('ships each task by its own route until the person makes one their default, and back', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.isUndefined((yield* client.GetSettings({})).shipRoute)
+        yield* client.SetShipRoute({ commandId: commandId(), route: { review: false, far: 'merge' } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).shipRoute, { review: false, far: 'merge' })
+        yield* client.SetShipRoute({ commandId: commandId(), route: { review: true, far: 'ready' } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).shipRoute, { review: true, far: 'ready' })
+        yield* client.SetShipRoute({ commandId: commandId(), route: null })
+        assert.isUndefined((yield* client.GetSettings({})).shipRoute)
+      }),
+    ),
+  )
+
   it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1330,6 +1348,56 @@ describe('project rules, through the API', () => {
     ),
   )
 
+  it.live('suggests the review bots that spoke on its tasks’ pull requests, and trusts one from a task, the person’s', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, store } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        // As listening records each review or triage bot the first time it speaks on a pull request (code-hosts § Review and triage bots): the latest first.
+        const spoke = (n: number, login: string, name: string) =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) =>
+                sql`INSERT INTO observations ${sql.insert({
+                  id: `obs_${String(n).padStart(32, '0')}`,
+                  projectId: project.id,
+                  subjectType: 'external_link',
+                  subjectId: `link_${n}`,
+                  kind: 'bot_spoke',
+                  payload: JSON.stringify({ id: `bot:${login}`, login, name }),
+                  source: 'github',
+                  observedAt: `2026-11-0${n}T10:00:00.000Z`,
+                })}`,
+            ),
+          )
+        yield* spoke(1, 'claude[bot]', 'Claude')
+        yield* spoke(2, 'coderabbitai[bot]', 'CodeRabbit')
+        yield* spoke(3, 'claude[bot]', 'Claude')
+        const before = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(before.trustedBots, [])
+        assert.deepStrictEqual(before.suggestedBots, [
+          { login: 'claude[bot]', name: 'Claude' },
+          { login: 'coderabbitai[bot]', name: 'CodeRabbit' },
+        ])
+        // Trusted from the thread where it spoke, by any case, once: it is no longer suggested.
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'CodeRabbitAI[bot]' })
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'coderabbitai[bot]' })
+        const after = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(after.trustedBots, [{ login: 'coderabbitai[bot]', name: 'CodeRabbit' }])
+        assert.deepStrictEqual(after.suggestedBots, [{ login: 'claude[bot]', name: 'Claude' }])
+        assert.strictEqual(after.revision, before.revision + 1)
+        // Untrusted from the settings, it is suggested again.
+        const untrusted = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, trustedBots: [] })
+        assert.deepStrictEqual(
+          untrusted.suggestedBots.map((bot) => bot.login),
+          ['claude[bot]', 'coderabbitai[bot]'],
+        )
+      }),
+    ),
+  )
+
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1350,6 +1418,8 @@ describe('project rules, through the API', () => {
           resolveConflicts: true,
           pushCommits: true,
           postScreenshots: false,
+          trustedBots: [],
+          suggestedBots: [],
           leadsReachWeb: true,
           usageLimit: 'move',
           rotateAccounts: true,
@@ -1358,6 +1428,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // Its pull request is linked on the issue it came from, until the person says.
+          linkIssues: true,
           // A small change's review after it merges brings back only blocking and major findings, until the person says.
           afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
@@ -1782,6 +1854,8 @@ describe('a project’s menu, through the API', () => {
         assert.deepStrictEqual(docs?.fork, {
           fork: 'you/refund-docs',
           upstream: 'meridian/refund-docs',
+          remote: 'upstream',
+          by: 'names',
           target: 'fork',
           canPush: null,
           offer: false,
@@ -2047,6 +2121,192 @@ describe('a fork’s branches upstream, through the API', () => {
   )
 })
 
+describe('a fork as its host says, through the API', () => {
+  afterEach(() => forgetTold())
+
+  /** A clone of you/site with these remotes besides origin, opened with GitHub connected, its host saying what it was forked from. */
+  const siteOpened = (
+    remotes: ReadonlyArray<string>,
+    parent: ReadonlyArray<string> | null | undefined,
+    more?: { readonly source?: ReadonlyArray<string> },
+  ) =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'site'])
+      github.addRepository(['meridian', 'site'])
+      if (parent !== undefined) github.forkFrom(['you', 'site'], parent, more)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ site: [`origin=${HOST}/you/site.git`, ...remotes] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'site')) })
+      const read = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one)
+      return { client, github, projectId: project.id, path: join(folder, 'site'), read }
+    })
+
+  const remotesOf = (path: string) => execFileSync('git', ['remote', '-v'], { cwd: path }).toString()
+
+  it.live('finds the repository it was forked from among its remotes by its address, whatever it is called', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`base=${HOST}/Meridian/site`, `dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { fork: 'you/site', upstream: 'meridian/site', remote: 'base', by: 'host', target: 'fork' })
+      }),
+    ),
+  )
+
+  it.live('offers to add it where none of its remotes has it, and adds it beside them, leaving theirs as they were', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([`dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null, by: 'host' })
+        const had = remotesOf(path)
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path),
+          `${had}upstream\t${HOST}/meridian/site.git (fetch)\nupstream\t${HOST}/meridian/site.git (push)\n`,
+        )
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        // Asked again, there is nothing more to add.
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path)
+            .split('\n')
+            .filter((line) => line.startsWith('upstream')).length,
+          2,
+        )
+      }),
+    ),
+  )
+
+  it.live('adds it once when asked several times at once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        const repositoryId = (yield* read)?.id ?? ''
+        yield* Effect.all(
+          Array.from({ length: 5 }, () => client.AddParentRemote({ commandId: commandId(), projectId, repositoryId })),
+          {
+            concurrency: 'unbounded',
+          },
+        )
+        assert.strictEqual(execFileSync('git', ['remote'], { cwd: path }).toString(), 'origin\nupstream\n')
+      }),
+    ),
+  )
+
+  it.live('sets the default branch of the remote it adds, where it could fetch it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        // The parent's address reaches a repository on disk here, as a host's would.
+        const bare = mkdtempSync(join(tmpdir(), 'althar-parent-'))
+        execFileSync('git', ['clone', '-q', '--bare', path, bare])
+        execFileSync('git', ['config', `url.${bare}.insteadOf`, `${HOST}/meridian/site.git`], { cwd: path })
+        // As a git before 2.48 fetches, which leaves a new remote without its HEAD.
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            Object.assign(process.env, {
+              GIT_CONFIG_COUNT: '1',
+              GIT_CONFIG_KEY_0: 'remote.upstream.followRemoteHEAD',
+              GIT_CONFIG_VALUE_0: 'never',
+            })
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env.GIT_CONFIG_COUNT
+              delete process.env.GIT_CONFIG_KEY_0
+              delete process.env.GIT_CONFIG_VALUE_0
+            }),
+        )
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: (yield* read)?.id ?? '' })
+        // Its HEAD, so a task started from it needn't ask the remote for its default branch.
+        const current = execFileSync('git', ['branch', '--show-current'], { cwd: path }).toString().trim()
+        assert.strictEqual(
+          execFileSync('git', ['symbolic-ref', 'refs/remotes/upstream/HEAD'], { cwd: path }).toString().trim(),
+          `refs/remotes/upstream/${current}`,
+        )
+      }),
+    ),
+  )
+
+  it.live('takes `parent` for it where `upstream` names another repository', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says the root of its forks: meridian/site, so someone/site is neither its parent nor its root.
+        const { client, projectId, path, read } = yield* siteOpened([`upstream=${HOST}/someone/site.git`], ['meridian', 'site'], {
+          source: ['meridian', 'site'],
+        })
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null })
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.include(remotesOf(path), `upstream\t${HOST}/someone/site.git (fetch)`)
+        assert.include(remotesOf(path), `parent\t${HOST}/meridian/site.git (fetch)`)
+        assert.deepInclude((yield* read)?.fork, { remote: 'parent' })
+      }),
+    ),
+  )
+
+  it.live('is no fork where its host says it isn’t and its remotes don’t, and nothing is added', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, read } = yield* siteOpened([`base=${HOST}/meridian/site.git`], null)
+        const one = yield* read
+        assert.isNull(one?.fork)
+        const refused = yield* Effect.flip(client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: one?.id ?? '' }))
+        assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+
+  it.live('goes by its remotes’ names where its host can’t be reached, and doesn’t ask it again on every read', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], undefined)
+        const asks = () => github.calls.filter((call) => call === 'repository').length
+        github.failNext('repository', 'unreachable')
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
+        // One that failed, or hung until it was given up on, holds up the next reads no more: it is asked again only later.
+        const asked = asks()
+        github.forkFrom(['you', 'site'], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'names' })
+        assert.strictEqual(asks(), asked)
+      }),
+    ),
+  )
+
+  it.live('asks its host once, and goes by what it said until its answer is old', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        const asked = github.calls.filter((call) => call === 'repository').length
+        yield* read
+        assert.strictEqual(github.calls.filter((call) => call === 'repository').length, asked)
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork, takes its `upstream` at the root of its forks for the repository it goes to', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says you/site is a fork of ninemate/site, itself forked from meridian/site, which the clone has as upstream.
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'], { source: ['meridian', 'site'] })
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'host' })
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork whose root its host doesn’t say, takes its `upstream` as its remotes’ names do', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'])
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
+      }),
+    ),
+  )
+})
+
 describe('the coordinator, through the API', () => {
   it.live('plans what the person asks for, and takes their changes to the plan', () =>
     Effect.scoped(
@@ -2062,7 +2322,7 @@ describe('the coordinator, through the API', () => {
           disposition: 'after_current',
         })
         const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
-          snapshot.items.some((item) => item.kind === 'task'),
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
         )
         const card = planned.items.find((item) => item.kind === 'task')
         const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
@@ -2260,19 +2520,24 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        // A change with work on it can't be marked done.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
         assert.sameDeepMembers(yield* phases, [
-          ['Which partners still call v1', 'kept'],
+          ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Marked done, it settles.
+        // Kept for later, both are out of Needs you: the plain task, and the change on its branch, with no pull request open.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Make the sketch real', 'kept'],
+        ])
+        // Marked done, the plain task settles.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'settled'],
-          ['Make the sketch real', 'ready'],
+          ['Make the sketch real', 'kept'],
         ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
@@ -2377,7 +2642,8 @@ describe('the coordinator, through the API', () => {
         )
         // The window's interrupt: the conflict is the person's, as the lead left it, and the lead isn't asked again.
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
-        const [interrupted] = yield* rounds()
+        // Recorded behind the press, which answers once the lead is told: the round is the person's as that is done.
+        const [interrupted] = yield* until(rounds(), ([one]) => one?.state !== 'resolving')
         assert.strictEqual(interrupted?.state, 'failed')
         assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
         const thread = yield* until(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
@@ -2410,7 +2676,8 @@ describe('the coordinator, through the API', () => {
         )
         // Whether or not a lead is there to interrupt.
         yield* Effect.exit(client.Interrupt({ commandId: commandId(), threadId: task.threadId }))
-        assert.deepStrictEqual((yield* rounds()).find((round) => round.id === checking)?.state, 'resolved')
+        const handed = yield* until(rounds(), (all) => all.find((round) => round.id === checking)?.state !== 'checking')
+        assert.deepStrictEqual(handed.find((round) => round.id === checking)?.state, 'resolved')
       }),
     ),
   )
@@ -2490,7 +2757,7 @@ describe('the coordinator, through the API', () => {
         // So does stopping its lead alone.
         const checkingAgain = yield* waiting()
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
-        assert.deepStrictEqual(yield* stateOf(checkingAgain), [{ state: 'resolved' }])
+        assert.deepStrictEqual(yield* until(stateOf(checkingAgain), ([one]) => one?.state !== 'checking'), [{ state: 'resolved' }])
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
@@ -2714,6 +2981,8 @@ describe('code hosts and trackers, through the API', () => {
           description: '[lead:finish] [lead:edit]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
           issue: 'MER-231',
+          // The same issue again, in another case, is tied once.
+          issues: ['mer-231', ' '],
         })
         assert.strictEqual(started.branch, 'althar/mer-231-rate-limit-refunds')
         const thread = yield* until(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
@@ -2734,6 +3003,18 @@ describe('code hosts and trackers, through the API', () => {
         assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        // Its issue switched to only part of, its first where none is named: its pull request says so in the words trackers read.
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: true })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Part of [MER-231]('),
+        )
+        const tie = (yield* client.GetThread({ threadId: started.threadId })).task.fromIssues?.[0]?.link ?? ''
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: false, issue: tie })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Issue: [MER-231]('),
+        )
         // On the board it is ready to accept, its pull request with it.
         const ready = (yield* client.GetBoard({ projectId: project.id })).tasks.find((task) => task.taskId === started.id)
         assert.deepInclude(ready, { phase: 'ready', changed: null })
@@ -2884,7 +3165,7 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
-      "git worktree didn't work: fatal: a branch named x already exists.",
+      "git worktree didn't work: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')
@@ -3730,6 +4011,50 @@ describe('a project set up where it starts, through the API', () => {
           reason: 'NotFound',
         })
         assert.isFalse(existsSync(join(outside, '.git')))
+      }),
+    ),
+  )
+})
+
+describe('terminals, through the API', () => {
+  it.live('are the window’s alone: a paired device opens, reads, types into, resizes and closes none', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({ sender: { kind: 'paired_device', deviceId: 'phone-1' } })
+        const projectId = yield* Effect.provideContext(
+          Effect.gen(function* () {
+            const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+            return opened.projectId
+          }),
+          context,
+        )
+        const refused = <A, E>(call: Effect.Effect<A, E>) =>
+          Effect.map(Effect.flip(call), (error) => (error instanceof ApiError ? error.reason : String(error)))
+        const reasons = [
+          yield* refused(client.OpenTerminal({ commandId: commandId(), id: 'term_phone1', projectId, taskId: null, cols: 80, rows: 24 })),
+          yield* refused(client.ListTerminals({ projectId })),
+          yield* refused(Stream.runDrain(client.AttachTerminal({ id: 'term_phone1' }))),
+          yield* refused(client.WriteTerminal({ id: 'term_phone1', data: 'echo hi\n' })),
+          yield* refused(client.ResizeTerminal({ id: 'term_phone1', cols: 100, rows: 30 })),
+          yield* refused(client.CloseTerminal({ commandId: commandId(), id: 'term_phone1' })),
+        ]
+        assert.deepStrictEqual(reasons, Array(6).fill('Forbidden'))
+        // The window's own calls go through: to the shells it has, and to none it hasn't.
+        const { client: window } = yield* connected({})
+        assert.deepStrictEqual(yield* window.ListTerminals({ projectId }), [])
+        const unknown = yield* Effect.flip(Stream.runDrain(window.AttachTerminal({ id: 'term_none' })))
+        assert.strictEqual(unknown.reason, 'NotFound')
+        yield* window.CloseTerminal({ commandId: commandId(), id: 'term_none' })
+        // No shell was started for it.
+        assert.deepStrictEqual(
+          yield* Effect.provideContext(
+            Effect.gen(function* () {
+              return yield* (yield* Terminals).ofProject(projectId)
+            }),
+            context,
+          ),
+          [],
+        )
       }),
     ),
   )

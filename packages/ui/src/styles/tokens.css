@@ -193,6 +193,33 @@
   --named-gutter: #f5e2a0;
   --named-edge: #d6a72a;
   --named-ink: #5c4300;
+
+  /* ---- The person's terminals -------------------------------------------
+     A terminal in the window's own paper, its sixteen colours the syntax
+     inks' kin: each readable on that paper at 4.5:1, the bright ones a step
+     on, and white a grey that still shows on white, as an editor's light
+     terminal has it. Found matches in the named line's yellow.              */
+  --terminal-paper: #ffffff;
+  --terminal-selection: rgba(122, 63, 240, 0.2);
+  --terminal-selection-away: rgba(20, 20, 28, 0.09);
+  --terminal-match: #f5e2a0;
+  --terminal-match-chosen: #e4b53e;
+  --ansi-black: #141417;
+  --ansi-red: #b8382a;
+  --ansi-green: #237a3a;
+  --ansi-yellow: #8a6200;
+  --ansi-blue: #1a56a6;
+  --ansi-magenta: #a3217b;
+  --ansi-cyan: #0b6f73;
+  --ansi-white: #6b6a70;
+  --ansi-bright-black: #63636b;
+  --ansi-bright-red: #d1452f;
+  --ansi-bright-green: #2e8c46;
+  --ansi-bright-yellow: #a37400;
+  --ansi-bright-blue: #2f6fd0;
+  --ansi-bright-magenta: #c13a97;
+  --ansi-bright-cyan: #128287;
+  --ansi-bright-white: #8d8c92;
   /* a word over a file's lines about what they are: as they were, past the end, cut */
   --note-paper: #fdf7e3;
   --note-line: #efe2b6;

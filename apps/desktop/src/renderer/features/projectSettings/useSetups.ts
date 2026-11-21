@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 
-import type { RepositorySetup } from '@althar/contracts'
+import type { KeptSetup, RepositorySetup } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys } from '../../data/reads'
@@ -24,15 +24,16 @@ import { useServices } from '../../data/services'
 
 export interface SetupsModel {
   /** The setup to show for a repository: the person's newest change while it is on its way, else the one kept. */
-  readonly shown: (repositoryId: string, kept: RepositorySetup | null) => RepositorySetup | null
-  readonly change: (repositoryId: string, setup: RepositorySetup) => void
+  readonly shown: (repositoryId: string, kept: KeptSetup | null) => KeptSetup | null
+  /** Keeps the person's edit of a repository's setup, or with null clears it for a lead to record again. */
+  readonly change: (repositoryId: string, setup: RepositorySetup | null) => void
   /** Why the last change didn't hold. */
   readonly failed: string | null
 }
 
 interface Held {
   /** Each repository's newest change, while it is on its way. */
-  readonly pending: ReadonlyMap<string, RepositorySetup>
+  readonly pending: ReadonlyMap<string, KeptSetup | null>
   readonly failed: string | null
 }
 
@@ -70,8 +71,11 @@ export const useSetups = (projectId: string): SetupsModel => {
   )
   const { pending, failed } = useSyncExternalStore(subscribe, () => store.held)
   const change = useCallback(
-    (repositoryId: string, setup: RepositorySetup) => {
-      hold(store, (held) => ({ pending: new Map(held.pending).set(repositoryId, setup), failed: null }))
+    (repositoryId: string, setup: RepositorySetup | null) => {
+      hold(store, (held) => ({
+        pending: new Map(held.pending).set(repositoryId, setup === null ? null : { ...setup, by: 'person' }),
+        failed: null,
+      }))
       const before = store.queues.get(repositoryId)
       const turn = (before?.turn ?? 0) + 1
       const last = () => store.queues.get(repositoryId)?.turn === turn
@@ -93,6 +97,9 @@ export const useSetups = (projectId: string): SetupsModel => {
     },
     [cache, client, projectId, store],
   )
-  const shown = useCallback((repositoryId: string, kept: RepositorySetup | null) => pending.get(repositoryId) ?? kept, [pending])
+  const shown = useCallback(
+    (repositoryId: string, kept: KeptSetup | null) => (pending.has(repositoryId) ? (pending.get(repositoryId) ?? null) : kept),
+    [pending],
+  )
   return { shown, change, failed }
 }

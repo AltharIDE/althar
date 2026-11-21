@@ -4,7 +4,7 @@ import { commandDown, type Dictation, type DictationState as TrayState, Dictatio
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
-import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
+import { draftOf, setDraftDictated, setDraftText, useDraftWords } from '../drafts'
 import { joined, live } from './live'
 import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
 import { type Record, type Recorded, record as recordMicrophone } from './recorder'
@@ -60,6 +60,8 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
 const LONGEST = 5 * 60
 /* Shorter than this is a tap on the button, not something said. */
 const SHORTEST = 0.3
+/* Retry a failed pass after stopping, while the recording is still being written down. */
+const RETRY_DELAYS = [100, 250]
 type Problem =
   | { readonly kind: 'denied' }
   | { readonly kind: 'noMicrophone' }
@@ -201,7 +203,21 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
   held.writer = null
   changeSession(thread, { phase: 'writing' })
   try {
-    const text = now !== null ? await now.finish(said) : await (held.transcribe ?? nothingToWriteWith)(said)
+    const transcribe = held.transcribe
+    if (transcribe === null) throw new Error('Nothing to write it down with.')
+    const retry = async (recorded: Recorded) => {
+      let attempt = 0
+      for (;;) {
+        try {
+          return await transcribe(recorded)
+        } catch (error) {
+          const delay = RETRY_DELAYS[attempt++]
+          if (delay === undefined) throw error
+          await new Promise((resolve) => setTimeout(resolve, delay))
+        }
+      }
+    }
+    const text = now !== null ? await now.finish(said, retry) : await retry(said)
     // The window forgot the thread's dictation meanwhile: nothing to land in.
     if (handlesOf(thread) !== held) return
     // Nothing was heard: nothing to carry either.
@@ -216,8 +232,6 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
     changeSession(thread, (now) => ({ phase: 'idle', interim: '', failed: together(now.failed, said) }))
   }
 }
-
-const nothingToWriteWith = () => Promise.reject(new Error('Nothing to write it down with.'))
 
 const stopClock = (held: Handles) => {
   if (held.clock === null) return
@@ -293,7 +307,8 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   const [asking, setAsking] = useState(false)
   const [problem, setProblem] = useState<Problem | null>(null)
   const { phase, seconds, levels, interim, at, failed, arrived } = useSession(key)
-  const draft = useDraftOf(key).text
+  // Whether the draft is still what was written down while the person was away: the screen isn't drawn again for each word typed.
+  const arrivedAsIs = useDraftWords(key, (text) => arrived !== null && arrived === text)
   const vocabulary = useRef<{ readonly projectId: string | null; readonly words: Vocabulary }>({ projectId: null, words: NO_VOCABULARY })
   const prepared = useRef(false)
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
@@ -666,7 +681,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       kbd: SHORTCUT,
       busy: phase === 'writing',
       // Written down while the person was away, and the draft not changed since.
-      arrived: arrived !== null && arrived === draft,
+      arrived: arrivedAsIs,
       // What couldn't be written down, by identity: sending while it listens waits, and holds back if this fails.
       failed,
       expanded: shown !== null,

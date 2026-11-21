@@ -49,6 +49,8 @@ export interface RunTargetRun {
   code?: number | null
   /** It was stopped, not ended by itself. */
   stopped?: boolean
+  /** Starting, but no run exists yet: there is nothing to stop. */
+  pending?: boolean
   /** Why it couldn't be fetched, in the runtime's words. */
   why?: string
 }
@@ -92,6 +94,8 @@ export interface RunButtonText {
   from: Record<RunFrom, string>
   add: string
   edit: string
+  /** A terminal, where Run runs. */
+  terminal: string
   /** With nothing known to run. */
   emptyLabel: string
   emptyNote: string
@@ -131,10 +135,11 @@ export const runButtonText: RunButtonText = {
   },
   add: 'Add something to run',
   edit: 'Edit the list',
+  terminal: 'Open a terminal',
   emptyLabel: 'Something to run',
   emptyNote: 'Althar runs it itself, with no agent, and shows where it answers.',
   ask: 'Ask the coordinator to work it out',
-  askAbout: 'It reads the repository and keeps what is worth running.',
+  askAbout: 'Writes the request in its composer, for you to change or send.',
   scripts: 'Pick from package.json…',
   scriptsAbout: 'Any of the repository’s scripts.',
   type: 'Type a command…',
@@ -155,6 +160,8 @@ export interface RunButtonProps {
   onAdd: (way: AddWay) => void
   /** Opens the whole list, to order, edit and remove. */
   onEdit: () => void
+  /** Opens a terminal where Run runs; without it, the list offers none. */
+  onTerminal?: () => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -257,6 +264,7 @@ export function RunButton({
   onClear,
   onAdd,
   onEdit,
+  onTerminal,
   open,
   defaultOpen,
   onOpenChange,
@@ -348,6 +356,14 @@ export function RunButton({
           setOpened(false)
           onEdit()
         }}
+        {...(onTerminal === undefined
+          ? {}
+          : {
+              onTerminal: () => {
+                setOpened(false)
+                onTerminal()
+              },
+            })}
       />
     </Popover>
   )
@@ -363,6 +379,7 @@ function RunList({
   onClear,
   onAdd,
   onEdit,
+  onTerminal,
 }: {
   targets: readonly RunTarget[]
   t: RunButtonText
@@ -372,6 +389,7 @@ function RunList({
   onClear?: (id: string) => void
   onAdd: () => void
   onEdit: () => void
+  onTerminal?: () => void
 }) {
   const [order] = useState(() => [...targets.filter(busy), ...targets.filter((target) => !busy(target))].map((target) => target.id))
   const long = targets.length > LONG
@@ -446,6 +464,11 @@ function RunList({
         <ActionButton size="small" icon="list" onClick={onEdit}>
           {t.edit}
         </ActionButton>
+        {onTerminal !== undefined && (
+          <ActionButton size="small" icon="terminal" onClick={onTerminal}>
+            {t.terminal}
+          </ActionButton>
+        )}
       </div>
     </div>
   )
@@ -518,8 +541,8 @@ function Line({
     return row({
       glyph: <Spinner size="small" />,
       state: <span className={s.quiet}>{run.state === 'fetching' ? t.fetching : t.starting}</span>,
-      // A fetch can't be stopped; a start can.
-      ...(run.state === 'starting'
+      // A fetch can't be stopped; a start can, once there is one.
+      ...(run.state === 'starting' && run.pending !== true
         ? {
             acts: (
               <ActionButton size="small" aria-label={`${t.stop} ${name}`} onClick={onStop}>

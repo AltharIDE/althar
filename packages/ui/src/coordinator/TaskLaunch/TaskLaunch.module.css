@@ -153,6 +153,11 @@
     background-size 340ms var(--ease-out),
     color 240ms var(--ease-out);
 }
+/* Discarded before it began: it stays where it was, quieter. */
+.discarded .roster,
+.discarded .title {
+  opacity: 0.6;
+}
 .struck {
   color: var(--t-3);
   background-size: 100% 1px;
@@ -379,18 +384,48 @@
     filter: blur(3px);
   }
 }
+/* The light is a copy of the words in full ink (the sheen's ::before, from its data-words), seen through a soft-edged window
+   0.72 of their width that glides across them while the copy inside moves back as far, so the words stand still and only
+   transforms run, which the compositor draws. Clipped, so the window's travel past them adds nothing to scroll. */
 .going {
-  color: transparent;
-  background: linear-gradient(90deg, var(--t-4) 0 38%, var(--t-1) 50%, var(--t-4) 62% 100%) 0 0 / 300% 100%;
-  background-clip: text;
-  animation: shimmer 1.9s linear infinite;
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+  color: var(--t-4);
 }
-@keyframes shimmer {
+.sheen {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 72%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 50%, transparent);
+  pointer-events: none;
+  user-select: none;
+  animation: sweep 1.9s linear infinite;
+}
+.sheen::before {
+  content: attr(data-words);
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(100% / 0.72);
+  color: var(--t-1);
+  animation: stay 1.9s linear infinite;
+}
+/* the light's middle from half the words' width before them to one and a half after their start, as the gradient it replaces moved */
+@keyframes sweep {
   from {
-    background-position: 100% 0;
+    transform: translateX(calc(-86% / 0.72));
   }
   to {
-    background-position: 0 0;
+    transform: translateX(calc(114% / 0.72));
+  }
+}
+@keyframes stay {
+  from {
+    transform: translateX(86%);
+  }
+  to {
+    transform: translateX(-114%);
   }
 }
 .phase {
@@ -446,7 +481,36 @@
     animation: none !important;
     transition: none !important;
   }
+  /* the words still, in their own ink */
+  .sheen {
+    display: none;
+  }
   .pulse {
     display: none;
   }
+}
+
+/* A task it waits for, as a node on the line: its glyph in the seat, its arc going slowly round while it runs. */
+.blockerNode {
+  color: var(--t-2);
+}
+.blockerNode[data-state='choosing'] .arc {
+  animation-duration: 2.4s;
+}
+.blockerNode[data-stands='stuck'],
+.blockerNode[data-stands='abandoned'] {
+  border-color: color-mix(in oklab, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+.stands {
+  font-weight: 450;
+  color: var(--t-2);
+}
+.stands[data-stands='working'],
+.stands[data-stands='review'] {
+  color: var(--live);
+}
+.stands[data-stands='stuck'],
+.stands[data-stands='abandoned'] {
+  color: var(--danger);
 }

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, toConversation, showPanes } from './support'
+import { connectGitHub, launch, openFirstProject, say, SHIP_ON_CARD, showPanes, toConversation } from './support'
 
 /*
  * A task goes back to work, and ships again (ADR-034), in a real window
@@ -182,14 +182,14 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
+    await page.getByRole('button', { name: SHIP_ON_CARD }).click()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
 
     // Then more in api: web's pull request open, to mark ready and accept, beside api's next, to open.
     commitIn(api, 'More for api')
     await again()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: SHIP_ON_CARD })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-mixed-task.png', animations: 'disabled' })
@@ -211,7 +211,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
     await again()
     await expect(page.getByText('3 commits aren’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
+    await page.getByRole('button', { name: SHIP_ON_CARD }).click()
     await toConversation(page)
     await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
     await outputs()
@@ -223,7 +223,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     expect(git(remotes.web ?? '', 'for-each-ref', '--format=%(objectname)', `refs/heads/${branch}-2`)).toBe('')
     expect(git(web, 'log', '-1', '--format=%s')).toBe('More for web')
     await expect(page.getByText('Before this: api PR #1, merged on GitHub.')).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: SHIP_ON_CARD })).toHaveCount(0)
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-partial-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Back to api' }).click()
@@ -242,7 +242,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await expect(page.getByRole('link', { name: 'Open web #4 on GitHub' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Open api #3 on GitHub' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark both ready for review' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: SHIP_ON_CARD })).toHaveCount(0)
     expect(
       execFileSync('git', ['--git-dir', remotes.web ?? '', 'log', '-1', '--format=%s', `${branch}-2`], { encoding: 'utf8' }).trim(),
     ).toBe('More for web')

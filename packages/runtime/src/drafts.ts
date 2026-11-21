@@ -52,6 +52,10 @@ export interface Draft {
   readonly planned: boolean
   /** The person held it while it was drafted: its plan comes held. */
   readonly held: boolean
+  /** Its plan's call failed and no other has begun: it waits for a plan that may not come, and says so rather than sizing it. */
+  readonly unplanned: boolean
+  /** Its task was discarded while it was drafted: it says so, and nothing of it goes on. */
+  readonly discarded: boolean
 }
 
 /** A call being followed: which draft it writes. */
@@ -83,6 +87,8 @@ const blank = (key: string): Draft => ({
   preset: null,
   planned: false,
   held: false,
+  unplanned: false,
+  discarded: false,
 })
 
 const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
@@ -123,7 +129,7 @@ export const callBegan = (state: Drafts, callId: string, tool: 'draft_task' | 'p
   const draft = waiting.length === 1 ? (waiting[0]?.key ?? null) : null
   calls.set(callId, { tool, draft })
   const next = { ...state, calls }
-  return draft === null ? next : change(next, draft, (one) => ({ ...one, planning: true }))
+  return draft === null ? next : change(next, draft, (one) => ({ ...one, planning: true, unplanned: false }))
 }
 
 /**
@@ -172,6 +178,7 @@ export const inputWritten = (
   next = change(next, key, (draft) => ({
     ...draft,
     planning: true,
+    unplanned: false,
     ...(preset === undefined ? {} : { preset }),
     ...(review === null ? { noReview: true, review: null } : {}),
   }))
@@ -189,7 +196,10 @@ export const resolved = (state: Drafts, callId: string, step: 'lead' | 'review',
   return change(state, key, (draft) => ({ ...draft, [step]: who, ...(step === 'review' ? { noReview: false } : {}) }))
 }
 
-/** A followed call ended: a plan that went through is in its card now; one that failed leaves its draft waiting for another. */
+/**
+ * A followed call ended: a plan that went through is in its card now; one that failed leaves its draft without a plan,
+ * which it says plainly rather than sizing it for ever, until another plan's call begins for it.
+ */
 export const callEnded = (state: Drafts, callId: string, ok: boolean): Drafts => {
   const call = state.calls.get(callId)
   if (call === undefined) return state
@@ -203,7 +213,16 @@ export const callEnded = (state: Drafts, callId: string, ok: boolean): Drafts =>
   return change(next, call.draft, (draft) =>
     ok
       ? { ...draft, planned: true, planning: false }
-      : { ...blank(draft.key), title: draft.title, brief: draft.brief, taskId: draft.taskId, slug: draft.slug },
+      : {
+          ...blank(draft.key),
+          title: draft.title,
+          brief: draft.brief,
+          taskId: draft.taskId,
+          slug: draft.slug,
+          held: draft.held,
+          discarded: draft.discarded,
+          unplanned: true,
+        },
   )
 }
 
@@ -225,5 +244,27 @@ export const drafted = (state: Drafts, task: { readonly taskId: string; readonly
 export const heldDraft = (state: Drafts, key: string): Drafts =>
   state.drafts.some((draft) => draft.key === key && !draft.held) ? change(state, key, (draft) => ({ ...draft, held: true })) : state
 
-/** The turn ended: drafts that never got their plan go (the board shows them as stopped); planned ones are in their cards. */
+/** Its plan is in after all, though its call said otherwise (a preset that didn't apply to a plan proposed): its card has it. */
+export const plannedAnyway = (state: Drafts, taskId: string): Drafts =>
+  state.drafts.some((draft) => draft.taskId === taskId && !draft.planned)
+    ? {
+        ...state,
+        drafts: state.drafts.map((draft) =>
+          draft.taskId === taskId ? { ...draft, planned: true, planning: false, unplanned: false } : draft,
+        ),
+      }
+    : state
+
+/** These tasks were discarded: their drafts say so. Unchanged where none of them is a draft not yet said to be. */
+export const discardedDrafts = (state: Drafts, taskIds: ReadonlySet<string>): Drafts =>
+  state.drafts.some((draft) => draft.taskId !== null && taskIds.has(draft.taskId) && !draft.discarded)
+    ? {
+        ...state,
+        drafts: state.drafts.map((draft) =>
+          draft.taskId !== null && taskIds.has(draft.taskId) ? { ...draft, discarded: true, planning: false } : draft,
+        ),
+      }
+    : state
+
+/** The turn ended: drafts go; their cards in the thread say where each stands, one that never got its plan included. */
 export const turnEnded = (): Drafts => noDrafts

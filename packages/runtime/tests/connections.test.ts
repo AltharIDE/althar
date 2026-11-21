@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { agentGit, Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
@@ -14,7 +15,7 @@ import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Con
 import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
-import { type Sealer, Secrets, SecretsUnavailable } from '../src/Secrets'
+import { KEPT_OPEN, type Sealer, Secrets, SecretsUnavailable } from '../src/Secrets'
 import { fakeAgents, fakeConnectors, until } from './support'
 
 /*
@@ -458,6 +459,9 @@ describe('a connection', () => {
       assert.strictEqual(connection.webUrl, 'https://git.meridian.dev')
       assert.isNull(yield* connections.hostOf(['https://github.com/meridian/api.git', '/a/local/path']))
       assert.deepStrictEqual((yield* connections.hostOf(['git@git.meridian.dev:meridian/api.git']))?.path, ['meridian', 'api'])
+      // It says which remote reached it, as given: a mirror's where origin's host isn't connected, whose answer is none of origin's.
+      const mirrored = yield* connections.hostOf(['https://github.com/you/api.git', 'git@git.meridian.dev:you/api.git'])
+      assert.strictEqual(mirrored?.remote, 'git@git.meridian.dev:you/api.git')
       // Where a remote is: a hosted service Althar knows, an instance the person connected, a host it doesn't know, or none.
       assert.deepStrictEqual(yield* connections.placeOf('https://github.com/meridian/api.git'), {
         host: 'github.com',
@@ -481,6 +485,69 @@ describe('a connection', () => {
       assert.isNull(yield* connections.resolve('https://example.com/x'))
       assert.strictEqual((yield* connections.resolve('https://git.meridian.dev/meridian/api/pull/3'))?.ref.kind, 'change')
       assert.lengthOf(yield* connections.trackers, 1)
+    }).pipe(
+      Effect.provide(
+        Runtime.layer({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: fakeAgents(),
+          secrets: Secrets.memory(),
+          connectors: fakeConnectors({ github }),
+        }),
+      ),
+    )
+  })
+})
+
+describe('what reads through a connection', () => {
+  it.live('ends before its removal, a removal stopped and made again included, and none starts after', () => {
+    const github = makeFakeService()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const { id } = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId })
+      // A read under way through it, held until the test lets it go.
+      const reading = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      let acted = false
+      const read = yield* Effect.forkChild(
+        connections.whileThere(
+          id,
+          Effect.gen(function* () {
+            yield* Deferred.succeed(reading, undefined)
+            yield* Deferred.await(gate)
+            acted = true
+          }),
+        ),
+      )
+      yield* Deferred.await(reading)
+      // A removal waits for it, and none starts meanwhile; stopped, the connection is there to read through again.
+      const first = yield* Effect.forkChild(connections.remove(id, instance.personId))
+      yield* until(connections.whileThere(id, Effect.void), Option.isNone)
+      yield* Fiber.interrupt(first)
+      assert.isTrue(Option.isSome(yield* connections.whileThere(id, Effect.void)))
+      // The next removal still waits for the read begun before the first.
+      const second = yield* Effect.forkChild(connections.remove(id, instance.personId))
+      yield* until(connections.whileThere(id, Effect.void), Option.isNone)
+      yield* Effect.sleep(Duration.millis(50))
+      assert.isUndefined(second.pollUnsafe(), 'the removal waits for the read under way')
+      assert.isFalse(acted)
+      yield* Deferred.succeed(gate, undefined)
+      assert.isTrue(Option.isSome(yield* Fiber.join(read)))
+      yield* Fiber.join(second)
+      assert.isTrue(acted)
+      assert.lengthOf(yield* connections.list, 0)
+      // Removed, it reads nothing more.
+      assert.isTrue(
+        Option.isNone(
+          yield* connections.whileThere(
+            id,
+            Effect.sync(() => assert.fail('read after its removal')),
+          ),
+        ),
+      )
     }).pipe(
       Effect.provide(
         Runtime.layer({
@@ -1135,7 +1202,80 @@ describe('where sign-ins are kept', () => {
       asked = 0
       assert.deepInclude(yield* Effect.flip(secrets.set('conn_2', 'x')), { reason: 'Install and start a keyring.', keyring: true })
       assert.strictEqual(asked, 1)
-    }).pipe(Effect.provide(Secrets.sealed(folder, flaky)))
+      // Kept open for none of the time, so each read above asked the app.
+    }).pipe(Effect.provide(Secrets.sealed(folder, flaky, { keptOpen: Duration.zero })))
+  })
+
+  /** The app's main process, counting what it is asked to open, and holding an open until the test lets it go where it says. */
+  const counting = () => {
+    let opened = 0
+    let holding: Deferred.Deferred<void> | undefined
+    const sealing: Sealer = {
+      seal: (value) => sealer().seal(value),
+      open: (sealed) =>
+        Effect.suspend(() => {
+          opened += 1
+          return holding === undefined ? sealer().open(sealed) : Effect.andThen(Deferred.await(holding), sealer().open(sealed))
+        }),
+    }
+    return {
+      sealing,
+      opened: () => opened,
+      hold: () => (holding = Deferred.makeUnsafe<void>()),
+      letGo: () => (holding === undefined ? Effect.void : Deferred.succeed(holding, undefined)),
+    }
+  }
+
+  it.effect('keeps a secret it opened open for a few minutes, so a connector’s every call doesn’t ask the app again', () => {
+    const folder = join(mkdtempSync(join(tmpdir(), 'althar-secrets-')), 'secrets')
+    const app = counting()
+    return Effect.gen(function* () {
+      // Kept as it was sealed: read back, nothing is asked of the app.
+      const first = yield* secretsOf(Secrets.sealed(folder, app.sealing))
+      yield* first.set('conn_1', '{"token":"ghp secret"}')
+      assert.strictEqual(yield* first.get('conn_1'), '{"token":"ghp secret"}')
+      assert.strictEqual(app.opened(), 0)
+      // After a restart, the first read opens it, and those after it for a few minutes don't.
+      const secrets = yield* secretsOf(Secrets.sealed(folder, app.sealing))
+      for (let read = 0; read < 3; read++) assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp secret"}')
+      assert.strictEqual(app.opened(), 1)
+      yield* TestClock.adjust(KEPT_OPEN)
+      assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp secret"}')
+      assert.strictEqual(app.opened(), 2)
+      // Removed, as a sign-out removes it: gone at once.
+      yield* secrets.remove('conn_1')
+      assert.isNull(yield* secrets.get('conn_1'))
+      assert.strictEqual(app.opened(), 2)
+    })
+  })
+
+  it.live('never keeps open what an open that began before a change read', () => {
+    const folder = join(mkdtempSync(join(tmpdir(), 'althar-secrets-')), 'secrets')
+    const app = counting()
+    return Effect.gen(function* () {
+      const secrets = yield* secretsOf(Secrets.sealed(folder, app.sealing))
+      yield* secrets.set('conn_1', 'older')
+      const restarted = yield* secretsOf(Secrets.sealed(folder, app.sealing))
+      // An open of the older token is under way as a sign-in keeps a newer one.
+      app.hold()
+      const reading = yield* Effect.forkChild(restarted.get('conn_1'))
+      yield* until(Effect.sync(app.opened), (opened) => opened === 1)
+      yield* restarted.set('conn_1', 'newer')
+      yield* app.letGo()
+      assert.strictEqual(yield* Fiber.join(reading), 'older')
+      // What it read is not what is kept now: the newer one is.
+      assert.strictEqual(yield* restarted.get('conn_1'), 'newer')
+      assert.strictEqual(app.opened(), 1)
+      // An open under way as it is removed keeps nothing either.
+      const again = yield* secretsOf(Secrets.sealed(folder, app.sealing))
+      app.hold()
+      const late = yield* Effect.forkChild(again.get('conn_1'))
+      yield* until(Effect.sync(app.opened), (opened) => opened === 2)
+      yield* again.remove('conn_1')
+      yield* app.letGo()
+      assert.strictEqual(yield* Fiber.join(late), 'newer')
+      assert.isNull(yield* again.get('conn_1'))
+    })
   })
 
   it.effect('in the command-line client, keeps none, and says why', () =>

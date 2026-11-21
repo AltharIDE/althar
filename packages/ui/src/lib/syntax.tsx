@@ -1,14 +1,15 @@
-import type { GrammarState, HighlighterCore, ThemedToken, ThemeRegistration } from 'shiki/core'
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from 'react'
 
+import { type ColourAnswer, type ColourAsk, slices, type Token, type TokenLines, unpack } from './shiki'
+
+export type { Token, TokenLines } from './shiki'
+
 /*
- * A file's colours, by Shiki: the grammars editors use, read with its
- * JavaScript engine (no WebAssembly), each language loaded the first time
- * a file of it shows. The colours are the kit's syntax inks (tokens.css),
- * as CSS variables, so a theme of the kit's own draws them: what the
- * language says, what is written out, what is called, a type, a comment,
- * punctuation. Not the product's violet or cobalt, nor a change's green or
- * red, and each readable on the yellow of the lines an agent named.
+ * A file's colours, as the window shows them. They are worked out off the
+ * window's thread, in a worker (shiki.ts says how), each text once however
+ * many places show it, and the last few are kept: a peek and the panel show
+ * the same file, a diff its two sides. A file's lines show plain until their
+ * colours come, and take them as they come, its first lines first.
  */
 
 /** The languages a file's name says, by what follows its last dot, or its whole name. */
@@ -67,43 +68,6 @@ const BY_KIND: Readonly<Record<string, string>> = {
 
 const BY_NAME: Readonly<Record<string, string>> = { dockerfile: 'dockerfile', makefile: 'make', '.gitignore': 'ini', '.env': 'ini' }
 
-/** Each language's grammar, fetched the first time a file of it shows. */
-const GRAMMARS: Readonly<Record<string, () => Promise<unknown>>> = {
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsonc: () => import('shiki/langs/jsonc.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  shellscript: () => import('shiki/langs/shellscript.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  graphql: () => import('shiki/langs/graphql.mjs'),
-  ini: () => import('shiki/langs/ini.mjs'),
-  vue: () => import('shiki/langs/vue.mjs'),
-  svelte: () => import('shiki/langs/svelte.mjs'),
-  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
-  make: () => import('shiki/langs/make.mjs'),
-}
-
 /** The language a file is in, for its colours, by its name: null for one that isn't coloured. */
 export const languageOf = (path: string): string | null => {
   const name = (path.split('/').pop() ?? path).toLowerCase()
@@ -119,214 +83,174 @@ export const isProse = (path: string) => {
   return /\.(md|mdx|markdown|txt|text)$/i.test(name) || (!name.startsWith('.') && !/.\.[^.]+$/.test(name))
 }
 
-/** An ink, which a place drawing code on a colour of its own may tint by setting `--code-<name>`: a diff's green and red. */
-const ink = (name: string) => `var(--code-${name}, var(--syn-${name}))`
-
-/** The kit's own theme: TextMate's scopes, each kind in its ink. */
-const THEME: ThemeRegistration = {
-  name: 'althar',
-  type: 'light',
-  colors: { 'editor.foreground': 'var(--t-1)', 'editor.background': 'transparent' },
-  tokenColors: [
-    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: ink('comment'), fontStyle: 'italic' } },
-    {
-      scope: ['punctuation', 'meta.brace', 'keyword.operator', 'storage.type.function.arrow', 'meta.tag.sgml'],
-      settings: { foreground: ink('punct') },
-    },
-    {
-      scope: [
-        'keyword',
-        'storage',
-        'storage.type',
-        'storage.modifier',
-        'keyword.operator.new',
-        'keyword.operator.expression',
-        'keyword.operator.logical.python',
-        'keyword.operator.word',
-        'variable.language',
-        'entity.name.tag',
-        'markup.list punctuation.definition',
-        'punctuation.definition.heading',
-        'punctuation.definition.list',
-        'punctuation.definition.quote',
-      ],
-      settings: { foreground: ink('keyword') },
-    },
-    {
-      scope: [
-        'string',
-        'constant.numeric',
-        'constant.language',
-        'constant.character',
-        'constant.other',
-        'support.constant',
-        'markup.inline.raw',
-        'markup.fenced_code',
-      ],
-      settings: { foreground: ink('string') },
-    },
-    {
-      scope: [
-        'entity.name.function',
-        'support.function',
-        'variable.function',
-        'entity.other.attribute-name',
-        'meta.object-literal.key',
-        'support.type.property-name',
-        'meta.property-name',
-        'markup.underline.link',
-        'string.other.link',
-      ],
-      settings: { foreground: ink('fn') },
-    },
-    {
-      scope: [
-        'entity.name.type',
-        'entity.name.class',
-        'entity.other.inherited-class',
-        'support.type',
-        'support.class',
-        'entity.name.namespace',
-        'entity.other.attribute-name.class.css',
-        'support.type.builtin',
-        'storage.type.primitive',
-      ],
-      settings: { foreground: ink('type') },
-    },
-    { scope: ['markup.heading', 'entity.name.section'], settings: { foreground: 'var(--t-1)', fontStyle: 'bold' } },
-    { scope: ['markup.bold'], settings: { fontStyle: 'bold' } },
-    { scope: ['markup.italic'], settings: { fontStyle: 'italic' } },
-    { scope: ['markup.deleted'], settings: { foreground: 'var(--del-ink-2)' } },
-    { scope: ['markup.inserted'], settings: { foreground: 'var(--add-ink-2)' } },
-  ],
-}
-
-let shiki: Promise<HighlighterCore> | null = null
-
-/** The highlighter, made the first time a file is coloured, with no language until one is asked for. */
-const highlighter = () => {
-  shiki ??= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(([core, engine]) =>
-    core.createHighlighterCore({ themes: [THEME], langs: [], engine: engine.createJavaScriptRegexEngine({ forgiving: true }) }),
-  )
-  return shiki
-}
-
 /** Past this, a file shows plain: colouring it would hold the window up for little. */
 const MOST_COLOURED = { lines: 20_000, bytes: 1024 * 1024 }
 
-/** A stretch of a line in one ink: its text, and its colour and weight where it has one. */
-export interface Token {
-  readonly content: string
-  readonly style?: CSSProperties
-}
+const keyOf = (lang: string, text: string) => `${lang}\u0000${text}`
 
-/** A text's lines, each as its tokens. */
-export type TokenLines = ReadonlyArray<ReadonlyArray<Token>>
-
-/** What was coloured last, by its language and text: a peek and the panel show the same file, a diff its two sides. */
+/** What was coloured last, by its language and text. */
 const coloured = new Map<string, TokenLines>()
 const KEPT = 12
 
-const FONT_ITALIC = 1
-const FONT_BOLD = 2
-
-const tokenOf = (token: ThemedToken): Token => {
-  const style = {
-    ...(token.color === undefined || token.color === 'var(--t-1)' ? {} : { color: token.color }),
-    ...((token.fontStyle ?? 0) & FONT_ITALIC ? { fontStyle: 'italic' } : {}),
-    ...((token.fontStyle ?? 0) & FONT_BOLD ? { fontWeight: 650 } : {}),
-  }
-  return Object.keys(style).length === 0 ? { content: token.content } : { content: token.content, style }
+const keep = (key: string, lines: TokenLines) => {
+  coloured.set(key, lines)
+  if (coloured.size > KEPT) coloured.delete(coloured.keys().next().value ?? '')
 }
 
-const sameInk = (a: Token, b: Token) =>
-  a.style?.color === b.style?.color && a.style?.fontStyle === b.style?.fontStyle && a.style?.fontWeight === b.style?.fontWeight
-
-/** A line's tokens with each run of the same ink as one: fewer spans for a long file or diff to draw. */
-const merged = (line: readonly Token[]): Token[] => {
-  const out: Token[] = []
-  for (const token of line) {
-    const last = out.at(-1)
-    if (last !== undefined && sameInk(last, token)) out[out.length - 1] = { ...last, content: last.content + token.content }
-    else out.push(token)
-  }
-  return out
+/** What a text being coloured hears: its lines as they come, and whether those are the last; or that it can't be. */
+interface Hears {
+  readonly lines: (lines: TokenLines, done: boolean) => void
+  /** All of its lines at once, in place of any heard before: colouring started again in place, after a worker that broke. */
+  readonly whole: (lines: TokenLines) => void
+  readonly failed: () => void
 }
 
-/**
- * How many lines are coloured at a time, and how long colouring holds the
- * window before it lets it draw and answer: a long file, or both sides of a
- * long diff, takes seconds to colour, and the window scrolls meanwhile.
- */
-const SLICE = { lines: 25, ms: 12 }
+/** How long colouring in place holds the window before it lets it draw and answer. */
+const HOLD = 12
 
 const pause = () => new Promise<void>((done) => setTimeout(done, 0))
 
-/** A text being coloured: those waiting for it, and whether they all stopped, so it stops too. */
-interface Job {
-  done: Promise<TokenLines>
-  waiting: number
-  dropped: boolean
-}
-const colouring = new Map<string, Job>()
-
-/** A text's lines as tokens in their inks, by its language, a slice at a time, each slice taking up where the last one left the grammar. */
-const tokenize = async (key: string, text: string, lang: string, job: Job): Promise<TokenLines> => {
-  const shown = await highlighter()
-  const grammar = GRAMMARS[lang]
-  if (grammar === undefined) throw new Error(`No grammar for ${lang}`)
-  if (!shown.getLoadedLanguages().includes(lang)) await shown.loadLanguage((await grammar()) as never)
-  const rows = text.split('\n')
+/**
+ * A text's lines coloured in place, where there is no worker: a slice at a time, the window drawing and answering between
+ * them, all of them at once when done; null once stopped.
+ */
+const colourInPlace = async (text: string, lang: string, stopped: () => boolean): Promise<TokenLines | null> => {
+  const next = await slices(text, lang)
   const tokens: Token[][] = []
-  let state: GrammarState | undefined
   let since = performance.now()
-  for (let at = 0; at < rows.length; at += SLICE.lines) {
-    if (job.dropped) throw new Error('No one is waiting for it')
-    const slice = shown.codeToTokens(rows.slice(at, at + SLICE.lines).join('\n'), {
-      lang,
-      theme: 'althar',
-      tokenizeMaxLineLength: 2000,
-      ...(state === undefined ? {} : { grammarState: state }),
-    })
-    state = slice.grammarState
-    for (const line of slice.tokens) tokens.push(merged(line.map(tokenOf)))
-    if (performance.now() - since > SLICE.ms) {
+  for (let lines = next(); lines !== null; lines = next()) {
+    if (stopped()) return null
+    tokens.push(...lines)
+    if (performance.now() - since > HOLD) {
       await pause()
       since = performance.now()
     }
   }
-  coloured.set(key, tokens)
-  if (coloured.size > KEPT) coloured.delete(coloured.keys().next().value ?? '')
   return tokens
 }
 
-/** A text's tokens, coloured once however many show it at a time; dropped by all of them, it stops. */
-const colour = (text: string, lang: string): { readonly done: Promise<TokenLines>; readonly drop: () => void } => {
-  const key = `${lang}\u0000${text}`
+/** The worker, made the first time a text is coloured: null where there can be none, or it failed, and texts colour in place. */
+let worker: Worker | null | undefined
+/** Each text asked of the worker, by its id: what hears it, and how to colour it in place instead should the worker fail. */
+const asked = new Map<number, { readonly hears: Hears; readonly inPlace: () => void }>()
+/** The inks the worker has named, in the order it named them; the first is none. */
+const inks: Array<CSSProperties | undefined> = [undefined]
+let lastId = 0
+
+const theWorker = (): Worker | null => {
+  if (worker !== undefined) return worker
+  if (typeof Worker === 'undefined') return (worker = null)
+  try {
+    const made = new Worker(new URL('./syntax.worker.ts', import.meta.url), { type: 'module' })
+    made.onmessage = (event: MessageEvent<ColourAnswer>) => {
+      const answer = event.data
+      const one = asked.get(answer.id)
+      if ('failed' in answer) {
+        asked.delete(answer.id)
+        one?.hears.failed()
+        return
+      }
+      inks.push(...answer.inks)
+      if (answer.done) asked.delete(answer.id)
+      one?.hears.lines(unpack(answer.lines, inks), answer.done)
+    }
+    // A worker that won't start, or breaks, leaves what it was colouring to colour in place, and all after it.
+    made.onerror = () => {
+      made.terminate()
+      worker = null
+      const left = [...asked.values()]
+      asked.clear()
+      for (const one of left) one.inPlace()
+    }
+    worker = made
+  } catch {
+    worker = null
+  }
+  return worker
+}
+
+/** Starts colouring a text, in the worker or else in place; returns the way to stop. */
+const start = (text: string, lang: string, hears: Hears): (() => void) => {
+  let stopped = false
+  const inPlace = () => {
+    colourInPlace(text, lang, () => stopped).then((lines) => {
+      // The whole text, from its first line: what a worker that broke sent of it before is replaced, never added to.
+      if (lines !== null) hears.whole(lines)
+    }, hears.failed)
+  }
+  const to = theWorker()
+  if (to === null) {
+    inPlace()
+    return () => {
+      stopped = true
+    }
+  }
+  const id = (lastId += 1)
+  asked.set(id, { hears, inPlace })
+  to.postMessage({ type: 'colour', id, text, lang } satisfies ColourAsk)
+  return () => {
+    stopped = true
+    if (asked.delete(id)) worker?.postMessage({ type: 'drop', id } satisfies ColourAsk)
+  }
+}
+
+/** What shows a text hears: its lines coloured so far. */
+type Show = (lines: TokenLines) => void
+
+/** A text being coloured: its lines so far, those showing it, and how to stop. */
+interface Job {
+  lines: TokenLines
+  readonly shows: Set<Show>
+  stop: () => void
+}
+const colouring = new Map<string, Job>()
+
+/**
+ * Colours a text once however many show it at a time, telling each its lines as they come; dropped by all of them, it
+ * stops. Returns the way to drop it.
+ */
+const colour = (text: string, lang: string, show: Show): (() => void) => {
+  const key = keyOf(lang, text)
   const kept = coloured.get(key)
-  if (kept !== undefined) return { done: Promise.resolve(kept), drop: () => undefined }
+  if (kept !== undefined) {
+    show(kept)
+    return () => undefined
+  }
   let job = colouring.get(key)
   if (job === undefined) {
-    const made: Job = { done: Promise.resolve([]), waiting: 0, dropped: false }
-    made.done = tokenize(key, text, lang, made).finally(() => {
+    const made: Job = { lines: [], shows: new Set(), stop: () => undefined }
+    const over = () => {
       if (colouring.get(key) === made) colouring.delete(key)
+    }
+    made.stop = start(text, lang, {
+      lines: (more, done) => {
+        if (more.length > 0) made.lines = made.lines.length === 0 ? more : made.lines.concat(more)
+        if (done) {
+          keep(key, made.lines)
+          over()
+        }
+        for (const one of made.shows) one(made.lines)
+      },
+      whole: (all) => {
+        made.lines = all
+        keep(key, made.lines)
+        over()
+        for (const one of made.shows) one(made.lines)
+      },
+      // A grammar that wouldn't load leaves it plain.
+      failed: over,
     })
     colouring.set(key, made)
     job = made
   }
   const mine = job
-  mine.waiting += 1
-  let gone = false
-  return {
-    done: mine.done,
-    drop: () => {
-      if (gone) return
-      gone = true
-      mine.waiting -= 1
-      if (mine.waiting > 0) return
-      mine.dropped = true
-      if (colouring.get(key) === mine) colouring.delete(key)
-    },
+  mine.shows.add(show)
+  if (mine.lines.length > 0) show(mine.lines)
+  return () => {
+    mine.shows.delete(show)
+    if (mine.shows.size > 0) return
+    mine.stop()
+    if (colouring.get(key) === mine) colouring.delete(key)
   }
 }
 
@@ -343,31 +267,20 @@ export const inked = (tokens: ReadonlyArray<Token>, key = ''): ReactNode[] =>
   )
 
 /**
- * A file's lines as their tokens: null while they are coloured, and for a
- * language not coloured or a file too long to colour, which shows plain.
+ * A file's lines as their tokens, those coloured so far: null while none
+ * are, and for a language not coloured or a file too long to colour, which
+ * shows plain.
  */
 export function useTokens(text: string | null, path: string): TokenLines | null {
   const lang = languageOf(path)
-  const key = text === null || lang === null ? null : `${lang}\u0000${text}`
+  const key = text === null || lang === null ? null : keyOf(lang, text)
   const [shown, setShown] = useState<{ readonly key: string; readonly lines: TokenLines } | null>(() =>
-    key === null ? null : { key, lines: coloured.get(key) ?? [] },
+    key === null ? null : { key, lines: coloured.get(key) ?? colouring.get(key)?.lines ?? [] },
   )
   useEffect(() => {
     if (text === null || lang === null || key === null) return
     if (text.length > MOST_COLOURED.bytes || text.split('\n', MOST_COLOURED.lines + 1).length > MOST_COLOURED.lines) return
-    let on = true
-    const job = colour(text, lang)
-    job.done.then(
-      (lines) => {
-        if (on) setShown({ key, lines })
-      },
-      // A grammar that wouldn't load leaves it plain.
-      () => undefined,
-    )
-    return () => {
-      on = false
-      job.drop()
-    }
+    return colour(text, lang, (lines) => setShown((was) => (was !== null && was.key === key && was.lines === lines ? was : { key, lines })))
   }, [key, text, lang])
   return shown !== null && shown.key === key && shown.lines.length > 0 ? shown.lines : null
 }

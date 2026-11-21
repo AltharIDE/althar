@@ -1,10 +1,10 @@
 # ADR-103: A project lives locally or on a host, and places its work across its pools
 
-> The wider design remains a proposal. The shared API and host foundations below are built; the transport and language choices accepted on 16 Nov are recorded as decided, not built in [Foundations](../foundations.md#remote-connections-and-native-workers-decided-not-built). Other proposed decisions would fold into [Foundations § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
+> The wider design remains a proposal. The shared API and host foundations below are built; the transport and language choices accepted on 16 Nov are recorded with their delivery status in [Foundations](../foundations.md#remote-connections-and-native-workers). Other proposed decisions would fold into [Foundations § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
-- **Updated:** 2026-11-16
+- **Updated:** 2026-11-18
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
@@ -107,10 +107,67 @@ one. No automatic migration or two-way database sync in the first slice.
 
 ### Pools and task placement
 
-A project names the pools it may use. A pool contains enrolled workers;
-hosts advertise OS, architecture, available CPU, memory and disk, installed
-tools, provider/account capabilities and reachable services. Host membership
-alone gives no access to an unassigned project's repositories or secrets.
+#### Worker ownership and access
+
+Every pool has one owner, either a person or an organization. The
+[existing project owner contract](../../../packages/contracts/src/identities.ts)
+already represents both kinds of owner. Use the durable person identity
+for personal projects and private worker pools. Linking a cloud account
+adds a login and billing relationship for managed services while retaining
+the person's existing local identity. An organization has its own
+ownership and billing records. Its members act through their individual
+accounts with roles granted by the organization.
+
+The home is the project writer and scheduler. A project and its home have
+an owner scope, and projects in a home initially share that scope. Keep
+ownership separate from the home ID, machine and endpoint. Moving the
+home preserves project and pool ownership. One computer can serve a
+personal home and attach as a client to a company home. Each connection
+uses the identity and grants for its own home.
+
+A worker registration belongs to a pool. For private capacity the owner
+administers its workers. For managed capacity Althar operates the
+machines and allocates workers for the owner's pool. A pool grants
+specific homes and projects access. Within a home, a project can use its
+owner's approved pools, subject to the person's role and the project's
+placement policy. The first version admits each worker to one home at a
+time and uses same-owner pool grants. An owner can later authorize a
+pool for several of its homes through separate enrollments and an
+allocator that prevents them reserving the same capacity.
+
+The selected project determines the owner scope before the home resolves
+eligible pools. Check the authenticated person's permission, the project
+and home grant, capacity, and the payer's limit before dispatch. A worker
+receives credentials for the authorized project and attempt. Keep work,
+secrets and artifacts within that scope. Revocation blocks new
+admissions. The home applies the existing lease and cancellation policy
+to work already admitted.
+
+| Situation | Pool available to the project | Who pays |
+| --- | --- | --- |
+| Personal Pro user runs a personal project in Althar Cloud | Their personal managed pool, provided when they link their cloud account | Their personal cloud account |
+| The same user runs a personal project on their own worker | Their personal private pool | They operate their machine |
+| The same user opens a company project from the company home | A company pool approved for that project, subject to their company role | The company operates private capacity or pays for its managed capacity |
+
+Managed admissions record the payer and cap with the project, home,
+pool and attempt. Reuse the same reservation and receipt for delivery
+retries. Membership changes affect future authorization while historic
+receipts retain the payer recorded at admission. A personal plan can
+include a monthly compute allowance. Allowances, prices and overage
+terms remain product decisions.
+
+Ship the personal managed path first with a default pool and a personal
+budget. Keep the owner scope and grants explicit in the model so company
+roles and pools can use the same placement and metering path when
+collaboration ships.
+
+#### Placement
+
+A project names the pools it may use. A pool supplies private workers or
+managed capacity. Enrolled workers advertise OS, architecture, available
+CPU, memory and disk, installed tools, provider/account capabilities and
+reachable services. Access to repositories and secrets requires a
+project-scoped grant.
 
 Place each new task on an eligible worker across those pools. Check required
 platform, repository access, credentials and capacity first; prefer prepared
@@ -273,6 +330,22 @@ events by sequence. Tool requests to the home carry the session, project,
 attempt and token. The home enforces their tool role and current lease;
 the worker's loopback MCP gateway exposes only that session's tools.
 
+Keep worker connection and enrollment separate from that execution
+protocol. The personal-host diagnostic dials a reachable home and verifies
+its certificate with mutual TLS. An operator-provisioned relay carries
+the same encrypted connection over two outbound WSS links, and the home
+can keep its worker port on loopback. Reuse that transport for the
+desktop home and eventual managed workers. The Protobuf execution
+messages, capability negotiation, journal and replay rules apply to each
+route. See the [outbound worker relay guide](../../../packages/worker-protocol/README.md#outbound-worker-relay).
+Verify both application identities and their grants across the gateway.
+Bind a managed worker credential to its allocation, home and expiry, then
+bind each start to the home-issued project, attempt, fence and execution
+lease. Document the gateway's visibility into routed worker messages and
+the separate storage used for scoped data transfers. A cloud account can
+buy capacity. The home authorizes work and mediated actions, and the person
+authorizes protected approvals.
+
 A client disconnect does not end a task. Losing the worker's connection to
 the home is different: after its bounded lease grace, it stops starting
 work and stops owned processes, retaining source, logs and results for
@@ -389,6 +462,31 @@ health and any managed-service metering are separate from product analytics.
 
 ### Local, Connect, Hosted and cloud workers
 
+The proposed first paid product is **managed worker capacity for an
+existing home**. A desktop home or a personally hosted home offers
+**Run in cloud** for an eligible new task. Sustained capacity pressure can
+surface that action when a task is likely to wait. The first release asks
+the person to confirm placement and spend, and keeps running attempts on
+their current worker.
+Account linking enables allocation, a spending limit and a usage receipt
+for the cloud run. Leave prices and plans open. Track compute separately
+from model usage.
+
+The cloud service provisions and retires an isolated runner, issues its
+short-lived credential, connects it to the home and meters its compute.
+The home owns scheduling, approval policy, conversations, project state
+and the final task record. Give the runner the chosen source snapshot and only the
+credentials and artifact access that attempt needs. Authorize each transfer
+separately. Scope retention and cleanup to the attempt so a worker can be
+retired after preserving its result. A desktop home still needs to be
+awake to coordinate and respond to asks. If it goes offline, the worker
+follows the bounded lease and reconciliation rules, and the home can pick
+up retained results when it returns.
+
+The proposed second paid product is **hosting the home itself**. It keeps
+the coordinator and project record available when the person's device is
+offline. Home migration, recovery and export belong to that product.
+
 Keep these independent: local/self-hosted single-player; optional **Connect**
 relay access to running homes; **Hosted** for a managed single-player home;
 cloud workers as optional compute; and multiplayer collaboration. This is
@@ -425,7 +523,7 @@ New hosts and protocols named here still have to be built.
 | `packages/runtime` control | [`Runtime.ts`](../../../packages/runtime/src/Runtime.ts), [`Config.ts`](../../../packages/runtime/src/Config.ts), [`Api.ts`](../../../packages/runtime/src/Api.ts), [`Instance.ts`](../../../packages/runtime/src/Instance.ts) and [`ToolServer.ts`](../../../packages/runtime/src/ToolServer.ts): host services, actor provenance, placement, fenced worker dispatch and result reconciliation. The current tool server is loopback HTTP with per-session role tokens, not a remote UI endpoint. |
 | `packages/runtime` execution/files | [`Projects.ts`](../../../packages/runtime/src/Projects.ts), [`local.ts`](../../../packages/runtime/src/local.ts), [`Sessions.ts`](../../../packages/runtime/src/Sessions.ts), [`Runs.ts`](../../../packages/runtime/src/Runs.ts), [`Launches.ts`](../../../packages/runtime/src/Launches.ts), [`Folders.ts`](../../../packages/runtime/src/Folders.ts), [`diffs.ts`](../../../packages/runtime/src/diffs.ts), [`sentFiles.ts`](../../../packages/runtime/src/sentFiles.ts) and [`Artifacts.ts`](../../../packages/runtime/src/Artifacts.ts): move filesystem/process operations behind host-qualified execution and transfer interfaces. Today they assume local paths and processes. |
 | `packages/provider-adapters`, `packages/skills` | [`AgentConnection.ts`](../../../packages/provider-adapters/src/AgentConnection.ts) and [`projection.ts`](../../../packages/skills/src/projection.ts): run ACP beside the agent, host capability probes, supported headless auth and portable skill projection. Extend #684's `agentTools.ts`, `mcpSync.ts`, `skillSync.ts` and `agentServers.ts` when it lands; those files are still on its branch at this writing. |
-| Managed services (later) | Connect relay, pairing/discovery, Hosted lifecycle, regional storage and optional cloud capacity. Same client/worker contracts; service routing and billing do not grant person authority. |
+| Managed services | First, account linking, an outbound execution gateway, isolated worker allocation, bounded artifact transfer and metering. Later, managed home lifecycle and optional client relay. Preserve home and person authority across all three. |
 
 The desktop host waits for the first screen before connector fetches,
 seals through main, and asks main to draw screenshots. The headless host must
@@ -454,52 +552,77 @@ multiplayer permission model. Pricing and entitlements remain separate.
 bridge and CLI attach through the private socket or system OpenSSH with
 socket authority, expected home/API checks and checked feed positions.
 [Desktop SSH attachment #982](https://github.com/AltharIDE/althar/pull/982)
-is in review as of 16 Nov, not merged. It does not provide protected device
-enrollment or person-only approvals.
+merged on 17 Nov with socket authority.
 
-The next two slices can be developed independently against the existing
-home. Deliver direct connectivity first for the client path; neither slice
-needs a relay. The following work remains proposed beyond the accepted
-transport and language choices.
+**Connection-only direct access implemented, 16 Nov 2026:** opt-in HTTPS/WSS,
+operator-issued five-minute invitations, encrypted desktop keys, paired-device
+reconnect and immediate revocation now use the shared API. The first desktop
+path retains socket authority: it cannot approve permissions, enroll trusted
+approval devices or use desktop-local files/previews. A pin in the operator's
+code authenticates a private TLS endpoint; changing the TLS key needs pairing
+again. Invitations end on restart, while registrations remain durable. Host
+setup/certificate provisioning, protected approvals and real provider/VPS
+validation remain release work.
+
+**Native worker diagnostic:** [the Protobuf foundation](https://github.com/AltharIDE/althar/pull/1026)
+merged on 18 Nov. The opt-in Linux home listener authenticates a worker
+using mutual TLS and a durable enrollment. The home can issue a single
+fenced start grant for a fixed diagnostic. The worker journals the start
+and result, and the home persists a replayed result or records an unknown
+outcome after an interrupted attempt. The
+[operator guide](../../../apps/host/README.md#native-worker-diagnostic)
+covers certificate and journal setup.
+
+Client enrollment, self-hosted projects and managed worker capacity can
+advance independently where they share the existing home and execution
+contract. The first paid release tests a managed worker from an existing
+home. A hosted home follows as its own product. The following work remains
+proposed beyond the accepted transport and language choices.
 
 ```mermaid
 flowchart TD
     Existing[Built: shared API and persistent Node home]
-    Existing --> Direct[Next client slice: HTTPS/WSS and reviewed device pairing]
-    Existing --> Worker[Next execution slice: Rust worker and Protobuf contract]
-    Direct --> Personal[Usable personal remote project]
-    Worker --> Personal
-    Personal --> Pools[Several assigned workers and local testing]
-    Personal --> Hosted[Managed home: lifecycle, backups and recovery]
-    Pools --> Cloud[Isolated managed compute]
-    Hosted --> Cloud
+    Existing --> Direct[HTTPS/WSS delivered; trusted approval enrollment pending]
+    Existing --> Worker[Built: enrolled Rust worker and recoverable diagnostic]
+    Direct --> Approval[Protected owner keys and approval recovery]
+    Worker --> Commands[Project work, isolation and process-tree cancellation]
+    Commands --> Proof[One real project task on a separate worker]
+    Proof --> Cloud[First paid product: managed workers for existing homes]
+    Cloud --> Hosted[Second paid product: managed home and recovery]
+    Approval --> Personal[Usable personal remote project]
+    Proof --> Personal
+    Proof --> Pools[Several assigned workers and local testing]
     Direct -. Later optional .-> Relay[Account-backed encrypted relay]
     Direct -. Key and origin review .-> Clients[Phone and web clients]
     Hosted -. Separate authorization work .-> Multiplayer[Organization and project collaboration]
 ```
 
-1. **Direct home connection and device lifecycle.** Add HTTPS/WSS adapters
-   to the existing API, with TLS/server identity, authenticated attachment,
-   explicit origin policy, bounded frames/queues, timeouts and checked-feed
-   reconnect. Support a private-network endpoint and a directly reachable
-   HTTPS endpoint without requiring Tailscale, SSH or a relay account. Pair
-   once with a home-bound, expiring, single-use challenge; reconnect and
-   revoke a device. Review initial owner enrollment, protected key storage,
-   recovery and approval provenance before granting person authority. Keep
-   clients that cannot meet that boundary at socket authority. Prove a
-   revoked connection stops, an unpaired process cannot answer an ask, and
-   reconnect neither loses history silently nor replays an external action.
-2. **One native worker execution path.** Add a pinned Rust workspace,
-   canonical Protobuf schemas and reproducible TypeScript/Rust bindings.
-   Validate gRPC as the first transport candidate. Enroll one authenticated
-   worker and run one real command from the Node home with a durable
-   attempt/lease/fencing record, a worker journal and bounded streamed
-   output. Prove process-tree cancellation, dropped acknowledgements,
-   reconnect replay, stale attempts, worker/home restart reconciliation and
-   explicit unknown outcomes for unconfirmed external effects. Capture the
-   warm/cold and memory baseline described above. Do not start with a broad
-   rewrite of provider adapters, a new scheduler or managed sandbox fleet.
-3. **One usable personal remote project.** Connect the client and worker
+1. **Finish trusted client enrollment.** Direct HTTPS/WSS, connection-only
+   pairing, bounded streams, revocation and checked-feed reconnect are now
+   implemented. Keep software-key clients at socket authority. Before
+   granting person authority, review initial owner enrollment, protected key
+   storage, recovery and approval provenance, and validate them on supported
+   clients. Prove an unpaired process cannot answer an ask and reconnect
+   cannot replay an external action. Direct transport alone does not close
+   this approval-security gate.
+2. **Extend the native worker execution path to project work.** Build on
+   the locked Rust toolchain, shared Protobuf bindings and authenticated
+   diagnostic. Add project-scoped authorization, renewable leases, bounded
+   live logs, and process-tree cancellation with reconciliation of
+   unconfirmed external effects. Add automated enrollment and a signed
+   worker artifact. Capture the warm/cold and memory baseline described
+   above with real project setup and provider startup.
+3. **Managed workers for existing homes.** Prove one eligible Linux task
+   initiated from a desktop home behind NAT. Reserve capped compute for a
+   linked account, provision one isolated runner, transfer a scoped
+   workspace, and return logs and a durable result to the existing home.
+   Offer the same execution path from a personal Node home. Prove retry
+   deduplication for allocation and metering, credential expiry, cancellation
+   and recovery, source and secret isolation, regional placement, provider
+   sign-in, cleanup and recovery of unpushed work. Verify reusable images
+   and snapshots are free of credentials. Measure time to useful work
+   before widening the platform, provider or account matrix.
+4. **One usable personal remote project.** Connect the client and worker
    paths. Co-locate a personal Linux home and worker initially; create a
    remote project and clone its repositories rather than silently moving a
    local one. Ship host-side agent login, setup, files/diffs/artifacts,
@@ -508,23 +631,17 @@ flowchart TD
    and records its result with the desktop asleep, then reconnect. Gate
    each provider on supported headless sign-in, refresh and plan usage on
    that VPS. An unsupported provider remains unavailable there.
-4. **Several workers and local testing.** Automatic placement across assigned
+5. **Several workers and local testing.** Automatic placement across assigned
    pools, resource reservations, fenced leases, host outages and snapshots;
    Run on this computer and platform-qualified setup. Prove a saturated host
    sends a new task to another approved worker, unassigned pools stay unused,
    concurrent homes cannot overbook, a stale attempt cannot complete, and
    local verification includes uncommitted remote source without losing edits.
-5. **Hosted single-player.** Managed regional homes, recovery and export,
+6. **Hosted single-player.** Managed regional homes, recovery and export,
    secrets, independent updates and entitlements. Use the person's own pools
    first; distinguish coordinator availability, provider usage and worker
    capacity. Prove restore, key recovery, writer fencing, offline clients and
    a complete export back to a personal host. This does not wait for relay.
-6. **Managed cloud workers.** Isolated environments, prepared snapshots,
-   capacity controls, retention and measured startup. Reuse placement and
-   lease protocols. Prove tenant separation, cancellation, no secret in a
-   reusable snapshot, regional placement and export of unpushed work before
-   retiring capacity. Supported provider sign-in in managed environments is
-   a separate release gate, checked again rather than inherited from a VPS.
 
 **Optional later connection work:** an encrypted relay can reuse the paired
 client API after a routing, abuse-control, privacy and operating-cost review.

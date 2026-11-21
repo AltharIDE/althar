@@ -4,8 +4,8 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { Brand } from '../../foundations/brands/brands'
 import type { ModelInfo } from '../../primitives/Model/Model'
-import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
-import { taskEndText, type ChoiceWords } from '../../foundations/vocabularyText'
+import { BlockerStands, TaskEnd, TaskStatus, WorksIn } from '../../foundations/vocabulary'
+import { blockerStandsText, taskEndText, type ChoiceWords } from '../../foundations/vocabularyText'
 import { useControlled } from '../../lib/controlled'
 import { useOnScreen } from '../../lib/onScreen'
 import { OverlayBoundary } from '../../lib/overlay'
@@ -17,7 +17,8 @@ import { CountdownRing } from '../../primitives/CountdownRing/CountdownRing'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
+import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { BranchSelect } from '../../primitives/BranchSelect/BranchSelect'
 import { IssueRef, type IssueRefProps } from '../Issue/Issue'
@@ -43,6 +44,13 @@ import { Rhythm } from '../../lib/rhythm'
  * lands as it is made. Only what arrives once the card is on screen moves:
  * a card that mounts already planned, as the drafting one gives way to it or
  * as the thread is opened again, is still.
+ *
+ * A plan that waits for other tasks (`waitsFor`, tasks wait for their
+ * blockers) has each of them as a stop on its line before its lead's row:
+ * "Pairing merges", its node turning while that task runs, red once it's
+ * stuck, struck through once abandoned, and how it stands at the row's end.
+ * The row is a menu: open it, reopen it, stop waiting for it, start without
+ * it. Its foot says when it starts where the clock was, and no clock runs.
  */
 
 /** Model makers whose marks roll through a node while its model is chosen. */
@@ -92,15 +100,33 @@ export interface LaunchPick {
 }
 
 /** What drafting is at, while the plan is written: said at its foot, and which row is being chosen. */
+/** A task the plan waits for: it starts once each of them merges. */
+export interface LaunchBlocker {
+  id: string
+  /** The task, by its title: its row says "Pairing merges". */
+  name: string
+  stands: BlockerStands
+  /** Opens it. */
+  onOpen?: () => void
+  /** Reopens it, once abandoned. */
+  onReopen?: () => void
+  /** Stops waiting for it: the plan still waits for the rest. */
+  onStopWaiting?: () => void
+}
+
 export type LaunchPhase = 'writing' | 'sizing' | 'lead' | 'review' | 'end'
 
 /**
  * A plan still being drafted: the card shows as the coordinator writes it.
  * Its steps so far are `steps`, a step whose model isn't chosen yet with no
- * agents; the title is '' until written.
+ * agents; the title is '' until written. `ended` once drafting stopped short of
+ * a plan: `unplanned`, its plan didn't come, which it says plainly, offering to
+ * plan or discard it; `discarded`, its task was discarded. Nothing on it moves
+ * then.
  */
 export interface LaunchDrafting {
   readonly phase: LaunchPhase
+  readonly ended?: 'unplanned' | 'discarded'
 }
 
 export interface TaskLaunchText {
@@ -152,8 +178,27 @@ export interface TaskLaunchText {
   deciding: string
   /** Drafting, held: it won't start once planned until it is started. */
   heldDrafting: string
+  /** Drafting stopped short of a plan: the kicker without a preset, what its foot says, and what it offers. */
+  draft: string
+  unplanned: string
+  discarded: string
+  plan: string
+  discard: string
   /** The skip in the picker of a step that can be skipped. */
   skipStep: (step: LaunchStep) => string
+  /** A task it waits for, as a row: its merge is the stop. */
+  merges: (name: string) => string
+  /** How that task stands, at its row's end. */
+  stands: Record<BlockerStands, string>
+  /** Its row's menu, by the task's name: its name, and each thing it does. */
+  after: (name: string) => string
+  openBlocker: (name: string) => string
+  reopenBlocker: (name: string) => string
+  stopWaiting: (name: string) => string
+  startWithout: string
+  /** The foot, while it waits, where the clock was: how many it waits for, or that one was abandoned. */
+  startsWhen: (open: number) => string
+  abandoned: string
 }
 
 export const taskLaunchText: TaskLaunchText = {
@@ -196,7 +241,21 @@ export const taskLaunchText: TaskLaunchText = {
   open: 'Open seat',
   deciding: 'Deciding…',
   heldDrafting: 'Held · starts when you say',
+  draft: 'Draft',
+  unplanned: 'No plan yet',
+  discarded: 'Discarded',
+  plan: 'Plan it',
+  discard: 'Discard',
   skipStep: (step) => `Skip the ${step.label.toLowerCase()}`,
+  merges: (name) => `${name} merges`,
+  stands: blockerStandsText,
+  after: (name) => `After ${name}`,
+  openBlocker: (name) => `Open ${name}`,
+  reopenBlocker: (name) => `Reopen ${name}`,
+  stopWaiting: (name) => `Stop waiting for ${name}`,
+  startWithout: 'Start now, without it',
+  startsWhen: (open) => (open === 1 ? 'Starts when it merges' : open === 2 ? 'Starts when both merge' : `Starts when all ${open} merge`),
+  abandoned: 'Waits for your answer',
 }
 
 /** A wait in seconds while it is short, two figures at most so the clock keeps its width; in minutes past that: 30s, 10 min. */
@@ -223,7 +282,11 @@ function Roll({ children }: { children: ReactNode }) {
 /** Words for something still going on, a light passing over them. */
 const Going = ({ children }: { children: string }) => (
   <Roll>
-    <span className={s.going}>{children}</span>
+    <span className={s.going}>
+      {children}
+      {/* the light: their copy, drawn by its style, never read, found or copied twice */}
+      <span className={s.sheen} data-words={children} aria-hidden="true" />
+    </span>
   </Roll>
 )
 
@@ -271,6 +334,39 @@ function Pulse() {
 function Link({ state }: { state: 'idle' | 'flow' | 'done' }) {
   const arrives = useArrives()
   return <span className={cx(s.link, arrives && s.drawn)} data-state={state} aria-hidden="true" />
+}
+
+/** Where a task it waits for stands, as the kit's glyph draws it; an abandoned one is a cross. */
+function BlockerGlyph({ stands }: { stands: BlockerStands }) {
+  switch (stands) {
+    case BlockerStands.Working:
+    case BlockerStands.Review:
+      return <TaskGlyph status={TaskStatus.Running} />
+    case BlockerStands.Stuck:
+      return <TaskGlyph status={TaskStatus.Stopped} />
+    case BlockerStands.Merged:
+      return <TaskGlyph status={TaskStatus.Done} />
+    case BlockerStands.Abandoned:
+      return <Icon name="close" size={11} />
+    case BlockerStands.Planned:
+      return <TaskGlyph status={TaskStatus.Queued} />
+  }
+}
+
+/** A task it waits for as a node on the line: its seat dashed until it starts, an arc going slowly round while it runs. */
+function BlockerNode({ stands }: { stands: BlockerStands }) {
+  const running = stands === BlockerStands.Working || stands === BlockerStands.Review
+  const state = running ? 'choosing' : stands === BlockerStands.Planned || stands === BlockerStands.Abandoned ? 'idle' : 'filled'
+  return (
+    <span className={cx(s.node, s.blockerNode)} data-state={state} data-stands={stands} aria-hidden="true">
+      <span className={s.arc} />
+      <span className={s.face}>
+        <span>
+          <BlockerGlyph stands={stands} />
+        </span>
+      </span>
+    </span>
+  )
 }
 
 /**
@@ -418,6 +514,8 @@ export interface TaskLaunchProps {
    * which takes it out of the line until it is started.
    */
   queued?: string
+  /** Hover on that line: which tasks hold the agents. */
+  queuedTitle?: string
   defaultHeld?: boolean
   onHeldChange?: (held: boolean) => void
   /** No row for what happens when the work is done, where tasks end on their branch. */
@@ -455,8 +553,18 @@ export interface TaskLaunchProps {
    * known yet.
    */
   drafting?: LaunchDrafting
+  /** Drafting ended with no plan: asks for its plan, from its foot. */
+  onPlan?: () => void
+  /** Drafting ended with no plan: discards it, from its foot. */
+  onDiscard?: () => void
   /** Something offered about the task, quiet in the foot after the estimate, below Start: keeping its parts as a preset. */
   footNote?: ReactNode
+  /**
+   * The tasks it waits for that haven't merged (tasks wait for their
+   * blockers): a row each before its lead's, and its foot says when it
+   * starts where the clock was. Start in its rows' menus starts it anyway.
+   */
+  waitsFor?: readonly LaunchBlocker[]
   text?: Partial<TaskLaunchText>
 }
 
@@ -483,6 +591,7 @@ export function TaskLaunch({
   startsAt,
   held: heldProp,
   queued,
+  queuedTitle,
   defaultHeld = false,
   onHeldChange,
   hideEnd = false,
@@ -497,6 +606,9 @@ export function TaskLaunch({
   onCreateBranch,
   onStart,
   drafting,
+  onPlan,
+  onDiscard,
+  waitsFor = [],
   text,
 }: TaskLaunchProps) {
   const t = { ...taskLaunchText, ...text }
@@ -519,14 +631,16 @@ export function TaskLaunch({
     onStart(steps, end)
   }
   const startWhenDue = useEffectEvent(start)
+  // Waiting for other tasks, it runs no clock of its own: it starts once they merge.
+  const blocked = drafting === undefined && waitsFor.length > 0
 
   const seen = useOnScreen(ref, { threshold: 0.9, enabled: !started && drafting === undefined })
   useEffect(() => {
-    if (drafting !== undefined || queued !== undefined || startsAt !== undefined || !seen || held || started) return
+    if (drafting !== undefined || queued !== undefined || blocked || startsAt !== undefined || !seen || held || started) return
     /* the last second starts it, so the clock never shows zero */
     const id = window.setTimeout(() => (left <= 1 ? startWhenDue() : setShownFor(left - 1)), 1000)
     return () => window.clearTimeout(id)
-  }, [drafting, queued, startsAt, seen, left, held, started])
+  }, [drafting, queued, blocked, startsAt, seen, left, held, started])
   useEffect(() => {
     if (drafting !== undefined || startsAt === undefined || held || started || now >= startsAt) return
     /* the kept time: it ticks each second until then; whatever keeps it starts the plan */
@@ -568,7 +682,9 @@ export function TaskLaunch({
   const where = worksIn === undefined || drafting !== undefined ? null : whereLine(worksIn, worksInWhy, localTaken ?? null, t)
 
   // A row for each of each step's agents, or one for a step whose agent isn't chosen yet; then how the work ends.
-  const phase = drafting?.phase
+  // Drafting that stopped short of a plan is at nothing: no row is being chosen, nothing turns.
+  const ended = drafting?.ended
+  const phase = ended === undefined ? drafting?.phase : undefined
   const choosingStep = phase === 'lead' ? 0 : phase === 'review' ? 1 : -1
   const rows = steps.flatMap((st, i) =>
     st.agents.length === 0
@@ -585,7 +701,7 @@ export function TaskLaunch({
         : row.i === 0 && (phase === 'writing' || phase === 'sizing')
           ? 'next'
           : 'idle'
-  const endState: NodeState = endKnown ? 'filled' : phase === 'end' ? 'choosing' : 'idle'
+  const endState: NodeState = endKnown && ended === undefined ? 'filled' : phase === 'end' ? 'choosing' : 'idle'
   const states = [...rows.map(stateOf), ...(endRow ? [endState] : [])]
   const linkAt = (n: number) => {
     const next = states[n + 1]
@@ -596,15 +712,15 @@ export function TaskLaunch({
   return (
     <OnScreen.Provider value={onScreen}>
       <div
-        className={cx(s.launch, held && s.held, drafting !== undefined && s.drafting)}
+        className={cx(s.launch, held && s.held, drafting !== undefined && s.drafting, ended === 'discarded' && s.discarded)}
         ref={ref}
         data-rhythm={Rhythm.Card}
-        aria-busy={drafting !== undefined}
+        aria-busy={drafting !== undefined && ended === undefined}
       >
         <div className={s.head}>
           {(preset !== undefined || from !== undefined || drafting !== undefined) && (
             <span className={s.kicker}>
-              {preset === undefined && drafting !== undefined && t.drafting}
+              {preset === undefined && drafting !== undefined && (ended === undefined ? t.drafting : t.draft)}
               {preset !== undefined &&
                 (drafting !== undefined || presets === undefined || presets.length < 2 || onPresetChange === undefined ? (
                   <Roll key={preset}>{preset}</Roll>
@@ -656,6 +772,53 @@ export function TaskLaunch({
           {where !== null && <p className={s.whereLine}>{where}</p>}
         </div>
         <ol className={s.roster}>
+          {blocked &&
+            waitsFor.map((blocker, n) => (
+              <Row
+                key={`after-${blocker.id}`}
+                i={n}
+                node={<BlockerNode stands={blocker.stands} />}
+                link="idle"
+                label={t.merges(blocker.name)}
+                struck={blocker.stands === BlockerStands.Abandoned}
+                who={
+                  <span className={s.stands} data-stands={blocker.stands}>
+                    {t.stands[blocker.stands]}
+                  </span>
+                }
+                pick={(onOpenChange) => (
+                  <Menu
+                    label={t.after(blocker.name)}
+                    width={280}
+                    placement="below"
+                    align="end"
+                    onOpenChange={onOpenChange}
+                    trigger={<button type="button" aria-label={`${t.after(blocker.name)}: ${t.stands[blocker.stands]}`} />}
+                  >
+                    {blocker.onOpen !== undefined && (
+                      <MenuItem icon="arrow" onSelect={blocker.onOpen}>
+                        {t.openBlocker(blocker.name)}
+                      </MenuItem>
+                    )}
+                    {blocker.stands === BlockerStands.Abandoned && blocker.onReopen !== undefined && (
+                      <MenuItem icon="reload" onSelect={blocker.onReopen}>
+                        {t.reopenBlocker(blocker.name)}
+                      </MenuItem>
+                    )}
+                    <MenuSeparator />
+                    {waitsFor.length === 1 || blocker.onStopWaiting === undefined ? (
+                      <MenuItem icon="play" onSelect={start}>
+                        {t.startWithout}
+                      </MenuItem>
+                    ) : (
+                      <MenuItem icon="close" onSelect={blocker.onStopWaiting}>
+                        {t.stopWaiting(blocker.name)}
+                      </MenuItem>
+                    )}
+                  </Menu>
+                )}
+              />
+            ))}
           {rows.map((row, n) => {
             const { st, i, k, agent } = row
             const state = states[n] ?? 'idle'
@@ -777,7 +940,20 @@ export function TaskLaunch({
             />
           )}
         </ol>
-        {drafting !== undefined ? (
+        {ended !== undefined ? (
+          <div className={s.foot}>
+            <span className={s.estimate}>{estimate}</span>
+            <span className={s.when} role="status">
+              {ended === 'discarded' ? t.discarded : t.unplanned}
+            </span>
+            {ended === 'unplanned' && onDiscard !== undefined && (
+              <Button variant="quiet" onClick={onDiscard}>
+                {t.discard}
+              </Button>
+            )}
+            {ended === 'unplanned' && onPlan !== undefined && <Button onClick={onPlan}>{t.plan}</Button>}
+          </div>
+        ) : drafting !== undefined ? (
           <div className={s.foot}>
             <span className={s.estimate}>{estimate}</span>
             {held ? (
@@ -794,7 +970,7 @@ export function TaskLaunch({
               </>
             )}
           </div>
-        ) : queued !== undefined && !held ? (
+        ) : blocked ? (
           <div className={s.foot}>
             <span className={s.estimate}>
               {estimate}
@@ -802,6 +978,27 @@ export function TaskLaunch({
               {footNote}
             </span>
             <span className={s.when} role="status">
+              {(() => {
+                const words = waitsFor.some((one) => one.stands === BlockerStands.Abandoned) ? t.abandoned : t.startsWhen(waitsFor.length)
+                return held ? `${t.held} · ${words.charAt(0).toLowerCase()}${words.slice(1)}` : words
+              })()}
+            </span>
+            {held ? (
+              <Button onClick={start}>{t.start}</Button>
+            ) : (
+              <Button variant="quiet" onClick={() => setHeld(true)}>
+                {t.hold}
+              </Button>
+            )}
+          </div>
+        ) : queued !== undefined && !held ? (
+          <div className={s.foot}>
+            <span className={s.estimate}>
+              {estimate}
+              {estimate !== undefined && footNote !== undefined && ' · '}
+              {footNote}
+            </span>
+            <span className={s.when} role="status" {...(queuedTitle === undefined ? {} : { title: queuedTitle })}>
               {queued}
             </span>
             <Button variant="quiet" onClick={() => setHeld(true)}>
