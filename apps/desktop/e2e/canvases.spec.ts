@@ -150,10 +150,18 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(directionsRow).toContainText('Document')
     await expect(directionsRow).toContainText('Lead of Redesign sign-in')
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts.png')
+    // Opened, it is the artifact itself, with its own chat beside it: the chat's top row is the artifact's, never a task's.
     await table.getByRole('button', { name: 'Sign-in page' }).click()
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    const chat = page.getByRole('region', { name: 'Its chat' })
+    await expect(chat.getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
+    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Back to meridian' })).toHaveCount(0)
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
+    // Escape goes back to every artifact.
+    await page.locator('body').press('Escape')
+    await expect(table).toBeVisible()
   } finally {
     await electronApp.close()
   }
