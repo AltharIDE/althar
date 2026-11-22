@@ -45,9 +45,9 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 26px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 7px;
   color: var(--t-2);
   white-space: nowrap;

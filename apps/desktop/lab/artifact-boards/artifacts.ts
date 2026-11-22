@@ -76,12 +76,24 @@ export interface Kept {
   readonly repo: string
   /** Its folder, or for what is one file (a document, a diagram, a chart), that file. */
   readonly path: string
-  /** With its task's change (on the task's branch, in its pull request), a pull request of its own, or straight to the default branch. */
-  readonly how: 'task' | 'pr' | 'main'
+  /** A pull request of its own, or straight to the default branch. */
+  readonly how: 'pr' | 'main'
   /** Each new version committed as it is made; else only when someone saves. */
   readonly follow: boolean
   /** The version in git now. */
   readonly version: number
+}
+
+/**
+ * The project's place for artifacts, a setting (Settings › Code and issues ›
+ * Artifacts): the folder Save to repo puts one in unless the person picks
+ * somewhere else, and how and when it goes in. The first save sets it.
+ */
+export interface Home {
+  readonly repo: string
+  readonly folder: string
+  readonly how: Kept['how']
+  readonly follow: boolean
 }
 
 export interface Artifact {
@@ -206,7 +218,7 @@ export const ARTIFACTS: ReadonlyArray<Artifact> = [
     ago: 52,
     version: 3,
     comments: 1,
-    kept: { repo: 'kiln', path: 'design/calmer-checkout/', how: 'task', follow: true, version: 3 },
+    kept: { repo: 'kiln', path: 'design/calmer-checkout/', how: 'pr', follow: true, version: 3 },
     reach: 'shared',
     pages: [
       {
@@ -230,7 +242,7 @@ export const ARTIFACTS: ReadonlyArray<Artifact> = [
     ago: 58,
     version: 1,
     comments: 0,
-    kept: { repo: 'kiln', path: 'docs/flows/booking.mmd', how: 'task', follow: true, version: 1 },
+    kept: { repo: 'kiln', path: 'docs/flows/booking.mmd', how: 'pr', follow: true, version: 1 },
     reach: 'published',
     pages: [{ id: 'flow', name: 'Flow', boards: [{ id: 'flow', name: 'How a booking flows', draw: 'flow' }] }],
   },

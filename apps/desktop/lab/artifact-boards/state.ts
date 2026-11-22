@@ -12,14 +12,15 @@ export const DIRECTIONS = [
   { key: 'b', kbd: 'B', label: 'A room of its own', moments: ['Artifacts', 'In its room', 'Share'] },
   { key: 'c', kbd: 'C', label: 'A lot of work', moments: ['Every page', 'In its room'] },
   { key: 'd', kbd: 'D', label: 'Talk on the board', moments: ['Pins', 'A pin open', 'Shared'] },
-  { key: 'e', kbd: 'E', label: 'Save to repo', moments: ['Path', 'Tree', 'Columns', 'Suggested'] },
+  { key: 'e', kbd: 'E', label: 'Save to repo', moments: ['Path', 'Tree', 'Columns', 'Suggested', 'One place', 'First save', 'Setting'] },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
 
-/** How Save to repo picks the folder: E's moments, one each; every direction uses the one seen last. */
-export const PICKERS = ['path', 'tree', 'columns', 'suggested'] as const
+/** How Save to repo picks the folder: E's moments, one each, the project's one place from the fifth on; every direction uses the one seen last. */
+export const PICKERS = ['path', 'tree', 'columns', 'suggested', 'place'] as const
 export type Picker = (typeof PICKERS)[number]
-const pickerOf = (asked: string | null): Picker => PICKERS.find((one) => one === asked) ?? 'suggested'
+const pickerOf = (asked: string | null): Picker => PICKERS.find((one) => one === asked) ?? 'place'
+const pickerAt = (m: number): Picker => PICKERS[Math.min(m, PICKERS.length - 1)] ?? 'place'
 
 export interface LabState {
   readonly d: Direction
@@ -38,7 +39,7 @@ let state: LabState = {
   dark: params.get('theme') === 'dark',
   k: pickerOf(params.get('k')),
 }
-if (state.d === 'e') state = { ...state, k: PICKERS[state.m] ?? state.k }
+if (state.d === 'e') state = { ...state, k: pickerAt(state.m) }
 const listeners = new Set<() => void>()
 
 export const directionOf = (key: Direction) => DIRECTIONS.find((one) => one.key === key) ?? DIRECTIONS[0]
@@ -53,7 +54,7 @@ export const lab = {
     const next = { ...state, ...change }
     if (change.d !== undefined && change.d !== state.d && change.m === undefined) next.m = 0
     next.m = Math.max(0, Math.min(next.m, directionOf(next.d).moments.length - 1))
-    if (next.d === 'e') next.k = PICKERS[next.m] ?? next.k
+    if (next.d === 'e') next.k = pickerAt(next.m)
     // The same moment chosen again starts it again.
     if (change.dark === undefined) round += 1
     state = next

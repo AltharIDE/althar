@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import { type Artifact, type BoardDef, GIFT, type Kept, type Reach } from './artifacts'
+import { type Artifact, type BoardDef, GIFT, type Home, type Kept, type Reach } from './artifacts'
 
 /*
  * What happens on the lab's artifacts as the person points and says: what
@@ -74,7 +74,12 @@ interface World {
   readonly committing: ReadonlyArray<string>
   /** Who sees each artifact, as changed here. */
   readonly reach: Readonly<Record<string, Reach>>
+  /** The project's place for artifacts; null until the first save sets it. */
+  readonly home: Home | null
 }
+
+/** kiln's, as its first save set it: with its designs, in a pull request of its own, each version a commit on it. */
+export const KILN_HOME: Home = { repo: 'kiln', folder: 'design/', how: 'pr', follow: true }
 
 const EMPTY: World = {
   lines: [],
@@ -87,6 +92,7 @@ const EMPTY: World = {
   kept: {},
   committing: [],
   reach: {},
+  home: KILN_HOME,
 }
 
 /** A made-up commit for a version of an artifact in git: the same each time. */
@@ -124,6 +130,8 @@ export const live = {
     const kept = artifact.id in world.kept ? (world.kept[artifact.id] ?? null) : (artifact.kept ?? null)
     return kept === null ? null : kept.follow ? { ...kept, version: live.version(artifact) } : kept
   },
+  /** The project's place for artifacts, as set in its settings or by a save. */
+  setHome: (home: Home | null) => put({ home }),
   /** Saved to a folder in a repository, or kept in Althar only: shown at once, its commit following. */
   save: (artifact: Artifact, kept: Kept | null) => {
     put({ kept: { ...world.kept, [artifact.id]: kept }, committing: kept === null ? world.committing : [...world.committing, artifact.id] })

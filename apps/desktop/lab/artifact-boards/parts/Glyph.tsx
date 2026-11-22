@@ -14,6 +14,7 @@ import {
   MoreHoriz,
   MultiplePages,
   NavArrowDown,
+  NavArrowLeft,
   NavArrowRight,
   Plus,
   Repository,
@@ -54,6 +55,7 @@ const DRAWINGS = {
   folder: Folder,
   file: EmptyPage,
   right: NavArrowRight,
+  left: NavArrowLeft,
   plus: Plus,
   search: Search,
 } as const

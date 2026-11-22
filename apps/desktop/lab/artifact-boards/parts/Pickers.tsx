@@ -621,7 +621,7 @@ export function Suggested(props: PickerProps) {
   )
 }
 
-function Trail({ repo, folder }: { repo: string; folder: string }) {
+export function Trail({ repo, folder }: { repo: string; folder: string }) {
   return (
     <>
       {[repo, ...folder.split('/').filter(Boolean)].map((part, i) => (

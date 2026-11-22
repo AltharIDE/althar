@@ -28,6 +28,8 @@ const SEAMS: ReadonlyArray<{ readonly importer: string; readonly source: string;
   // The top rows: an artifact chat's names the artifact and who sees it, beside its conversation and in the project's Artifacts.
   { importer: at('features/task/TaskView.tsx'), source: '@althar/ui', to: lab('ui.tsx') },
   { importer: at('features/project/ProjectView.tsx'), source: '@althar/ui', to: lab('ui.tsx') },
+  // The project's settings: where its artifacts go in git, under Code and issues (E7).
+  { importer: at('features/projectSettings/ProjectSettingsPage.tsx'), source: './CodeSection', to: lab('CodeSection.tsx') },
 ]
 
 const seam = (): Plugin => ({

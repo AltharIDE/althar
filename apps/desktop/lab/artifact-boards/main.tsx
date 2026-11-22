@@ -53,6 +53,10 @@ const router = makeRouter({ client, cache })
 const go = () => {
   const { d, m } = lab.get()
   pages.hide(GIFT_TASK_ID)
+  if (d === 'e' && m === 6) {
+    void router.navigate({ to: '/projects/$projectId', params: { projectId: KILN }, search: { room: Room.Settings, section: 'code' } })
+    return
+  }
   if (d === 'b' || (d === 'c' && m === 1)) {
     void router.navigate({ to: '/projects/$projectId', params: { projectId: KILN }, search: { room: Room.Artifacts } })
     return

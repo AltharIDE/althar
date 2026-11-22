@@ -88,7 +88,12 @@ export const seed = (d: Direction, m: number) => {
     return
   }
   // Elsewhere, people's comments are pins on the boards: Sam's on the card. Where Share opens, Gift a class is shared with kiln already.
-  live.reset({ pins: [SAM], ...(momentOf(d, m).share === true ? { reach: { [GIFT]: 'shared' as const } } : {}) })
+  // E's first save is the project's first: no place for artifacts set yet.
+  live.reset({
+    pins: [SAM],
+    ...(momentOf(d, m).share === true ? { reach: { [GIFT]: 'shared' as const } } : {}),
+    ...(d === 'e' && m === 5 ? { home: null } : {}),
+  })
 }
 
 export interface Moment {
@@ -119,8 +124,8 @@ export const momentOf = (d: Direction, m: number): Moment => {
             : { opening: every }
   if (d === 'b') return m === 0 ? { opening: every, open: null } : { opening: every, open: GIFT, share: m === 2 }
   // A lot of work in one artifact: every page at once, a row each, beside the conversation or in its room.
-  // Save to repo, open on Gift a class beside its conversation, with the moment's picker.
-  if (d === 'e') return { opening: every, keep: true }
+  // Save to repo, open on Gift a class beside its conversation, with the moment's picker; the last, the project's settings.
+  if (d === 'e') return m === 6 ? { opening: every } : { opening: every, keep: true }
   if (d === 'c') return { opening: { page: EVERY_PAGE, view: 'every' }, open: m === 1 ? GIFT : null }
   return m === 1 ? { opening: { ...one, pin: 'pin-sam' } } : m === 2 ? { opening: one, guest: true } : { opening: one }
 }

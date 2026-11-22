@@ -213,6 +213,35 @@ const shots = [
   ],
   ['dark-e2', 'd=e&m=1&theme=dark'],
   ['dark-e4', 'd=e&m=3&theme=dark'],
+  ['e5-place', 'd=e&m=4'],
+  [
+    'e5-else',
+    'd=e&m=4',
+    async (page) => {
+      await page.getByRole('button', { name: 'Somewhere else' }).click()
+      await page.getByRole('treeitem', { name: 'docs/' }).first().click()
+      await page.waitForTimeout(400)
+    },
+  ],
+  ['e6-first', 'd=e&m=5'],
+  ['e7-setting', 'd=e&m=6', async (page) => page.waitForTimeout(1200)],
+  [
+    'e6-then',
+    'd=e&m=5',
+    async (page) => {
+      await page.getByRole('button', { name: 'Save to kiln' }).click()
+      await page.waitForTimeout(1800)
+      await page
+        .getByRole('button', { name: /gift-a-class\// })
+        .first()
+        .click()
+      await page.waitForTimeout(400)
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.waitForTimeout(1500)
+    },
+  ],
+  ['dark-e5', 'd=e&m=4&theme=dark'],
+  ['dark-e7', 'd=e&m=6&theme=dark', async (page) => page.waitForTimeout(1200)],
   ['dark-a2', 'd=a&m=1&theme=dark'],
   ['dark-a5', 'd=a&m=4&theme=dark'],
   ['dark-b1', 'd=b&m=0&theme=dark'],

@@ -27,9 +27,9 @@ export const NOTES: Readonly<Record<Direction, { readonly for: string; readonly 
     size: 'Medium to large: the runtime has to send a turn’s answer back to a pin.',
   },
   e: {
-    for: 'Picking where an artifact goes in git, from Save to repo in its top row. Four pickers, one a moment; the one seen last is the one Save to repo opens everywhere else (A–D). Each shows the new folder where it would land, among what’s there, with its name typed in place, and the same foot: how it goes in (with the task’s change, a pull request of its own, straight to main), when it’s committed (every version, or when you save), and Save. Saved, it opens where it is, to move it or stop saving.',
+    for: 'Picking where an artifact goes in git, from Save to repo in its top row. Four pickers first, one a moment, each showing the new folder where it would land with its name typed in place, how it goes in and when it’s committed. Then the one place (5–7): the project’s place for artifacts is a setting, so Save to repo is that place and Save, with the tree for somewhere else; the first save sets it, and Settings › Code and issues changes it. The picker seen last is the one Save to repo opens in A–D. Saved, it opens where it is, to move it or stop saving.',
     build:
-      'Every picker needs the repositories’ folders: read from git at the default branch’s head (git ls-tree, folders only), in a worker, kept with the project’s file index and refreshed when the branch moves, so it opens at once. The rest is the renderer’s: a menu path, a tree, or columns, over that index. Suggestions come from where the project keeps such things (where its saved artifacts are, a design folder, the code the task changes), worked out when Save to repo opens; the lead can add its own reasons as it saves.',
+      'Every picker needs the repositories’ folders: read from git at the default branch’s head (git ls-tree, folders only), in a worker, kept with the project’s file index and refreshed when the branch moves, so it opens at once. The rest is the renderer’s: a menu path, a tree, or columns, over that index. Suggestions come from where the project keeps such things (where its saved artifacts are, a design folder, the code the task changes), worked out when Save to repo opens. The one place is a project setting beside its repositories (folder, how, every version), read by Save to repo; Althar’s pick for the first save is its first suggestion, and a pull request where the repository’s main is protected.',
     size: 'Small, any of them: the index is the only new part, and Althar has most of it for finding files.',
   },
 }
@@ -52,6 +52,10 @@ export const PICKER_NOTES: Readonly<Record<Picker, { readonly label: string; rea
     label: 'Suggested',
     for: 'Where Althar would put it and why, one click each: with kiln’s designs, beside the code it designs, or in the team’s designs. Somewhere else finds any folder by its words. Most saves are one click; the reasons say what each place means.',
   },
+  place: {
+    label: 'One place',
+    for: 'Suggested, down to the one place the project keeps artifacts: a setting, so most saves are Save. Somewhere else opens the tree, and can make the folder picked the place from now on. How it goes in is the setting’s, a line under the place with Settings beside it, not a choice each time. The first save in a project (6) is Althar’s pick with its reason, and sets the place; the setting (7) is under Code and issues, beside the repositories.',
+  },
 }
 
 /** Saving to a repo, or not: the same in every direction, in the artifact's head. */
@@ -62,4 +66,4 @@ export const GIT = {
 }
 
 export const PICK =
-  'Where it’s going: A, B and D together. The artifact chat (A) is where a design is made, its top row the artifact’s and who sees it; the room (B) is where every artifact is found and opened into its chat; pins (D) are how people and the lead talk about a part. Every page at once (C) is how an artifact looks once a lot of work is in it, and saving to a repo goes in all of them. Its picker: Suggested (E4), most saves one click with a reason each, its Somewhere else opening the tree (E2) rather than only a find, for seeing exactly what lands where.'
+  'Where it’s going: A, B and D together. The artifact chat (A) is where a design is made, its top row the artifact’s and who sees it; the room (B) is where every artifact is found and opened into its chat; pins (D) are how people and the lead talk about a part. Every page at once (C) is how an artifact looks once a lot of work is in it, and saving to a repo goes in all of them. Its picker: the one place (E5), the project’s setting, so most saves are Save, with the tree (E2) for somewhere else.'
