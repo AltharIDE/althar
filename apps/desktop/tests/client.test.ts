@@ -381,6 +381,7 @@ describe('the client', () => {
           SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
+          SetThreadGoal: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
           UndoTurn: () => Effect.die('unused'),
