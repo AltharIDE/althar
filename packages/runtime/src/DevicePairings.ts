@@ -151,7 +151,8 @@ export class DevicePairings extends Context.Service<
           const tokenHash = createHash('sha256').update(token).digest('hex')
           const invitation = yield* issue(tokenHash)
           const code = encodePairingCode({ ...invitation, protocol: 1, apiVersion: API_VERSION, ...at, token })
-          return { code, link: pairingLinkOf(code), tokenHash, expiresAt: invitation.expiresAt }
+          const left = Math.max(0, invitation.expiresAt - (yield* Clock.currentTimeMillis))
+          return { code, link: pairingLinkOf(code), tokenHash, expiresAt: invitation.expiresAt, left }
         })
       const status = (given: string) =>
         Effect.gen(function* () {

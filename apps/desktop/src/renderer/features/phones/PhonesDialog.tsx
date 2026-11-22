@@ -6,7 +6,9 @@ import s from './Phones.module.css'
 
 /*
  * Pair a phone… from the homes menu: one dialog that pairs a phone with the
- * window's home and lists the phones it has paired, each with Remove. Done
+ * window's home and lists what it has paired with a code, each with Remove:
+ * phones, and computers that connected the same way, which the home doesn't
+ * tell apart. Done
  * closes it; Pair another phone makes a new code in place.
  */
 
@@ -28,13 +30,15 @@ export function PhonesDialog({ home, onClose }: PhonesDialogProps) {
         state={pairing.state}
         {...(pairing.reach === null ? {} : { reach: pairing.reach })}
         onLetIn={pairing.letIn}
+        {...(pairing.shutOut === undefined ? {} : { onShutOut: pairing.shutOut })}
+        {...(pairing.shutProblem === null ? {} : { shutProblem: pairing.shutProblem })}
         onNewCode={pairing.again}
         onDone={onClose}
         onPairAnother={pairing.again}
       />
       {list.length > 0 && (
         <section className={s.paired}>
-          <span className={s.pairedHead}>Phones that open {home}</span>
+          <span className={s.pairedHead}>Paired with a code</span>
           <PhoneList home={home} phones={list.map((device) => phoneOf(device, now, phones.fresh))} onRemove={phones.remove} />
           {phones.problem !== null && <span className={s.problem}>{phones.problem}</span>}
         </section>

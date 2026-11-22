@@ -1,4 +1,4 @@
-import type { ClientPage, RegisteredClient } from '@althar/contracts'
+import type { ClientPage, PhoneAccess, RegisteredClient } from '@althar/contracts'
 import type { PairedPhone, PairPhoneState } from '@althar/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -43,11 +43,17 @@ export const phoneOf = (device: RegisteredClient, now: string, fresh: ReadonlySe
 /** What pairs with a code (phones, and computers that connected the same way), and isn't taken off. */
 const pairedOnly = (page: ClientPage) => page.clients.filter((device) => device.role === 'socket' && device.revokedAt === null)
 
-/** The phones the window's home has paired, kept fresh, with Remove at once. */
+/**
+ * What the window's home has paired with a code, kept fresh, with Remove at
+ * once. Each removal is held by its device until a fresh read from the home
+ * no longer has it, so a read begun before the press can't bring it back, and
+ * a refusal puts back only the device it was for.
+ */
 export function usePairedPhones() {
   const { client } = useServices()
   const queries = useQueryClient()
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set())
   const [problem, setProblem] = useState<string | null>(null)
   const devices = useQuery({
     queryKey: DEVICES,
@@ -63,24 +69,34 @@ export function usePairedPhones() {
       return all
     },
   })
-  const removing = useMutation({
+  const settled = (id: string) =>
+    setRemoving((was) => {
+      const next = new Set(was)
+      next.delete(id)
+      return next
+    })
+  const removal = useMutation({
     mutationFn: (id: string) => client.removePairedDevice(id),
     onMutate: (id) => {
       setProblem(null)
-      const was = queries.getQueryData<ReadonlyArray<RegisteredClient>>(DEVICES)
-      queries.setQueryData<ReadonlyArray<RegisteredClient>>(DEVICES, (list) => list?.filter((device) => device.deviceId !== id))
-      return { was }
+      setRemoving((was) => new Set([...was, id]))
     },
-    onError: (error, _id, context) => {
-      queries.setQueryData(DEVICES, context?.was)
+    onError: (error, id) => {
+      settled(id)
       setProblem(problemOf(error))
+    },
+    onSuccess: async (_done, id) => {
+      // A read begun before the press is cancelled for a fresh one; until it lands, the device stays off the list.
+      await queries.invalidateQueries({ queryKey: DEVICES }).catch(() => undefined)
+      settled(id)
     },
   })
   const paired = (deviceId: string) => {
     setFresh((was) => new Set([...was, deviceId]))
     void queries.invalidateQueries({ queryKey: DEVICES })
   }
-  return { devices: devices.data ?? null, fresh, problem, remove: (id: string) => removing.mutate(id), paired }
+  const shown = devices.data?.filter((device) => !removing.has(device.deviceId)) ?? null
+  return { devices: shown, fresh, problem, remove: (id: string) => removal.mutate(id), paired }
 }
 
 /** One pairing, from opening to Done: what PairPhone shows, and what its presses do. */
@@ -95,7 +111,11 @@ export function usePairing(onPaired: (deviceId: string) => void) {
   const reachable = access.data !== undefined && access.data.origin !== null
   const made = useQuery({
     queryKey: ['phones', 'code', round],
-    queryFn: () => client.createPairingCode(),
+    // Counted down from what the home says is left, never this window's clock against the home's.
+    queryFn: async () => {
+      const made = await client.createPairingCode()
+      return { ...made, until: Date.now() + made.left }
+    },
     enabled: reachable,
     // A code is made once for its round, never again behind the person's back.
     staleTime: Infinity,
@@ -108,16 +128,36 @@ export function usePairing(onPaired: (deviceId: string) => void) {
     mutationFn: () => client.setPhoneAccess(true),
     onSuccess: (now) => queries.setQueryData(ACCESS, now),
   })
+  // Stop letting phones in: closed at once, open again with the home's reason if it refuses.
+  const [shutProblem, setShutProblem] = useState<string | null>(null)
+  const shutting = useMutation({
+    mutationFn: () => client.setPhoneAccess(false),
+    onMutate: () => {
+      setShutProblem(null)
+      const was = queries.getQueryData<PhoneAccess>(ACCESS)
+      if (was !== undefined) queries.setQueryData<PhoneAccess>(ACCESS, { ...was, origin: null, on: false })
+      return { was }
+    },
+    onError: (error, _none, context) => {
+      queries.setQueryData(ACCESS, context?.was)
+      setShutProblem(problemOf(error))
+    },
+    onSuccess: (now) => {
+      queries.setQueryData(ACCESS, now)
+      setRound((was) => was + 1)
+    },
+  })
   const code = made.data
   const done = paired !== null && paired.round === round ? paired : null
   const out = code !== undefined && done === null && ranOut !== round ? code : null
   const now = useNow(out !== null)
-  const left = out === null ? 0 : Math.max(0, out.expiresAt - Date.parse(now))
-  const waiting = left > 0 ? out : null
-  // Asked after while it waits, until a phone uses it; the home says when it ran out too.
+  const left = out === null ? 0 : Math.max(0, out.until - Date.parse(now))
+  // Out until the home itself says it ran out: a phone may pair in its last second, after this window's count reached 0.
+  const waiting = out
   useQuery({
     queryKey: ['phones', 'status', waiting?.tokenHash ?? null],
     enabled: waiting !== null,
+    refetchIntervalInBackground: true,
     refetchInterval: STATUS_EVERY,
     gcTime: 0,
     queryFn: async () => {
@@ -159,5 +199,13 @@ export function usePairing(onPaired: (deviceId: string) => void) {
   const host = access.data?.origin == null ? null : new URL(access.data.origin).hostname
   const reach =
     host === null ? null : host.endsWith('.local') ? `Phones on the same Wi-Fi reach it, at ${host}.` : `Phones reach it at ${host}.`
-  return { state, letIn: () => letting.mutate(), again, reach }
+  const on = access.data?.on === true && access.data.switchable
+  return {
+    state,
+    letIn: () => letting.mutate(),
+    again,
+    reach,
+    ...(on ? { shutOut: () => shutting.mutate() } : {}),
+    shutProblem,
+  }
 }

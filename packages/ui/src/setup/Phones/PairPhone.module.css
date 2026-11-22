@@ -250,6 +250,14 @@
   line-height: 1.5;
   color: var(--danger);
 }
+/* a code too long for a QR: the tile says so, and the code to paste stays beside it */
+.tooLong {
+  padding: 24px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--t-3);
+}
 /* where phones reach the home, last */
 .reach {
   margin-top: 4px;

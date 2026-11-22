@@ -94,6 +94,8 @@ export const PairingCodeMade = Schema.Struct({
   link: Schema.String,
   tokenHash: PairingTokenHash,
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** How long it has, in ms, by the home's clock as it made it: a window counts down from this, never from its own clock against expiresAt. */
+  left: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 })
 export type PairingCodeMade = typeof PairingCodeMade.Type
 

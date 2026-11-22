@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 
@@ -20,12 +21,28 @@ import { Clock, Context, Effect, Exit, Scope } from 'effect'
 
 export const PHONE_PORT = 6769
 /** Tests name where phones reach the Mac themselves: a .local name may not resolve on CI, and port 6769 may be taken. */
-const hostHere = () => process.env.ALTHAR_PHONE_HOST ?? localName()
+const hostHere = Effect.promise(async () => process.env.ALTHAR_PHONE_HOST ?? localName(await bonjourName()))
 const portHere = () => Number.parseInt(process.env.ALTHAR_PHONE_PORT ?? '', 10) || PHONE_PORT
 const SETTING = 'phones.json'
 const TLS = 'phones-tls.json'
 
-/** The Mac's name on the local network, as Bonjour answers it: `Studio-Mac.local`. */
+/**
+ * The name Bonjour publishes for this Mac (System Settings › General › Sharing,
+ * Local hostname), which is what a phone on the Wi-Fi resolves; the configured
+ * hostname may be another name entirely (studio.example.com). Elsewhere, or
+ * where it can't be read, the hostname.
+ */
+export const bonjourName = () =>
+  process.platform !== 'darwin'
+    ? Promise.resolve(hostname())
+    : new Promise<string>((resolve) =>
+        execFile('/usr/sbin/scutil', ['--get', 'LocalHostName'], { timeout: 2_000 }, (error, out) => {
+          const name = String(out).trim()
+          resolve(error === null && name !== '' ? name : hostname())
+        }),
+      )
+
+/** The Mac's name on the local network, from its Bonjour name: `studio-mac.local`. */
 export const localName = (name = hostname()) => {
   const bare = name
     .replace(/\.local\.?$/i, '')
@@ -82,7 +99,7 @@ export const phonesIn = (profile: string, context: Context.Context<never>) =>
       Effect.promise(() => writePrivate(join(profile, SETTING), JSON.stringify({ on }), true).catch(() => false))
     const start = Effect.gen(function* () {
       if (open !== undefined) return
-      const name = hostHere()
+      const name = yield* hostHere
       const port = portHere()
       const tls = yield* tlsFor(profile, name)
       const scope = yield* Scope.make()

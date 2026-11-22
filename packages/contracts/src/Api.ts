@@ -5140,7 +5140,8 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
   command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
-  command('CreatePairingCode', {}, PairingCodeMade),
+  // A call, not a command: a command's receipt would keep the code, a bearer, in the profile's database.
+  call('CreatePairingCode', {}, PairingCodeMade),
   call('GetPairingStatus', { tokenHash: PairingTokenHash }, PairingStatus),
   call('GetPhoneAccess', {}, PhoneAccess),
   command('SetPhoneAccess', { on: Schema.Boolean }, PhoneAccess),

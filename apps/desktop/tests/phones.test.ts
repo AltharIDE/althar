@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,13 +7,18 @@ import { tlsPublicKeyPin } from '@althar/transport-node'
 import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { localName, tlsFor } from '../src/runtime/phones'
+import { bonjourName, localName, tlsFor } from '../src/runtime/phones'
 
 describe('This Mac letting phones in', () => {
   it('answers at the Mac’s Bonjour name', () => {
     expect(localName('Studio-Mac.local')).toBe('studio-mac.local')
     expect(localName('Balázs’s MacBook Pro')).toBe('bal-zs-s-macbook-pro.local')
     expect(localName('')).toBe('althar.local')
+  })
+
+  it.runIf(process.platform === 'darwin')('takes the name Bonjour publishes, not the configured hostname', async () => {
+    const published = execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName']).toString().trim()
+    expect(await bonjourName()).toBe(published)
   })
 
   it('keeps its key, and so every paired phone’s pin, when the Mac is renamed', async () => {

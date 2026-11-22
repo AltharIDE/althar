@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Api } from '../src/Api'
 
 import { pairingCodeIn, pairingLinkOf } from '../src/pairing'
 
@@ -21,5 +22,13 @@ describe('pairing links', () => {
     expect(pairingCodeIn('https://evil.example/pair#1.abc')).toBe('https://evil.example/pair#1.abc')
     expect(pairingCodeIn('https://althar.ai/pair#hello')).toBe('https://althar.ai/pair#hello')
     expect(pairingCodeIn('https://althar.ai/pair')).toBe('https://althar.ai/pair')
+  })
+})
+
+describe('making a pairing code', () => {
+  it('is a call with no command id, so no receipt keeps the code', () => {
+    const rpc = Api.requests.get('CreatePairingCode')
+    expect(rpc).toBeDefined()
+    expect(Object.keys((rpc?.payloadSchema as unknown as { fields: object }).fields)).not.toContain('commandId')
   })
 })

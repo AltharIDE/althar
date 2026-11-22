@@ -1299,6 +1299,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       link: 'https://althar.ai/pair#1.e30',
       tokenHash: 'a'.repeat(64),
       expiresAt: Date.now() + 5 * 60_000,
+      left: 5 * 60_000,
     })),
     pairingStatus: vi.fn(async () => ({ state: 'waiting' as const, expiresAt: Date.now() + 5 * 60_000 })),
     pairedDevices: vi.fn(async () => ({ clients: [], next: null })),

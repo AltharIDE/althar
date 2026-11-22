@@ -1227,7 +1227,7 @@ export const connect = async (
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     phoneAccess: () => settle(api.GetPhoneAccess({})),
     setPhoneAccess: (on) => command((commandId) => api.SetPhoneAccess({ commandId, on })),
-    createPairingCode: () => command((commandId) => api.CreatePairingCode({ commandId })),
+    createPairingCode: () => settle(api.CreatePairingCode({})),
     pairingStatus: (tokenHash) => settle(api.GetPairingStatus({ tokenHash })),
     pairedDevices: (after) => settle(api.ListClientDevices({ limit: 100, ...(after === undefined ? {} : { after }) })),
     removePairedDevice: (deviceId) => command((commandId) => api.RevokeConnectionDevice({ commandId, deviceId })),

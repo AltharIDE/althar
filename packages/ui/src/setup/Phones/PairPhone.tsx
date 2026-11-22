@@ -40,6 +40,10 @@ export interface PairPhoneProps {
   /** Where phones reach the home, in a line, under the code: "On the same Wi-Fi as this Mac." */
   readonly reach?: string
   readonly onLetIn?: () => void
+  /** Stops letting phones in, where the window can (This Mac); paired phones stay paired for when they're let in again. */
+  readonly onShutOut?: () => void
+  /** Why stopping didn't take, in the home's words. */
+  readonly shutProblem?: string
   readonly onNewCode: () => void
   readonly onDone: () => void
   readonly onPairAnother: () => void
@@ -71,9 +75,18 @@ const seedOfCode = (code: string): string | null => {
 /** The QR, dark on light in either appearance, as a phone's camera reads it best. */
 export function Qr({ text, size, className }: { text: string; size: number; className?: string }) {
   const path = useMemo(() => {
-    const matrix = qrOf(text)
-    return { d: qrPath(matrix, 2), n: matrix.size + 4 }
+    // A home whose certificate is large makes a code past what a QR holds: the code to paste stays.
+    try {
+      const matrix = qrOf(text)
+      return { d: qrPath(matrix, 2), n: matrix.size + 4 }
+    } catch {
+      return null
+    }
   }, [text])
+  if (path === null)
+    return (
+      <span className={cx(s.tooLong, className)}>This home’s code is too long for a QR. Paste it in Althar on your phone instead.</span>
+    )
   return (
     <svg className={cx(s.qr, className)} width={size} height={size} viewBox={`0 0 ${path.n} ${path.n}`} shapeRendering="crispEdges">
       <title>Pairing code</title>
@@ -138,7 +151,18 @@ function Closed({
   )
 }
 
-export function PairPhone({ home, state, layout = 'wide', reach, onLetIn, onNewCode, onDone, onPairAnother }: PairPhoneProps) {
+export function PairPhone({
+  home,
+  state,
+  layout = 'wide',
+  reach,
+  onLetIn,
+  onShutOut,
+  shutProblem,
+  onNewCode,
+  onDone,
+  onPairAnother,
+}: PairPhoneProps) {
   const code = state.kind === 'waiting' || state.kind === 'expired' || state.kind === 'paired' ? state.code : null
   const seed = useMemo(() => (code === null ? null : seedOfCode(code)), [code])
   const frame = (body: React.ReactNode) => <div className={s.frame}>{body}</div>
@@ -229,7 +253,18 @@ export function PairPhone({ home, state, layout = 'wide', reach, onLetIn, onNewC
             </span>
           </>
         )}
-        {reach !== undefined && <span className={s.reach}>{reach}</span>}
+        {(reach !== undefined || onShutOut !== undefined) && (
+          <span className={s.reach}>
+            {reach}
+            {onShutOut !== undefined && (
+              <>
+                {' '}
+                <LinkButton onClick={onShutOut}>Stop letting phones in</LinkButton>
+              </>
+            )}
+          </span>
+        )}
+        {shutProblem !== undefined && <span className={s.problem}>{shutProblem}</span>}
       </div>
     </div>,
   )

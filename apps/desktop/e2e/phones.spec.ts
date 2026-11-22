@@ -73,13 +73,13 @@ test('pairs a phone with This Mac from the homes menu, over HTTPS, and takes it 
     // Again: a new code at once, the phone listed under it, and Remove takes it off.
     dialog = await openPairing()
     await expect(dialog.getByText('Scan it with your phone’s camera')).toBeVisible()
-    await expect(dialog.getByText('Phones that open This Mac')).toBeVisible()
+    await expect(dialog.getByText('Paired with a code')).toBeVisible()
     await dialog.getByText('iPhone', { exact: true }).hover()
     await dialog.getByRole('button', { name: 'Remove' }).click()
     const asking = page.getByRole('dialog', { name: 'Remove iPhone?' })
     await shoot(page, '4-remove')
     await asking.getByRole('button', { name: 'Remove' }).click()
-    await expect(dialog.getByText('Phones that open This Mac')).toBeHidden()
+    await expect(dialog.getByText('Paired with a code')).toBeHidden()
   } finally {
     await electronApp.close()
   }
