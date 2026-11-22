@@ -4,8 +4,7 @@ import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
-import { isAbsolute, join, resolve, sep } from 'node:path'
+import { isAbsolute, join, sep } from 'node:path'
 
 import {
   type AfterMergeRule,
@@ -71,7 +70,8 @@ import {
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Ledger } from '@althar/persistence-sqlite'
+import { Database, Ledger } from '@althar/persistence-sqlite'
+import { type BoardRow, boardProjections, boardRows, committedAt, homeRows, putProjection } from './boardProjections'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
@@ -1072,6 +1072,7 @@ export interface ThreadChange {
 
 type Store =
   | SqlClient.SqlClient
+  | Database.ReadLane
   | Ledger
   | Instance
   | Agents
@@ -1110,13 +1111,7 @@ const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>
   defaultValue: () => null,
 })
 
-/** A task's row, as a board reads it. */
-interface BoardRow {
-  readonly id: string
-  readonly state: string
-  readonly createdAt: string
-  readonly settledAt: string | null
-}
+const WorktreeDetails = Context.Reference<boolean>('@althar/runtime/Queries/WorktreeDetails', { defaultValue: () => true })
 
 /** A task as its board shows it, and as JSON: what the watcher compares with what it last said. */
 interface Shown {
@@ -1187,11 +1182,11 @@ export class Queries extends Context.Service<
     /** A task's card, as its board shows it: where it stands and what it makes. */
     card(taskId: string): Effect.Effect<TaskCard, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
-    board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
+    board(projectId: string, cached?: boolean): Effect.Effect<BoardSnapshot, unknown>
     /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
     olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
-    home(since?: string, deviceId?: string): Effect.Effect<HomeSnapshot, unknown>
+    home(since?: string, deviceId?: string, cached?: boolean): Effect.Effect<HomeSnapshot, unknown>
     /**
      * What waits on the person, across every project not archived: each task the home shows, as the card watcher last worked
      * its card out, and the calls that wait. What the Dock's badge and the notifications go by; it works no card out.
@@ -1214,6 +1209,7 @@ export class Queries extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const config = yield* RuntimeConfig
+      const reader = yield* Database.ReadLane
       // How long a draft waits for its plan before it is the person's (DRAFTING_MS unless a test says otherwise).
       const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
       const launches = yield* Launches
@@ -2300,6 +2296,7 @@ export class Queries extends Context.Service<
        */
       const heldOf = (taskId: string, after: number | undefined) =>
         Effect.gen(function* () {
+          if (!(yield* WorktreeDetails)) return undefined
           const changes = yield* Changes
           const [first] = yield* changes.holds(taskId).pipe(Effect.orElseSucceed(() => []))
           if (first === undefined) return undefined
@@ -2512,6 +2509,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
+          const worktreeDetails = yield* WorktreeDetails
           // Commits after its last pull request merged or closed, in none yet: something for the person to ship (ADR-034). Read
           // from git before the store, so a round of work that opens meanwhile shows as it is, not a settled task with its commit.
           // By repository: one whose pull request is still open takes pushes instead.
@@ -2519,7 +2517,7 @@ export class Queries extends Context.Service<
             SELECT k.state, (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes
             FROM tasks k WHERE k.id = ${taskId}`
           const after =
-            shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
+            worktreeDetails && shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
               ? yield* (yield* Changes).unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{
@@ -3003,9 +3001,11 @@ export class Queries extends Context.Service<
           const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${quick}` : null
           const known = settledKinds.get(taskId)
           const kept = settledAs !== null && known?.as === settledAs ? known.kind : undefined
-          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, quick, made: reads ? yield* madeOf(taskId) : false })
+          const kind =
+            kept ??
+            kindOf({ reviewing, end, changes: changes.length, quick, made: reads && worktreeDetails ? yield* madeOf(taskId) : false })
           settledKinds.delete(taskId)
-          if (settledAs !== null) settledKinds.set(taskId, { as: settledAs, kind })
+          if (settledAs !== null && worktreeDetails) settledKinds.set(taskId, { as: settledAs, kind })
           for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           const card = {
             taskId,
@@ -3281,22 +3281,6 @@ export class Queries extends Context.Service<
        */
       const settledCards = new Map<string, { readonly seen: string; readonly shown: Shown }>()
 
-      /** When a worktree's head last moved, as its reflog was last written: a commit there writes it. Nothing where it can't be read. */
-      const committedAt = (path: string): Effect.Effect<string> =>
-        path === ''
-          ? Effect.succeed('')
-          : Effect.promise(async () => {
-              try {
-                // A worktree's `.git` is a file naming its folder in the repository's; a repository's own, that folder.
-                const dotGit = join(path, '.git')
-                const pointer = (await stat(dotGit)).isFile() ? /^gitdir: (.+)$/m.exec(await readFile(dotGit, 'utf8'))?.[1] : undefined
-                const gitDir = pointer === undefined ? dotGit : resolve(path, pointer.trim())
-                return String((await stat(join(gitDir, 'logs', 'HEAD'))).mtimeMs)
-              } catch {
-                return ''
-              }
-            })
-
       /*
        * What the card watcher last worked out of each task's card (below), its card and its calls, and of its card alone. A read
        * can give out a card the watcher never saw: from what moves with no change recorded, as a commit made in a task's
@@ -3304,6 +3288,19 @@ export class Queries extends Context.Service<
        * its card comes to: back to what the watcher saw, a window holding the other would otherwise never hear of it.
        */
       const shownCards = new Map<string, { readonly whole: string; readonly card: string }>()
+      const projections = yield* boardProjections
+      const getProjected = (row: BoardRow) =>
+        projections.read(
+          row,
+          Effect.provideService(
+            Effect.gen(function* () {
+              const found = yield* standingFor(row.id)
+              return found === undefined ? [] : [yield* boardOf(row, found.card)]
+            }),
+            WorktreeDetails,
+            false,
+          ),
+        )
 
       /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
       const onBoard = (row: BoardRow) =>
@@ -3337,12 +3334,13 @@ export class Queries extends Context.Service<
       /** A task as its board shows it, from its card: ready, what it changed and what of it merges here, from git. */
       const boardOf = (row: BoardRow, card: TaskCard) =>
         Effect.gen(function* () {
+          const details = yield* WorktreeDetails
           // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
           // without one shows its branch's size so far.
           const atWork = (card.phase === 'running' || card.phase === 'stopped') && card.kind === 'change' && card.change === null
           // A plain task with no branch yet has nothing of its own in git to size.
           const said =
-            (card.phase === 'ready' || atWork) && card.branch !== null
+            details && (card.phase === 'ready' || atWork) && card.branch !== null
               ? yield* gitOf(row.id, { changed: card.change === null || card.change.state === 'closed', here: card.phase === 'ready' })
               : null
           const changed =
@@ -3355,6 +3353,7 @@ export class Queries extends Context.Service<
               : null
           // A change ready with nothing on its branch and no pull request open or merged: nothing to accept.
           const nothingBuilt =
+            details &&
             card.phase === 'ready' &&
             card.kind === 'change' &&
             card.unshipped == null &&
@@ -3636,29 +3635,15 @@ export class Queries extends Context.Service<
         })
 
       /** A project's board: its tasks, each as its card, and every call that waits on the person. */
-      const board = (projectId: string) =>
+      const board = (projectId: string, cached = false) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const at = yield* readAt
-          const rows = yield* sql<{
-            id: string
-            state: string
-            createdAt: string
-            settledAt: string | null
-            worktree: string | null
-            baseRef: string | null
-            baseCommit: string | null
-          }>`
-            SELECT k.id, k.state, k.created_at, k.settled_at, w.path AS worktree, w.base_ref, w.base_commit
-            FROM tasks k LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
-            WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
-              SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
-              ORDER BY settled_at DESC, id DESC LIMIT ${SETTLED_SHOWN}))
-            ORDER BY k.created_at, k.id`
+          const at = yield* cached ? cursor : readAt
+          const rows = yield* boardRows(projectId, instance.deviceId, SETTLED_SHOWN, cached)
           const [counted] = yield* sql<{
             total: number
           }>`SELECT COUNT(*) AS total FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')`
-          const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
+          const tasks = yield* Effect.forEach(rows, cached ? getProjected : onBoard, { concurrency: AT_ONCE })
           // Only what the board still shows is kept.
           const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
           for (const key of settledCards.keys()) if (!shown.has(key)) settledCards.delete(key)
@@ -3706,46 +3691,41 @@ export class Queries extends Context.Service<
        * the home, the edge, the Dock's badge and the notifications count is
        * read from these, so none can say a task waits where its card doesn't.
        */
-      const homeTasks = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
-          SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-          WHERE p.archived_at IS NULL AND (k.state IN ('open', 'draft') OR k.id IN (
-            -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
-            SELECT id FROM (
-              SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
-              FROM tasks WHERE state IN ('done', 'abandoned'))
-            WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
-          ORDER BY k.created_at, k.id`
-        const tasks = yield* Effect.forEach(
-          rows,
-          (row) =>
-            Effect.map(onBoard(row), (read) =>
-              read.flatMap((task) =>
-                // A task kept for later waits on its board, not here.
-                onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
+      const homeTasks = (cached = false) =>
+        Effect.gen(function* () {
+          const rows = yield* homeRows(SETTLED_SHOWN, cached)
+          const tasks = yield* Effect.forEach(
+            rows,
+            (row) =>
+              Effect.map(cached ? getProjected(row) : onBoard(row), (read) =>
+                read.flatMap((task) =>
+                  // A task kept for later waits on its board, not here.
+                  onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
+                ),
               ),
-            ),
-          { concurrency: AT_ONCE },
-        )
-        return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
-      })
+            { concurrency: AT_ONCE },
+          )
+          return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
+        })
 
       /**
        * The home: every project, and across them what waits on the person,
        * what runs, and what the loop did since `since`, or since they last left
        * the home here, or, before they ever did, over the last day.
        */
-      const home = (since?: string, deviceId: string = instance.deviceId) =>
+      const home = (since?: string, deviceId: string = instance.deviceId, cached = false) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const at = yield* readAt
+          const at = yield* cached ? cursor : readAt
           const [device] = yield* sql<{
             looked: string | null
           }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${deviceId}`
           const looked = device?.looked ?? null
           const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
-          const { open, tasks } = yield* homeTasks
+          const [{ open, tasks }, calls, events, projectList] = yield* Effect.all(
+            [homeTasks(cached), callsIn(null), eventsSince(from, cached), projects],
+            { concurrency: cached ? 'unbounded' : 1 },
+          )
           // What is kept of a task's worktrees goes once it is settled: the home reads every open one.
           forget((owner) => !open.has(owner.taskId))
           return {
@@ -3753,9 +3733,9 @@ export class Queries extends Context.Service<
             looked,
             since: from,
             tasks,
-            calls: (yield* callsIn(null)).map((one) => ({ ...one.call, projectId: one.projectId })),
-            events: yield* eventsSince(from),
-            projects: (yield* projects).projects,
+            calls: calls.map((one) => ({ ...one.call, projectId: one.projectId })),
+            events,
+            projects: projectList.projects,
           } satisfies HomeSnapshot
         })
 
@@ -3764,10 +3744,10 @@ export class Queries extends Context.Service<
        * did: each step's result, each usage limit and quiet step it dealt with,
        * and the permission asks the projects' rules answered, counted.
        */
-      const eventsSince = (from: string) =>
+      const eventsSince = (from: string, cached: boolean) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const items = yield* sql<{
+          const readEvents = sql<{
             id: string
             sequence: number
             kind: string
@@ -3785,6 +3765,7 @@ export class Queries extends Context.Service<
             WHERE p.archived_at IS NULL AND i.created_at > ${from}
               AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') = 'stall'))
             ORDER BY i.created_at DESC, i.sequence DESC LIMIT ${EVENTS}`
+          const items = yield* cached ? reader.read(readEvents) : readEvents
           const events: Array<HomeEvent> = items.flatMap((row): ReadonlyArray<HomeEvent> => {
             const base = {
               id: row.id,
@@ -4822,20 +4803,21 @@ export class Queries extends Context.Service<
           })),
         } satisfies Waiting
       })
-      const cardShown = (taskId: string, calls: (projectId: string) => ReturnType<typeof callsIn>) =>
+      const cardShown = (taskId: string, calls: (projectId: string) => ReturnType<typeof callsIn>, changed: boolean) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT id, project_id, state, created_at, settled_at FROM tasks WHERE id = ${taskId}`
           if (row === undefined) {
             standing.delete(taskId)
+            projections.forget(taskId)
             return 'gone'
           }
-          for (const key of settledCards.keys()) if (key.startsWith(`${taskId}:`)) settledCards.delete(key)
+          if (changed) for (const key of settledCards.keys()) if (key.startsWith(`${taskId}:`)) settledCards.delete(key)
           const shown = yield* cardOnBoard(row)
           keep(taskId, row.projectId, shown.read)
           const its = (yield* calls(row.projectId)).filter((one) => one.call.taskId === taskId).map((one) => one.call)
-          return { whole: `${shown.json}\n${JSON.stringify(its)}`, card: shown.json }
+          return { whole: `${shown.json}\n${JSON.stringify(its)}`, card: shown.json, projectId: row.projectId }
         })
       // What of a project's board is no task's: the questions its coordinator asks the person, which wait in Needs you.
       const shownCalls = new Map<string, string>()
@@ -4845,7 +4827,10 @@ export class Queries extends Context.Service<
           yield* readUpTo(yield* cursor)
           const to = readTo
           // Each task a change was of, by its project: the change's own, so a task removed is still said of its board.
-          const tasks = [...movedAt].filter(([, moved]) => moved.cursor > after)
+          const tasks = new Map<string, string | undefined>(
+            [...movedAt].filter(([, moved]) => moved.cursor > after).map(([id, moved]) => [id, moved.projectId]),
+          )
+          for (const id of projections.pending(AT_ONCE)) if (!tasks.has(id)) tasks.set(id, undefined)
           // And each project a change of no task was in, whose own calls it may have moved: not what this said of a card.
           const projects = [...projectMovedAt].filter(([, cursor]) => cursor > after).map(([projectId]) => projectId)
           // Each project's calls are read once, however many of its cards are worked out.
@@ -4860,19 +4845,28 @@ export class Queries extends Context.Service<
             })
           yield* Effect.forEach(
             tasks,
-            ([taskId, { projectId }]) =>
+            ([taskId, projectId]) =>
               Effect.gen(function* () {
-                const shown = yield* cardShown(taskId, calls)
-                if (shown !== 'gone' && shownCards.get(taskId)?.whole === shown.whole) return
+                const shown = yield* cardShown(taskId, calls, projectId !== undefined)
+                if (shown !== 'gone' && shownCards.get(taskId)?.whole === shown.whole) return yield* projections.checked(taskId)
+                const sql = yield* SqlClient.SqlClient
+                const owner = shown === 'gone' ? projectId : shown.projectId
+                if (owner === undefined) return yield* projections.checked(taskId)
+                yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    if (shown !== 'gone') yield* putProjection(taskId, shown.card)
+                    cardRevision += 1
+                    yield* ledger.notify({
+                      projectId: owner as never,
+                      aggregateType: 'card',
+                      aggregateId: taskId,
+                      aggregateRevision: cardRevision,
+                    })
+                  }),
+                )
                 if (shown === 'gone') shownCards.delete(taskId)
                 else shownCards.set(taskId, shown)
-                cardRevision += 1
-                yield* ledger.notify({
-                  projectId: projectId as never,
-                  aggregateType: 'card',
-                  aggregateId: taskId,
-                  aggregateRevision: cardRevision,
-                })
+                yield* projections.checked(taskId)
               }),
             { concurrency: AT_ONCE, discard: true },
           )
@@ -4908,7 +4902,7 @@ export class Queries extends Context.Service<
       yield* Effect.forkScoped(
         Effect.gen(function* () {
           // Where each task stands, read whole once before any change is worked out: what counts what waits waits for it.
-          yield* run(Effect.map(homeTasks, (read) => read.tasks.forEach((task) => standing.set(task.taskId, task)))).pipe(
+          yield* run(Effect.map(homeTasks(true), (read) => read.tasks.forEach((task) => standing.set(task.taskId, task)))).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.logWarning('Could not read where the tasks stand', cause),
             ),
@@ -4916,7 +4910,7 @@ export class Queries extends Context.Service<
           yield* Deferred.succeed(primed, undefined)
           // Changes are gathered for a moment, so a burst works each card out once.
           const round = Effect.gen(function* () {
-            yield* grown
+            yield* projections.wait(grown)
             yield* Effect.sleep(CARDS_GATHER)
             at = yield* run(cardsMoved(ledger, at))
           })
@@ -5002,9 +4996,9 @@ export class Queries extends Context.Service<
               found === undefined ? Effect.fail(new NotFound({ kind: 'task', id: taskId })) : Effect.succeed(found),
             ),
           ),
-        board: (projectId) => run(boards(projectId, board(projectId))),
+        board: (projectId, cached = false) => run(boards(`${projectId} ${cached}`, board(projectId, cached))),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
-        home: (since, deviceId) => run(homes(`${since ?? ''} ${deviceId ?? ''}`, home(since, deviceId))),
+        home: (since, deviceId, cached = false) => run(homes(`${since ?? ''} ${deviceId ?? ''} ${cached}`, home(since, deviceId, cached))),
         waiting: run(waiting),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         shown: (threadId, itemId) => run(shown(threadId, itemId)),

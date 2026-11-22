@@ -9,7 +9,7 @@ import { showHomes } from '../homes/useHomes'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
 import { SearchNotice } from '../finder/SearchNotice'
-import { FinderView, useWarmSearch } from '../finder/FinderView'
+import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack, CarriedPlace } from '../../shared/dictation/Carried'
 import { LooseDictation, type Place, placeLoose } from '../../shared/dictation/Loose'
@@ -199,7 +199,6 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const showProject = useEffectEvent((projectId: string) => tabs.open(projectId))
   const { host: frameHost } = useServices()
   useEffect(() => frameHost.homes?.onProject(showProject), [frameHost.homes])
-  useWarmSearch()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // Where dictation said from anywhere goes, chosen from its pill.

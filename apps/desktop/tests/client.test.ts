@@ -226,6 +226,7 @@ describe('the client', () => {
     const handlers = apiLayer(
       Effect.succeed(
         Api.of({
+          ListProjectWorkers: () => Effect.succeed([]),
           WatchAttention: () => Stream.die('unused'),
           GetConnectionInfo: () => Effect.die('unused'),
           ListClientDevices: () => Effect.die('unused'),

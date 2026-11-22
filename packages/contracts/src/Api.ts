@@ -2436,6 +2436,9 @@ export const ArrivalItem = Schema.Struct({
 })
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
+export const ProjectWorker = Schema.Struct({ workerId: Schema.String, providers: Schema.Array(Schema.String), busy: Schema.Boolean })
+export type ProjectWorker = typeof ProjectWorker.Type
+
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
@@ -4792,10 +4795,19 @@ export const FOUND_MOST = 50
 export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
 export type FoundTasks = typeof FoundTasks.Type
 
-/** Local search documents, read in pages independently of what is typed. */
+const DocumentKind = Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note'])
+
+export const FinderQuery = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(500)),
+  projectId: Schema.optional(Schema.String),
+  kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+})
+export type FinderQuery = typeof FinderQuery.Type
+
+/** Local documents found by search. The original catalog is still paged. */
 export const SearchDocument = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note']),
+  kind: DocumentKind,
   projectId: Schema.String,
   threadId: Schema.NullOr(Schema.String),
   taskId: Schema.NullOr(Schema.String),
@@ -4808,7 +4820,12 @@ export const SearchDocument = Schema.Struct({
   state: Schema.String,
 })
 export type SearchDocument = typeof SearchDocument.Type
-export const SearchDocuments = Schema.Struct({ documents: Schema.Array(SearchDocument), next: Schema.NullOr(Schema.String) })
+export const SearchDocuments = Schema.Struct({
+  documents: Schema.Array(SearchDocument),
+  next: Schema.NullOr(Schema.String),
+  indexed: Schema.optional(Schema.Boolean),
+  indexing: Schema.optional(Schema.Boolean),
+})
 export type SearchDocuments = typeof SearchDocuments.Type
 
 /** A part of the whole, 0 to 1. */
@@ -4991,6 +5008,7 @@ const socketCalls = new Set<string>([
   'GetConnectionInfo',
   'Status',
   'ListProjects',
+  'ListProjectWorkers',
   'GetProject',
   'GetTask',
   'GetThread',
@@ -5020,6 +5038,8 @@ const socketCalls = new Set<string>([
   'Send',
   'TakeBack',
   'StartTask',
+  'StartPlan',
+  'HoldPlan',
   'CreateTask',
   'StopTask',
   'ResumeTask',
@@ -5255,6 +5275,7 @@ const ProjectApi = RpcGroup.make(
     },
     Schema.String,
   ),
+  call('ListProjectWorkers', { projectId: Schema.String }, Schema.Array(ProjectWorker)),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
    * Finds tasks by what they were about: their titles, what the person asked,
@@ -5273,7 +5294,7 @@ const ProjectApi = RpcGroup.make(
     },
     FoundTasks,
   ),
-  call('GetSearchDocuments', { after: Schema.optional(Schema.String) }, SearchDocuments),
+  call('GetSearchDocuments', { after: Schema.optional(Schema.String), search: Schema.optional(FinderQuery) }, SearchDocuments),
   call('GetSearchFiles', { threadId: Schema.String }, Schema.Struct({ files: Schema.Array(Schema.String) })),
   command(
     'CreateTask',
@@ -5321,7 +5342,7 @@ const ProjectApi = RpcGroup.make(
    */
   call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
-  call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
+  call('GetBoard', { projectId: Schema.String, cached: Schema.optional(Schema.Boolean) }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
   call(
     'GetOlderSettled',
@@ -5329,7 +5350,7 @@ const ProjectApi = RpcGroup.make(
     Schema.Struct({ tasks: Schema.Array(BoardTask) }),
   ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
-  call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
+  call('GetHome', { since: Schema.optional(Schema.String), cached: Schema.optional(Schema.Boolean) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   /**
@@ -5419,6 +5440,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
+      workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5442,7 +5464,11 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String }, Schema.Void),
+  command(
+    'StartPlan',
+    { planId: Schema.String, workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))) },
+    Schema.Void,
+  ),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */

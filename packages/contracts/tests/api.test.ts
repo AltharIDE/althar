@@ -461,6 +461,7 @@ describe('the API', () => {
         const handlers = apiLayer(
           Effect.succeed(
             Api.of({
+              ListProjectWorkers: () => Effect.succeed([]),
               GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
               SaveAcpConnection: () => Effect.succeed(1),
               CheckAcpConnection: () => Effect.succeed(1),

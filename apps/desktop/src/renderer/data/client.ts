@@ -6,6 +6,7 @@ import {
   type ConnectionInfo,
   type Elsewhere,
   type FeedPosition,
+  type FinderQuery,
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
@@ -105,6 +106,7 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type ProjectWorker,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -167,6 +169,7 @@ export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
+  readonly listProjectWorkers: (projectId: string) => Promise<ReadonlyArray<ProjectWorker>>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
   /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
@@ -220,7 +223,7 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
-  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchDocuments: (after?: string, search?: FinderQuery, signal?: AbortSignal) => Promise<SearchDocuments>
   readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
@@ -561,7 +564,7 @@ export interface Client {
     /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
     readonly taskId?: string
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string) => Promise<void>
+  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
@@ -1041,6 +1044,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
+    listProjectWorkers: (projectId) => settle(api.ListProjectWorkers({ projectId })),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     lookElsewhere: (at) => settle(api.LookElsewhere(at)),
     bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
@@ -1064,7 +1068,14 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
-    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchDocuments: (after, search, signal) =>
+      settle(
+        api.GetSearchDocuments({
+          ...(after === undefined ? {} : { after }),
+          ...(search === undefined ? {} : { search }),
+        }),
+        signal,
+      ),
     getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
@@ -1110,9 +1121,9 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
           ...(at.image === true ? { image: true } : {}),
         }),
       ),
-    getBoard: (projectId) => settle(api.GetBoard({ projectId })),
+    getBoard: (projectId) => settle(api.GetBoard({ projectId, cached: true })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
-    getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
+    getHome: (since) => settle(api.GetHome(since === undefined ? { cached: true } : { since, cached: true })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
     settledWithOnePress: (press) => command((commandId) => api.SettledWithOnePress({ commandId, ...press })),
@@ -1232,7 +1243,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
-    startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    startPlan: (planId, workerId) =>
+      command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
