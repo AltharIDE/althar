@@ -16,21 +16,30 @@ import {
   You,
 } from '@althar/ui'
 
-import { agoWords, ARTIFACTS, type Artifact, artifactOf, type ArtifactKind, boardCount, CANVAS_KIND, GIFT, KIND_WORDS } from '../artifacts'
+import {
+  agoWords,
+  ARTIFACTS,
+  type Artifact,
+  artifactOf,
+  type ArtifactKind,
+  boardCount,
+  CANVAS_KIND,
+  GIFT,
+  KIND_WORDS,
+  REACH,
+  type Reach,
+} from '../artifacts'
+import { ReachTag } from '../parts/ChatBar'
 import { GIFT_SO_FAR } from '../data'
+import { chat, useChat } from '../chat'
 import { ask, live, type Spot, useLive } from '../live'
-import type { Moment } from '../moments'
-import { momentOf } from '../moments'
+import { momentOf, type Moment } from '../moments'
 import { ArtifactCanvas } from '../parts/ArtifactCanvas'
-import { Rule } from '../parts/Boards'
 import { Glyph } from '../parts/Glyph'
-import { Keep, Where } from '../parts/Keep'
-import { Share } from '../parts/Share'
+import { Where } from '../parts/Keep'
 import { Sheet } from '../parts/Sheet'
-import { Switcher } from '../parts/Switcher'
 import { Thumb } from '../parts/Thumb'
-import { roundOf, useLab, useOpenSoon } from '../state'
-import { Facts, Panel } from './Host'
+import { roundOf, useLab } from '../state'
 import r from './room.module.css'
 
 /*
@@ -45,16 +54,18 @@ import r from './room.module.css'
 
 export function ArtifactsView(_: { projectId: string; threadId: string | null; draft: string | null }) {
   const { d, m } = useLab()
+  const { room } = useChat()
   const moment = momentOf(d, m)
   const key = String(roundOf())
-  if (d === 'b' || d === 'c') return <Gallery key={key} moment={moment} />
-  return <Table key={key} talk={d === 'd' ? 'pin' : 'conversation'} />
+  // An artifact opened here is its chat: the top row is its (seams/ui.tsx), the room its canvas and conversation.
+  if (room !== null) return <ArtifactRoom key={`${key}|${room}`} id={room} moment={moment} />
+  if (d === 'b' || d === 'c') return <Gallery key={key} />
+  return <Table />
 }
 
 /* ——— A, D: today's table ——— */
 
-function Table({ talk }: { talk: 'conversation' | 'pin' }) {
-  const [open, setOpen] = useState<string | null>(null)
+function Table() {
   const [now] = useState(() => Date.now())
   return (
     <Artifacts
@@ -69,8 +80,8 @@ function Table({ talk }: { talk: 'conversation' | 'pin' }) {
         at: new Date(now - one.ago * 60_000).toISOString(),
         openComments: one.comments,
       }))}
-      onOpen={(row) => setOpen(row.id)}
-      open={open !== null && <Panel key={open} canvasId={open} talk={talk} moment={{ opening: {} }} onClose={() => setOpen(null)} />}
+      onOpen={(row) => chat.room(row.id)}
+      open={null}
     />
   )
 }
@@ -109,8 +120,9 @@ interface Filters {
   readonly where: 'git' | 'althar' | null
   readonly from: ReadonlySet<From>
   readonly talked: boolean
+  readonly reach: ReadonlySet<Reach>
 }
-const NONE: Filters = { kinds: new Set(), where: null, from: new Set(), talked: false }
+const NONE: Filters = { kinds: new Set(), where: null, from: new Set(), talked: false, reach: new Set() }
 const toggled = <T,>(set: ReadonlySet<T>, one: T) => {
   const next = new Set(set)
   if (next.has(one)) next.delete(one)
@@ -121,15 +133,14 @@ const toggled = <T,>(set: ReadonlySet<T>, one: T) => {
 /** Where it came from, in a few words: the task, or who. */
 const fromWords = (one: Artifact) => (one.found === true ? `${one.by}, by hand` : (one.task ?? 'The coordinator'))
 
-function Gallery({ moment }: { moment: Moment }) {
-  const [open, setOpen] = useState<string | null>(moment.open ?? null)
+function Gallery() {
   const [look, setLook] = useState<'cards' | 'list'>('cards')
   const [sort, setSort] = useState<Sort>('newest')
   const [byTask, setByTask] = useState(false)
   const [filters, setFilters] = useState<Filters>(NONE)
   const [words, setWords] = useState('')
   useLive()
-  if (open !== null) return <ArtifactRoom id={open} moment={moment} onOpen={setOpen} onBack={() => setOpen(null)} />
+  const setOpen = chat.room
   const said = words.trim().toLowerCase()
   const shown = ARTIFACTS.filter(
     (one) =>
@@ -137,6 +148,7 @@ function Gallery({ moment }: { moment: Moment }) {
       (filters.where === null || (live.keptOf(one) !== null) === (filters.where === 'git')) &&
       (filters.from.size === 0 || filters.from.has(fromOf(one))) &&
       (!filters.talked || one.comments > 0) &&
+      (filters.reach.size === 0 || filters.reach.has(live.reachOf(one))) &&
       (said === '' || `${one.title} ${one.name} ${one.by} ${one.task ?? ''} ${live.keptOf(one)?.path ?? ''}`.toLowerCase().includes(said)),
   ).sort(sortBy(sort))
   const groups = byTask
@@ -167,6 +179,11 @@ function Gallery({ moment }: { moment: Moment }) {
       key: from,
       label: FROM_WORDS[from],
       off: () => setFilters({ ...filters, from: toggled(filters.from, from) }),
+    })),
+    ...[...filters.reach].map((reach) => ({
+      key: reach,
+      label: REACH[reach].label,
+      off: () => setFilters({ ...filters, reach: toggled(filters.reach, reach) }),
     })),
     ...(filters.talked ? [{ key: 'talked', label: 'With open comments', off: () => setFilters({ ...filters, talked: false }) }] : []),
   ]
@@ -236,6 +253,20 @@ function Gallery({ moment }: { moment: Moment }) {
                 onCheckedChange={() => setFilters({ ...filters, from: toggled(filters.from, from) })}
               >
                 {FROM_WORDS[from]}
+              </MenuCheckboxItem>
+            ))}
+          </MenuGroup>
+          <MenuSeparator />
+          <MenuGroup label="Who sees it">
+            {(['draft', 'shared', 'published'] as const).map((reach) => (
+              <MenuCheckboxItem
+                key={reach}
+                keepOpen
+                checked={filters.reach.has(reach)}
+                onCheckedChange={() => setFilters({ ...filters, reach: toggled(filters.reach, reach) })}
+                hint={String(ARTIFACTS.filter((one) => live.reachOf(one) === reach).length)}
+              >
+                {REACH[reach].label}
               </MenuCheckboxItem>
             ))}
           </MenuGroup>
@@ -360,6 +391,8 @@ function Card({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) 
       <span className={r.cardWords}>
         <span className={r.cardTop}>
           <span className={r.cardTitle}>{artifact.title}</span>
+          {/* A draft is unmarked; shared or published says so. */}
+          {live.reachOf(artifact) !== 'draft' && <ReachTag reach={live.reachOf(artifact)} />}
           <span className={r.cardVersion}>v{live.version(artifact)}</span>
         </span>
         <span className={r.cardFacts}>
@@ -411,6 +444,7 @@ function List({
           {column('Kind', null)}
           {column('Boards', 'boards', r.colNum)}
           {column('From', null)}
+          {column('Who sees it', null)}
           {column('In git', null)}
           {column('Comments', 'comments', r.colNum)}
           {column('Changed', 'newest', r.colWhen)}
@@ -435,6 +469,9 @@ function List({
                 {fromWords(one)}
               </span>
             </td>
+            <td>
+              <ReachTag reach={live.reachOf(one)} />
+            </td>
             <td className={r.colWhere}>{live.keptOf(one) === null ? <span className={r.none}>—</span> : <Where artifact={one} />}</td>
             <td className={r.colNum}>{one.comments > 0 ? one.comments : <span className={r.none}>—</span>}</td>
             <td className={r.colWhen}>
@@ -447,41 +484,22 @@ function List({
   )
 }
 
-/** An artifact with the room to itself: its canvas, and the conversation with the lead that drew it, docked beside. Its head floats on the canvas, as beside a conversation. */
-function ArtifactRoom({ id, moment, onOpen, onBack }: { id: string; moment: Moment; onOpen: (id: string) => void; onBack: () => void }) {
+/** An artifact opened in the project's Artifacts: its chat, the conversation with the lead that drew it docked beside its canvas. Its top row is the chat's (seams/ui.tsx). */
+function ArtifactRoom({ id, moment }: { id: string; moment: Moment }) {
   const artifact = artifactOf(id)
-  const [sharing, setSharing] = useOpenSoon(moment.share === true && id === moment.open)
-  const [browsing, setBrowsing] = useState(false)
+  const { wide } = useChat()
   useLive()
   return (
-    <div className={r.room}>
+    <div
+      className={r.room}
+      onKeyDown={(event) => {
+        // The canvas takes Escape first, for what is open on it; then it's back to every artifact.
+        if (event.key === 'Escape' && !event.defaultPrevented) chat.room(null)
+      }}
+    >
       <div className={r.roomBody}>
-        <Talk artifact={artifact} />
-        <ArtifactCanvas
-          key={id}
-          artifact={artifact}
-          talk="conversation"
-          opening={id === moment.open ? moment.opening : {}}
-          lead={
-            <>
-              <button type="button" className={r.back} onClick={onBack} aria-label="Every artifact">
-                <Icon name="chevronL" size={12} />
-                Artifacts
-              </button>
-              <Rule />
-              <Switcher artifact={artifact} task={artifact.task} onPick={onOpen} open={browsing} onOpenChange={setBrowsing} />
-              <Rule />
-            </>
-          }
-          trail={
-            <>
-              <Facts artifactId={artifact.id} talk="conversation" />
-              <Rule />
-              <Keep artifact={artifact} />
-              <Share title={artifact.title} slug={artifact.name} tone="head" open={sharing} onOpenChange={setSharing} />
-            </>
-          }
-        />
+        {!wide && <Talk artifact={artifact} />}
+        <ArtifactCanvas key={id} artifact={artifact} talk="conversation" opening={id === moment.open ? moment.opening : {}} />
       </div>
     </div>
   )
@@ -494,7 +512,7 @@ function Talk({ artifact }: { artifact: Artifact }) {
   const end = useRef<HTMLDivElement>(null)
   const gift = artifact.id === GIFT
   const before: ReadonlyArray<{ readonly who: 'you' | 'lead' | 'canvas'; readonly text: string }> = artifact.found
-    ? []
+    ? [{ who: 'canvas' as const, text: `${artifact.by} committed it ${agoWords(artifact.ago)}` }]
     : gift
       ? GIFT_SO_FAR.map((one) =>
           one.who === 'canvas' ? { who: 'canvas' as const, text: `v${one.version} · ${one.note}` } : { who: one.who, text: one.text },
@@ -527,17 +545,6 @@ function Talk({ artifact }: { artifact: Artifact }) {
   }
   return (
     <section className={r.talk} aria-label={`Talking about ${artifact.title}`}>
-      <div className={r.talkHead}>
-        <span className={r.talkWho}>
-          {artifact.found ? `${artifact.by} committed it ${agoWords(artifact.ago)}` : `Lead of ${artifact.task ?? 'the coordinator’s'}`}
-        </span>
-        {!artifact.found && (
-          <button type="button" className={r.talkTask}>
-            Open the task
-            <Icon name="arrow" size={11} />
-          </button>
-        )}
-      </div>
       <div className={r.lines}>
         {lines.map((line, i) =>
           line.who === 'you' ? (

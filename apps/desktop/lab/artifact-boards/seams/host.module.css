@@ -1,4 +1,4 @@
-/* The panel beside the conversation: the artifact's canvas, edge to edge, its head floating on it. */
+/* The panel beside the conversation: the artifact's canvas, edge to edge. */
 .panel {
   min-width: 0;
   min-height: 0;
@@ -8,26 +8,6 @@
   background: var(--paper);
   border-left: 1px solid var(--line-2);
 }
-.version {
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  font: 11.5px var(--mono);
-  color: var(--t-2);
-  font-variant-numeric: tabular-nums;
-}
-.version:hover,
-.version[data-state='open'] {
-  background: var(--hover-faint);
-  color: var(--t-1);
-}
-.pins {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 6px;
-  font-size: 12px;
-  color: var(--t-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.panel[data-wide] {
+  border-left: 0;
 }

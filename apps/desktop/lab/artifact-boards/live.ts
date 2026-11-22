@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import { type Artifact, type BoardDef, GIFT, type Kept } from './artifacts'
+import { type Artifact, type BoardDef, GIFT, type Kept, type Reach } from './artifacts'
 
 /*
  * What happens on the lab's artifacts as the person points and says: what
@@ -72,9 +72,22 @@ interface World {
   readonly kept: Readonly<Record<string, Kept | null>>
   /** Artifacts whose commit is on its way. */
   readonly committing: ReadonlyArray<string>
+  /** Who sees each artifact, as changed here. */
+  readonly reach: Readonly<Record<string, Reach>>
 }
 
-const EMPTY: World = { lines: [], working: false, at: null, versions: {}, landed: {}, added: {}, pins: [], kept: {}, committing: [] }
+const EMPTY: World = {
+  lines: [],
+  working: false,
+  at: null,
+  versions: {},
+  landed: {},
+  added: {},
+  pins: [],
+  kept: {},
+  committing: [],
+  reach: {},
+}
 
 /** A made-up commit for a version of an artifact in git: the same each time. */
 export const commitOf = (artifactId: string, version: number) => {
@@ -158,6 +171,9 @@ export const live = {
     })
   },
   pin: (pin: Pin) => put({ pins: [...world.pins.filter((one) => one.id !== pin.id), pin] }),
+  reachOf: (artifact: Artifact): Reach => world.reach[artifact.id] ?? artifact.reach ?? 'draft',
+  /** Shared or published at once, or back to a draft: its link stops opening. */
+  reach: (artifact: Artifact, reach: Reach) => put({ reach: { ...world.reach, [artifact.id]: reach } }),
   subscribe: (listener: () => void) => {
     listeners.add(listener)
     return () => listeners.delete(listener)

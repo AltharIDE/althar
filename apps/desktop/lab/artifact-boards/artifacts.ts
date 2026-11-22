@@ -101,6 +101,20 @@ export interface Artifact {
   readonly kept?: Kept
   /** Found in a repository, where a person committed it: no task drew it. */
   readonly found?: boolean
+  /** Who sees it beyond the chat it was drawn in, as the lab starts; a draft if not said. */
+  readonly reach?: Reach
+}
+
+/**
+ * Who sees an artifact: a draft is only for the chat it's drawn in (you and
+ * its lead); shared, the people on the project, in their Althar; published,
+ * anyone with its link, as a page on the web.
+ */
+export type Reach = 'draft' | 'shared' | 'published'
+export const REACH: Readonly<Record<Reach, { readonly label: string; readonly line: string }>> = {
+  draft: { label: 'Draft', line: 'Only you and its lead' },
+  shared: { label: 'Shared', line: 'People on kiln, in their Althar' },
+  published: { label: 'Published', line: 'Anyone with the link, on the web' },
 }
 
 export const GIFT = 'cv_gift'
@@ -193,6 +207,7 @@ export const ARTIFACTS: ReadonlyArray<Artifact> = [
     version: 3,
     comments: 1,
     kept: { repo: 'kiln', path: 'design/calmer-checkout/', how: 'task', follow: true, version: 3 },
+    reach: 'shared',
     pages: [
       {
         id: 'checkout',
@@ -216,6 +231,7 @@ export const ARTIFACTS: ReadonlyArray<Artifact> = [
     version: 1,
     comments: 0,
     kept: { repo: 'kiln', path: 'docs/flows/booking.mmd', how: 'task', follow: true, version: 1 },
+    reach: 'published',
     pages: [{ id: 'flow', name: 'Flow', boards: [{ id: 'flow', name: 'How a booking flows', draw: 'flow' }] }],
   },
   {
@@ -265,6 +281,7 @@ export const ARTIFACTS: ReadonlyArray<Artifact> = [
     version: 1,
     comments: 0,
     found: true,
+    reach: 'shared',
     kept: { repo: 'kiln-design', path: 'class-page/', how: 'main', follow: true, version: 1 },
     pages: [
       {

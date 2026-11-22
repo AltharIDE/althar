@@ -1,12 +1,15 @@
 import {
   ChatBubble,
+  Collapse,
   CursorPointer,
   DragHandGesture,
   EditPencil,
+  Expand,
   Filter,
   GitCommit,
   Link,
   List,
+  MoreHoriz,
   MultiplePages,
   NavArrowDown,
   Repository,
@@ -40,6 +43,9 @@ const DRAWINGS = {
   filter: Filter,
   sort: Sort,
   list: List,
+  expand: Expand,
+  collapse: Collapse,
+  more: MoreHoriz,
 } as const
 export type GlyphName = keyof typeof DRAWINGS
 

@@ -28,6 +28,22 @@ const send = async (page, words) => {
 
 const shots = [
   ['a1-every-board', 'd=a&m=0'],
+  [
+    'a-reach',
+    'd=a&m=0',
+    async (page) => {
+      await page.getByRole('button', { name: 'Draft', exact: true }).click()
+      await page.waitForTimeout(300)
+    },
+  ],
+  [
+    'a-wide',
+    'd=a&m=0',
+    async (page) => {
+      await page.getByRole('button', { name: 'The canvas on its own' }).click()
+      await page.waitForTimeout(900)
+    },
+  ],
   ['a2-point', 'd=a&m=1'],
   [
     'a2-landed',

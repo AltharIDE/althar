@@ -25,6 +25,9 @@ const SEAMS: ReadonlyArray<{ readonly importer: string; readonly source: string;
   { importer: at('features/project/ProjectView.tsx'), source: '../canvases/ArtifactsView', to: lab('Room.tsx') },
   // A task's canvases as it opens: the artifact its lead drew, beside it from the start.
   { importer: at('features/task/TaskView.tsx'), source: '../canvases/arrivals', to: lab('arrivals.ts') },
+  // The top rows: an artifact chat's names the artifact and who sees it, beside its conversation and in the project's Artifacts.
+  { importer: at('features/task/TaskView.tsx'), source: '@althar/ui', to: lab('ui.tsx') },
+  { importer: at('features/project/ProjectView.tsx'), source: '@althar/ui', to: lab('ui.tsx') },
 ]
 
 const seam = (): Plugin => ({

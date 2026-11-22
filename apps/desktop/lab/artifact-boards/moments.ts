@@ -1,4 +1,5 @@
 import { GIFT } from './artifacts'
+import { chat } from './chat'
 import { live, type Pin, type Spot } from './live'
 import { EVERY_PAGE, type Opening } from './parts/ArtifactCanvas'
 import type { Direction } from './state'
@@ -48,6 +49,7 @@ const AMOUNTS: Pin = {
 
 /** What a moment starts with, on the canvas and in the conversation. */
 export const seed = (d: Direction, m: number) => {
+  chat.reset(momentOf(d, m).open ?? null)
   if (d === 'd') {
     const warmed = m >= 1
     live.reset({
@@ -85,8 +87,8 @@ export const seed = (d: Direction, m: number) => {
     })
     return
   }
-  // Elsewhere, people's comments are pins on the boards: Sam's on the card.
-  live.reset({ pins: [SAM] })
+  // Elsewhere, people's comments are pins on the boards: Sam's on the card. Where Share opens, Gift a class is shared with kiln already.
+  live.reset({ pins: [SAM], ...(momentOf(d, m).share === true ? { reach: { [GIFT]: 'shared' as const } } : {}) })
 }
 
 export interface Moment {
