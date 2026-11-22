@@ -141,7 +141,7 @@ export interface ProjectModel {
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly workers: ReadonlyArray<ProjectWorker>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
+  readonly startPlan: (planId: string, workerId?: string) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers). */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
@@ -707,7 +707,14 @@ export const useProject = (projectId: string): ProjectModel => {
         (failure: unknown) => messageOf(failure),
       ),
     workers,
-    startPlan: (planId, workerId) => act(() => (workerId === undefined ? client.startPlan(planId) : client.startPlan(planId, workerId))),
+    startPlan: async (planId, workerId) => {
+      let accepted = false
+      await act(async () => {
+        await (workerId === undefined ? client.startPlan(planId) : client.startPlan(planId, workerId))
+        accepted = true
+      })
+      return accepted
+    },
     stopWaiting: (taskId, on) => act(() => client.stopWaiting(taskId, on)),
     reopenTask: (taskId) => act(() => client.reopenTask(taskId)),
     discardTask: (taskId) =>
