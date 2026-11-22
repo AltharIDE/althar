@@ -311,3 +311,5 @@ export { ListMotion } from './lib/ListMotion'
 /* The kit's timings, for motion the app writes itself (ADR-069): the search palette's morphs. */
 export { MOTION, reducedMotion, SCALE } from './lib/motion'
 export { useTypedTitle } from './lib/typedTitle'
+
+export * from './composer/Goal/Goal'

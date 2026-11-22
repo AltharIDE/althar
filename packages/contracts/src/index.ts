@@ -24,3 +24,5 @@ export * from './attention'
 export * from './agentCatalog'
 
 export * from './pairing'
+
+export * from './goals'
