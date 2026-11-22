@@ -20,6 +20,7 @@ import { glanceOf, memoryOf } from '../src/renderer/features/tabs/useLoad'
 import { brandOf } from '../src/renderer/shared/agents'
 import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
+import type { Client } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
 import { card, changed, fakeClient, fakeHost, home, load, project } from './fixtures'
 import { withServices } from './render'
@@ -111,6 +112,7 @@ const windowAt = (
   projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera],
   host: Host = fakeHost(),
   homeFor: (projects: ReadonlyArray<ProjectSummary>) => HomeSnapshot = homeOf,
+  more: Partial<Client> = {},
 ) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
@@ -119,6 +121,7 @@ const windowAt = (
   const { client, emit } = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects })),
     getHome: vi.fn(async () => homeFor(projects)),
+    ...more,
   })
   making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
@@ -513,6 +516,45 @@ describe('how hard the Mac works, in the bar', () => {
     expect(await load.findByText('2 of 4')).toBeTruthy()
     expect(load.getByText('Agents')).toBeTruthy()
     expect(client.getPlaces).toHaveBeenCalled()
+  })
+
+  it('lists the home’s workers under its readings, each where it stands, and a row opens it in Settings › Computers', async () => {
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
+    const workers = [
+      {
+        workerId: `wrk_${'2'.repeat(32)}`,
+        connected: true,
+        busy: true,
+        capacity,
+        providers: ['codex'],
+        projects: [{ id: 'p1', name: 'meridian' }],
+        task: { taskId: 't1', threadId: 'th1', title: 'Fix the login redirect', project: 'meridian' },
+      },
+      { workerId: `wrk_${'1'.repeat(32)}`, connected: true, busy: false, capacity, providers: ['codex'], projects: [], task: null },
+      { workerId: `wrk_${'3'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null },
+    ]
+    const { router } = windowAt('/projects/p2', undefined, undefined, undefined, {
+      getWorkers: vi.fn(async () => ({ enabled: true, workers })),
+    })
+    const load = await peek()
+    expect(await load.findByRole('heading', { name: 'Workers' })).toBeTruthy()
+    expect(load.getByRole('heading', { name: 'Running on This Mac' })).toBeTruthy()
+    expect(load.getByRole('button', { name: /^Linux worker 222222/ }).textContent).toContain('Fix the login redirect · meridian')
+    expect(load.getByRole('button', { name: /^Linux worker 111111/ }).textContent).toContain('12.4 GB memory free')
+    expect(load.getByRole('button', { name: /^Linux worker 333333/ }).textContent).toContain('Offline')
+
+    await userEvent.click(load.getByRole('button', { name: /^Linux worker 111111/ }))
+    await waitFor(() => expect(where()).toBe('/settings/computers'))
+    expect(router.state.location.search).toEqual({ worker: workers[1]?.workerId })
+    expect(screen.queryByRole('dialog', { name: 'This Mac’s load' })).toBeNull()
+  })
+
+  it('lists no workers where the home takes none', async () => {
+    windowAt('/projects/p2')
+    const load = await peek()
+    expect(await load.findByText('2 of 4')).toBeTruthy()
+    expect(load.queryByRole('heading', { name: 'Workers' })).toBeNull()
+    expect(load.getByRole('heading', { name: 'Running' })).toBeTruthy()
   })
 
   it('is never read while it is off', async () => {
