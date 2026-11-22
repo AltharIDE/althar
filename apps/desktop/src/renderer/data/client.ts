@@ -1024,7 +1024,11 @@ const retryingCommand = <A>(run: (commandId: string) => Effect.Effect<A, unknown
 }
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
-export const connect = async (port: DomMessagePort, expected?: ClientIdentity): Promise<Client> => {
+export const connect = async (
+  port: DomMessagePort,
+  expected?: ClientIdentity,
+  answerPermission?: (answer: Parameters<Client['answer']>[0] & { readonly commandId: string }) => Promise<void>,
+): Promise<Client> => {
   const scope = await Effect.runPromise(Scope.make())
   const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
@@ -1291,7 +1295,10 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     setThreadGoal: (input) => command((commandId) => api.SetThreadGoal({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
-    answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
+    answer: (input) =>
+      answerPermission === undefined
+        ? command((commandId) => api.Answer({ commandId, ...input }))
+        : answerPermission({ commandId: newCommandId(), ...input }),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),

@@ -36,7 +36,7 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME, emitterPort, type AttentionEvent } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
 import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
@@ -63,6 +63,8 @@ import { browserAgent } from './browser/devices'
 import { type Bridge, bridgeOf } from './browser/bridge'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
+import { workerPreviews } from './browser/workerPreview'
+import { saveWorkerSnapshot } from './workerSnapshot'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -282,6 +284,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
   { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
+  { scheme: WORKER_PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ])
 
 /** A smaller copy of a picture, drawn by Chromium's own decoder: a JPEG stays one, anything else becomes a PNG, keeping its transparency. */
@@ -805,6 +808,23 @@ const connect = (window: BrowserWindow) => {
   startupMark('port-handed-over', undefined, window.webContents.id)
 }
 
+const workerHomePort = async (window: BrowserWindow, signal: AbortSignal) => {
+  const id = window.webContents.id
+  if (homes.state(id).current.kind !== 'local') return homes.previewPort(id, signal)
+  if (runtime === undefined) throw new Error('Start the local home before connecting to the worker.')
+  const { port1, port2 } = new MessageChannelMain()
+  runtime.postMessage({ type: 'connect' }, [port1])
+  return port2
+}
+const showWorkerPreview = workerPreviews(workerHomePort)
+const copyWorkerSnapshot = saveWorkerSnapshot(workerHomePort)
+ipcMain.handle('althar:save-worker-snapshot', async (event, value: unknown) => {
+  if (!mine(event.sender)) throw new Error('Select the task from the Althar window.')
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null) return
+  await copyWorkerSnapshot(window, value)
+})
+
 /**
  * Shows the icon on the Dock, where there is one: while Althar runs, the Dock
  * shows this rather than the app's own. A missing picture reads as an empty
@@ -948,6 +968,7 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
+    if (showWorkerPreview(window, url)) return { action: 'deny' }
     const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)

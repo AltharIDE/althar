@@ -276,6 +276,8 @@ export class Limits extends Context.Service<
       readonly projectId?: string
       readonly threadId?: string
       readonly accountId?: string
+      /** A sleeping session's account, if the project still allows it and it can run. */
+      readonly preferAccountId?: string
       readonly model?: string
       /** Before lowering a model, prefer accounts above this remaining share; fixed-account mode still stays fixed. */
       readonly reserve?: number
@@ -797,20 +799,25 @@ export class Limits extends Context.Service<
                 if ((yield* signIns.account(account)).status === 'signed_out') return false
                 return !rotate || Option.isNone(yield* outOf(account))
               })
-            // A conversation stays on its account only where the project rotates; otherwise work runs on the first, as `out` reads it.
-            if (rotate && input.threadId !== undefined) {
-              const [last] = yield* sql<{ accountId: string | null }>`
-                SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
-                ORDER BY started_at DESC LIMIT 1`
-              const own = list.find((account) => account.id === last?.accountId)
+            // Sleeping sessions keep an eligible account even in fixed-account projects. Other starts keep the thread's
+            // account only in rotating projects.
+            if (input.preferAccountId !== undefined || (rotate && input.threadId !== undefined)) {
+              const [last] =
+                input.preferAccountId === undefined
+                  ? yield* sql<{ accountId: string | null }>`
+                    SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
+                    ORDER BY started_at DESC LIMIT 1`
+                  : []
+              const own = list.find((account) => account.id === (input.preferAccountId ?? last?.accountId))
               // Not where the model's provider refused it lately (OpenCode Go's expired key): another account may have it working.
               if (
                 own !== undefined &&
                 (yield* runs(own)) &&
-                Option.match(yield* roomOf(own, input.model), {
-                  onNone: () => true,
-                  onSome: (room) => (input.reserve === undefined ? room.leftPercent >= NEARLY_OUT : room.leftPercent > input.reserve),
-                }) &&
+                (!rotate ||
+                  Option.match(yield* roomOf(own, input.model), {
+                    onNone: () => true,
+                    onSome: (room) => (input.reserve === undefined ? room.leftPercent >= NEARLY_OUT : room.leftPercent > input.reserve),
+                  })) &&
                 (yield* providerStanding(own, input.model)) < 2
               )
                 return own

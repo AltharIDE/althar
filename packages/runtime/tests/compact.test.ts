@@ -155,7 +155,7 @@ describe('compacting an agent’s context', () => {
       const projectId = yield* opened
       const task = yield* started(projectId, 'First', 'Do it. [lead:finish]')
       yield* answered(task.threadId, 1)
-      // A quarter of a million-token window: past where a lead is handed over, but the person asked to compact.
+      // A quarter of a million-token window: past the lead's threshold. The person's Compact takes its place in the queue.
       yield* say(task.threadId, 'Look again. [context:25/1000000]')
       yield* answered(task.threadId, 2)
       yield* compact(task.threadId)

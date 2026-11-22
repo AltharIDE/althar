@@ -258,7 +258,14 @@ export const codexLikeMeanings = {
 
 export interface FakeAgentOptions {
   /** Lets a test deliver a connection failure between turns, or close ACP during one. */
-  readonly sessionControls?: (controls: { readonly lose: () => Promise<void>; readonly close: () => void }) => void
+  readonly sessionControls?: (controls: {
+    readonly id: string
+    readonly cwd: string
+    readonly live: () => boolean
+    readonly lose: () => Promise<void>
+    readonly close: () => void
+    readonly tool: (state: 'in_progress' | 'completed') => Promise<void>
+  }) => void
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
@@ -288,6 +295,8 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Holds a session close while a test sends another input. IDs are local to the fake connection. */
+  readonly beforeClose?: (sessionId: string, coordinator: boolean) => Promise<void>
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
   /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
@@ -610,7 +619,7 @@ const playStall = async (
   }
   // Its first session in its worktree is lost, as claude-agent-acp drops one whose Claude Code process died, and it answers
   // the prompt as that did on 2 November 2026; the coordinator that plans it only passes the marker on.
-  if (session.markers.has('[lead:lost-once]') && !session.coordinator && !lostIn.has(session.cwd)) {
+  if (session.markers.has(session.coordinator ? '[coordinator:lost-once]' : '[lead:lost-once]') && !lostIn.has(session.cwd)) {
     lostIn.add(session.cwd)
     throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
   }
@@ -1804,6 +1813,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       sessions.set(sessionId, session)
       options.sessionControls?.({
+        id: sessionId,
+        cwd: session.cwd,
+        live: () => !session.closed,
         lose: () =>
           client.notify(acp.methods.client.session.update, {
             sessionId,
@@ -1818,6 +1830,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             },
           }),
         close: () => connections.get(shared(client))?.close(),
+        tool: (state) =>
+          client.notify(acp.methods.client.session.update, {
+            sessionId,
+            update:
+              state === 'in_progress'
+                ? { sessionUpdate: 'tool_call', toolCallId: 'outside-turn', title: 'Read', kind: 'read', status: state }
+                : { sessionUpdate: 'tool_call_update', toolCallId: 'outside-turn', status: state },
+          }),
       })
       // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
       connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
@@ -1864,8 +1884,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
-    .onRequest(acp.methods.agent.session.close, ({ params }) => {
+    .onRequest(acp.methods.agent.session.close, async ({ params }) => {
       const closing = sessions.get(params.sessionId)
+      await options.beforeClose?.(params.sessionId, closing?.coordinator === true)
       if (closing !== undefined) closing.closed = true
       sessions.delete(params.sessionId)
       options.closed?.(params.sessionId)
@@ -1962,6 +1983,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
+      // A process-transport test can check cleanup of a child the agent never reported as a background job.
+      const childFile = /\[test-child:([^\]]+)\]/.exec(text)?.[1]
+      if (childFile !== undefined) {
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+        child.unref()
+        writeFileSync(childFile, String(child.pid))
+      }
       // A step of work between what it says, so each is a message of its own, as an agent's tool call between them makes it.
       let steps = 0
       const aloud = {
@@ -2018,6 +2046,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
+        if (session.markers.has('[lead:compact-lost]')) throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
         if (session.markers.has('[lead:compact-fails]')) {
           await update({
             sessionUpdate: 'tool_call',
@@ -2056,6 +2085,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
       }
+
+      // Spontaneous compaction may complete before a fresh usage figure reaches the client.
+      if (text.includes('[context-compacted]'))
+        await update({ sessionUpdate: 'compaction_update', compactionId: 'automatic', status: 'completed' })
 
       // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
@@ -2211,6 +2244,20 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         session.played.add('[lead:ask]')
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
+      }
+      if (text.includes('[lead:permission]') && !session.played.has('[lead:permission]') && !session.coordinator) {
+        session.played.add('[lead:permission]')
+        const toolCall = {
+          toolCallId: 'lead-deploy',
+          title: 'Run make deploy',
+          kind: 'execute' as const,
+          rawInput: { command: 'make deploy' },
+        }
+        await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+        const chosen = await ask(toolCall, commandOptions)
+        const allowed = chosen.startsWith('allow')
+        await update({ sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: allowed ? 'completed' : 'failed' })
+        if (!allowed || session.cancelled) return { stopReason: 'cancelled' }
       }
 
       // A lead that stalls or loops, where a marker says so.

@@ -4,6 +4,7 @@ import {
   listenWorkers as listen,
   workerCertificate as certificate,
   WorkerHomeError,
+  withWorkerStore,
   type WorkerConfiguration,
   type WorkerHomePaths,
 } from '@althar/runtime/workerHome'
@@ -50,15 +51,5 @@ export const workerOperation = <A>(
         () => Effect.try({ try: () => readHomeId(join(profile, 'althar.sqlite')), catch: storageFailure }),
       ),
     )
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const store = await openWorkerStore(profile, homeId)
-        try {
-          return await operation(store)
-        } finally {
-          store.close()
-        }
-      },
-      catch: workerFailure,
-    })
+    return yield* withWorkerStore(profile, homeId, operation).pipe(Effect.mapError(workerFailure))
   })

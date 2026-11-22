@@ -11,10 +11,20 @@ export { TransportError, TransportReason, transportError } from './errors'
 export { sshArguments, sshEnvironment, type SshTarget, type SshConnectionOptions } from './sshArguments'
 
 export { httpsOrigin, tlsPublicKeyPin, homeHttpsAgent, httpsJson } from './https'
-export { openHttpsConnection, webSocketServer, webSocketPort, webSocketHeartbeat, type HomeWebSocket } from './webSocket'
+export {
+  openHttpsConnection,
+  prepareApprovalKeyEnrollment,
+  preparePermissionApproval,
+  webSocketServer,
+  webSocketPort,
+  webSocketHeartbeat,
+  type HomeWebSocket,
+} from './webSocket'
 
 export { createDeviceKey, signDeviceMessage, encodePairingCode, decodePairingCode, completeDevicePairing, type DeviceKey } from './pairing'
 
 export { untilPortCloses } from './lifetime'
 
 export type { HttpsHomeTarget } from '@althar/contracts'
+
+export { installWorkerSnapshot, workerCopyFolder } from './workerSnapshot'

@@ -1,4 +1,4 @@
-import { ApiError, workerPlanProblem, workerProblem } from '@althar/contracts'
+import { ApiError, automaticWorker, automaticWorkerUnavailable, workerPlanProblem, workerProblem } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -336,10 +336,19 @@ export class Plans extends Context.Service<
             homeOnly: parameters.here === true,
             readOnly: parameters.reads === true,
           })
-          const worker = config.workers?.list(plan.projectId).find((one) => one.workerId === workerId)
-          const message = workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ?? workerProblem(worker, parameters.steps)
-          if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
-          return { parameters: JSON.stringify({ ...parameters, workerId }) }
+          const available = config.workers?.list(plan.projectId) ?? []
+          const worker =
+            workerId === 'auto'
+              ? automaticWorker(available, parameters.steps, requirements.repositoryCount)
+              : available.find((one) => one.workerId === workerId)
+          const message =
+            workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ??
+            (workerId === 'auto' && worker === undefined
+              ? automaticWorkerUnavailable
+              : workerProblem(worker, parameters.steps, requirements.repositoryCount))
+          if (worker === undefined || message !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
+          return { parameters: JSON.stringify({ ...parameters, workerId: worker.workerId }) }
         })
 
       const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>

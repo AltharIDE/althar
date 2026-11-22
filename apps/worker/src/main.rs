@@ -2,7 +2,10 @@
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Send + Sync>> {
     use althar_worker::{
-        agent::{AgentConfig, run_agent_unit, watch_agent_slot},
+        agent::{
+            AgentConfig, run_agent_unit, run_agent_unit_with_repository_setup,
+            run_agent_unit_with_setup, watch_agent_slot,
+        },
         diagnostic::{DiagnosticJournal, read_credentials, run_worker_once},
         grpc::WorkerEnrollment,
         project::{ProjectConfig, run_unit},
@@ -21,6 +24,36 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         && flag == "--agent-unit"
     {
         return Ok(run_agent_unit(Path::new(executable), args).await?);
+    }
+    if let [flag, args @ ..] = raw.as_slice()
+        && flag == "--agent-unit-with-repository-setup"
+    {
+        return Ok(run_agent_unit_with_repository_setup(args).await?);
+    }
+    if let [flag, folder, count, tail @ ..] = raw.as_slice()
+        && flag == "--agent-unit-with-setup"
+    {
+        let count = count
+            .to_str()
+            .and_then(|count| count.parse::<usize>().ok())
+            .filter(|count| *count < tail.len())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid workspace setup arguments",
+                )
+            })?;
+        let (commands, launch) = tail.split_at(count);
+        let (executable, args) = launch.split_first().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "Missing agent executable")
+        })?;
+        return Ok(run_agent_unit_with_setup(
+            Path::new(executable),
+            args,
+            Path::new(folder),
+            commands,
+        )
+        .await?);
     }
     let args = raw
         .into_iter()

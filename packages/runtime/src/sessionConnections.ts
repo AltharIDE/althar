@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, posix, relative, sep } from 'node:path'
+import { basename, dirname, join, posix, relative, sep } from 'node:path'
+import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
@@ -23,7 +24,6 @@ import { touchCard } from './cards'
 import { type AgentEntry, RuntimeConfig, type RuntimeOptions, SIGNED_OUT_GIT_CONFIG } from './Config'
 import { SessionFailed } from './errors'
 import type { FailuresService } from './Failures'
-import { dueForHandover } from './handover'
 import type { InstanceInfo } from './Instance'
 import { type LeftRunning, stillBusy } from './leftRunning'
 import type { Limits } from './Limits'
@@ -34,6 +34,7 @@ import type { Policies } from './Policies'
 import { processes, treeOf } from './ports'
 import { guardEnv, guardHolds } from './pushGuard'
 import type { Questions } from './Questions'
+import type { Setups } from './Setups'
 import { change, fact, timestamp } from './records'
 import {
   type Brief,
@@ -45,6 +46,7 @@ import {
   type Store,
   type ThreadContext,
   agentLost,
+  automaticCompactionDue,
   cwdOf,
   foldersOf,
   heardContext,
@@ -62,7 +64,9 @@ import { blockGoalAfterDisconnect } from './threadGoals'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
-import type { WorkerExecution } from './workerExecution'
+import { taskWorker, type WorkerExecution } from './workerExecution'
+import { workerSkillFiles } from './workerSkills'
+import { workerStdioMcp } from './workerMcp'
 import { folderGoneWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -98,6 +102,7 @@ export interface SessionConnectionsDependencies {
   >
   readonly sessionsScope: Scope.Closeable
   readonly sessionsSql: SqlClient.SqlClient
+  readonly setups: Setups['Service']
   readonly skillsConfig: RuntimeOptions['skills']
   readonly stopGrace: Duration.Duration
   readonly stopTrees: (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) => Effect.Effect<void>
@@ -128,6 +133,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     sessionFact,
     sessionsScope,
     sessionsSql,
+    setups,
     skillsConfig,
     stopGrace,
     stopTrees,
@@ -300,12 +306,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       // Trusted fully, by the person's word or as the team's, it runs as the team's code does: no longer untrusted or offline.
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
-      const selectedWorker =
-        thread.role !== 'task' || thread.helper !== undefined
-          ? null
-          : ((yield* sql<{ workerId: string | null }>`SELECT json_extract(parameters, '$.workerId') AS worker_id
-              FROM task_plans WHERE state = 'accepted' AND task_id = ${thread.taskId}
-              ORDER BY decided_at DESC, rowid DESC LIMIT 1`)[0]?.workerId ?? null)
+      const selectedWorker = thread.role !== 'task' ? null : yield* taskWorker(thread.taskId)
+      const startWithin = selectedWorker === null ? SESSION_START_TIMEOUT : Duration.minutes(15)
       // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
       if (selectedWorker === null) yield* accounts.prepare(account)
       // The session's own scope, from here, so whatever it is given goes with it.
@@ -321,8 +323,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         Effect.provideService(SqlClient.SqlClient, sessionsSql),
       )
       const heldSkills = turnedOff.agent.length === 0 ? {} : { heldSkills: turnedOff.agent }
+      const workerCanLoadSkills = thread.role === 'task' && definition.skills?.via.kind !== 'env'
       const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
-        selectedWorker === null && !offline && skillsConfig !== undefined && definition.skills !== null
+        !offline && skillsConfig !== undefined && definition.skills !== null
           ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread), turnedOff.names).pipe(
               Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
               Effect.map((run) => ({ skills: run })),
@@ -526,11 +529,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
       }
-      // What the agent's hold and settings read first, such as Claude Code's sandbox probe, once a launch and usually in already.
-      const waiting = definition.ready?.()
+      // A sandbox probe describes the machine running it. A worker starts its own provider process.
+      const waiting = selectedWorker === null ? definition.ready?.() : undefined
       if (waiting !== undefined) yield* Effect.promise(() => waiting)
       // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
-      const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
+      const hold = selectedWorker === null ? definition.holds?.(reads ? 'reader' : 'lead', sessionOptions) : undefined
       let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
       // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
       let remote: WorkerExecution | undefined
@@ -571,22 +574,72 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               (transport._tag === 'InProcess' && definition.source !== 'bundled')
             )
               return yield* refuse('This agent or task cannot run on the selected worker.')
-            if (thread.repositories.length !== 1 || thread.repositories[0]?.local === 1)
-              return yield* refuse('A worker needs one repository in a separate task worktree.')
-            const [workspace] = yield* sql<{
-              id: string
-            }>`SELECT id FROM workspaces WHERE task_id = ${thread.taskId} AND path = ${thread.worktree}`
-            if (workspace === undefined) return yield* refuse('The task’s worker workspace is not ready.')
-            remote = yield* platform.open({
-              workerId: selectedWorker,
-              projectId: thread.projectId,
-              workspaceId: workspace.id,
-              providerId: definition.id,
-              worktree: thread.worktree,
-              toolPort: toolServer.port,
-            })
-            homeWorktree = thread.worktree
-            agentCwd = posix.join(remote.path, ...relative(thread.worktree, agentCwd).split(sep))
+            if (thread.repositories.length === 0 || thread.repositories.some((repository) => repository.local === 1))
+              return yield* refuse('A worker needs separate task worktrees.')
+            const assets =
+              !workerCanLoadSkills || skills === undefined || skills.given.length === 0
+                ? []
+                : yield* Effect.tryPromise({
+                    try: () => workerSkillFiles(skills.folder),
+                    catch: () => refuse('Could not read the skills selected for this worker session.'),
+                  })
+            if (thread.helper !== undefined) {
+              if (platform.openHelper === undefined) return yield* refuse('This worker cannot start the selected helper agent.')
+              const directory = relative(thread.worktree, agentCwd).split(sep).join('/')
+              remote = yield* platform.openHelper({
+                workerId: selectedWorker,
+                projectId: thread.projectId,
+                providerId: definition.id,
+                worktree: thread.helper.copyOf ?? thread.worktree,
+                ...(thread.helper.copyOf === undefined ? {} : { copy: thread.worktree }),
+                toolPort: toolServer.port,
+                directory,
+                ...(assets.length === 0 ? {} : { skills: assets }),
+              })
+              homeWorktree = thread.worktree
+              agentCwd = posix.join(remote.path, directory)
+            } else {
+              const rows = yield* sql<{
+                id: string
+                path: string
+              }>`SELECT id, path FROM workspaces WHERE task_id = ${thread.taskId} AND access = 'write'`
+              const workspace = rows.find((row) => row.path === thread.worktree)
+              if (workspace === undefined) return yield* refuse('The task’s worker workspace is not ready.')
+              const grouped = thread.repositories.length > 1
+              const root = grouped ? dirname(thread.worktree) : thread.worktree
+              const repositories = []
+              if (grouped) {
+                for (const repository of thread.repositories) {
+                  const bound = rows.find((row) => row.path === repository.worktree)
+                  const directory = basename(repository.worktree)
+                  if (bound === undefined || dirname(repository.worktree) !== root || !WORKER_REPOSITORY_FOLDER.test(directory))
+                    return yield* refuse('The task’s worker repositories are not ready.')
+                  repositories.push({ workspaceId: bound.id, worktree: bound.path, directory })
+                }
+              }
+              const plans = yield* Effect.forEach(
+                grouped ? repositories.map((entry) => entry.workspaceId) : [workspace.id],
+                (workspaceId) => setups.workerPlan(thread.taskId, workspaceId).pipe(Effect.map((plan) => ({ workspaceId, plan }))),
+              ).pipe(Effect.mapError(() => refuse('Could not plan setup for the worker’s checkout.')))
+              const layouts = plans.flatMap(({ workspaceId, plan }) => (plan?.spec === undefined ? [] : [{ workspaceId, ...plan.spec }]))
+              const setup = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
+              remote = yield* platform.open({
+                workerId: selectedWorker,
+                projectId: thread.projectId,
+                workspaceId: workspace.id,
+                providerId: definition.id,
+                worktree: thread.worktree,
+                toolPort: toolServer.port,
+                ...(setup === undefined ? {} : { setup }),
+                ...(grouped ? { repositories } : {}),
+                ...(assets.length === 0 ? {} : { skills: assets }),
+              })
+              for (const { workspaceId, plan } of plans) {
+                if (plan !== undefined) yield* plan.record(grouped ? remote.repositorySetup?.[workspaceId] : remote.setup)
+              }
+              homeWorktree = root
+              agentCwd = posix.join(remote.path, ...relative(root, agentCwd).split(sep))
+            }
           }
           const activeWorker = remote
           const localRoot = homeWorktree
@@ -622,15 +675,33 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           })
           // The person's own servers ticked for this role, whichever of their agents' settings they were found in (ADR-097).
           // A repository's own `.mcp.json` is given only where the repository is the person's: an outside author's never loads its MCP config.
+          const configured = yield* serversFor(
+            toolRoleOf(thread),
+            thread.projectId,
+            connection.info.mcp.http,
+            !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
+          ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
+          const unavailableMcp: string[] = []
           const persons =
-            activeWorker !== undefined
-              ? []
-              : yield* serversFor(
-                  toolRoleOf(thread),
-                  thread.projectId,
-                  connection.info.mcp.http,
-                  !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
-                ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
+            activeWorker === undefined
+              ? configured
+              : (yield* Effect.forEach(configured, (server) =>
+                  Effect.gen(function* () {
+                    if (server.type === 'stdio') {
+                      const command = workerStdioMcp(server, activeWorker.localMcp)
+                      if (command !== null) return [command]
+                      unavailableMcp.push(server.name)
+                      return []
+                    }
+                    const mounted = yield* toolServer.mountWorkerServer(server, activeWorker.toolPort)
+                    if (mounted === null) {
+                      unavailableMcp.push(server.name)
+                      return []
+                    }
+                    yield* Scope.addFinalizer(scope, mounted.revoke)
+                    return [mounted.server]
+                  }),
+                )).flat()
           const localTools = tools.server
           if (activeWorker !== undefined && localTools.type !== 'http')
             return yield* new AgentStartFailed({ command: definition.name, reason: 'The worker needs the home’s HTTP tool grant.' })
@@ -638,6 +709,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             activeWorker === undefined || localTools.type !== 'http'
               ? localTools
               : { ...localTools, url: 'http://127.0.0.1:' + activeWorker.toolPort + '/mcp' }
+          const effectiveSkills = activeWorker === undefined ? skills?.folder : activeWorker.skillsPath
+          const { skills: _homeSkills, ...otherOptions } = sessionOptions
+          const effectiveSessionOptions = { ...otherOptions, ...(effectiveSkills === undefined ? {} : { skills: effectiveSkills }) }
           const agent = yield* connection.newSession({
             cwd: agentCwd,
             // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
@@ -647,8 +721,12 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
             ...heldFor(definition, reads && thread.role !== 'coordinator'),
             mcpServers: [mcp, ...persons],
-            ...(skills !== undefined && definition.skills?.via.kind === 'directory' ? { additionalDirectories: [skills.folder] } : {}),
-            ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', sessionOptions) }),
+            ...(definition.skills?.via.kind === 'directory' && effectiveSkills !== undefined
+              ? { additionalDirectories: [effectiveSkills] }
+              : {}),
+            ...(definition.sessionMeta === undefined
+              ? {}
+              : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', effectiveSessionOptions) }),
           })
           if (model !== undefined) yield* agent.setOption(definition.options.model, model)
           else
@@ -659,13 +737,13 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             )
           // An effort the model doesn't offer is no reason not to start.
           yield* settleEffort(definition, agent, effort ?? null)
-          return { connection, agent }
+          return { connection, agent, unavailableMcp }
         }).pipe(
           Scope.provide(scope),
-          Effect.timeoutOption(SESSION_START_TIMEOUT),
+          Effect.timeoutOption(startWithin),
           Effect.flatMap((result) => {
             if (Option.isNone(result)) {
-              return Effect.fail(new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }))
+              return Effect.fail(new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: startWithin }))
             }
             return Effect.succeed(result.value)
           }),
@@ -698,7 +776,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         })
         return yield* new SessionFailed({ agentId: definition.id, reason, summary })
       }
-      const { connection, agent } = started.value
+      const { connection, agent, unavailableMcp } = started.value
       yield* Effect.logInfo('Agent started').pipe(
         Effect.annotateLogs({
           agent: definition.id,
@@ -718,12 +796,21 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         })
       }
       // Skills it should have had and didn't get are said in the thread, as the other things a start couldn't do are.
-      if (setUp.failed !== undefined) {
+      if (unavailableMcp.length > 0) {
+        yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+          source: 'runtime',
+          severity: 'warning',
+          title: 'Some selected MCP servers are unavailable on this worker.',
+          description: unavailableMcp.join(', '),
+        })
+      }
+      const skillsUnable = selectedWorker !== null && !workerCanLoadSkills && (skills?.given.length ?? 0) > 0
+      if (setUp.failed !== undefined || skillsUnable) {
         yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
           source: 'runtime',
           severity: 'warning',
           title: `${definition.name} started without its skills.`,
-          description: setUp.failed,
+          description: setUp.failed ?? 'This worker cannot load skills for this agent session yet.',
         })
       }
       // A skill this agent can't use is shown as a difference from the others, not hidden.
@@ -759,7 +846,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         scope,
         revokeTools: tools.revoke,
         requestContext: held,
-        skills,
+        skills: skillsUnable ? undefined : skills,
         upFront,
       }
     })
@@ -838,6 +925,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           })
         }),
       )
+      const openedAt = yield* Clock.currentTimeMillis
       const running: Running = {
         sessionId,
         entry,
@@ -883,6 +971,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         handover: 'none',
         turnStartedAt: null,
         turnEndedAt: null,
+        openedAt,
+        idleTouchedAt: openedAt,
         nextLead: undefined,
         leadLock: Semaphore.makeUnsafe(1),
         settingLead: false,
@@ -945,27 +1035,17 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 running.stopping = true
                 return Effect.asVoid(Deferred.succeed(running.stopRequest, { state: 'lost' }))
               }
-              return Effect.andThen(
-                Effect.andThen(
-                  Effect.andThen(
-                    Effect.andThen(
-                      Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
-                        heardPlan(running, event),
-                      ),
-                      heard.record(event),
-                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                    Effect.andThen(heardWork(running, event), heardBackground(running, event)),
-                  ),
-                  live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
-                ),
-                // A coordinator that says between turns its context is filling up is handed over now, not at its next turn.
-                Effect.suspend(() =>
-                  event._tag === 'ContextUsage' && thread.role === 'coordinator' && !running.turnRunning && dueForHandover(running.context)
-                    ? Queue.offer(running.wake, undefined)
-                    : Effect.void,
-                ),
-              )
+              return Effect.gen(function* () {
+                heardContext(running, event)
+                yield* Effect.andThen(heardPlan(running, event), heard.record(event)).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)),
+                )
+                yield* Effect.andThen(heardWork(running, event), heardBackground(running, event))
+                yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
+                // Idle updates can make compaction due as well as the events in a turn.
+                if (thread.role === 'coordinator' && !running.turnRunning && automaticCompactionDue(running))
+                  yield* Queue.offer(running.wake, undefined)
+              })
             }),
           ),
         ),

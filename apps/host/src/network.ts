@@ -8,6 +8,7 @@ import { httpsOrigin, tlsPublicKeyPin } from '@althar/transport-node'
 import { Effect, Schema } from 'effect'
 
 import { HostError, storageFailure } from './errors'
+import { readApprovalKeys } from './approvalKeys'
 import type { HostOptions } from './options'
 import { readPrivate, writePrivate } from './privateFiles'
 
@@ -18,6 +19,7 @@ const Configuration = Schema.Struct({
   port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
   certificate: Schema.String,
   key: Schema.String,
+  approvalKeys: Schema.optional(Schema.String),
 })
 export type NetworkConfiguration = typeof Configuration.Type
 const invalid = () =>
@@ -56,6 +58,7 @@ export const networkFiles = (options: Pick<HostOptions, 'profile' | 'worktrees'>
     try: async () => {
       const config = Schema.decodeUnknownSync(Configuration)(given)
       const origin = httpsOrigin(config.origin)
+      const approvalKeys = config.approvalKeys === undefined ? undefined : await readApprovalKeys(config.approvalKeys, origin)
       if (!isIP(config.address) || !isAbsolute(config.certificate) || !isAbsolute(config.key)) throw invalid()
       const keyPath = await realpath(config.key)
       if (insidePath(await realpath(options.profile), keyPath) || insidePath(await realpath(options.worktrees), keyPath)) throw invalid()
@@ -73,6 +76,7 @@ export const networkFiles = (options: Pick<HostOptions, 'profile' | 'worktrees'>
           config: { ...config, origin },
           certificate,
           key,
+          approvalKeys,
           tlsKeyPin: tlsPublicKeyPin(certificate),
           tlsCertificate: parsed.raw.toString('base64url'),
         }

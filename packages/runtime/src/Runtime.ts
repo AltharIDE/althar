@@ -66,6 +66,7 @@ import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 import { WorktreeRepair } from './WorktreeRepair'
+import { WorkerSnapshots } from './WorkerSnapshots'
 import { ApiCommands } from './ApiCommands'
 import { ClientIdentities } from './ClientIdentities'
 
@@ -174,7 +175,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   const judging = startupLayer('permissionjudge', PermissionJudge.layer).pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
-  const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
+  const core = Layer.mergeAll(
+    startupLayer('projects', Projects.layer),
+    startupLayer('sessions', Sessions.layer),
+    Launches.layer,
+    WorkerSnapshots.layer,
+  ).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
       Layer.mergeAll(
