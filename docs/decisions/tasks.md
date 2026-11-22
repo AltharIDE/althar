@@ -44,6 +44,14 @@ helper at work has Stop. Add takes on a pull request, opened or attached;
 what only the lead can take on is asked of it in the person's words. The
 person can change a task's team at any time.
 
+## Goals
+
+A lead’s conversation can keep one goal. The person sets it with `/goal <objective>` and can view, edit, pause, resume or clear it above the composer. Althar keeps the objective, the lead’s latest progress report and the outcome with the thread, so a different lead or a restarted runtime can carry on from the current work.
+
+A goal’s automatic turns use the usual queue, agent places and permissions. Messages already waiting go first. A goal can yield to the task’s existing waits, including waiting for a person or an external change while a step is open. Goals get twelve automatic turns at a time. Resume grants a fresh allowance when they reach the limit.
+
+The lead reports completion with evidence or reports what blocks it. A report only applies to the goal revision that turn received. Pausing or clearing a goal interrupts its automatic turn. Stopping the lead also pauses its goal. A goal report leaves the task’s usual step, review and publishing decisions in place.
+
 ## Changing parts
 
 - **The person** changes parts from the parts row and the task's menu:

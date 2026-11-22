@@ -1,3 +1,4 @@
+import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -20,6 +21,8 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type GoalControl,
+  goalCommand,
   type StorageSize,
   type Attachment,
   type PortLike,
@@ -32,7 +35,7 @@ import {
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
-import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -166,6 +169,7 @@ import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { searchDocuments } from './searchDocuments'
+import { findDocuments } from './finderIndex'
 import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
@@ -282,6 +286,7 @@ export const handlers = apiLayer(
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     type QueryServices =
       | SqlClient.SqlClient
+      | Database.ReadLane
       | RuntimeConfig
       | Accounts
       | Agents
@@ -346,7 +351,7 @@ export const handlers = apiLayer(
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
-    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
     // What bringing a task's removed folder back needs (ADR-056).
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
@@ -496,7 +501,7 @@ export const handlers = apiLayer(
       : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
       Effect.provideContext(
-        Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
+        Effect.catchCause(timedCall(effect), (cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
           const error = Cause.findErrorOption(cause)
           // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -513,6 +518,30 @@ export const handlers = apiLayer(
         }),
         queryContext,
       )
+
+    const personSetsGoal = sender.kind === 'window' || sender.kind === 'paired_device'
+    const setThreadGoal = (
+      threadId: string,
+      control: GoalControl,
+      lead?: { readonly agentId: string; readonly model?: string | undefined; readonly effort?: string | undefined },
+    ) =>
+      Effect.gen(function* () {
+        if (!personSetsGoal)
+          return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+        const choice =
+          lead === undefined
+            ? undefined
+            : {
+                agentId: lead.agentId,
+                ...(lead.model === undefined ? {} : { model: lead.model }),
+                ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+              }
+        const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
+        if (!result.changed) return result.goal
+        if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
+        if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
+        return result.goal
+      })
 
     /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
     const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
@@ -1285,12 +1314,13 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
-      GetSearchDocuments: ({ after }) =>
+      GetSearchDocuments: ({ after, search }) =>
         api(
           Effect.gen(function* () {
             const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
-            return yield* searchDocuments(after, working)
+            return yield* search === undefined ? searchDocuments(after, working) : findDocuments(search, working)
           }),
         ),
       GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
@@ -1354,10 +1384,10 @@ export const handlers = apiLayer(
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
       GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
-      GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetBoard: ({ projectId, cached }) => api(queries.board(projectId, cached)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
-      GetHome: ({ since }) => api(queries.home(since, identity.deviceId)),
+      GetHome: ({ since, cached }) => api(queries.home(since, identity.deviceId, cached)),
       LeftHome: () =>
         api(
           Effect.gen(function* () {
@@ -1628,13 +1658,14 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              yield* Effect.provideContext(pauseGoal(threadId), store)
               const live = yield* sessions.running(threadId)
               if (Option.isNone(live) || !live.value.turnRunning) {
                 const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId, 'person')
+              yield* sessions.interrupt(threadId, 'person', true)
             }),
           ),
         ),
@@ -1692,7 +1723,15 @@ export const handlers = apiLayer(
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+        once(
+          commandId,
+          api(
+            Effect.andThen(
+              Effect.provideContext(pauseGoal(threadId), store),
+              Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })),
+            ),
+          ),
+        ),
       SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
         once(
           commandId,
@@ -1780,11 +1819,36 @@ export const handlers = apiLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
+      SetThreadGoal: ({ threadId, control, lead }) => api(setThreadGoal(threadId, control, lead)),
       Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
             Effect.gen(function* () {
+              const goal = goalCommand(body)
+              if (goal !== undefined) {
+                const task = yield* goalThread(threadId)
+                if (task !== undefined) {
+                  if (!personSetsGoal)
+                    return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+                  if ([images, files, comments, canvasComments].some((parts) => (parts?.length ?? 0) > 0))
+                    return yield* new ApiError({ reason: 'Invalid', message: 'Send attachments in a message alongside the goal.' })
+                  if (goal.action !== 'show') yield* setThreadGoal(threadId, goal)
+                  else {
+                    const current = yield* readGoal(threadId)
+                    yield* Effect.provideContext(
+                      addItem({ projectId: task.projectId, threadId }, 'notice', {
+                        source: 'runtime',
+                        severity: 'info',
+                        title: current === null ? 'Set an objective with /goal.' : `Goal · ${current.waiting ? 'waiting' : current.status}`,
+                        ...(current === null ? {} : { description: current.objective }),
+                      }),
+                      store,
+                    )
+                  }
+                  return
+                }
+              }
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
@@ -1839,7 +1903,20 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
+      StartTask: ({
+        commandId,
+        projectId,
+        title,
+        description,
+        steps,
+        issue: named,
+        issues: others,
+        end,
+        repositories,
+        chat,
+        taskId,
+        workerId,
+      }) =>
         once(
           commandId,
           api(
@@ -1849,8 +1926,14 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              if (workerId !== undefined) {
+                const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
+                if (worker === undefined || worker.busy)
+                  return yield* new ApiError({ reason: 'Invalid', message: 'Choose an available worker assigned to this project.' })
+              }
+
               const created = yield* projects.createTask({
-                envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
+                envelope: yield* envelope('task.create', { projectId, title, description, issue, workerId }, commandId),
                 projectId,
                 title,
                 ...(description === undefined ? {} : { description }),
@@ -1874,6 +1957,7 @@ export const handlers = apiLayer(
                 reason: null,
                 actorId: actorId,
                 startsIn: Duration.zero,
+                ...(workerId === undefined ? {} : { held: true }),
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
@@ -1884,12 +1968,12 @@ export const handlers = apiLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, actorId)
+              yield* plans.start(planId, actorId, workerId)
               return yield* queries.task(created.taskId)
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
+      StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
@@ -2849,7 +2933,12 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                   reason: 'PersonRequired',
                   message: 'This call needs the person in the window or on a paired device.',
                 })
-              const positioned = Effect.flatMap(effect, (value) => {
+              const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
+              const prioritized = effect.pipe(
+                Effect.provideService(Foreground, !background),
+                Effect.provideService(Database.ReadPriority, background ? 'background' : 'interactive'),
+              )
+              const positioned = Effect.flatMap(prioritized, (value) => {
                 if (typeof value !== 'object' || value === null || !('cursor' in value) || typeof value.cursor !== 'number')
                   return Effect.succeed(value)
                 const cursor = value.cursor
@@ -2870,9 +2959,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
                 // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
-                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
-                  ? behind.withPermits(1)(positioned)
-                  : positioned
+                return yield* background ? behind.withPermits(1)(positioned) : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
               const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
               const handle = Effect.andThen(identities.check(identity), positioned).pipe(

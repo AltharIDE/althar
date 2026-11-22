@@ -80,6 +80,12 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
         Effect.sync(() => output.some((line) => line.includes('"workerPort":'))),
         Boolean,
       )
+      const assign = (id: string) =>
+        command('enroll-worker', '--worker-certificate', certificates('enrolled.pem'), '--project-id', id, '--json')
+      const unknownProject = yield* Effect.flip(assign(`proj_${'f'.repeat(32)}`))
+      assert.strictEqual(unknownProject._tag, 'HostError')
+      yield* assign(projectId)
+      assert.deepStrictEqual(last(), { projectId, workerId })
       const foreign = yield* Effect.flip(projectRun(`proj_${'f'.repeat(32)}`))
       assert.strictEqual(foreign._tag, 'HostError')
       if (foreign._tag === 'HostError') assert.include(foreign.message, 'registered on this home')
@@ -95,6 +101,7 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       assert.include(output.at(-1) ?? '', 'queued')
       const store = yield* Effect.promise(() => openWorkerStore(profile, homeId))
       try {
+        assert.isTrue(store.agents.permits(workerId, projectId))
         const offer = store.next(workerId)
         assert.isDefined(offer)
         if (!offer) throw new Error('The diagnostic was not offered')

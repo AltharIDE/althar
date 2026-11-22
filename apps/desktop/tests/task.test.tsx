@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type AgentStatus, ApiError, type LimitCall, PAGE, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
+import { type AgentStatus, ApiError, type LimitCall, PAGE, type StuckStep, type ThreadSnapshot, nextGoal } from '@althar/contracts'
 import { TaskStatus, TrackStep } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
@@ -33,6 +33,7 @@ import type { PageState } from '../src/main/browser/page'
 import { forgetPages, pages } from '../src/renderer/features/browser/pages'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { clock } from '../src/renderer/shared/time'
+import type { Client } from '../src/renderer/data/client'
 import { keys, reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
@@ -1616,6 +1617,90 @@ describe('a task', () => {
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Stop, use the helper', disposition: 'interrupt_and_continue' }),
     )
+  })
+
+  it('keeps the goal visible across a stale read and routes its controls through the goal command', async () => {
+    let now = thread()
+    let accept: () => void = () => undefined
+    const accepted = new Promise<void>((resolve) => (accept = resolve))
+    const setThreadGoal = vi.fn<Client['setThreadGoal']>(async ({ control }) => {
+      if (control.action === 'set') await accepted
+      const goal = nextGoal(now.task.goal ?? null, control)
+      now = { ...now, task: { ...now.task, goal } }
+      return goal
+    })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => now), setThreadGoal })
+    withServices(<Task />, client)
+    const composer = (await screen.findByRole('textbox', { name: 'Tell Claude Code something' })) as HTMLTextAreaElement
+    await userEvent.type(composer, '/goal{Enter}')
+    expect(composer.value).toBe('/goal ')
+    expect(setThreadGoal).not.toHaveBeenCalled()
+    await userEvent.type(composer, 'Verify staging{Enter}')
+    const goal = within(screen.getByRole('region', { name: 'Goal' }))
+    expect(goal.getByRole('status').textContent).toBe('Active')
+    expect(setThreadGoal).toHaveBeenLastCalledWith({ threadId: 'th1', control: { action: 'set', objective: 'Verify staging' } })
+
+    const reads = vi.mocked(client.getThread).mock.calls.length
+    act(() => emit(changed('task', now.task.id)))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledTimes(reads + 1))
+    expect(goal.getByRole('status').textContent).toBe('Active')
+    await act(async () => accept())
+
+    await userEvent.type(composer, '/goal{Enter}')
+    expect(composer.value).toBe('')
+    await userEvent.click(goal.getByRole('button', { name: 'Pause' }))
+    expect(goal.getByRole('status').textContent).toBe('Paused')
+    await userEvent.click(goal.getByRole('button', { name: 'Edit' }))
+    const objective = goal.getByRole('textbox', { name: 'Objective' })
+    await userEvent.clear(objective)
+    expect(goal.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+    await userEvent.type(objective, 'Verify staging and production')
+    await userEvent.click(goal.getByRole('button', { name: 'Save' }))
+    expect(goal.getByText('Verify staging and production')).toBeTruthy()
+    expect(setThreadGoal).toHaveBeenLastCalledWith({
+      threadId: 'th1',
+      control: { action: 'edit', objective: 'Verify staging and production' },
+    })
+    await userEvent.click(goal.getByRole('button', { name: 'Resume' }))
+    expect(goal.getByRole('status').textContent).toBe('Active')
+    await userEvent.click(goal.getByRole('button', { name: 'Clear' }))
+    expect(screen.queryByRole('region', { name: 'Goal' })).toBeNull()
+    expect(client.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps a goal draft and its chosen lead when Althar rejects it, and preserves attachments alongside it', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread()),
+      setThreadGoal: vi
+        .fn<Client['setThreadGoal']>()
+        .mockRejectedValueOnce(new ApiError({ reason: 'Invalid', message: 'Enter a shorter goal.' })),
+    })
+    withServices(<Task />, client)
+    const composer = (await screen.findByRole('textbox', { name: 'Tell Claude Code something' })) as HTMLTextAreaElement
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(composer, '/goal Verify the fix{Enter}')
+    expect(await screen.findByText('Enter a shorter goal.')).toBeTruthy()
+    expect(composer.value).toBe('/goal Verify the fix')
+    expect(screen.queryByRole('region', { name: 'Goal' })).toBeNull()
+    expect(screen.getByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+    expect(client.setThreadGoal).toHaveBeenCalledWith({
+      threadId: 'th1',
+      control: { action: 'set', objective: 'Verify the fix' },
+      lead: expect.objectContaining({ agentId: 'codex', model: 'gpt-5.2-codex' }),
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep Claude Opus' }))
+    fireEvent.drop(composer, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.click(composer)
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByText('Send attachments in a message alongside the goal.')).toBeTruthy()
+    expect(composer.value).toBe('/goal Verify the fix')
+    expect(screen.getByRole('img', { name: 'shot.png' })).toBeTruthy()
+    expect(client.setThreadGoal).toHaveBeenCalledTimes(1)
+    expect(client.send).not.toHaveBeenCalled()
   })
 
   it('sends images dropped on its composer with what the person says, and shows them in the thread at once', async () => {

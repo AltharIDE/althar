@@ -335,6 +335,7 @@ export interface Running {
    * moment there is nothing for an interrupt to stop.
    */
   promptSent: Deferred.Deferred<void> | null
+  goalRoundTurn?: string | undefined
   stopping: boolean
   /** The first stop intent survives a crash during cancellation and cannot be replaced by shutdown. */
   stopIntent?: StopRequest
@@ -460,6 +461,8 @@ export type Why =
 export interface Brief {
   readonly text: string
   readonly closing: string
+  /** A session opened just to pursue a goal needs ordinary input if the goal was stopped. */
+  readonly onlyForGoal?: true
   /** The person started or switched to the agent: its first turn is theirs, and goes on at once (ADR-037). */
   readonly byPerson?: boolean
   /** A fresh session taking over from one whose context was full, rather than one started for the work: its first turn's line says which. */

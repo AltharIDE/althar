@@ -6,7 +6,15 @@ import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, Service, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import {
+  GOAL_LENGTH,
+  goalCommand,
+  type AttentionRequest,
+  type Service,
+  type TaskAction,
+  type ThreadItem,
+  type ThreadSnapshot,
+} from '@althar/contracts'
 import { useQuery } from '@tanstack/react-query'
 import {
   CheckoutAsk,
@@ -20,6 +28,7 @@ import {
   type FileView,
   commandDown,
   Behind,
+  Goal,
   keys,
   modKey,
   DictationTray,
@@ -559,6 +568,8 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const steers = useSendMidTurn()?.to === 'steer'
+  const [goalExpanded, setGoalExpanded] = useState(false)
+  const [goalNote, setGoalNote] = useState<string | null>(null)
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -910,6 +921,32 @@ export function TaskView({
    * back in the composer, words, images and the agent picked to take over.
    */
   const submit = (body: string, now: boolean) => {
+    const goal = goalCommand(body)
+    if (goal !== undefined) {
+      const attached = images.props(receiver)
+      if (attached.images.length > 0 || attached.files.length > 0 || comments.length > 0) {
+        setGoalNote('Send attachments in a message alongside the goal.')
+        return
+      }
+      setGoalNote(null)
+      if (goal.action === 'show') {
+        if (snapshot.task.goal != null) {
+          setGoalExpanded(true)
+          setDraft('')
+        } else setDraft('/goal ')
+        return
+      }
+      setDraft('')
+      const starts = goal.action === 'set' || goal.action === 'resume'
+      const lead = starts ? (waiting ?? (session?.held === true ? undefined : (chosen ?? undefined))) : undefined
+      if (starts && waiting !== null) setHandover(null)
+      void model.setGoal(goal, lead, () => {
+        setDraft((current) => withQueued(current, body))
+        if (starts && waiting !== null) setHandover((current) => current ?? waiting)
+      })
+      return
+    }
+    setGoalNote(null)
     const pictures = receiver.takes !== false
     const own = images.take(receiver, pictures && readingCommentCrops(kept))
     if (own === null) return
@@ -1314,10 +1351,16 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || aside?.notice != null || turnUndo.notice !== null ? (
+          model.error !== null ||
+          goalNote !== null ||
+          conflict !== null ||
+          line !== null ||
+          aside?.notice != null ||
+          turnUndo.notice !== null ? (
             <>
               {aside?.notice}
               {turnUndo.notice}
+              {goalNote !== null && <div role="alert">{goalNote}</div>}
               {model.error !== null && (
                 <Problem
                   as="div"
@@ -1348,6 +1391,18 @@ export function TaskView({
         above={
           <>
             {aside?.bar}
+            {snapshot.task.goal != null && (
+              <Goal
+                goal={snapshot.task.goal}
+                expanded={goalExpanded}
+                onExpand={setGoalExpanded}
+                objectiveLimit={GOAL_LENGTH}
+                onPause={() => void model.setGoal({ action: 'pause' })}
+                onResume={() => void model.setGoal({ action: 'resume' }, session?.held === true ? undefined : (chosen ?? undefined))}
+                onEdit={(objective) => void model.setGoal({ action: 'edit', objective })}
+                onClear={() => void model.setGoal({ action: 'clear' })}
+              />
+            )}
             <Now ticking={clockRuns}>
               {(now) => (
                 <Behind
