@@ -7,17 +7,25 @@ import { configureWorkers, withWorkerStore, workerCertificate } from '@althar/ru
 import { apiClient, openLocalConnection } from '@althar/transport-node'
 import { Effect } from 'effect'
 
+import { attachedClient } from './attachment'
+import { attachmentTarget, requireVerifiedHome } from './attachmentOptions'
+import { testWorkerCopy } from './workerCopy'
+
 export const WORKER_USAGE = `Usage:
   althar workers configure --ca <pem> --certificate <pem> --key <pem>
                          [--address <ip>] [--port <port>] [--relay <file>]
   althar workers disable
   althar workers enroll --certificate <pem> --project <id>
   althar workers revoke --worker <id> [--project <id>]
-  althar workers fetch-file --project <id> --task <id> --path <checkout-relative>
-                           --out <local-file> [--workspace <id>]
+  althar workers fetch-file --thread <id> --path <checkout-relative>
+                           --out <local-file> [--workspace <id>] [--ssh <host> --home <home-id>]
+  althar workers test-copy --thread <id> --into <folder>
+                           [--workspace <id>] [--ssh <host> --home <home-id>] -- <program> [args...]
 
 Use --profile <dir> for another local Desktop profile. Configure also accepts
---worktrees <dir> if the profile uses a custom worktree directory.`
+--worktrees <dir> if the profile uses a custom worktree directory. For a remote
+file or workspace, use the same SSH options as attach. You can supply
+--project <id> --task <id> in place of --thread.`
 
 const options = {
   profile: { type: 'string' },
@@ -31,17 +39,30 @@ const options = {
   project: { type: 'string' },
   worker: { type: 'string' },
   task: { type: 'string' },
+  thread: { type: 'string' },
   workspace: { type: 'string' },
   path: { type: 'string' },
   out: { type: 'string' },
+  into: { type: 'string' },
+  home: { type: 'string' },
+  ssh: { type: 'string' },
+  'ssh-config': { type: 'string' },
+  'ssh-port': { type: 'string' },
+  'remote-launcher': { type: 'string' },
+  'remote-profile': { type: 'string' },
 } as const
+
+const connectionFlags = ['home', 'ssh', 'ssh-config', 'ssh-port', 'remote-launcher', 'remote-profile'] as const
+
+const taskFlags = ['project', 'task', 'thread', 'workspace', ...connectionFlags] as const
 
 const flags = {
   configure: ['worktrees', 'address', 'port', 'ca', 'certificate', 'key', 'relay'],
   disable: [],
   enroll: ['certificate', 'project'],
   revoke: ['worker', 'project'],
-  'fetch-file': ['project', 'task', 'workspace', 'path', 'out'],
+  'fetch-file': [...taskFlags, 'path', 'out'],
+  'test-copy': [...taskFlags, 'into'],
 } as const
 
 const required = (value: string | undefined, flag: string) => {
@@ -81,10 +102,11 @@ export const saveFetchedFile = async (
 
 export const runWorkers = (argv: ReadonlyArray<string>, defaults: { readonly profile: string; readonly worktrees: string }) => {
   const [command, ...args] = argv
-  if (command !== 'configure' && command !== 'disable' && command !== 'enroll' && command !== 'revoke' && command !== 'fetch-file')
-    throw new Error('Choose configure, disable, enroll, revoke or fetch-file.')
-  const { values } = parseArgs({ args, options })
-  const enabledFlags: readonly string[] = flags[command]
+  if (command === undefined || !Object.hasOwn(flags, command))
+    throw new Error('Choose configure, disable, enroll, revoke, fetch-file or test-copy.')
+  const programAt = command === 'test-copy' ? args.indexOf('--') : -1
+  const { values } = parseArgs({ args: programAt < 0 ? args : args.slice(0, programAt), options })
+  const enabledFlags: readonly string[] = flags[command as keyof typeof flags]
   const invalid = Object.keys(values).find((name) => name !== 'profile' && !enabledFlags.includes(name))
   if (invalid !== undefined) throw new Error(`--${invalid} is unavailable for workers ${command}.`)
   const profile = resolve(values.profile ?? defaults.profile)
@@ -107,19 +129,50 @@ export const runWorkers = (argv: ReadonlyArray<string>, defaults: { readonly pro
       Effect.map(({ enabled }) => `Worker listener ${enabled ? 'configured' : 'disabled'}. Restart Desktop to apply it.`),
     )
   }
-  if (command === 'fetch-file') {
-    const out = resolve(required(values.out, 'out'))
-    const request = {
-      projectId: required(values.project, 'project'),
-      taskId: required(values.task, 'task'),
-      relativePath: required(values.path, 'path'),
-      ...(values.workspace === undefined ? {} : { workspaceId: required(values.workspace, 'workspace') }),
+  if (command === 'fetch-file' || command === 'test-copy') {
+    const connection = new Map<string, string>()
+    if (values.ssh === undefined || values.profile !== undefined) connection.set('profile', profile)
+    for (const flag of connectionFlags) {
+      if (values[flag] !== undefined) connection.set(flag, required(values[flag], flag))
     }
+    const target = attachmentTarget(connection)
+    requireVerifiedHome(target)
+    const thread = values.thread
+    if (thread !== undefined && (!/^thr_[0-9a-f]{32}$/.test(thread) || values.project !== undefined || values.task !== undefined))
+      throw new Error('Use a thread ID on its own, or give both --project and --task.')
+    const reference =
+      thread === undefined
+        ? { projectId: required(values.project, 'project'), taskId: required(values.task, 'task') }
+        : { threadId: thread }
+    const workspaceId = values.workspace === undefined ? undefined : required(values.workspace, 'workspace')
+    const program = programAt < 0 ? undefined : args[programAt + 1]
+    if (command === 'test-copy' && (program === undefined || program.trim() === ''))
+      throw new Error('Give the local test program after --.')
+    const operation =
+      command === 'test-copy'
+        ? {
+            kind: 'test' as const,
+            program: { command: program!, args: args.slice(programAt + 2) },
+            into: resolve(required(values.into, 'into')),
+          }
+        : { kind: 'fetch' as const, out: resolve(required(values.out, 'out')), path: required(values.path, 'path') }
     return Effect.scoped(
       Effect.gen(function* () {
-        const { api } = yield* apiClient(yield* openLocalConnection(profile))
-        const file = yield* api.ReadWorkerFile(request)
-        return yield* Effect.tryPromise({ try: () => saveFetchedFile(out, file), catch: workerError })
+        const { api } = yield* attachedClient(target)
+        const task =
+          'threadId' in reference
+            ? yield* api
+                .GetThread({ threadId: reference.threadId, limit: 1 })
+                .pipe(Effect.map((snapshot) => ({ projectId: snapshot.project.id, taskId: snapshot.task.id })))
+            : reference
+        if (operation.kind === 'test')
+          return yield* testWorkerCopy(api, { ...task, source: 'worker' }, operation.into, workspaceId, operation.program)
+        const file = yield* api.ReadWorkerFile({
+          ...task,
+          relativePath: operation.path,
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+        })
+        return yield* Effect.tryPromise({ try: () => saveFetchedFile(operation.out, file), catch: workerError })
       }),
     )
   }

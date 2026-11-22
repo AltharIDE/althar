@@ -633,6 +633,33 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
+  it('offers the best available worker while keeping This home selected by default', async () => {
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const held = card({
+      phase: 'held',
+      plan: { ...plan, startsAt: null, workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false } },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [
+        {
+          workerId: 'wrk_' + 'e'.repeat(32),
+          providers: ['claude-code'],
+          busy: false,
+          capacity: { platform: 'linux' as const, architecture: 'arm64' as const, cpuCores: 6, freeMemoryMib: 4096, freeDiskMib: 8192 },
+        },
+      ]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const picker = await screen.findByRole('combobox', { name: 'Run on' })
+    expect(picker.textContent).toContain('This home')
+    await userEvent.click(picker)
+    await userEvent.click(await screen.findByRole('option', { name: 'Best available worker' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1', 'auto'))
+  })
+
   it('offers a task with two repositories on a worker that supports both', async () => {
     const plan = card().plan
     if (plan == null) throw new Error('The task card fixture needs a plan.')

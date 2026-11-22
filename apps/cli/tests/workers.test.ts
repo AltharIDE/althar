@@ -24,6 +24,22 @@ it.live('configures a local worker listener and grants a certificate access to a
     assert.throws(() => run('unknown'))
     assert.throws(() => run('disable', '--worker', 'unused'), /unavailable/)
     assert.throws(() => run('enroll'), /Give --certificate a value/)
+    const fetch = [
+      'fetch-file',
+      '--project',
+      'proj_' + '1'.repeat(32),
+      '--task',
+      'task_' + '2'.repeat(32),
+      '--path',
+      'out.log',
+      '--out',
+      join(root, 'out.log'),
+    ]
+    assert.throws(() => run(...fetch, '--ssh', 'my-vps'), /requires --home/)
+    assert.throws(() => run(...fetch, '--profile', defaults.profile, '--ssh', 'my-vps'), /exactly one/)
+    assert.throws(() => run(...fetch, '--remote-profile', '/tmp/profile'), /require --ssh/)
+    assert.throws(() => run(...fetch, '--thread', 'thr_' + '2'.repeat(32)), /thread ID on its own/)
+    assert.throws(() => run('test-copy', '--thread', 'thr_' + '2'.repeat(32), '--into', root), /local test program after --/)
     assert.throws(() => run('configure', '--port', '0'), /Choose a port/)
     assert.include(
       yield* run(

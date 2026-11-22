@@ -27,4 +27,4 @@ export { untilPortCloses } from './lifetime'
 
 export type { HttpsHomeTarget } from '@althar/contracts'
 
-export { installWorkerSnapshot } from './workerSnapshot'
+export { installWorkerSnapshot, workerCopyFolder } from './workerSnapshot'

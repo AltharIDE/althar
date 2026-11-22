@@ -5,12 +5,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WorkerSnapshot, WorkerSnapshotChunkRequest } from '@althar/contracts'
 import { expect, it } from 'vitest'
-import { installWorkerSnapshot } from '../src/workerSnapshot'
+import { installWorkerSnapshot, workerCopyFolder } from '../src/workerSnapshot'
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd })
     .toString()
     .trim()
+
+it('trims only trailing dots and prefixes names reserved by Windows', () => {
+  expect(workerCopyFolder('con...')).toBe('repo-con')
+  expect(workerCopyFolder('my.project...')).toBe('repo-my.project')
+  const internalDots = 'start' + '.'.repeat(32_768) + 'end'
+  expect(workerCopyFolder(internalDots)).toBe('repo-' + internalDots)
+})
 
 it('installs the exact committed, staged and working files without replacing a local folder', async () => {
   const root = await mkdtemp(join(tmpdir(), 'althar-local-snapshot-test-'))

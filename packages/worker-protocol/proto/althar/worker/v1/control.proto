@@ -29,6 +29,7 @@ message AgentWorkerFrame {
     AgentFileResult file_result = 12;
     AgentFileChunk file_chunk = 13;
     AgentRunBytes index_patch = 14;
+    AgentRunAccepted accepted = 15;
   }
 }
 
@@ -60,6 +61,18 @@ message AgentWorkerHello {
   uint32 version = 2;
   repeated AgentWorkerCapability capabilities = 3;
   string journal_id = 4;
+  AgentWorkerCapacity capacity = 5;
+  bool reserve_before_transfer = 6;
+}
+
+message AgentWorkerCapacity {
+  // These refer to the worker and its workspace volume, never the home.
+  string platform = 1;
+  string architecture = 2;
+  uint32 cpu_cores = 3;
+  uint32 free_memory_mib = 4;
+  uint32 free_disk_mib = 5;
+  bool account_reserved = 6;
 }
 
 // A worker can only start a provider that its operator enabled for the project.
@@ -83,6 +96,7 @@ message AgentHomeHello {
   string worker_id = 2;
   uint32 version = 3;
   uint32 lease_ms = 4;
+  bool reserve_before_transfer = 5;
 }
 
 // Provider executable, provider arguments, and account credentials stay on the worker.
@@ -140,6 +154,10 @@ message AgentWorkspaceSource {
   uint32 size = 1;
   bytes sha256 = 2;
   string head = 3;
+}
+
+message AgentRunAccepted {
+  string run_id = 1;
 }
 
 message AgentRunReady {
@@ -247,6 +265,7 @@ message AgentRunExit {
   AgentRunOutcome outcome = 2;
   // Present only for a confirmed process exit with an exit code.
   optional uint32 exit_code = 3;
+  bool worker_busy = 4;
 }
 
 enum AgentRunOutcome {
@@ -259,6 +278,7 @@ enum AgentRunOutcome {
 
 message AgentWorkerHeartbeat {
   uint32 sequence = 1;
+  AgentWorkerCapacity capacity = 2;
 }
 
 message AgentFileRef {
