@@ -5,7 +5,17 @@ import { tmpdir } from 'node:os'
 import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { type MessageSender, Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import {
+  type MessageSender,
+  Api,
+  ApiError,
+  GOAL_LENGTH,
+  GOAL_ROUNDS,
+  clientProtocol,
+  emitterPort,
+  type ThreadSnapshot,
+  type WatchEvent,
+} from '@althar/contracts'
 import {
   type AgentDefinition,
   AgentExited,
@@ -16,6 +26,7 @@ import {
 } from '@althar/provider-adapters'
 import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { afterEach } from 'vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -42,6 +53,7 @@ import {
   TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
+import { forgetTold } from '../src/forks'
 import { Projects } from '../src/Projects'
 import { Terminals } from '../src/Terminals'
 import * as Runtime from '../src/Runtime'
@@ -230,6 +242,227 @@ describe('the API', () => {
       }),
     ),
   )
+  it.live('continues a persisted goal on a different provider and accepts evidence from its current turn', () =>
+    Effect.gen(function* () {
+      const first = holds()
+      const second = holds()
+      const { client, grant, store, context } = yield* connected({
+        agents: fakeAgents({}, [], { codex: { holds: first }, 'claude-code': { holds: second } }),
+      })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Verify the API' })
+      const active = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ id: string; sessionId: string; agent: string; prompt: string; revision: number }>`
+        SELECT d.id, d.provider_session_id AS session_id, s.agent_id AS agent, d.prompt, d.goal_revision AS revision
+        FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+        WHERE d.thread_id = ${task.threadId} AND d.goal_round = 1 AND d.state = 'delivered'`,
+        ),
+      )
+      const head = client.GetThread({ threadId: task.threadId, limit: 0 })
+      const started = yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Verify the API [lead:slowly]' },
+        lead: { agentId: 'codex' },
+      })
+      assert.strictEqual(started?.status, 'active')
+      const [before] = yield* until(active, (rows) => rows[0]?.agent === 'codex')
+      const handing = yield* Effect.forkChild(
+        client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'claude-code' }),
+      )
+      first.open('[lead:slowly]')
+      yield* Fiber.join(handing)
+      const [after] = yield* until(active, (rows) => rows[0]?.agent === 'claude-code')
+      assert.strictEqual(after?.revision, before?.revision)
+      assert.include(after?.prompt ?? '', 'Verify the API')
+      const report = { status: 'complete', detail: 'API test suite passed.' }
+      const access = { role: 'lead' as const, projectId: project.id, taskId: task.id, threadId: task.threadId }
+      assert.include(
+        yield* callTool({ ...access, sessionId: before?.sessionId ?? '' }, 'report_goal', { ...report, turn: before?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'no longer holds',
+      )
+      assert.include(
+        yield* callTool({ ...access, sessionId: after?.sessionId ?? '' }, 'report_goal', { ...report, turn: after?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'evidence recorded',
+      )
+      second.open('[lead:slowly]')
+      assert.strictEqual((yield* head).task.goal?.detail, report.detail)
+      assert.strictEqual((yield* head).task.goal?.status, 'complete')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('bounds automatic rounds, routes typed controls through Althar and preserves revision across clear', () =>
+    Effect.gen(function* () {
+      const { client, grant, store } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Bounded goal' })
+      const send = (body: string) => client.Send({ commandId: commandId(), threadId: task.threadId, body, disposition: 'after_current' })
+      const goal = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ status: string; rounds: number; revision: number }>`
+        SELECT status, rounds, generation AS revision FROM thread_goals WHERE thread_id = ${task.threadId}`,
+        ),
+      )
+      yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Keep checking the result' },
+        lead: { agentId: 'codex' },
+      })
+      const [limited] = yield* until(goal, ([row]) => row?.status === 'limited')
+      assert.strictEqual(limited?.rounds, GOAL_ROUNDS)
+      yield* send('/goal clear')
+      assert.isNull((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.goal)
+      yield* send('/goal Verify the next result')
+      const [newer] = yield* goal
+      assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
+      yield* send('/goal pause')
+      assert.strictEqual((yield* goal)[0]?.status, 'paused')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('validates typed goal commands before keeping attachments or starting a lead', () =>
+    Effect.gen(function* () {
+      const { client, grant } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Goal controls' })
+      const command = { threadId: task.threadId, disposition: 'after_current' as const }
+      const attached = yield* Effect.flip(
+        client.Send({
+          ...command,
+          commandId: commandId(),
+          body: '/goal Verify the build',
+          images: [{ data: 'not an image', name: 'notes.png' }],
+        }),
+      )
+      assert.strictEqual(attached.message, 'Send attachments in a message alongside the goal.')
+      const oversized = yield* Effect.flip(
+        client.Send({ ...command, commandId: commandId(), body: `/goal ${'a'.repeat(GOAL_LENGTH + 1)}` }),
+      )
+      assert.strictEqual(oversized.reason, 'Invalid')
+      const empty = yield* Effect.flip(
+        client.SetThreadGoal({
+          commandId: commandId(),
+          threadId: task.threadId,
+          control: { action: 'set', objective: '  ' },
+        }),
+      )
+      assert.strictEqual(empty.reason, 'Invalid')
+      const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+      const wrongThread = yield* Effect.flip(
+        client.SetThreadGoal({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          control: { action: 'set', objective: 'Verify the build' },
+        }),
+      )
+      assert.strictEqual(wrongThread.message, 'Goals belong to task conversations.')
+      yield* client.Send({ ...command, commandId: commandId(), body: '/goal' })
+      const thread = yield* client.GetThread({ threadId: task.threadId })
+      assert.isNull(thread.task.goal)
+      assert.isNull(thread.session)
+      assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Set an objective with /goal.'))
+      yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
+      const abandoned = yield* Effect.flip(client.Send({ ...command, commandId: commandId(), body: '/goal Verify the build' }))
+      assert.strictEqual(abandoned.message, 'Start a goal on an open task.')
+    }).pipe(Effect.scoped),
+  )
+
+  for (const stop of ['pause', 'clear', 'interrupt', 'stop lead', 'stop task'] as const) {
+    it.live(`ends a live automatic goal turn on ${stop}`, () => {
+      const gate = holds()
+      const marker = '[answers-after:5s]'
+      let promptAsked: () => void = () => undefined
+      const asked = new Promise<void>((resolve) => (promptAsked = resolve))
+      return Effect.gen(function* () {
+        const { client, grant, store } = yield* connected({ agents: fakeAgents({ holds: gate, promptAsked }) })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Stop verification' })
+        const { threadId } = task
+        const turns = store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) => sql<{ state: string }>`
+            SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND goal_round = 1 ORDER BY rowid`,
+          ),
+        )
+        yield* client.SetThreadGoal({
+          commandId: commandId(),
+          threadId,
+          control: { action: 'set', objective: `Verify production ${marker}` },
+          lead: { agentId: 'codex' },
+        })
+        yield* until(turns, ([turn]) => turn?.state === 'delivered')
+        yield* Effect.promise(() => asked)
+
+        if (stop === 'pause' || stop === 'clear')
+          yield* client.SetThreadGoal({ commandId: commandId(), threadId, control: { action: stop } })
+        else if (stop === 'interrupt') yield* client.Interrupt({ commandId: commandId(), threadId })
+        else if (stop === 'stop lead') yield* client.StopSession({ commandId: commandId(), threadId })
+        else yield* client.StopTask({ commandId: commandId(), taskId: task.id })
+
+        const finished = yield* until(turns, ([turn]) => turn?.state === 'interrupted')
+        assert.deepStrictEqual(finished, [{ state: 'interrupted' }])
+        const snapshot = yield* client.GetThread({ threadId, limit: 0 })
+        if (stop === 'clear') assert.isNull(snapshot.task.goal)
+        else assert.include(snapshot.task.goal, { status: 'paused', rounds: 1 })
+      }).pipe(Effect.ensuring(Effect.sync(() => gate.open(marker))), Effect.scoped)
+    })
+  }
+
+  for (const sender of [{ kind: 'socket' }, { kind: 'paired_device', deviceId: 'phone' }] as const) {
+    it.live(`enforces goal control permissions for a ${sender.kind === 'socket' ? 'socket' : 'paired device'}`, () => {
+      const gate = holds()
+      return Effect.gen(function* () {
+        const { client, context } = yield* connected({ sender, agents: fakeAgents({ holds: gate }) })
+        const { threadId } = yield* Effect.gen(function* () {
+          const projects = yield* Projects
+          const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+          return yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title: 'Check the release',
+            draft: true,
+            plain: true,
+          })
+        }).pipe(Effect.provideContext(context))
+        const objective = 'Verify production [lead:slowly]'
+        const set = client.SetThreadGoal({
+          commandId: commandId(),
+          threadId,
+          control: { action: 'set', objective },
+          lead: { agentId: 'codex', model: 'small', effort: 'low' },
+        })
+        const send = (body: string) => client.Send({ commandId: commandId(), threadId, body, disposition: 'after_current' })
+        if (sender.kind === 'socket') {
+          assert.strictEqual((yield* Effect.flip(set)).reason, 'Forbidden')
+          assert.strictEqual((yield* Effect.flip(send(`/goal ${objective}`))).reason, 'Forbidden')
+          assert.isNull((yield* client.GetThread({ threadId, limit: 0 })).task.goal)
+          return
+        }
+
+        const accepted = yield* set
+        assert.include(accepted, { status: 'active', objective })
+        assert.deepStrictEqual(yield* set, accepted)
+        const active = yield* client.SetThreadGoal({ commandId: commandId(), threadId, control: { action: 'resume' } })
+        assert.strictEqual(active?.revision, accepted?.revision)
+        yield* send('/goal')
+        const thread = yield* until(client.GetThread({ threadId }), (snapshot) => snapshot.session?.turnRunning === true)
+        assert.include(thread.session, { agentId: 'codex', model: 'small', effort: 'low' })
+        assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Goal · active'))
+        yield* send('/goal pause')
+        assert.strictEqual((yield* client.GetThread({ threadId, limit: 0 })).task.goal?.status, 'paused')
+      }).pipe(Effect.ensuring(Effect.sync(() => gate.open('[lead:slowly]'))), Effect.scoped)
+    })
+  }
+
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()
@@ -557,6 +790,76 @@ describe('the API', () => {
             ['opencode', true],
           ],
         )
+      }),
+    ),
+  )
+
+  it.live('shares a cold agent status and version check across simultaneous windows', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let checks = 0
+        let versions = 0
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) => {
+            const check = definition.signIn.status
+            if (check === undefined) throw new Error('The test agent needs a status command')
+            return {
+              ...definition,
+              signIn: {
+                ...definition.signIn,
+                status: (node) => {
+                  checks++
+                  return check(node)
+                },
+              },
+              version: (node) => {
+                versions++
+                return { command: node, args: ['--version'] }
+              },
+            }
+          }),
+        })
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind: 'window' },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
+        const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+        const otherWindow = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+        const [first, second] = yield* Effect.all([client.Status({}), otherWindow.Status({})], { concurrency: 2 })
+        assert.deepStrictEqual(first, second)
+        assert.strictEqual(checks, 1)
+        assert.strictEqual(versions, 1)
+        yield* client.Status({ recheck: true })
+        assert.strictEqual(checks, 2)
+        assert.strictEqual(versions, 1)
+      }),
+    ),
+  )
+
+  it.live('retries a failed agent version probe and reuses the version once found', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let probes = 0
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({
+            ...definition,
+            version: (node) => ({
+              command: node,
+              args: ['-e', ++probes === 1 ? 'process.exit(1)' : 'console.log("1.2.3")'],
+            }),
+          })),
+        })
+        const version = client.Status({}).pipe(Effect.map(({ agents }) => agents.find(({ id }) => id === 'codex')?.version))
+        assert.strictEqual(yield* version, null)
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(probes, 2)
       }),
     ),
   )
@@ -1345,6 +1648,56 @@ describe('project rules, through the API', () => {
     ),
   )
 
+  it.live('suggests the review bots that spoke on its tasks’ pull requests, and trusts one from a task, the person’s', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, store } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        // As listening records each review or triage bot the first time it speaks on a pull request (code-hosts § Review and triage bots): the latest first.
+        const spoke = (n: number, login: string, name: string) =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) =>
+                sql`INSERT INTO observations ${sql.insert({
+                  id: `obs_${String(n).padStart(32, '0')}`,
+                  projectId: project.id,
+                  subjectType: 'external_link',
+                  subjectId: `link_${n}`,
+                  kind: 'bot_spoke',
+                  payload: JSON.stringify({ id: `bot:${login}`, login, name }),
+                  source: 'github',
+                  observedAt: `2026-11-0${n}T10:00:00.000Z`,
+                })}`,
+            ),
+          )
+        yield* spoke(1, 'claude[bot]', 'Claude')
+        yield* spoke(2, 'coderabbitai[bot]', 'CodeRabbit')
+        yield* spoke(3, 'claude[bot]', 'Claude')
+        const before = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(before.trustedBots, [])
+        assert.deepStrictEqual(before.suggestedBots, [
+          { login: 'claude[bot]', name: 'Claude' },
+          { login: 'coderabbitai[bot]', name: 'CodeRabbit' },
+        ])
+        // Trusted from the thread where it spoke, by any case, once: it is no longer suggested.
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'CodeRabbitAI[bot]' })
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'coderabbitai[bot]' })
+        const after = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(after.trustedBots, [{ login: 'coderabbitai[bot]', name: 'CodeRabbit' }])
+        assert.deepStrictEqual(after.suggestedBots, [{ login: 'claude[bot]', name: 'Claude' }])
+        assert.strictEqual(after.revision, before.revision + 1)
+        // Untrusted from the settings, it is suggested again.
+        const untrusted = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, trustedBots: [] })
+        assert.deepStrictEqual(
+          untrusted.suggestedBots.map((bot) => bot.login),
+          ['claude[bot]', 'coderabbitai[bot]'],
+        )
+      }),
+    ),
+  )
+
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1365,6 +1718,8 @@ describe('project rules, through the API', () => {
           resolveConflicts: true,
           pushCommits: true,
           postScreenshots: false,
+          trustedBots: [],
+          suggestedBots: [],
           leadsReachWeb: true,
           usageLimit: 'move',
           rotateAccounts: true,
@@ -1799,6 +2154,8 @@ describe('a project’s menu, through the API', () => {
         assert.deepStrictEqual(docs?.fork, {
           fork: 'you/refund-docs',
           upstream: 'meridian/refund-docs',
+          remote: 'upstream',
+          by: 'names',
           target: 'fork',
           canPush: null,
           offer: false,
@@ -2059,6 +2416,192 @@ describe('a fork’s branches upstream, through the API', () => {
           client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
         )
         assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+})
+
+describe('a fork as its host says, through the API', () => {
+  afterEach(() => forgetTold())
+
+  /** A clone of you/site with these remotes besides origin, opened with GitHub connected, its host saying what it was forked from. */
+  const siteOpened = (
+    remotes: ReadonlyArray<string>,
+    parent: ReadonlyArray<string> | null | undefined,
+    more?: { readonly source?: ReadonlyArray<string> },
+  ) =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'site'])
+      github.addRepository(['meridian', 'site'])
+      if (parent !== undefined) github.forkFrom(['you', 'site'], parent, more)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ site: [`origin=${HOST}/you/site.git`, ...remotes] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'site')) })
+      const read = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one)
+      return { client, github, projectId: project.id, path: join(folder, 'site'), read }
+    })
+
+  const remotesOf = (path: string) => execFileSync('git', ['remote', '-v'], { cwd: path }).toString()
+
+  it.live('finds the repository it was forked from among its remotes by its address, whatever it is called', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`base=${HOST}/Meridian/site`, `dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { fork: 'you/site', upstream: 'meridian/site', remote: 'base', by: 'host', target: 'fork' })
+      }),
+    ),
+  )
+
+  it.live('offers to add it where none of its remotes has it, and adds it beside them, leaving theirs as they were', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([`dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null, by: 'host' })
+        const had = remotesOf(path)
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path),
+          `${had}upstream\t${HOST}/meridian/site.git (fetch)\nupstream\t${HOST}/meridian/site.git (push)\n`,
+        )
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        // Asked again, there is nothing more to add.
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path)
+            .split('\n')
+            .filter((line) => line.startsWith('upstream')).length,
+          2,
+        )
+      }),
+    ),
+  )
+
+  it.live('adds it once when asked several times at once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        const repositoryId = (yield* read)?.id ?? ''
+        yield* Effect.all(
+          Array.from({ length: 5 }, () => client.AddParentRemote({ commandId: commandId(), projectId, repositoryId })),
+          {
+            concurrency: 'unbounded',
+          },
+        )
+        assert.strictEqual(execFileSync('git', ['remote'], { cwd: path }).toString(), 'origin\nupstream\n')
+      }),
+    ),
+  )
+
+  it.live('sets the default branch of the remote it adds, where it could fetch it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        // The parent's address reaches a repository on disk here, as a host's would.
+        const bare = mkdtempSync(join(tmpdir(), 'althar-parent-'))
+        execFileSync('git', ['clone', '-q', '--bare', path, bare])
+        execFileSync('git', ['config', `url.${bare}.insteadOf`, `${HOST}/meridian/site.git`], { cwd: path })
+        // As a git before 2.48 fetches, which leaves a new remote without its HEAD.
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            Object.assign(process.env, {
+              GIT_CONFIG_COUNT: '1',
+              GIT_CONFIG_KEY_0: 'remote.upstream.followRemoteHEAD',
+              GIT_CONFIG_VALUE_0: 'never',
+            })
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env.GIT_CONFIG_COUNT
+              delete process.env.GIT_CONFIG_KEY_0
+              delete process.env.GIT_CONFIG_VALUE_0
+            }),
+        )
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: (yield* read)?.id ?? '' })
+        // Its HEAD, so a task started from it needn't ask the remote for its default branch.
+        const current = execFileSync('git', ['branch', '--show-current'], { cwd: path }).toString().trim()
+        assert.strictEqual(
+          execFileSync('git', ['symbolic-ref', 'refs/remotes/upstream/HEAD'], { cwd: path }).toString().trim(),
+          `refs/remotes/upstream/${current}`,
+        )
+      }),
+    ),
+  )
+
+  it.live('takes `parent` for it where `upstream` names another repository', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says the root of its forks: meridian/site, so someone/site is neither its parent nor its root.
+        const { client, projectId, path, read } = yield* siteOpened([`upstream=${HOST}/someone/site.git`], ['meridian', 'site'], {
+          source: ['meridian', 'site'],
+        })
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null })
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.include(remotesOf(path), `upstream\t${HOST}/someone/site.git (fetch)`)
+        assert.include(remotesOf(path), `parent\t${HOST}/meridian/site.git (fetch)`)
+        assert.deepInclude((yield* read)?.fork, { remote: 'parent' })
+      }),
+    ),
+  )
+
+  it.live('is no fork where its host says it isn’t and its remotes don’t, and nothing is added', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, read } = yield* siteOpened([`base=${HOST}/meridian/site.git`], null)
+        const one = yield* read
+        assert.isNull(one?.fork)
+        const refused = yield* Effect.flip(client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: one?.id ?? '' }))
+        assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+
+  it.live('goes by its remotes’ names where its host can’t be reached, and doesn’t ask it again on every read', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], undefined)
+        const asks = () => github.calls.filter((call) => call === 'repository').length
+        github.failNext('repository', 'unreachable')
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
+        // One that failed, or hung until it was given up on, holds up the next reads no more: it is asked again only later.
+        const asked = asks()
+        github.forkFrom(['you', 'site'], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'names' })
+        assert.strictEqual(asks(), asked)
+      }),
+    ),
+  )
+
+  it.live('asks its host once, and goes by what it said until its answer is old', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        const asked = github.calls.filter((call) => call === 'repository').length
+        yield* read
+        assert.strictEqual(github.calls.filter((call) => call === 'repository').length, asked)
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork, takes its `upstream` at the root of its forks for the repository it goes to', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says you/site is a fork of ninemate/site, itself forked from meridian/site, which the clone has as upstream.
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'], { source: ['meridian', 'site'] })
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'host' })
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork whose root its host doesn’t say, takes its `upstream` as its remotes’ names do', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'])
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
       }),
     ),
   )

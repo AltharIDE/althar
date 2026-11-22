@@ -410,6 +410,8 @@ what goes.
 
 ## Changes
 
+- 20 Nov 2026: GitLab review posting publishes the summary and inline comments together from draft notes. Existing unpublished notes stay private until their author handles them.
+
 - 13 Nov 2026: a task keeps a persistent visual collection across amendments, with explicit retirement and GIF playback.
 
 - 8 Nov 2026: written from the ADRs under Replaces.

@@ -5,6 +5,7 @@ import { Duration } from 'effect'
 import {
   answerHint,
   bodyOf,
+  botFindingLine,
   checksForLead,
   checksLine,
   checksOf,
@@ -18,6 +19,7 @@ import {
   leftQueueNote,
   nameOf,
   outsidersLine,
+  quietBotsLine,
   queuedNote,
   reviewForLead,
   reviewLine,
@@ -283,6 +285,25 @@ describe('what Althar writes about a pull request', () => {
     const failed = { sha: 'a', outcome: 'failed' as const, passed: 0, failed: 1, running: 0, total: 1, failing: ['test'], list: [] }
     assert.match(checksForLead(failed, 'PR #1', ['log']), /^Checks failed on PR #1: test\.\n\nlog\n\nFix what broke/)
     assert.include(answerHint, 'reply_on_pull_request')
+  })
+
+  it('quotes what a trusted bot said as findings, and names the untrusted ones left out', () => {
+    assert.strictEqual(botFindingLine(review({ body: '' })), '- Its review: changes requested')
+    assert.strictEqual(botFindingLine(review()), '- Its review: changes requested\n> Name it better.')
+    assert.strictEqual(botFindingLine(comment({ body: 'Cap it.' })), '- On the pull request:\n> Cap it.')
+    assert.strictEqual(
+      botFindingLine(comment({ path: 'a.ts', line: 3, threadId: '7', body: 'Cap it.' })),
+      '- On a.ts:3 (thread 7):\n> Cap it.',
+    )
+    assert.strictEqual(quietBotsLine([], 0), '')
+    assert.strictEqual(
+      quietBotsLine(['CodeRabbit'], 1),
+      "CodeRabbit, a review bot this project doesn't trust, is left out; the person can trust one in the project's settings. One comment from other bots is left out.",
+    )
+    assert.strictEqual(
+      quietBotsLine(['CodeRabbit', 'Copilot'], 2),
+      "Review bots this project doesn't trust (CodeRabbit, Copilot) are left out; the person can trust one in the project's settings. 2 comments from other bots are left out.",
+    )
   })
 })
 

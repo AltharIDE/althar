@@ -70,6 +70,7 @@ export type ProjectRepositoriesProps = RootProps<
     | 'onTowardChange'
     | 'onTowardCreate'
     | 'onTargetChange'
+    | 'onAddRemote'
     | 'onLeaveOut'
     | 'onOpen'
     | 'onConnect'
@@ -113,6 +114,7 @@ export function ProjectRepositories({
   onTowardChange,
   onTowardCreate,
   onTargetChange,
+  onAddRemote,
   onLeaveOut,
   onOpen,
   onConnect,
@@ -187,6 +189,7 @@ export function ProjectRepositories({
             className={s.map}
             {...(reading === undefined ? {} : { reading })}
             {...(worktrees === undefined ? {} : { worktrees })}
+            {...(onAddRemote === undefined ? {} : { onAddRemote })}
             {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
             {...(onOpen === undefined ? {} : { onOpen })}
             {...(onConnect === undefined ? {} : { onConnect })}

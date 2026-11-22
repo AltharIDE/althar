@@ -4,10 +4,10 @@ import { join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { MessageSender } from '@althar/contracts'
 import { scenarios } from '@althar/provider-adapters/testing'
+import { readClock } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Deferred, Duration, Effect, Fiber, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
-import { TestClock } from 'effect/testing'
 
 import { ActionNotPerformed } from '../src/toolErrors'
 import { Live } from '../src/Live'
@@ -15,18 +15,16 @@ import { postCard } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
 import { Errands, errandLines, type AskedAction, type AskedResult, type ErrandStep, type FreshAction } from '../src/Errands'
 import { handoverRecord } from '../src/handover'
+import { MergeLine } from '../src/MergeLine'
 import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { addItem } from '../src/threads'
 import { ToolRefused, ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, callToolAtOnce, repository, runtime, task, turns, until } from './support'
 
-/**
- * A runtime whose background loops don't wake within the days these tests move the TestClock by: each wake costs real
- * time, so a day at the default cadences (a sample every two seconds, a listen, a stall look and a merge-line look
- * every thirty) takes as long as a minute of waiting on a busy machine.
- */
+/** Defer background sweeps in tests that call the reminder or merge-line sweep directly. */
 const slowDays = (database?: string) => {
   const never = Duration.hours(1000)
   return runtime(
@@ -42,6 +40,10 @@ const slowDays = (database?: string) => {
     },
   )
 }
+
+/** Advance the reminder timestamps without replaying scheduled background work. */
+const errandTime = <A, E, R>(test: (advance: (duration: Duration.Input) => Effect.Effect<void>) => Effect.Effect<A, E, R>) =>
+  Effect.flatMap(readClock, (clock) => clock.run(test(clock.advance)))
 
 /** A live turn in the store, without an agent process; calls use the real HTTP MCP server. */
 const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
@@ -226,7 +228,7 @@ describe('the person’s word through the tool boundary', () => {
     Effect.gen(function* () {
       const s = yield* setup()
       const message = yield* s.say()
-      for (const kind of ['pull_request_opened', 'checks_passed', 'merged', 'imaginary']) {
+      for (const kind of ['pull_request_opened', 'merged', 'imaginary']) {
         const answer = yield* callTool(s.access, 'keep_errand', {
           message,
           steps: [s.step, { ...s.step, key: 'later', waits: [{ kind, target: 'release' }] }],
@@ -251,8 +253,161 @@ describe('the person’s word through the tool boundary', () => {
         yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: task.taskId }] }),
         'This project has no task',
       )
+      assert.include(
+        yield* callTool(s.access, 'keep_errand', {
+          message,
+          steps: [{ ...s.step, waits: [{ kind: 'checks_passed', target: 'elsewhere' }] }],
+        }),
+        'This project has no task elsewhere',
+      )
       assert.lengthOf(yield* s.sql`SELECT id FROM errands`, 0)
     }).pipe(Effect.provide(runtime())),
+  )
+
+  for (const when of ['before', 'after'] as const) {
+    it.live(`wakes each slug wait when its result was recorded ${when} the errand was kept`, () =>
+      Effect.gen(function* () {
+        const s = yield* setup()
+        const projectId = s.access.projectId as ProjectId
+        const target = yield* (yield* Projects).createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: 'Release prep',
+        })
+        const [task] = yield* s.sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${target.taskId}`
+        const slug = task!.slug
+        const at = yield* timestamp
+        const checks = Effect.gen(function* () {
+          const url = 'https://github.test/meridian/api/pull/1'
+          const snapshot = { repository: ['meridian', 'api'], state: 'merged', headSha: 'head-a' }
+          const linkId = yield* newId(Ids.externalLink)
+          yield* s.sql`INSERT INTO external_links ${s.sql.insert({
+            id: linkId,
+            projectId,
+            taskId: target.taskId,
+            product: 'github',
+            kind: 'change',
+            externalId: '1',
+            ref: '1',
+            key: '1',
+            url,
+            snapshot: JSON.stringify(snapshot),
+            createdAt: at,
+            updatedAt: at,
+          })}`
+          yield* s.sql`INSERT INTO observations ${s.sql.insert({
+            id: yield* newId(Ids.observation),
+            projectId,
+            subjectType: 'external_link',
+            subjectId: linkId,
+            kind: 'checks',
+            payload: JSON.stringify({ sha: 'head-a', outcome: 'passed' }),
+            source: 'althar',
+            observedAt: at,
+          })}`
+        })
+        const report = (content: object) => addItem({ projectId, threadId: target.threadId }, 'step_result', content)
+        const results = {
+          review_settled: report({ step: 'review', verdict: 'pass', findings: [] }),
+          lead_done: report({ step: 'implement', summary: 'Implemented.' }),
+          checks_passed: checks,
+        }
+        const kinds = ['review_settled', 'lead_done', 'checks_passed'] as const
+        const message = yield* s.say()
+        const line = yield* MergeLine
+        const news = Effect.map(
+          s.sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${s.access.threadId}
+            AND input_origin = 'news' ORDER BY sequence`,
+          (rows) => rows.map((row) => row.body).join('\n'),
+        )
+        const ids = new Map<string, string>()
+        if (when === 'before') for (const kind of kinds) yield* results[kind]
+        for (const kind of kinds) {
+          const id = yield* callTool(s.access, 'keep_errand', {
+            message,
+            steps: [{ ...s.step, key: kind, target: `repo/${kind}`, waits: [{ kind, target: slug }] }],
+          })
+          assert.match(id, /^errand_/)
+          ids.set(kind, id)
+        }
+        const action = (kind: string) => callTool(s.access, s.step.tool, { errandId: ids.get(kind), step: kind, target: `repo/${kind}` })
+        if (when === 'after') {
+          yield* line.tick(projectId)
+          assert.strictEqual(yield* news, '')
+          assert.include(yield* action('review_settled'), 'This step still waits for its task')
+          assert.deepStrictEqual(s.counts(), { acts: 0, reads: 0 })
+          for (const kind of kinds) yield* results[kind]
+        }
+        yield* line.tick(projectId)
+        const heard = yield* news
+        for (const [kind, id] of ids) assert.include(heard, `Errand ${id}, step ${kind}: its waits are met`)
+        yield* line.tick(projectId)
+        assert.strictEqual(yield* news, heard)
+        yield* s.say({ kind: 'internal' }, heard)
+        for (const kind of kinds) assert.strictEqual(yield* action(kind), 'Did it once.')
+        assert.lengthOf(yield* s.sql`SELECT id FROM errands WHERE state = 'done'`, 3)
+        assert.strictEqual(s.counts().acts, 3)
+      }).pipe(Effect.provide(slowDays())),
+    )
+  }
+
+  it.live('reports terminal task waits that cannot be met and stops reminding about them', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const projectId = s.access.projectId as ProjectId
+      const line = yield* MergeLine
+      const message = yield* s.say()
+      for (const ended of ['merged', 'settled', 'discarded']) {
+        const target = yield* (yield* Projects).createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: `${ended} work`,
+        })
+        const [task] = yield* s.sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${target.taskId}`
+        const at = yield* timestamp
+        if (ended === 'merged') {
+          const url = 'https://github.test/meridian/api/pull/1'
+          yield* s.sql`INSERT INTO external_links ${s.sql.insert({
+            id: yield* newId(Ids.externalLink),
+            projectId,
+            taskId: target.taskId,
+            product: 'github',
+            kind: 'change',
+            externalId: '1',
+            ref: '1',
+            key: '1',
+            url,
+            snapshot: JSON.stringify({ repository: ['meridian', 'api'], state: 'merged' }),
+            createdAt: at,
+            updatedAt: at,
+          })}`
+        } else {
+          yield* s.sql`UPDATE tasks SET state = ${ended === 'settled' ? 'done' : 'abandoned'}, settled_at = ${at} WHERE id = ${target.taskId}`
+        }
+        const id = yield* s.errands.keep(s.access, message, [
+          {
+            ...s.step,
+            waits: [
+              { kind: 'lead_done', target: task!.slug },
+              { kind: 'review_settled', target: task!.slug },
+            ],
+          },
+        ])
+        yield* line.tick(projectId)
+        const [row] = yield* s.sql<{ state: string; reason: string }>`SELECT state, reason FROM errands WHERE id = ${id}`
+        assert.strictEqual(row?.state, 'paused')
+        assert.include(
+          row?.reason,
+          `Task “${task!.slug}” ${ended === 'merged' ? ended : `was ${ended}`} without a record of a finished lead step`,
+        )
+      }
+      yield* s.sql`UPDATE errands SET news_at = '2000-01-01T00:00:00.000Z'`
+      yield* s.errands.remind(projectId)
+      const notices = yield* s.sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId}
+        AND kind = 'notice' AND json_extract(content, '$.title') LIKE 'Errand %hold%'`
+      assert.lengthOf(notices, 3)
+      assert.isTrue(notices.every(({ content }) => content.includes('without a record of a finished lead step')))
+    }).pipe(Effect.provide(slowDays())),
   )
 
   it.live('an old errand with an unwatched kind is paused on the next sweep, with a way to keep it again', () =>
@@ -628,47 +783,51 @@ describe('the person’s word through the tool boundary', () => {
     }),
   )
 
-  it.effect('news touching an errand resets its day without news', () =>
-    Effect.gen(function* () {
-      const s = yield* setup()
-      const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
-      yield* TestClock.adjust('23 hours')
-      yield* s.errands.news(id)
-      yield* TestClock.adjust('1 hour')
-      yield* s.errands.remind(s.access.projectId)
-      const reminders = s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
-      assert.lengthOf(yield* reminders, 0)
-      yield* TestClock.adjust('23 hours')
-      yield* s.errands.remind(s.access.projectId)
-      assert.lengthOf(yield* reminders, 1)
-    }).pipe(Effect.provide(slowDays())),
+  it.live('news touching an errand resets its day without news', () =>
+    errandTime((advance) =>
+      Effect.gen(function* () {
+        const s = yield* setup()
+        const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+        yield* advance('23 hours')
+        yield* s.errands.news(id)
+        yield* advance('1 hour')
+        yield* s.errands.remind(s.access.projectId)
+        const reminders = s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
+        assert.lengthOf(yield* reminders, 0)
+        yield* advance('23 hours')
+        yield* s.errands.remind(s.access.projectId)
+        assert.lengthOf(yield* reminders, 1)
+      }).pipe(Effect.provide(slowDays())),
+    ),
   )
 
-  it.effect('a quiet errand says what it waits on once a day without a live session', () =>
-    Effect.gen(function* () {
-      const s = yield* setup()
-      yield* s.errands.keep(s.access, yield* s.say(), [s.step])
-      const since = yield* timestamp
-      yield* s.errands.keep(s.access, yield* s.say({ kind: 'window' }, 'Wait for the missing check'), [
-        { ...s.step, waits: [{ kind: 'required-check-missing', target: 'build', since }] },
-      ])
-      yield* s.sql`UPDATE turn_deliveries SET state = 'completed' WHERE thread_id = ${s.access.threadId}`
-      yield* TestClock.adjust('1 hour')
-      yield* s.errands.remind(s.access.projectId)
-      assert.lengthOf(
-        yield* s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`,
-        1,
-      )
-      yield* TestClock.adjust('23 hours')
-      yield* s.errands.remind(s.access.projectId)
-      yield* s.errands.remind(s.access.projectId)
-      const lines = yield* s.sql<{
-        content: string
-      }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
-      assert.lengthOf(lines, 2)
-      assert.isTrue(lines.some((line) => line.content.includes('once its checks pass')))
-      assert.isTrue(lines.every((line) => !line.content.includes('[{')))
-    }).pipe(Effect.provide(slowDays())),
+  it.live('a quiet errand says what it waits on once a day without a live session', () =>
+    errandTime((advance) =>
+      Effect.gen(function* () {
+        const s = yield* setup()
+        yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+        const since = yield* timestamp
+        yield* s.errands.keep(s.access, yield* s.say({ kind: 'window' }, 'Wait for the missing check'), [
+          { ...s.step, waits: [{ kind: 'required-check-missing', target: 'build', since }] },
+        ])
+        yield* s.sql`UPDATE turn_deliveries SET state = 'completed' WHERE thread_id = ${s.access.threadId}`
+        yield* advance('1 hour')
+        yield* s.errands.remind(s.access.projectId)
+        assert.lengthOf(
+          yield* s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`,
+          1,
+        )
+        yield* advance('23 hours')
+        yield* s.errands.remind(s.access.projectId)
+        yield* s.errands.remind(s.access.projectId)
+        const lines = yield* s.sql<{
+          content: string
+        }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
+        assert.lengthOf(lines, 2)
+        assert.isTrue(lines.some((line) => line.content.includes('once its checks pass')))
+        assert.isTrue(lines.every((line) => !line.content.includes('[{')))
+      }).pipe(Effect.provide(slowDays())),
+    ),
   )
 })
 

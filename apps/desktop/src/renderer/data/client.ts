@@ -6,6 +6,7 @@ import {
   type ConnectionInfo,
   type Elsewhere,
   type FeedPosition,
+  type FinderQuery,
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
@@ -105,6 +106,7 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type ProjectWorker,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -122,6 +124,8 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type ThreadGoal,
+  type GoalControl,
   type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
@@ -146,7 +150,11 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<
+  Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox' | 'trustedBots' | 'suggestedBots'>
+> & {
+    /** The bots its leads hear, by their accounts, the list whole (code-hosts § Review and triage bots). */
+    readonly trustedBots?: ReadonlyArray<string>
     /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
     readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
@@ -163,6 +171,7 @@ export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
+  readonly listProjectWorkers: (projectId: string) => Promise<ReadonlyArray<ProjectWorker>>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
   /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
@@ -216,7 +225,7 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
-  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchDocuments: (after?: string, search?: FinderQuery, signal?: AbortSignal) => Promise<SearchDocuments>
   readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
@@ -503,6 +512,11 @@ export interface Client {
   readonly keepTaskForLater: (taskId: string) => Promise<void>
   /** Gives the task another title, in any state; its slug, branch and folder stay. */
   readonly renameTask: (taskId: string, title: string) => Promise<void>
+  readonly setThreadGoal: (input: {
+    readonly threadId: string
+    readonly control: GoalControl
+    readonly lead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
+  }) => Promise<ThreadGoal | null>
   readonly send: (input: {
     readonly threadId: string
     readonly body: string
@@ -554,7 +568,7 @@ export interface Client {
     /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
     readonly taskId?: string
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string) => Promise<void>
+  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
@@ -643,6 +657,8 @@ export interface Client {
   /** Adds the repositories at the folder a grant names. */
   readonly addRepositories: (projectId: string, grant: string) => Promise<void>
   readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone, where none of its remotes is that repository. */
+  readonly addParentRemote: (projectId: string, repositoryId: string) => Promise<void>
   readonly setRepository: (input: {
     readonly projectId: string
     readonly repositoryId: string
@@ -650,7 +666,8 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
-    readonly setup?: RepositorySetup
+    /** The setup the person edited; null clears it, for a lead to record again. */
+    readonly setup?: RepositorySetup | null
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>
@@ -667,6 +684,8 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** Trusts a bot in a task's project, from the thread where it spoke: its leads hear it from then on (code-hosts § Review and triage bots). */
+  readonly trustBot: (taskId: string, login: string) => Promise<void>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -1029,6 +1048,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
+    listProjectWorkers: (projectId) => settle(api.ListProjectWorkers({ projectId })),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     lookElsewhere: (at) => settle(api.LookElsewhere(at)),
     bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
@@ -1052,7 +1072,14 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
-    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchDocuments: (after, search, signal) =>
+      settle(
+        api.GetSearchDocuments({
+          ...(after === undefined ? {} : { after }),
+          ...(search === undefined ? {} : { search }),
+        }),
+        signal,
+      ),
     getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
@@ -1098,9 +1125,9 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
           ...(at.image === true ? { image: true } : {}),
         }),
       ),
-    getBoard: (projectId) => settle(api.GetBoard({ projectId })),
+    getBoard: (projectId) => settle(api.GetBoard({ projectId, cached: true })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
-    getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
+    getHome: (since) => settle(api.GetHome(since === undefined ? { cached: true } : { since, cached: true })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
     settledWithOnePress: (press) => command((commandId) => api.SettledWithOnePress({ commandId, ...press })),
@@ -1213,13 +1240,15 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
+    setThreadGoal: (input) => command((commandId) => api.SetThreadGoal({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
-    startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    startPlan: (planId, workerId) =>
+      command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
@@ -1275,6 +1304,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    addParentRemote: (projectId, repositoryId) => command((commandId) => api.AddParentRemote({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
@@ -1283,6 +1313,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    trustBot: (taskId, login) => command((commandId) => api.TrustBot({ commandId, taskId, login })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>

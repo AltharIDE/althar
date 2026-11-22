@@ -1,4 +1,5 @@
 import type { SearchDocument } from '@althar/contracts'
+import { Database } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { phaseRead, phasesNow } from './Search'
@@ -16,7 +17,9 @@ export const searchDocuments = Effect.fn('Search.documents')(function* (
   kept = SAID_KEPT,
 ) {
   const sql = yield* SqlClient.SqlClient
-  const rows = yield* sql<SearchDocument>`
+  const reader = yield* Database.ReadLane
+  const rows = yield* reader.read(
+    sql<SearchDocument>`
     WITH documents AS (
       SELECT 'task:' || k.id AS id, 'task' AS kind, k.project_id, t.id AS thread_id, k.id AS task_id,
         NULL AS item_id, k.title, coalesce(k.request, k.description, '') AS body,
@@ -57,7 +60,9 @@ export const searchDocuments = Effect.fn('Search.documents')(function* (
     )
     SELECT d.* FROM documents d JOIN projects p ON p.id = d.project_id
     WHERE p.archived_at IS NULL AND d.id > ${after} AND d.title != ''
-    ORDER BY d.id LIMIT 201`
+    ORDER BY d.id LIMIT 201`,
+    'background',
+  )
   const documents = rows.slice(0, 200)
   const ids = documents.filter((one) => one.kind === 'task').map((one) => one.taskId!)
   if (ids.length > 0) {

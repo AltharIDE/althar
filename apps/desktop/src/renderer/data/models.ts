@@ -199,7 +199,10 @@ const quiet = () => undefined
 export const readModelsAhead = (client: Client) => read(client, storeOf(client))
 
 /** Reads the models again, after something that may change them, such as an agent found signed in or newly installed. */
-export const readModelsAgain = (client: Client) => read(client, storeOf(client), true)
+export const readModelsAgain = (client: Client) => {
+  const store = storeOf(client)
+  if (store.reading || store.read !== null || store.listeners.size > 0) read(client, store, true)
+}
 
 /** Tells `listener` each time the models are read: an agent signed in or out, a model switched off or on. Until the returned stop. */
 export const onModelsRead = (client: Client, listener: () => void) => {

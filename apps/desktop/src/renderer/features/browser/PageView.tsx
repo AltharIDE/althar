@@ -8,7 +8,7 @@ import type { CookieKeep } from '../../../main/browser/cookies'
 import { DEVICES, placed, type Rect, type Viewport, VIEWPORTS } from '../../../main/browser/devices'
 import type { PageLine as Line, Pointed } from '../../../main/browser/page'
 import { useServices } from '../../data/services'
-import { cropOf, gather, type GatheredComment, rewrite, drop, useComments } from '../../shared/comments'
+import { drop, type GatheredComment, markEarlier, savePageComment, useComments } from '../../shared/comments'
 import { usePreferences } from '../../shared/usePreferences'
 import { pressDictationShortcut } from '../../shared/dictation/useDictation'
 import { useCovered } from './cover'
@@ -184,16 +184,37 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
   // Closing or leaving, the page comes back for whoever shows it next.
   useEffect(() => () => void browser?.cover(owner, false), [browser, owner])
 
-  // The comments' pins, each on the page it was made on.
+  // Number pins by their place in the composer. Check the spot only once its page finishes loading.
+  const pageAddress = state?.loading === false ? state.address : null
   useEffect(() => {
-    void browser?.pins(
-      owner,
-      // Numbered by their place among all the draft's comments, as their chips are; those on canvases have no pin here.
-      comments.flatMap((comment, index) =>
-        comment.on.kind === 'page' ? [{ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address }] : [],
-      ),
+    if (browser === undefined) return
+    let current = true
+    const pins = comments.flatMap((comment, index) =>
+      comment.on.kind === 'page' ? [{ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address }] : [],
     )
-  }, [browser, owner, comments])
+    void browser
+      .pins(owner, pins)
+      .then((answer) => {
+        if (!current || answer === null || answer.address !== pageAddress) return
+        const earlier = new Map<number, boolean>(
+          pins.filter((pin) => pin.address === answer.address).map((pin) => [pin.n, !answer.found.includes(pin.n)]),
+        )
+        markEarlier(
+          draft,
+          new Map(
+            comments.flatMap((one, index) =>
+              one.on.kind === 'page' && one.on.viewport === viewport && earlier.has(index + 1)
+                ? [[one.id, earlier.get(index + 1) === true] as const]
+                : [],
+            ),
+          ),
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      current = false
+    }
+  }, [browser, owner, draft, comments, pageAddress, viewport])
 
   const point = useCallback(async () => {
     if (browser === undefined || state === null || state.address === '') return
@@ -211,7 +232,9 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     if (comment === undefined || comment.on.kind !== 'page') return
     const spot = comment.on
     void (async () => {
-      const found = await browser.find(owner, spot.picked.selector, spot.address)
+      if (spot.viewport !== viewport) await browser.viewport(owner, spot.viewport).catch(() => undefined)
+      const found = await browser.find(owner, spot.picked.selector, spot.address).catch(() => null)
+      markEarlier(draft, new Map([[comment.id, found === null]]))
       if (found !== null) return setWriting({ pointed: found, comment, n: index + 1 })
       // Gone from the page: the comment opens over the page as it is, at its top, to change or remove.
       const picture = (await browser.still(owner)) ?? ''
@@ -230,17 +253,14 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         n: index + 1,
       })
     })()
-  }, [reopen, browser, owner, panel, writing, comments])
+  }, [reopen, browser, owner, panel, writing, comments, draft, viewport])
 
-  const submit = async (note: string) => {
+  const submit = (note: string) => {
     if (writing === null) return
-    const { pointed, comment, n } = writing
+    const { pointed, comment } = writing
     setWriting(null)
     const on = { kind: 'page' as const, picked: pointed.picked, address: pointed.address, viewport: pointed.viewport }
-    // A crop that can't be read goes without; the comment never does.
-    const crop = pointed.crop === null ? null : await cropOf(pointed.crop, n).catch(() => null)
-    if (comment === null) gather(draft, { id: crypto.randomUUID(), note, on, crop })
-    else rewrite(draft, comment.id, note, pointed.crop === null ? undefined : { on, crop })
+    savePageComment(draft, comment?.id ?? null, note, on, pointed.crop)
   }
 
   // In the page, the keys the window acts on: Comment, and the address.
@@ -340,7 +360,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
             size={text.sized(writing.pointed.picked.rect.width, writing.pointed.picked.rect.height)}
             defaultValue={writing.comment?.note ?? ''}
             existing={writing.comment !== null}
-            onSubmit={(note) => void submit(note)}
+            onSubmit={(note) => submit(note)}
             onCancel={() => setWriting(null)}
             {...(writing.comment === null
               ? {}

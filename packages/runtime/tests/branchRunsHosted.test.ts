@@ -8,8 +8,10 @@ import { join } from 'node:path'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
+import { afterEach } from 'vitest'
 
 import { Fetches } from '../src/Fetches'
+import { forgetTold, tell } from '../src/forks'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -265,5 +267,69 @@ describe('running a branch or a pull request on a connected code host', () => {
         )
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
     }).pipe(Effect.scoped)
+  })
+
+  describe('of a fork whose host says the repository it came from, which none of its remotes is', () => {
+    afterEach(() => forgetTold())
+
+    /** The person's clone of their fork, you/api, its origin unreachable but by the host, which says it was forked from meridian/api. */
+    const forkOnHost = () => {
+      const hosted = onHost()
+      git(hosted.path, 'remote', 'set-url', 'origin', `${HOST}/you/api.git`)
+      tell(`${HOST}/you/api.git`, { path: ['meridian', 'api'] }, Date.now())
+      return hosted
+    }
+
+    it.live('lists and fetches the pull requests of the repository it was forked from, at its address through its host', () => {
+      const { path, root, branch, fork } = forkOnHost()
+      return Effect.gen(function* () {
+        const { url } = yield* serve(root)
+        const github = makeFakeService({ pushUrl: () => `${url}/api.git`, pushHeader: SIGNED })
+        github.addRepository(['you', 'api'])
+        github.addRepository(['meridian', 'api'])
+        github.forkFrom(['you', 'api'], ['meridian', 'api'])
+        github.addPullRequest({
+          path: ['meridian', 'api'],
+          title: 'Add a services directory',
+          author: 'mira',
+          source: 'feature/find-a-pro',
+        })
+        github.addPullRequest({ path: ['meridian', 'api'], title: 'Dark mode', author: 'sam', source: 'dark-mode', fork: ['sam', 'api'] })
+        return yield* Effect.gen(function* () {
+          yield* connect
+          const fetches = yield* Fetches
+          const projects = yield* Projects
+          const { projectId } = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+          const [listed] = yield* fetches.offered(projectId)
+          // The parent's, not the fork's, which has none.
+          assert.deepStrictEqual(
+            (listed?.pullRequests ?? []).map((one) => one.title),
+            ['Dark mode', 'Add a services directory'],
+          )
+          assert.isNull(listed?.note)
+          // Its own branch's and a fork's, each where the host's ref for it would go: the clone has no remote for it to track.
+          const own = yield* fetches.fetch(path, { kind: 'pull_request', which: '1' })
+          assert.deepInclude(own, { ref: 'refs/althar/pull/1', remote: 'meridian/api', commit: branch })
+          const forked = yield* fetches.fetch(path, { kind: 'pull_request', which: `${HOST}/meridian/api/pull/2` })
+          assert.deepInclude(forked, { ref: 'refs/althar/pull/2', commit: fork })
+          // Its remotes are as they were.
+          assert.strictEqual(git(path, 'remote'), 'origin')
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+      }).pipe(Effect.scoped)
+    })
+
+    it.live('says to add it as a remote where no connection reaches it, never fetching or listing the fork’s instead', () => {
+      const { path } = forkOnHost()
+      return Effect.gen(function* () {
+        const fetches = yield* Fetches
+        const projects = yield* Projects
+        const { projectId } = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        const refused = yield* Effect.flip(fetches.fetch(path, { kind: 'pull_request', which: '1' }))
+        assert.include(refused.message, 'meridian/api, the repository it was forked from, which none of its remotes is')
+        assert.include(refused.message, 'Add it as a remote')
+        const [listed] = yield* fetches.offered(projectId)
+        assert.deepStrictEqual(listed?.pullRequests, [])
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {})))))
+    })
   })
 })

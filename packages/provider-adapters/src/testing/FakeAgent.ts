@@ -166,6 +166,7 @@ export const scenarios = {
    * `[lead:serve-apart]` runs a real server for it as Claude Code runs one:
    * under a shell in a process group of its own, which stopping the agent's
    * group misses, and stopping it ends the shell, not the server.
+   * `[lead:serve-apart-without-output]` starts the same server without reporting its output file.
    */
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
@@ -470,7 +471,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean; readonly omitOutputPath?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -532,7 +533,7 @@ const leaveRunning = async (
     canStop: true,
     toolCallId,
   })
-  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  if (options.omitOutputPath !== true) await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
   await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
   // Background work that isn't a command, as Claude Code reports some.
   await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: `dream-${id}`, name: 'Dreaming', taskType: 'dream', canStop: true })
@@ -944,7 +945,7 @@ const untilStopped = async (session: SessionState, marker: string) => {
 const playRole = async (
   session: SessionState,
   text: string,
-  serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
+  serve: (how: { readonly exits: boolean; readonly apart: boolean; readonly omitOutputPath: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
     readonly commits?: () => Promise<void>
@@ -1104,7 +1105,12 @@ const playRole = async (
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
-        await serve({ exits: text.includes('[lead:serve-exits]'), apart: text.includes('[lead:serve-apart]') })
+        const omitOutputPath = text.includes('[lead:serve-apart-without-output]')
+        await serve({
+          exits: text.includes('[lead:serve-exits]'),
+          apart: omitOutputPath || text.includes('[lead:serve-apart]'),
+          omitOutputPath,
+        })
       }
       // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
       // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),

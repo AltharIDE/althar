@@ -85,6 +85,39 @@ const sqlOf = <A extends object>(query: (sql: SqlClient.SqlClient) => Effect.Eff
   Effect.flatMap(SqlClient.SqlClient, query)
 
 describe('an aside opened with +', () => {
+  it.live('starts from the composer in a project of two repositories with both available', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const other = repository()
+        const grant = yield* store(Effect.flatMap(Folders, (folders) => folders.allow(other)))
+        yield* client.AddRepositories({ commandId: commandId(), projectId: project.id, grant })
+
+        // The composer supplies no repository choice, including when it sends the first words with the aside.
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'A quick question',
+          description: 'How do these fit together?',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        const workspaces = yield* store(
+          sqlOf((sql) => sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${aside.id} ORDER BY path`),
+        )
+        assert.lengthOf(workspaces, 2)
+        yield* until(client.GetThread({ threadId: aside.threadId }), (thread) => thread.items.some((item) => item.kind === 'agent_message'))
+        const [turn] = yield* store(
+          sqlOf((sql) => sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${aside.threadId}`),
+        )
+        for (const workspace of workspaces) {
+          assert.isTrue(existsSync(join(workspace.path, 'README.md')))
+          assert.include(turn?.prompt ?? '', workspace.path)
+        }
+      }),
+    ),
+  )
+
   it.live('starts and answers outside a full task queue, takes no place, and counts again once made a task', () =>
     Effect.scoped(
       Effect.gen(function* () {

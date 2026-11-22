@@ -2,7 +2,7 @@
 
 An Althar **home** is where your projects, task history and running sessions live. Put a home on a Linux machine if you want your work to keep going when you close the desktop window. You can come back to it from the desktop or the command line.
 
-A **worker** runs a command you choose in a project checkout. It can run beside the home or on a different Linux machine. The home remembers the run and its result, and the worker does the work.
+A **worker** is a Linux machine that can do work for a home. Use the bundled command demo to check the connection, or configure an agent on the worker and pick it when you start a task. The home keeps the conversation and handles permission requests.
 
 ## Try the host and worker preview
 
@@ -69,7 +69,9 @@ If you already sign in to your server over SSH, you can use the same connection 
 
 The desktop and CLI use the host's `connect-stdio` command for the session. This command checks the expected home ID and API version. When you disconnect, the home and its running sessions carry on. SSH lets you work with the home under a restricted role. Permission answers and device pairing require a client with the person's authority. [CLI attachment](../cli/README.md#attach-to-a-running-home) · [Transport reference](../../packages/transport-node/ARCHITECTURE.md)
 
-Desktop-driven setup uses SSH to install a signed host on a new server. It needs a published release and a trusted release key. [SSH setup reference](bootstrap/README.md)
+Desktop-driven setup uses SSH to install a signed host on a new server: in the desktop, **Connect a home… → Set one up → Over SSH**, or **SSH** with **Set it up** once you've chosen that way. Each step shows as it goes, and setup carries on with the dialog closed or after Althar restarts. It needs a published release and the desktop's pinned release key; until the first host release is out, setup says there's nothing to install yet. Althar from Flathub can't set a home up, as its sandbox keeps your SSH keys out of reach: set it up by hand there, then connect over SSH or with a pairing code. [SSH setup reference](bootstrap/README.md)
+
+Your first home opens on what a home is. Choose **Set one up**, then **With a pairing code** to connect a host that's already running.
 
 ## Direct HTTPS/WSS and device pairing
 
@@ -205,6 +207,41 @@ Once the diagnostic works, pick a quick command from a trusted checkout. The wor
    ```
 
 The preview runs one configured command per worker with a one-minute budget. The home keeps up to 64 KiB of combined stdout and stderr in up to 1,024 chunks. To read new output only, use `worker-log --json` and pass its `nextOffset` back as `--offset` on the next call. A run becomes `cancelled` after the worker confirms systemd has stopped all of its processes. After a disconnect or crash, the worker's permission to run expires and systemd stops the command. Reconnect with the same journal to settle the result.
+
+## Run an Althar task on a separate worker
+
+Use a Linux worker with Git, systemd 254 or later, and a working systemd user manager. Set it up under a dedicated account for your own trusted projects. The agent uses the provider account you sign into on that machine.
+
+Use a host, worker and Desktop built from the same revision for this flow. It supports the lead of a task with one Git repository and its own worktree. Enrollment uses the host console. Use an Althar client with approval authority if a task needs a protected permission decision.
+
+1. On the home, [configure the worker listener and enroll the worker certificate](#native-worker-diagnostic). For a separate machine, bind to a private address the worker can reach, and include the home’s worker-facing DNS name in the home certificate. Record the **home ID** and **project ID**. Once the host is running, assign the worker to that project with the command below. Give the worker its own client certificate and key, plus the public CA certificate. Save the **worker ID** the command prints.
+
+   ~~~sh
+   althar-host enroll-worker --worker-certificate "$tls/client.pem" --project-id "$PROJECT_ID" --json
+   ~~~
+2. On the worker, sign in with the provider’s supported command. Install its compatible ACP adapter there. Run the following as the worker user, substituting the project ID and the adapter executable. Use an absolute path. Put any fixed executable arguments after it, with one tab per argument.
+
+   ```sh
+   umask 077
+   worker_data="$HOME/.local/share/althar-worker"
+   mkdir -p "$worker_data/workspaces"
+   chmod 700 "$worker_data/workspaces"
+   printf '%s\n%s\t%s\t%s\n' "$worker_data/workspaces" "$PROJECT_ID" codex "$ACP_EXECUTABLE" \
+     > "$worker_data/agents.conf"
+   ```
+
+3. Start the worker in its own Linux terminal. Keep its journal in this location across restarts. Use the TLS files on the worker.
+
+   ```sh
+   ./althar-worker "https://$WORKER_HOME:6770" "$HOME_ID" "$WORKER_ID" \
+     "$WORKER_TLS/ca.pem" "$WORKER_TLS/client.pem" "$WORKER_TLS/client.key" \
+     "$worker_data/journal" --agent-config "$worker_data/agents.conf" --watch
+   ```
+
+4. In Desktop, open the home and its project. Prepare a task with one repository and an Implement lead that matches the worker’s provider. **Hold** the plan. Use **Run on** to pick the Linux worker, then start the task.
+5. Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. Try a follow-up and stop a task while the agent is working. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
+
+The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
 
 ## Managed releases and updates
 

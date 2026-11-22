@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { RuntimeConfig } from './Config'
 import { contained } from './Failures'
 import { Launches } from './Launches'
-import { ALTHAR, type Listed, listProcesses, marksOf, ownersOf, workIn } from './machine'
+import { ALTHAR, type Listed, listProcesses, marksOf, ownersOf, RUN, sameProcess, WORKER, workIn } from './machine'
 import { Sessions } from './Sessions'
 import { stopProcesses } from './stopping'
 import { addItem } from './threads'
@@ -111,6 +111,8 @@ export class LeftBehind extends Context.Service<
       const launches = yield* Launches
       const scope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const marks = marksOf()
+      const runMarks = marksOf(process.platform, RUN)
+      const workerMarks = marksOf(process.platform, WORKER)
       // Tasks being stopped now: one said settled twice is stopped once.
       const stopping = new Set<string>()
 
@@ -130,19 +132,32 @@ export class LeftBehind extends Context.Service<
         })
 
       /** Stops what carries work `doomed` says in its environment, outside Althar's own tree; what outlived it. */
-      const stopMarked = <E>(doomed: (work: string) => Effect.Effect<boolean, E, SqlClient.SqlClient>) =>
+      const stopMarked = <E>(
+        ...rules: ReadonlyArray<{
+          readonly doomed: (work: string) => Effect.Effect<boolean, E, SqlClient.SqlClient>
+          readonly read?: typeof marks
+        }>
+      ) =>
         Effect.gen(function* () {
           const listing = yield* listProcesses()
           if (listing === null) return []
           const spared = forebearsOf(listing, process.pid)
           const inTree = ownersOf(listing, [{ pid: process.pid, key: KEPT }], null)
           // Only those no tree of Althar's reaches carry a mark worth reading.
-          const read = yield* marks([...listing.keys()].filter((pid) => !inTree.has(pid) && !spared.has(pid)))
-          const works = new Map<string, boolean>()
-          for (const work of new Set(read.values())) works.set(work, yield* doomed(work))
-          const pids = doomedOf(listing, read, (work) => works.get(work) === true, process.pid, spared)
-          if (pids.length > 0) yield* Effect.logInfo('Stopping what settled work left running', { pids })
-          return yield* stopProcesses(pids)
+          const candidates = [...listing.keys()].filter((pid) => !inTree.has(pid) && !spared.has(pid))
+          const pids = new Set<number>()
+          for (const { doomed, read } of rules) {
+            const found = yield* (read ?? marks)(candidates)
+            if (found.size === 0) continue
+            const works = new Map<string, boolean>()
+            for (const work of new Set(found.values())) works.set(work, yield* doomed(work))
+            for (const pid of doomedOf(listing, found, (work) => works.get(work) === true, process.pid, spared)) pids.add(pid)
+          }
+          if (pids.size === 0) return []
+          const current = yield* listProcesses()
+          const stillThere = [...pids].filter((pid) => sameProcess(listing.get(pid), current?.get(pid)))
+          if (stillThere.length > 0) yield* Effect.logInfo('Stopping unowned processes', { pids: stillThere })
+          return yield* stopProcesses(stillThere)
         })
 
       /** Waits for the agent on the thread to end its turn, up to `TURN_ENDS`. */
@@ -210,7 +225,8 @@ export class LeftBehind extends Context.Service<
           if ((yield* settledNow(taskId)) !== undefined) yield* launches.stopAll(task.projectId, taskId, at)
           // Whatever still carries the task, as a server that left its agent's group: not if it opened again meanwhile.
           const work = `task:${taskId}`
-          const outlived = (yield* settledNow(taskId)) === undefined ? [] : yield* stopMarked((one) => Effect.succeed(one === work))
+          const outlived =
+            (yield* settledNow(taskId)) === undefined ? [] : yield* stopMarked({ doomed: (one) => Effect.succeed(one === work) })
           if (stuck.length === 0 && outlived.length === 0) return
           yield* Effect.logWarning('A settled task left something running that wouldn’t stop', { taskId, stuck, outlived })
           // A removed project's thread is seen by no one.
@@ -300,7 +316,23 @@ export class LeftBehind extends Context.Service<
           if (task === undefined || ended === null || ended > idleBefore || (yield* waitingOn(session.threadId))) continue
           yield* settle(session.taskId, yield* now)
         }
-        const outlived = yield* stopMarked(over)
+        const outlived = yield* stopMarked(
+          { doomed: over },
+          // A command can escape its group before its agent exits. It still belongs to that session.
+          {
+            read: workerMarks,
+            doomed: (sessionId) =>
+              Effect.map(sql`SELECT 1 FROM provider_sessions WHERE id = ${sessionId} AND ended_at IS NOT NULL`, (rows) => rows.length > 0),
+          },
+          {
+            read: runMarks,
+            doomed: (runId) =>
+              Effect.map(
+                sql`SELECT 1 FROM processes WHERE id = ${runId} AND purpose = 'run' AND ended_at IS NOT NULL`,
+                (rows) => rows.length > 0,
+              ),
+          },
+        )
         if (outlived.length > 0) yield* Effect.logWarning('What settled work left running wouldn’t stop', { outlived })
       })
 

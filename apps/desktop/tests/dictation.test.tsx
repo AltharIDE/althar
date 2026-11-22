@@ -580,9 +580,10 @@ const fakeDevices = (devices: Array<{ deviceId: string; label: string }>) => {
   let now = devices
   const listeners = new Set<() => void>()
   const list = () => now.map((device) => ({ kind: 'audioinput' as const, groupId: '', toJSON: () => ({}), ...device }))
+  const enumerateDevices = vi.fn(async () => list())
   Object.defineProperty(navigator, 'mediaDevices', {
     value: {
-      enumerateDevices: vi.fn(async () => list()),
+      enumerateDevices,
       addEventListener: (_: string, listener: () => void) => listeners.add(listener),
       removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
     },
@@ -594,7 +595,7 @@ const fakeDevices = (devices: Array<{ deviceId: string; label: string }>) => {
   }
   /** The system names its microphones, as once one may be used, without saying a device changed. */
   const name = (next: Array<{ deviceId: string; label: string }>) => (now = next)
-  return { change, name }
+  return { change, enumerateDevices, name }
 }
 
 const NAMED = [
@@ -611,6 +612,15 @@ const microphoneMenu = async () => {
 describe('choosing the microphone', () => {
   const ready = () => fakeDictation(state({}, { ready: true, got: SIZE }))
   afterEach(() => void Reflect.deleteProperty(navigator, 'mediaDevices'))
+
+  it('leaves media devices alone until the person opens the input menu', async () => {
+    const { enumerateDevices } = fakeDevices(NAMED)
+    show(ready().dictation, fakeRecord().record)
+    expect(enumerateDevices).not.toHaveBeenCalled()
+    const menu = await microphoneMenu()
+    expect(await within(menu).findByRole('menuitemradio', { name: 'Shure MV7' })).toBeTruthy()
+    expect(enumerateDevices).toHaveBeenCalledTimes(1)
+  })
 
   it('offers only the system’s default while the system names no microphone', async () => {
     fakeDevices([{ deviceId: 'a', label: '' }])

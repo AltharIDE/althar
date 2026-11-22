@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ChangeSummary, ChecksSummary } from '../src/Api'
-import { forShip, goingUp, isBlocked, personPushes, pushResolves, ranChecks, shipsToOpen, standingOf } from '../src/standing'
+import {
+  checkFailuresIn,
+  checkFailuresOf,
+  forShip,
+  goingUp,
+  isBlocked,
+  personPushes,
+  pushResolves,
+  ranChecks,
+  shipsToOpen,
+  standingOf,
+} from '../src/standing'
+import { kindWords, readyWordOf } from '../src/waiting'
 
 const checks = (over: Partial<ChecksSummary> = {}): ChecksSummary => ({
   outcome: 'passed',
@@ -175,5 +187,80 @@ describe('the shared rule for accepting a change', () => {
       expect(isBlocked(seen)).toBe(false)
     }
     expect(pushResolves(standingOf(change({ unpushed: 1 })))).toBe(false)
+  })
+
+  describe('optional checks (#1117)', () => {
+    // As on #1117: every required check passed; only Cloudflare's preview build, which isn't required, failed.
+    const site = checks({
+      outcome: 'failed',
+      passed: 2,
+      failed: 1,
+      total: 3,
+      failing: ['Workers Builds: althar-site'],
+      list: [
+        { name: 'check', state: 'passed', summary: null },
+        { name: 'test', state: 'passed', summary: null },
+        { name: 'Workers Builds: althar-site', state: 'failed', summary: null },
+      ],
+    })
+    const requiring = (required: ReadonlyArray<string>) =>
+      [{ kind: 'checks', state: 'met', have: required.length, need: required.length, required }] as const
+
+    it('reads as ready where only checks its host doesn’t require failed, the failure kept as a note', () => {
+      const seen = standingOf(change({ checks: site, needs: requiring(['check', 'test']) }))
+      expect(seen).toEqual({ blockers: [], next: { kind: 'merge' }, optional: ['Workers Builds: althar-site'] })
+      expect(isBlocked(seen)).toBe(false)
+      expect(readyWordOf({ kind: 'change', change: change({ checks: site, needs: requiring(['check', 'test']) }) })).toBe(kindWords.ready)
+    })
+
+    it('leaves a cancelled optional check out of the way too', () => {
+      const cancelled = checks({ list: [...checks().list, { name: 'preview', state: 'cancelled', summary: null }] })
+      expect(standingOf(change({ checks: cancelled, needs: requiring(['test']) }))).toEqual({
+        blockers: [],
+        next: { kind: 'merge' },
+        optional: ['preview'],
+      })
+    })
+
+    it('still blocks on a required check that failed, with the optional one beside it', () => {
+      const both = checks({ ...site, failed: 2, failing: ['test', 'Workers Builds: althar-site'] })
+      const seen = standingOf(change({ checks: both, needs: requiring(['check', 'test']) }))
+      expect(seen).toEqual({
+        blockers: [{ kind: 'failed', failing: ['test'], failed: 1 }],
+        next: { kind: 'fix', failing: ['test'] },
+        optional: ['Workers Builds: althar-site'],
+      })
+      expect(isBlocked(seen)).toBe(true)
+      expect(checkFailuresOf(change({ checks: both, needs: requiring(['check', 'test']) }))).toEqual({
+        failing: ['test'],
+        failed: 1,
+        cancelled: [],
+        optional: ['Workers Builds: althar-site'],
+        missing: [],
+        outcome: 'failed',
+      })
+    })
+
+    it('reads the outcome as far as the required checks go: passed, failed on a cancellation, or still to come', () => {
+      expect(checkFailuresIn(site, ['check', 'test']).outcome).toBe('passed')
+      expect(checkFailuresIn(site, ['check', 'test', 'lint'])).toMatchObject({ outcome: 'running', missing: ['lint'] })
+      const cancelled = checks({ outcome: 'failed', list: [...checks().list, { name: 'lint', state: 'cancelled', summary: null }] })
+      expect(checkFailuresIn(cancelled, ['test', 'lint'])).toMatchObject({ outcome: 'failed', cancelled: ['lint'] })
+      expect(checkFailuresIn(cancelled, ['test'])).toMatchObject({ outcome: 'passed', optional: ['lint'] })
+      // No required set: a cancellation fails it, as the host's outcome says.
+      expect(checkFailuresIn(cancelled, null)).toMatchObject({ outcome: 'failed', cancelled: ['lint'] })
+      expect(checkFailuresIn(cancelled, 'all').outcome).toBe('failed')
+    })
+
+    it('counts every check where the host gives no required set, as before', () => {
+      for (const needs of [undefined, [{ kind: 'checks', state: 'unmet', who: ['Workers Builds: althar-site'] }] as const]) {
+        const seen = standingOf(change({ checks: site, ...(needs === undefined ? {} : { needs }) }))
+        expect(seen).toEqual({
+          blockers: [{ kind: 'failed', failing: ['Workers Builds: althar-site'], failed: 1 }],
+          next: { kind: 'fix', failing: ['Workers Builds: althar-site'] },
+        })
+        expect(isBlocked(seen)).toBe(true)
+      }
+    })
   })
 })
