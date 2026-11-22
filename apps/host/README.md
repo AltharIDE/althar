@@ -87,7 +87,7 @@ althar-host pair --profile /path/to/profile
 
 In the desktop, open **Homes → Connect a home… → Pairing code**. Paste the code, check the destination, give the home a name and choose **Pair and open**. The home opens in its own window. Its projects stay on the server.
 
-A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. These paired devices get the restricted role for existing projects and tasks. Protected approval enrollment is separate work.
+A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. The paired connection opens existing projects and tasks. Set up a security key separately when you want to answer permission requests from that desktop.
 
 ```sh
 althar-host devices --profile /path/to/profile
@@ -98,6 +98,27 @@ althar-host disable-network --profile /path/to/profile
 Use the `next` value from `devices` with `--after` for another page. Revocation ends that device's connections right away. Work the home already accepted may finish. Restart the service after changing or disabling the listener.
 
 Pair again if you change the TLS key or replace a self-signed certificate. Renewals with the same key and trusted chain keep working. Back up the home database and desktop keyring according to your usual recovery plan.
+
+### Answer permissions with a security key
+
+Use an HTTPS home at a DNS name with a certificate your browser trusts. Pair the desktop to that same address. A personal FIDO2 security key with a PIN can confirm each answer in the browser. The home keeps the connection's existing authority and applies the specific decision once it verifies the confirmation.
+
+1. As the server administrator, create a key file under `/etc/althar` in directories owned by root. Keep the file readable by the host service and writable by root. For the first setup, use this shape with the exact home ID from `althar-host status --json` and its HTTPS origin.
+
+   ```json
+   {
+     "version": 1,
+     "homeId": "home_0123456789abcdef0123456789abcdef",
+     "origin": "https://home.example:6769",
+     "credentials": []
+   }
+   ```
+
+2. Run `configure-network` with the existing address and TLS options and `--approval-keys /etc/althar/approvals.json`. Restart the host service.
+3. In the paired desktop window, open **Manage homes**, open the home's menu, then choose **Set up a security key**. Register the key you physically control and download its public key file. Compare the SHA-256 shown on that page with `sha256sum althar-approval-key.json` in your administrator session before installing it. The file contains the home, origin and paired device ID. Check those against your home and its device list.
+4. Install the verified entry in the administrator's `credentials` list and restart the host service. Keep other devices' entries if they still need access. For a lost security key, revoke the paired device and remove its entry. Pair a new device to set up a replacement.
+
+When a permission is waiting in the desktop, choose **Allow** or **Reject** and confirm the exact decision in the browser. The agent continues as soon as the home accepts it.
 
 ## Native worker diagnostic
 

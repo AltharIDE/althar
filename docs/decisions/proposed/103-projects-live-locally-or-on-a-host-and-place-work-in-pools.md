@@ -316,6 +316,16 @@ socket authority until it can; calling its key paired is not a boundary.
 Pairing authenticates a device, not physical human intent for every action.
 The trusted approval path must preserve that distinction.
 
+For direct HTTPS permission answers, the paired connection can request a
+one-use confirmation for a specific open ask. The home presents the exact
+decision on its own HTTPS origin and requires a WebAuthn assertion with
+user verification from a security key linked to that device. An enrollment
+produces a public key for the administrator to verify and install. It grants
+authority only after the home reads its administrator-owned key list. The
+device keeps socket authority throughout. The home checks revocation and the
+open request again before applying the decision, and records the actor and
+device with its receipt.
+
 ADR-081/086's rule stays: fresh words from the window or a paired device,
 or an authorized errand, supply the person's word in the turn they start.
 Bind that provenance at authenticated ingress, not from a `byPerson` field

@@ -42,6 +42,7 @@ Options:
   --listen-port <port>       HTTPS/WSS port (6769) or worker gRPC port (6770)
   --tls-certificate <file>   Private RSA/ECDSA PEM certificate file
   --tls-key <file>           Matching PEM key outside profile/worktrees
+  --approval-keys <file>     Administrator-installed public security keys for this home
   --after <dev_id>           Read the next page of devices
   --device-id <dev_id>       Connection device to revoke
   --worker-ca <file>        Trusted worker certificate authority for configure-workers
@@ -174,6 +175,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--listen-port',
     '--tls-certificate',
     '--tls-key',
+    '--approval-keys',
     '--device-id',
     '--worker-ca',
     '--worker-relay',
@@ -358,6 +360,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   )
     return invalid('Listener settings require configure-network or configure-workers.')
   if (flags.has('--origin') && command !== 'configure-network') return invalid('--origin requires configure-network.')
+  const approvalKeys = flags.get('--approval-keys')
+  if (approvalKeys !== undefined && command !== 'configure-network') return invalid('--approval-keys requires configure-network.')
   if (flags.has('--worker-ca') !== (command === 'configure-workers'))
     return invalid('configure-workers requires --worker-ca, --tls-certificate and --tls-key.')
   const workerRelay = flags.get('--worker-relay')
@@ -448,6 +452,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
             port: Number(flags.get('--listen-port') ?? '6769'),
             certificate: resolve(flags.get('--tls-certificate') ?? ''),
             key: resolve(flags.get('--tls-key') ?? ''),
+            ...(approvalKeys === undefined ? {} : { approvalKeys: resolve(approvalKeys) }),
           },
         }),
     ...(flags.has('--after') ? { deviceAfter: flags.get('--after') ?? '' } : {}),

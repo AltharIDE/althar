@@ -1185,6 +1185,16 @@ export type CommandRule = typeof CommandRule.Type
 export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
 export type AlwaysScope = typeof AlwaysScope.Type
 
+/** The decision presented in a security-key ceremony for a restricted HTTPS client. */
+export const PermissionApproval = Schema.Struct({
+  commandId: CommandId,
+  attentionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  decision: Schema.Literals(['allow', 'reject']),
+  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  always: Schema.optionalKey(AlwaysScope),
+})
+export type PermissionApproval = typeof PermissionApproval.Type
+
 /** What let a request through without asking: a kind the project always allows, or one of its command rules. */
 export const AllowedBy = Schema.Union([
   Schema.Struct({ kind: RuleKind }),
