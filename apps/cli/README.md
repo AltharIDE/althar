@@ -1,89 +1,141 @@
-# @althar/cli
+# Talk to Althar from a terminal
 
-A command-line client for the Althar runtime, the first step of the MVP's build order: the agent harness without a UI. It opens a folder as a project, starts a task in a worktree of its own, and starts the task's agent, which begins on the task from its brief. Then you talk to it. The runtime runs inside the CLI's own process, over the same profile the app will use.
+Use the CLI to open a project and talk to its agent, or to join a home that's already running. A home can be on your computer or on a Linux server you reach over SSH. [Try a Linux home](../host/preview/README.md)
 
 ## Use it
 
-Build it once, then run it on Node (not Bun: the store needs `node:sqlite`):
+Build the CLI from `apps/cli`. Run the result with Node, which provides the SQLite support the local runtime needs.
 
-```bash
+```sh
 bun run build
-```
-
-```bash
 node dist/althar.js ~/work/meridian --task "Retry the checkout" --agent codex
 ```
 
-The agent must be signed in with its own tool first (`claude auth login`, `codex login`, `opencode auth login`); the CLI checks, and names the command when it isn't.
+Choose a Git checkout and describe the task. Sign in to the agent's own tool first, for example with `codex login`, `claude auth login` or `opencode auth login`. The CLI tells you which sign-in command to use if it needs one.
 
-Then type to talk to the agent. Your message waits for the agent's turn to end.
+This starts a local runtime and a task in its own worktree. Type a message and press Enter to send it after the agent's current turn.
 
 | Command | What it does |
 | --- | --- |
-| `/interrupt <text>` | Stop the turn, and say this first |
-| `/model <id>` | Change the model; the session carries on |
-| `/agent <id> [model]` | Hand the task to another agent, briefed with the thread so far |
-| `/allow [reason]`, `/reject [reason]` | Answer the question waiting for you, when the rules keep an action for you |
+| `/interrupt <text>` | Stop the current turn and send this message first |
+| `/model <id>` | Change the model and carry on with the session |
+| `/agent <id> [model]` | Hand the task and its conversation to another agent |
+| `/allow [reason]`, `/reject [reason]` | Answer a permission request in local mode |
 | `/stop` | Stop the session |
-| `/quit` | Stop everything and leave; so does Ctrl-C |
+| `/quit` or Ctrl-C | Leave the CLI and stop its local runtime |
 
 | Option | Default |
 | --- | --- |
-| `--agent` | `claude-code`; also `codex` and `opencode` |
-| `--model` | The agent's own default |
-| `--profile` | `~/Library/Application Support/Althar` on macOS, or `$ALTHAR_PROFILE` |
-| `--worktrees` | `~/Althar`, or `$ALTHAR_WORKTREES` |
+| `--agent` | `claude-code`. You can also choose `codex` or `opencode`. |
+| `--model` | The agent's default |
+| `--profile` | `~/Library/Application Support/Althar` on macOS, or the path you set in `$ALTHAR_PROFILE` |
+| `--worktrees` | `~/Althar`, or the path you set in `$ALTHAR_WORKTREES` |
 
-One runtime at a time can use a profile; a second CLI on the same profile stops with `DatabaseInUse`.
+If you see `DatabaseInUse`, a runtime already has that profile open. Use `attach` to join a running home or choose another profile for a separate local session.
 
 ## Attach to a running home
 
-The existing folder command above still embeds the runtime. `attach` connects
-to an already running home instead; it never opens its database, checks local
-provider sign-in or owns the home's lifetime. Agents and repositories live on
-the home. Open/provision the project there first.
+Use `attach` when the project and its agent are already on an Althar home. The home keeps its database and runs the agent, so your terminal can come and go.
 
-```bash
-node dist/althar.js inspect --profile /absolute/path/to/profile
-node dist/althar.js inspect --ssh my-vps
-# Verify the printed home identity independently, then list its projects:
-node dist/althar.js inspect --ssh my-vps --home home_<32-hex-digits>
-node dist/althar.js attach --ssh my-vps --home home_<32-hex-digits> --project proj_<32-hex-digits> --task "Retry checkout" --agent codex
-node dist/althar.js attach --ssh my-vps --home home_<32-hex-digits> --thread thr_<32-hex-digits>
+1. Open the checkout on the home first. For a server, check that `ssh my-vps` works with your SSH key. Use the name or alias that you normally connect with in place of `my-vps`.
+2. Inspect the home and compare its `homeId` with `althar-host status --json` on the server. Set `HOME_ID` to that value before you run the second command. For an unpacked preview, include `--remote-launcher /absolute/path/to/althar-host` on each SSH command. Use `--remote-profile` if you set up a custom profile.
+
+   ```sh
+   node dist/althar.js inspect --ssh my-vps
+   node dist/althar.js inspect --ssh my-vps --home "$HOME_ID"
+   ```
+
+3. Start a new task using a project ID from the list, or join a task using its existing thread ID. Set `PROJECT_ID` or `THREAD_ID` to the ID you looked up, then run the matching line.
+
+   ```sh
+   node dist/althar.js attach --ssh my-vps --home "$HOME_ID" --project "$PROJECT_ID" --task "Retry checkout" --agent codex
+   node dist/althar.js attach --ssh my-vps --home "$HOME_ID" --thread "$THREAD_ID"
+   ```
+
+For a home on this machine, use `--profile /absolute/path/to/profile` in place of the SSH target. You can also supply `--home` to verify the local identity. `--ssh-config` and `--ssh-port` are available for a different OpenSSH setup. [Host guide](../host/README.md#ssh-clients)
+
+In an attached session, `/quit`, Ctrl-C and a closed terminal disconnect your view and let the home's work continue. Rejoin with the printed thread ID. Use `/stop` to stop the agent's session. SSH connections have a restricted role, so use a trusted desktop window for permission answers.
+
+If the connection fails while creating a task, reuse the printed `--command-id cmd_…` with the same options to recover the creation receipt. For an existing task, use its thread ID. The terminal shows the latest 100 items, up to 65,536 characters each. Use the desktop for older history and files.
+
+## Connect a worker to the Desktop home
+
+The Desktop app can use the same Linux workers as a standalone Linux home.
+The worker connects to Desktop's built-in home, where your project and its task
+history already live. Use a worker certificate issued by the CA you configure
+for this home. Keep the worker and home private keys on their respective machines.
+[Worker certificates and routes](../host/README.md#native-worker-diagnostic)
+
+Use the CLI under the same OS account and with the same profile and worktree
+paths as Desktop. Enable the private local API with `ALTHAR_API_SOCKET=1` when
+starting Desktop so the CLI can look up that home's identity and projects.
+
+```sh
+node dist/althar.js workers configure --address "$PRIVATE_IP" \
+  --ca "$TLS/home-ca.pem" --certificate "$TLS/home.pem" --key "$TLS/home.key"
+node dist/althar.js inspect
+node dist/althar.js workers enroll --certificate "$TLS/worker.pem" --project "$PROJECT_ID"
 ```
 
-For local attachment replace `--ssh … --home …` with `--profile /absolute/path`;
-`--home` can also pin a local profile. SSH uses system OpenSSH and the managed
-host launcher. Configure and verify your host key and noninteractive key/agent
-authentication in a terminal first. Optional `--ssh-config`, `--ssh-port`,
-`--remote-launcher` and `--remote-profile` select an explicit config, port or
-absolute remote paths. No arbitrary remote command is accepted.
+Restart Desktop after changing the listener configuration. Enrollment prints
+the home and worker IDs for the worker's connection arguments. Use the name on
+the home certificate and port 6770 by default. The worker appears in **Run on**
+when a held plan can use it. To cut off a certificate, use
+`workers revoke --worker <id>`. To turn off the listener, use `workers disable`
+and restart Desktop. [Start an agent on the worker](../host/README.md#run-an-althar-task-on-a-separate-worker)
 
-**In attached mode `/quit`, EOF, Ctrl-C and SIGTERM disconnect only.** Work
-continues on the home; reattach with the printed thread ID. `/stop` explicitly
-stops the session. `/allow` and `/reject` cannot approve anything: SSH/socket
-authority is not person authority. Answer in the trusted desktop window.
-`/interrupt`, `/model` and `/agent` use the shared versioned command API.
-
-New-task attachment prints a creation command ID before dispatching. If a
-connection fails with an uncertain outcome, use the same `--command-id cmd_…`
-with the same creation options to recover its receipt. The corresponding
-session start uses a separate deterministic ID too. Prefer `--thread` to join
-an existing task without starting or switching its agent. Commands are never
-automatically replayed. History changes trigger a fresh checked snapshot; a
-disconnected client exits with a visible error. This terminal shows the newest
-100 items and cumulative live text, with each item limited to 65,536 characters; older history, full oversized items, files and rich evidence
-remain in the desktop interface.
+For an outbound worker relay on both machines, give `workers configure` the
+home link file with `--relay <file>` and leave its address at the default
+`127.0.0.1`. The worker connects with its own relay credentials. [Relay setup](../../packages/worker-protocol/README.md#outbound-worker-relay)
 
 ## Work on it
 
-From `apps/cli`:
+Run these from `apps/cli`.
 
 | Command | What it does |
 | --- | --- |
-| `bun run build` | Builds `dist/althar.js`, with everything but Node's own modules inlined |
-| `bun run check` | Format, type-aware lint and type checks |
-| `bun run test:coverage` | The tests, with the coverage gate: 90% of lines and branches |
-| `bun run verify` | Check and coverage, as CI runs them |
+| `bun run build` | Builds `dist/althar.js` |
+| `bun run check` | Checks formatting, lint and types |
+| `bun run test:coverage` | Runs the suite with a 90% line and branch coverage gate |
+| `bun run verify` | Runs the checks and coverage, as CI does |
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how it is put together.
+See the [CLI architecture](ARCHITECTURE.md) for where the pieces live.
+
+
+### Save a file made on the worker
+
+While a worker task is running, you can bring back a build output or log by
+giving its path inside the task checkout. This works even for ignored or
+untracked files. Use the running Desktop profile and the thread ID printed by
+`attach`. You can also give `--project` and `--task`. For a secondary
+repository, add `--workspace` with that checkout's ID.
+
+```sh
+node dist/althar.js workers fetch-file --thread "$THREAD_ID" \
+  --path dist/report.json --out "$PWD/report.json"
+```
+
+For a Linux home, add `--ssh my-vps --home "$HOME_ID"` with the home ID
+from `inspect`. Use any SSH options from [Attach to a running home](#attach-to-a-running-home).
+The output is saved on the computer that runs the CLI.
+
+The runner accepts regular files up to 16 MiB inside the checkout. It verifies
+the file before saving it under the name you choose. If that name already
+exists, choose another one.
+
+
+### Run a check on this computer
+
+`workers test-copy` saves a fresh Git copy and runs the command you put
+after `--` in it. The copy includes staged and unstaged edits and untracked
+files. Use `--workspace` to choose a different repository in the task.
+
+```sh
+node dist/althar.js workers test-copy --thread "$THREAD_ID" \
+  --into "$PWD" -- node --test
+```
+
+Use a project you trust when running its code on this computer. The command
+uses your local toolchain. The CLI prints the copy’s path and keeps it even
+if the command fails or you stop it. It leaves the original checkouts alone.
+Use the same SSH flags as `fetch-file` when your home is on another computer.

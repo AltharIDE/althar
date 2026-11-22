@@ -52,7 +52,7 @@ See [ADR-004](../decisions/coordinator.md#always-on).
   ([ADR-097](../decisions/what-agents-may-do.md#what-asks), its second phase; leads have it too);
 - keeps the project's notes: decisions the person makes in conversation that
   the code doesn't show, which every session of it starts with
-  ([ADR-031](../decisions/coordinator.md#handover-before-its-context-fills));
+  ([ADR-031](../decisions/coordinator.md#compaction-and-session-recovery));
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides)).
@@ -301,40 +301,30 @@ An import on a line of its own (`@AGENTS.md`) is put in place once, and a
 file read already is named instead of said again. Each file is cut at 10,000
 characters and all of them at 20,000, with where the rest is.
 
-### Handed to a fresh session before it fills
+### Compaction and recovery
 
-An agent left to fill its context compacts it by itself, at a moment of its
-choosing, into a summary of its own, and a decision made only in
-conversation may not survive it. So Althar hands the coordinator over first
-([ADR-031](../decisions/coordinator.md#handover-before-its-context-fills)):
+Althar uses ACP usage updates to decide when the coordinator reaches 80%
+of its window. The delivery loop can send a supported agent its own Compact
+command as soon as the ordinary turn ends, and a late usage update wakes the
+loop if the coordinator is already idle. The command carries no user input.
+The first ordinary turn after compaction includes the coordinator's role and
+current project records alongside the queued messages.
+See [ADR-031](../decisions/coordinator.md#compaction-and-session-recovery).
 
-- **When.** Once the agent says its context is 80% full (`HANDOVER_AT`, from
-  ACP's usage updates, as the composer's context ring shows it), between
-  turns: after the turn it crossed in, or at once where it says so between
-  turns. Never in a turn. The old session takes no more turns from then; what
-  the person says meanwhile waits for the fresh one.
-- **On what.** The same agent, account, model and effort. The fresh session
-  is started first, and the old one stopped as superseded by it; one that
-  can't start leaves the old one carrying on, its agent compacting by itself.
-  So does a brief that would take 40% or more of a fresh session's context:
-  it would be due again at once.
-- **Its brief, from Althar's records rather than the raw thread:** its role,
-  a line that it took over and should read earlier details with
-  `read_thread`, `read_task` or the code rather than guess, the project as
-  `project_overview` gives it, the notes, every open task (where it stands,
-  who leads it and what waits on the person; for the newest 25, its plan and
-  what its lead last reported too; asides apart and uncounted, with what of
-  each waits on the person and its last report), the tasks finished last,
-  what the repositories tell agents, and the conversation's last twelve
-  messages, word for word, but for what waits for its first turn, which that
-  turn says, with the earlier conversation in short before them. Each part is
-  bounded; a message longer than a part comes in parts, so `read_thread`
-  reaches all of it.
-- **What the person sees:** a quiet line in the thread, "Started a fresh
-  session; picked up 3 open tasks." The thread is Althar's record, so the
-  whole conversation stays there to scroll.
-- **What doesn't move:** plans in their countdown, held plans, drafts and
-  running tasks are Althar's, not the session's, and carry on as they were.
+```mermaid
+flowchart TD
+  A[Turn ends or idle usage update arrives] --> B{Session available?}
+  B -->|Lost| C[Start a fresh session with Althar's recovery brief]
+  B -->|Available and full| D[Ask the agent to compact between turns]
+  B -->|Available| E[Read the next turn]
+  D --> F[Keep the session and restore role and project records on the next turn]
+  F --> E
+  C --> E
+```
+
+The recovery brief also carries a bounded transcript, with the last twelve
+messages verbatim where they fit. Queued messages are delivered as input.
+The full transcript is kept independently of the provider session.
 
 ### Notes
 

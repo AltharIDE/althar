@@ -510,10 +510,9 @@ Required properties:
 
 Until it attaches over the socket (DEV-128), the command-line client
 (`apps/cli`) runs the runtime inside its own process. One runtime at a time may
-use a profile, whichever host runs it: the
-store holds its database in SQLite's exclusive locking mode, so a second
-runtime fails to open it rather than taking the first one's live sessions for
-a crashed launch's and reconciling them.
+use a profile, whichever host runs it. The runtime holds an exclusive SQLite
+lock on the profile's ownership file. A second runtime fails to open the
+profile before it can reconcile the first runtime's live sessions.
 
 ## Child processes and supervision
 

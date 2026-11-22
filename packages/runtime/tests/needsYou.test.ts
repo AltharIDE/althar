@@ -104,6 +104,39 @@ describe('a pull request that can be merged as it stands', () => {
     assert.isFalse(isMergeable(change({ state: 'merged' })))
     assert.isFalse(isMergeable(null))
   })
+
+  it('is so where only a check its host doesn’t require failed, and not where a required one did (#1117)', () => {
+    const preview = checks({
+      outcome: 'failed',
+      passed: 1,
+      failed: 1,
+      total: 2,
+      failing: ['preview'],
+      list: [
+        { name: 'test', state: 'passed', summary: null },
+        { name: 'preview', state: 'failed', summary: null },
+      ],
+    })
+    const requiring = [{ kind: 'checks', state: 'met', have: 1, need: 1, required: ['test'] }] as const
+    assert.isTrue(isMergeable(change({ checks: preview, needs: requiring })))
+    assert.isNull(byItself(change({ checks: preview, needs: requiring })))
+    assert.isFalse(isMergeable(change({ checks: preview })))
+    const both = checks({ outcome: 'failed', passed: 0, failed: 2, total: 2, failing: ['test', 'preview'] })
+    assert.isFalse(isMergeable(change({ checks: both, needs: requiring })))
+  })
+
+  it('is not so with a cancelled check that counts: required, or with no required set named', () => {
+    const cancelled = checks({
+      outcome: 'failed',
+      list: [
+        { name: 'test', state: 'passed', summary: null },
+        { name: 'lint', state: 'cancelled', summary: null },
+      ],
+    })
+    assert.isFalse(isMergeable(change({ checks: cancelled })))
+    assert.isFalse(isMergeable(change({ checks: cancelled, needs: [{ kind: 'checks', state: 'unmet', required: ['test', 'lint'] }] })))
+    assert.isTrue(isMergeable(change({ checks: cancelled, needs: [{ kind: 'checks', state: 'met', required: ['test'] }] })))
+  })
 })
 
 describe('a task between agents (DEV-173)', () => {

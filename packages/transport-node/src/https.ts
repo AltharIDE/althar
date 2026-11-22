@@ -86,7 +86,7 @@ export const homeHttpsAgent = (origin: string, trust?: HomeTlsTrust) =>
   )
 
 /** Small bootstrap messages only. RPC uses the separately bounded persistent stream. Redirects are never followed. */
-export const httpsJson = (origin: string, path: string, agent: Agent, body?: unknown) =>
+export const httpsJson = (origin: string, path: string, agent: Agent, body?: unknown, authorization?: string) =>
   Effect.tryPromise({
     try: (signal) =>
       new Promise<unknown>((resolve, reject) => {
@@ -101,6 +101,7 @@ export const httpsJson = (origin: string, path: string, agent: Agent, body?: unk
             headers: {
               accept: 'application/json',
               ...(bytes === undefined ? {} : { 'content-type': 'application/json', 'content-length': bytes.length }),
+              ...(authorization === undefined ? {} : { authorization }),
             },
           },
           (response) => {

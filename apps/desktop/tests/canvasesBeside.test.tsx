@@ -10,16 +10,23 @@ import {
   type CanvasVersionFacts,
   type ThreadItem,
 } from '@althar/contracts'
-import { DocPanel, ThreadShellProvider } from '@althar/ui'
+import { DocPanel, ThreadShellProvider, Room } from '@althar/ui'
 
 import { ServicesProvider } from '../src/renderer/data/services'
+import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useConnections } from '../src/renderer/features/connections/useConnections'
+import { useProject } from '../src/renderer/features/project/useProject'
+import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import { useTask } from '../src/renderer/features/task/useTask'
+import { TaskView } from '../src/renderer/features/task/TaskView'
+import { keys } from '../src/renderer/data/reads'
 import { arrived, useCanvasArrivals } from '../src/renderer/features/canvases/arrivals'
 import { ArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
 import { commentsOf, forgetComments } from '../src/renderer/shared/comments'
-import { fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
-import { servicesFor, withServices } from './render'
+import { coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
+import { useSettingsOf, servicesFor, withServices } from './render'
 
 /*
  * A project's canvases beside its conversations (ADR-104): one its agent
@@ -358,4 +365,34 @@ describe('the project’s Artifacts view', () => {
     expect(await screen.findByText('No such project')).toBeTruthy()
     expect(screen.getByText('No artifacts yet')).toBeTruthy()
   })
+})
+
+function CoordinatorScreen() {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      room={Room.Both}
+      onTask={vi.fn()}
+    />
+  )
+}
+function TaskScreen() {
+  return <TaskView model={useTask('th1')} onBack={vi.fn()} />
+}
+it.each(['coordinator', 'task'])('opens a canvas from the line and the arriving open in the %s thread', async (screenKind) => {
+  const history = [canvasItem('published', 1)]
+  const { client } = canvasClient({
+    getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [...history] })),
+    getThread: vi.fn(async () => snapshot({ items: [...history] })),
+  })
+  const services = servicesFor(client)
+  render(<ServicesProvider value={services}>{screenKind === 'task' ? <TaskScreen /> : <CoordinatorScreen />}</ServicesProvider>)
+  await userEvent.click(await screen.findByRole('button', { name: 'Open Sign-in flow, take 1 beside the conversation' }))
+  expect(await panelOf('Sign-in flow, take 1')).toBeTruthy()
+  history.push(canvasItem('opened', 2))
+  await act(async () => services.cache.refetchQueries({ queryKey: screenKind === 'task' ? keys.thread('th1') : keys.coordinator('p1') }))
+  expect(await panelOf('Sign-in flow, take 2')).toBeTruthy()
 })

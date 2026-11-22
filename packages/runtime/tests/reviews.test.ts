@@ -206,12 +206,17 @@ describe('reviewing someone else’s pull request', () => {
       }).pipe(Effect.provide(withQueries(github)))
     })
 
-  for (const product of ['gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const)
-    it.live(`fetches ${product}'s review ref and preserves its own-author change request`, () => {
+  for (const [product, author] of [
+    ['gitlab', 'ninemate'],
+    ['gitlab', 'YOU'],
+    ['bitbucket_cloud', 'YOU'],
+    ['bitbucket_dc', 'YOU'],
+  ] as const)
+    it.live(`drafts and posts a ${product} review with inline comments on ${author}'s change`, () => {
       const at = hosted()
       const host = makeFakeService({ product, pushUrl: () => at.bare })
       host.addRepository(['meridian', 'api'])
-      const { head, pull } = pullRequest(at, host, { author: 'YOU' })
+      const { head, pull } = pullRequest(at, host, { author })
       git(
         at.bare,
         'update-ref',
@@ -232,18 +237,24 @@ describe('reviewing someone else’s pull request', () => {
         assert.deepInclude(workspace, { access: 'read', state: 'ready' })
         assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
         const summary = 'Keep the retry bounded.'
-        yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
-          verdict: 'changes',
-          summary,
-          comments: [],
-        })
+        const comment = { path: 'send.ts', line: 1, body: 'Cover the retry limit.' }
+        assert.match(
+          yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
+            verdict: 'changes',
+            summary,
+            comments: [comment],
+          }),
+          /^Drafted/,
+        )
         const [draft] = yield* cardsIn(task?.threadId ?? '')
+        assert.deepInclude(draft?.comments[0], comment)
+        assert.isEmpty(host.reviewsPosted)
         const reviews = yield* Reviews
         const person = (yield* Instance).personId
         yield* reviews.change(draft?.draftId ?? '', { verdict: 'changes' }, person)
         const posted = yield* reviews.post(draft?.draftId ?? '', person)
         assert.deepInclude(posted, { state: 'posted', verdict: 'changes', summary })
-        assert.deepInclude(host.reviewsPosted[0]?.review, { event: 'request_changes', commit: head })
+        assert.deepInclude(host.reviewsPosted[0]?.review, { event: 'request_changes', commit: head, comments: [comment] })
         assert.notInclude(host.reviewsPosted[0]?.review.body ?? '', 'posted as a comment because')
       }).pipe(Effect.provide(withQueries(host)))
     })
@@ -739,6 +750,10 @@ describe('reviewing someone else’s pull request', () => {
       const queries = yield* Queries
       const instance = yield* Instance
       const card = () => Effect.orDie(queries.card(taskId))
+      const stopped = Effect.gen(function* () {
+        yield* until((yield* LeftBehind).stopping, (tasks) => !tasks.has(taskId))
+        yield* until(sessions.running(threadId), Option.isNone)
+      })
       // The busy flag clears before the turn's bookkeeping commits. Finish that turn before posting or reopening the review.
       const turnOver = Effect.gen(function* () {
         yield* until(turns(threadId), (all) => all.length > 0 && all.every((turn) => turn.state === 'completed'))
@@ -767,15 +782,9 @@ describe('reviewing someone else’s pull request', () => {
         Effect.gen(function* () {
           const draft = (yield* cardsIn(threadId)).at(-1)
           assert.strictEqual((yield* reviews.post(draft?.draftId ?? '', instance.personId)).state, 'posted')
-          // Posting settles the task; wait for that fixture's agent cleanup before reopening it.
-          yield* until((yield* LeftBehind).stopping, (tasks) => !tasks.has(taskId))
           assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
           yield* until(card(), (one) => one.phase === 'settled')
-          // Exercise reopening a stopped lead, independent of the background cleanup's timing.
-          yield* until(
-            Effect.map(sessions.running(threadId), (running) => [running]),
-            ([running]) => running !== undefined && Option.isNone(running),
-          )
+          yield* stopped
         })
 
       // Its lead reads the pull request first, once its plan starts, then drafts.
@@ -798,6 +807,7 @@ describe('reviewing someone else’s pull request', () => {
       // Done settles it, as a quick task's does.
       assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId }), taskId }))
       assert.strictEqual((yield* card()).phase, 'settled')
+      yield* stopped
 
       // Written to again, its lead drafts again: the draft waits in Needs you, and posting it settles the task once more.
       yield* write('Approve it after all.')

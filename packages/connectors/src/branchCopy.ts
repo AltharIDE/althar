@@ -94,7 +94,7 @@ const git = (cwd: string, args: ReadonlyArray<string>, env: Record<string, strin
       (error, stdout, stderr) =>
         resolve({
           code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128,
-          stdout: stdout.trim(),
+          stdout,
           stderr: stderr.trim(),
         }),
     )
@@ -105,7 +105,7 @@ const said = (ran: Ran) => ran.stderr.split('\n').find((line) => line.trim() !==
 /** The commit a branch of a remote is on now, by URL; null where there is none or it can't be asked. */
 const tipOf = async (cwd: string, at: BranchAt): Promise<string | null> => {
   const listed = await git(cwd, ['ls-remote', '--heads', at.target.url, `refs/heads/${at.branch}`], signedIn(at.target))
-  return listed.code === 0 ? (/^[0-9a-f]{40,64}/.exec(listed.stdout)?.[0] ?? null) : null
+  return listed.code === 0 ? (/^[0-9a-f]{40,64}/.exec(listed.stdout.trim())?.[0] ?? null) : null
 }
 
 const merging = async (dir: string, merge: CopyMerge): Promise<CopyMerged> => {
@@ -117,7 +117,7 @@ const merging = async (dir: string, merge: CopyMerge): Promise<CopyMerged> => {
     signedIn(merge.into.target),
   )
   if (own.code !== 0) return { outcome: 'refused', message: `Althar could not read the branch ${merge.into.branch}: ${said(own)}` }
-  const read = (await git(dir, ['rev-parse', '--verify', 'refs/althar/branch^{commit}'])).stdout
+  const read = (await git(dir, ['rev-parse', '--verify', 'refs/althar/branch^{commit}'])).stdout.trim()
   if (read !== merge.into.head) return { outcome: 'moved', head: read }
   const other = await git(
     dir,
@@ -125,7 +125,7 @@ const merging = async (dir: string, merge: CopyMerge): Promise<CopyMerged> => {
     signedIn(merge.from.target),
   )
   if (other.code !== 0) return { outcome: 'refused', message: `Althar could not read the branch ${merge.from.branch}: ${said(other)}` }
-  const target = (await git(dir, ['rev-parse', '--verify', 'refs/althar/target^{commit}'])).stdout
+  const target = (await git(dir, ['rev-parse', '--verify', 'refs/althar/target^{commit}'])).stdout.trim()
   if ((await git(dir, ['merge-base', '--is-ancestor', target, read])).code === 0) return { outcome: 'current' }
   const checkedOut = await git(dir, ['checkout', '--quiet', '--detach', read])
   if (checkedOut.code !== 0) return { outcome: 'refused', message: said(checkedOut) }
@@ -140,12 +140,12 @@ const merging = async (dir: string, merge: CopyMerge): Promise<CopyMerged> => {
     target,
   ])
   if (merged.code !== 0) {
-    const conflicted = await git(dir, ['diff', '--name-only', '--diff-filter=U'])
-    const files = conflicted.stdout === '' ? [] : conflicted.stdout.split('\n')
-    if (files.length === 0) return { outcome: 'refused', message: said(merged) === 'git failed' ? merged.stdout : said(merged) }
+    const conflicted = await git(dir, ['diff', '--name-only', '--diff-filter=U', '-z'])
+    const files = conflicted.stdout.split('\0').filter((file) => file !== '')
+    if (files.length === 0) return { outcome: 'refused', message: said(merged) === 'git failed' ? merged.stdout.trim() : said(merged) }
     return { outcome: 'conflict', files }
   }
-  const head = (await git(dir, ['rev-parse', 'HEAD'])).stdout
+  const head = (await git(dir, ['rev-parse', 'HEAD'])).stdout.trim()
   if (!merge.push) return { outcome: 'updated', head }
   // Plain: git refuses it unless it adds to the branch as the host has it, so another push meanwhile is never overwritten.
   const pushed = await git(

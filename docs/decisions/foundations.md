@@ -128,7 +128,7 @@ One runtime thread answers every window and runs every agent's session, so anyth
 
 The app logs, packaged or not and only on this computer, each window of five seconds in which the runtime's event loop or the main process's ran more than 100 ms late, each window call that took longer than 250 ms (`lag.ts`), and each frame of the window's that took 100 ms or more to draw and each press whose next frame came that late, by what it was on, never what it showed (`shared/frames.ts`). `tests/real/responsiveness.test.ts` is a by-hand run that times a task's view, the board, the home and Ship on a store of the person's size, idle and with every core and the disk busy.
 
-The store still runs on the runtime's thread: with the above, its statements took about 1.5 s of a two-minute window under load, and none held the thread past 200 ms. Moving it to a worker of its own is the next step if the lag log shows otherwise.
+The home owns the store's one writer. Board, Home and document search use read-only SQLite connections on workers. Screen reads have their own queue, and search and background refreshes use a separate queue. Search indexes public documents in small transactions as the source records change. Board and Home serve the latest completed cards and refresh worktree details behind the screen. The command's checks for merge and push still read fresh Git state.
 
 ## Recorded facts are complete; behaviour may start simple
 
@@ -185,6 +185,26 @@ A merge is gated on Linux, and a release on every platform. Windows' jobs were t
 
 Which workflow runs when, and how to read them, is in [DEVELOPMENT.md](../../DEVELOPMENT.md#changes-and-ci).
 
+## Numbers that can't collide
+
+ADR-107, decided 20 Nov 2026. A store's migrations keep their numbers, and a check refuses a pull request whose migration number is taken: by main, or by a pull request ahead of it in the merge queue.
+
+A migration is `NNNN_name.ts`, run in order of its number. A store records the numbers it ran (`schema_migrations.migration_id`) and runs only those above the largest (Effect's `SqliteMigrator`); an older build refuses a store whose largest is above its own (`DatabaseSchemaTooNew`). Two pull requests branched from the same main each take the next number, and each passes alone. In the 0.8.0 week three took 0080, and in November one renumbered to 0096 after #1064 took 0095. A second migration with a taken number fails Effect's migrator outright, but only once both are in one tree, and one below a number a store has run never runs on it at all.
+
+Two ways were weighed:
+
+- **(a) Name migrations by a unique id, ordered by merge.** No number to take, so nothing to collide. But order by merge isn't in the tree: it needs a list main writes after a merge, or a timestamp that sorts two pull requests by when they were written rather than when they landed. And a store records numbers: it would have to record ids beside them and read both, with shipped stores recording one way and new ones another. That is the change to how a store records and reads its migrations that this decision has to avoid, for a collision a check can refuse.
+- **(b) A check that refuses a number that is taken.** Nothing a store records changes, and no shipped migration is renumbered. Chosen.
+
+What is built:
+
+- **`numbers`, in `queue.yml`, on every pull request and every merge-queue group,** whatever they change, with no install (`.github/scripts/numbers.py`). `merge queue`, the check main's rules require, needs it. On a pull request it reads the tree as merged with main; in the queue, main with the group in. So of two pull requests that each pass alone with 0096, the second is refused in the queue before it lands.
+- **What it refuses:** a migration number used twice; one of main's migrations renamed, renumbered or removed (a store that ran it would skip what took its place, or run it again); a number below 0001, or numbers that skip one (a store at 0097 would never run a 0096 that landed later); a migration missing from `index.ts`'s list or `checksums.ts`, or listed without its file; the list out of order. The message names the migration to renumber, the number to take and what to rename: "Migration 0095 is taken: main already has 0095_sessions_by_agent. Renumber 0095_task_tags to 0096: rename the file, its key in index.ts and its line in checksums.ts."
+- **An open pull request with the same number is a warning, not a failure,** on the pull request whose `numbers` ran: it compares the migration files and proposal files this one adds with those every other open pull request adds, and names the one that has the same number. The pull request opened first hears of it only when its own check runs again, on its next push, and an ADR added only as a row of the table, with no proposal file, isn't compared. Either could merge first, and both renumbering would collide again; the queue refuses whichever lands second.
+- **ADR numbers are checked the same way.** The numbered ones left are the proposals in [`proposed/`](proposed/) and the rows of the [README](README.md)'s table, which keep the number of an ADR folded away. The check refuses a number with two proposal files or two rows, and a proposal whose number has no row or another ADR's row. A new ADR takes the number after the table's last.
+
+Shipped migrations keep their numbers, and a store records and reads them as before: the check reads only the tree.
+
 ## A feature ships for every service that can have it
 
 A feature built for one code host, tracker or agent is built for every one of its kind that can have it. Where that fits in the same change, it is the same change. Where it doesn't, the rest are tasks planned with it, done in the same release, and the feature isn't done until they are.
@@ -214,3 +234,4 @@ Not built yet:
 - 16 Nov 2026: the presses that still waited show at once (deleting an automation, removing a run, asking what the project runs); `althar/press-at-once` reads a busy mark as no result, `.finally` as waiting and handlers named in the same file, and `althar/off-the-thread` follows a renamed import.
 - 16 Nov 2026: direct HTTPS/WSS with optional private networking and SSH, reviewed device pairing, Rust execution workers and a Protobuf worker contract are decided but not built. Keep the Node home, defer relay implementation and separate worker identity from person authority. ADR-103's wider design remains proposed.
 - 16 Nov 2026: opt-in HTTPS/WSS, home/TLS-key-bound connection invitations, encrypted desktop connection keys, checked reconnect and live revocation. Software-stored keys retain socket authority. Invites expire on restart; durable registrations survive compatible updates. Protected approvals, provider/VPS validation and native workers remain ahead.
+- 20 Nov 2026: numbers that can't collide (ADR-107): `numbers` refuses a migration or ADR number main or a pull request ahead in the merge queue has, and warns a pull request, when its check runs, of an open one that adds a migration or proposal file with the same number.

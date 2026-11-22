@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, reveal, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * The project's canvases (ADR-104), in a real window with the fake agents.
@@ -211,6 +211,50 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('a coordinator aside opens canvases and files over the board', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const { electronApp, page } = await launch(home)
+  try {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800))
+    await openFirstProject(electronApp, page, repository(home))
+    await page.getByRole('button', { name: 'New aside' }).click()
+    const composer = page.getByRole('textbox', { name: /^Ask on the side/ })
+    await composer.fill('Compare sign-in directions')
+    await composer.press('Enter')
+    await expect(page.getByRole('button', { name: 'Make it a task' })).toBeVisible()
+    const reply = page.getByRole('textbox', { name: 'Reply', exact: true })
+    await reply.fill('Draw the sign-in directions. [lead:canvas]')
+    await reply.press('Enter')
+    await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await page.keyboard.press('ControlOrMeta+k')
+    await expect(page.getByRole('dialog', { name: 'Search' })).toBeVisible()
+    await expect.poll(() => canvasView(electronApp)).toBeNull()
+    await page.keyboard.press('Escape')
+    await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' }).click()
+    await expect(page.getByRole('img', { name: 'Checkout funnel' })).toBeVisible()
+    await reply.fill('Open the sign-in document. [lead:canvas-open]')
+    await reply.press('Enter')
+    const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
+    await expect(doc.getByText('First directions')).toBeVisible()
+    const thread = page.getByRole('region', { name: 'Thread', exact: true })
+    const answer = thread.getByRole('paragraph').filter({ hasText: 'The repository also has' })
+    const readme = answer.getByRole('button', { name: 'Open README.md', exact: true })
+    await expect(readme).toBeVisible()
+    await expect(thread).not.toHaveAttribute('aria-busy')
+    await reveal(page, readme)
+    await expect(doc).toBeInViewport()
+    await shoot(page, electronApp, page, 'test-results/aside-canvas-beside.png')
+    await readme.click()
+    const file = page.getByRole('complementary', { name: 'README.md' })
+    await expect(file.getByRole('heading', { name: 'meridian' })).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/aside-file-beside.png')
   } finally {
     await electronApp.close()
   }

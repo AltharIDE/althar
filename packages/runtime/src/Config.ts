@@ -27,6 +27,7 @@ import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
+import type { WorkerExecutionPlatform } from './workerExecution'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
 export interface Shot {
@@ -50,6 +51,7 @@ export interface Screenshot {
 }
 
 export interface RuntimeOptions {
+  readonly workers?: WorkerExecutionPlatform
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
   /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
@@ -256,6 +258,10 @@ export interface ConnectivityOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface IdleOptions {
+  /** How long an idle coordinator keeps its provider session: 30 minutes. */
+  readonly coordinator?: Duration.Duration
+  /** Holds retirement just before provider shutdown in a race test. */
+  readonly beforeCoordinatorStop?: (threadId: string) => Effect.Effect<void>
   /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
   readonly quiet?: Duration.Duration
   /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
@@ -286,8 +292,6 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
-  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
-  readonly askGrace?: Duration.Duration
   /** How many automations' tasks may be at work at once: one. */
   readonly automations?: number
   /** How many places beyond the number tasks planned small may take (quickLane.ts): one; none turns the quick lane off. */

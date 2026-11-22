@@ -349,10 +349,108 @@ describe('a task’s card in the Talk room', () => {
     expect(screen.queryByText(/PR #7/)).toBeNull()
   })
 
-  it('says why work its lead couldn’t finish needs you', async () => {
+  it('says why work its lead couldn’t finish needs you, as the board says it, opening it rather than answering', async () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md.'
     await talking(card({ phase: 'ready', handedBack: why, plan: null }))
-    expect(await screen.findByText(why)).toBeTruthy()
+    const shown = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(shown.getByText(why)).toBeTruthy()
+    expect(shown.getByText('Merge conflict')).toBeTruthy()
+    expect(shown.getByRole('button', { name: /Open task/ })).toBeTruthy()
+    expect(shown.queryByText('Needs you')).toBeNull()
+  })
+
+  it('follows its task once its question is answered: checks its lead brought to you are not ready to accept, not a question', async () => {
+    const asking = card({ phase: 'waiting', step: 'review', plan: null })
+    const why = 'OpenRouter is out of credit: both evals get 402 Payment Required.'
+    const { client, emit } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(asking, 'c0')] })),
+    })
+    withServices(<Project />, client)
+    const theCard = async () => within(await screen.findByRole('article', { name: 'Add a retry' }))
+    // Its step waits on the person: it asks, and the card answers it.
+    expect((await theCard()).getByText('Needs you')).toBeTruthy()
+    expect((await theCard()).getByRole('button', { name: /Answer/ })).toBeTruthy()
+    // Answered, it went on to its checks, which its lead brought to the person as nothing it can fix: the card reads it again.
+    vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, id) =>
+      items.card(card({ phase: 'ready', step: 'review', plan: null, change: change({ draft: false }), checksBack: why }), id),
+    )
+    act(() => emit(changed('task', 't1', 'th1', 'p1')))
+    await waitFor(async () => expect((await theCard()).queryByText('Needs you')).toBeNull())
+    const shown = await theCard()
+    expect(shown.getByText('Not ready to accept')).toBeTruthy()
+    expect(shown.getByText(why)).toBeTruthy()
+    expect(shown.queryByRole('button', { name: /Answer/ })).toBeNull()
+    expect(shown.getByRole('button', { name: /Open task/ })).toBeTruthy()
+  })
+
+  it('follows its open pull request as the board does, its checks running, failing and passing, with no reason handed back', async () => {
+    const asking = card({ phase: 'waiting', step: 'review', plan: null, change: change({ draft: false }) })
+    const { client, emit } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(asking, 'c0')] })),
+    })
+    withServices(<Project />, client)
+    const theCard = async () => within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect((await theCard()).getByText('Needs you')).toBeTruthy()
+    // The same pull request, as each look at it says it stands now.
+    const moved = async (checks: ReturnType<typeof change>['checks'], gone: string) => {
+      vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, id) =>
+        items.card(
+          card({ phase: 'ready', step: 'review', plan: null, summary: 'Fixed the evals.', change: change({ draft: false, checks }) }),
+          id,
+        ),
+      )
+      act(() => emit(changed('task', 't1', 'th1', 'p1')))
+      await waitFor(async () => expect((await theCard()).queryByText(gone)).toBeNull())
+      return theCard()
+    }
+    const list = [
+      { name: 'test', state: 'running' as const, summary: null },
+      { name: 'lint', state: 'passed' as const, summary: null },
+    ]
+    // Answered, its checks run: under way, not the person's, and not ready either.
+    const running = await moved({ outcome: 'running', passed: 1, failed: 0, running: 1, total: 2, failing: [], list }, 'Needs you')
+    expect(running.getByText('Checks running')).toBeTruthy()
+    expect(running.queryByText('Ready')).toBeNull()
+    expect(running.queryByRole('button', { name: /Answer/ })).toBeNull()
+    // They fail, and its lead handed nothing back: not ready to accept, saying which failed, as the board's card does.
+    const failed = await moved(change().checks, 'Checks running')
+    expect(failed.getByText('Not ready to accept')).toBeTruthy()
+    expect(failed.getByText('test failed')).toBeTruthy()
+    expect(failed.queryByText('Ready')).toBeNull()
+    expect(failed.getByRole('button', { name: /Open task/ })).toBeTruthy()
+    // They pass: ready, with what it did.
+    const passed = await moved(
+      {
+        outcome: 'passed',
+        passed: 2,
+        failed: 0,
+        running: 0,
+        total: 2,
+        failing: [],
+        list: list.map((one) => ({ ...one, state: 'passed' as const })),
+      },
+      'Not ready to accept',
+    )
+    expect(passed.getByText('Ready')).toBeTruthy()
+    expect(passed.getByText('Fixed the evals.')).toBeTruthy()
+  })
+
+  it('shows where its task stands now when the thread is read afresh, as after a reload or a restart', async () => {
+    const why = 'OpenRouter is out of credit: both evals get 402 Payment Required.'
+    const asking = items.card(card({ phase: 'waiting', step: 'review', plan: null }), 'c0')
+    const first = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [asking] })) })
+    const before = withServices(<Project />, first.client)
+    expect(within(await screen.findByRole('article', { name: 'Add a retry' })).getByText('Needs you')).toBeTruthy()
+    before.unmount()
+    // Read again from nothing: the runtime gives the same item where its task stands now, and nothing of what it showed stays.
+    const movedOn = card({ phase: 'ready', step: 'review', plan: null, change: change({ draft: false }), checksBack: why })
+    const again = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(movedOn, 'c0')] })) })
+    withServices(<Project />, again.client)
+    const shown = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(shown.getByText('Not ready to accept')).toBeTruthy()
+    expect(shown.getByText(why)).toBeTruthy()
+    expect(shown.queryByText('Needs you')).toBeNull()
+    expect(shown.queryByRole('button', { name: /Answer/ })).toBeNull()
   })
 
   it('names who holds the places it waits for, and stops what one left running', async () => {

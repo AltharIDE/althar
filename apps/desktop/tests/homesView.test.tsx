@@ -42,7 +42,7 @@ const overview: HomesOverview = {
     local: { live: true, list: [{ id: 'prj_althar', name: 'althar', ink: 'clay', working: 0, yours: 0 }] },
     [home.homeId]: { live: true, list: [{ id: 'prj_ledger', name: 'ledger', ink: 'moss', working: 2, yours: 1 }] },
   },
-  opened: { [home.id]: Date.now() - 40 * 60_000 },
+  opened: {},
 }
 const fixture = () => {
   const listeners = new Set<(state: HomeState) => void>()
@@ -100,10 +100,11 @@ it('previews a pairing destination, keeps the code private and pairs without SSH
   const close = vi.fn()
   render(<ConnectHome homes={homes} onClose={close} />)
   expect(screen.queryByLabelText('SSH host')).toBeNull()
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.type(screen.getByLabelText('Pairing code'), 'opaque-code')
   expect(screen.getByLabelText('Pairing code').getAttribute('type')).toBe('password')
   expect(await screen.findByText('https://my-vps.test:6769')).not.toBeNull()
+  await userEvent.clear(screen.getByLabelText('Name'))
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.click(screen.getByRole('button', { name: 'Pair and open' }))
   await waitFor(() => expect(close).toHaveBeenCalledOnce())
   expect(pair).toHaveBeenCalledExactlyOnceWith('opaque-code', 'My VPS')
@@ -115,7 +116,6 @@ it('discards an obsolete pairing preview and cancels pairing when its form is le
   const old = later<{ origin: string; homeId: string; expiresAt: number }>()
   const homes = { ...at.homes, pair: vi.fn(async () => {}), pairingInfo: vi.fn(() => old.promise) }
   render(<ConnectHome homes={homes} onClose={() => {}} />)
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.type(screen.getByLabelText('Pairing code'), 'old-code')
   await userEvent.clear(screen.getByLabelText('Pairing code'))
   await act(async () => old.resolve({ origin: 'https://old.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER }))
@@ -134,12 +134,12 @@ it('keeps what was typed for each way of connecting as the person switches betwe
   }
   render(<ConnectHome homes={homes} onClose={() => {}} />)
   const dialog = screen.getByRole('dialog', { name: 'Connect a home' })
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
+  await userEvent.type(screen.getByLabelText('Pairing code'), 'k7Qp-3xWm')
   await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
   await userEvent.type(screen.getByLabelText('SSH host'), 'deploy@vps.test')
   await userEvent.click(screen.getByRole('radio', { name: 'Pairing code' }))
   expect(screen.getByRole('dialog', { name: 'Connect a home' })).toBe(dialog)
-  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('My VPS')
+  expect((screen.getByLabelText('Pairing code') as HTMLInputElement).value).toBe('k7Qp-3xWm')
   await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
   expect((screen.getByLabelText('SSH host') as HTMLInputElement).value).toBe('deploy@vps.test')
 })
@@ -167,7 +167,7 @@ it('checks a host, shows its identity to compare, then connects under the host�
   await userEvent.type(screen.getByLabelText('SSH host'), 'me@fixture.example.com')
   expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Check host' }))
-  expect(await screen.findByText(home.homeId)).not.toBeNull()
+  expect(await screen.findByLabelText(home.homeId)).not.toBeNull()
   expect(at.homes.inspect).toHaveBeenCalledExactlyOnceWith({ target: 'me@fixture.example.com' })
   expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('fixture')
   await userEvent.clear(screen.getByLabelText('Name'))
@@ -187,7 +187,7 @@ it('discards a late check when the host changes, and cancels discovery when the 
   expect((screen.getByRole('button', { name: 'Checking…' }) as HTMLButtonElement).disabled).toBe(true)
   await userEvent.type(screen.getByLabelText('SSH host'), '-changed')
   await act(async () => checkedLater.resolve(checked))
-  expect(screen.queryByText(home.homeId)).toBeNull()
+  expect(screen.queryByLabelText(home.homeId)).toBeNull()
   expect(screen.getByRole('button', { name: 'Check host' })).not.toBeNull()
   view.unmount()
   expect(at.homes.cancelCheck).toHaveBeenCalled()
@@ -205,7 +205,7 @@ it('keeps errors at the host and needs a fresh check after a refused confirmatio
   expect((await screen.findByRole('alert')).textContent).toContain('Host unavailable')
   expect((screen.getByLabelText('SSH host') as HTMLInputElement).getAttribute('aria-invalid')).toBe('true')
   await userEvent.click(screen.getByRole('button', { name: 'Check host' }))
-  expect(await screen.findByText(home.homeId)).not.toBeNull()
+  expect(await screen.findByLabelText(home.homeId)).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect((await screen.findByRole('alert')).textContent).toContain('expired')
   expect(screen.getByRole('button', { name: 'Check host' })).not.toBeNull()
@@ -239,8 +239,9 @@ it('connects the first home from a visible chip, and names a remote home in its 
   )
   await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect a home…' }))
-  expect(await screen.findByRole('dialog', { name: 'Connect a home' })).not.toBeNull()
-  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  // A first home opens on what a home is.
+  expect(await screen.findByRole('dialog', { name: 'Your first home' })).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
   act(() => at.tell(overview))
   expect(await screen.findByRole('button', { name: /Homes/ })).not.toBeNull()
   view.unmount()
@@ -297,7 +298,7 @@ it('opens the chip’s menu from File › Homes… where there is a chip, and Co
   act(() => {
     window.dispatchEvent(new Event('althar:show-homes'))
   })
-  expect(await screen.findByRole('dialog', { name: 'Connect a home' })).not.toBeNull()
+  expect(await screen.findByRole('dialog', { name: 'Your first home' })).not.toBeNull()
   act(() => homesUi.set({ dialog: null }))
 })
 
@@ -306,6 +307,19 @@ const manage = (at: ReturnType<typeof fixture>, given: HomesOverview = overview,
   const view = render(<ManageHomes homes={at.homes} overview={given} here={here} onClose={close} onConnect={() => {}} />)
   return { close, view }
 }
+
+it('opens security key setup from the current paired home and says where it opened', async () => {
+  const at = fixture()
+  const enrollApprovalKey = vi.fn(async () => {})
+  const here: HomeState = { ...remote, current: { kind: 'https', home: paired } }
+  const homes = { ...at.homes, enrollApprovalKey }
+  const result = manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
+  await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key' }))
+  expect(enrollApprovalKey).toHaveBeenCalledOnce()
+  expect(await screen.findByText('Security key setup is open in your browser.')).not.toBeNull()
+  expect(result.close).not.toHaveBeenCalled()
+})
 
 it('shows each home by its projects, live while its window is connected, and opens one there', async () => {
   const at = fixture()
@@ -337,6 +351,7 @@ it('shows a resting home’s projects quietly, as last read, with when it was la
   const at = fixture()
   manage(at, {
     ...overview,
+    opened: { [home.id]: Date.now() - 40 * 60_000 },
     windows: { local: 'local' },
     projects: {
       ...overview.projects,
@@ -621,7 +636,6 @@ it('keeps malformed or expired pairing codes out of a connection, and accepts a 
   const pairingInfo = vi.fn(async () => ({ origin: 'https://replacement.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER }))
   pairingInfo.mockRejectedValueOnce(new Error('This pairing code expired.'))
   render(<ConnectHome homes={{ ...at.homes, pair, pairingInfo }} onClose={() => {}} />)
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.type(screen.getByLabelText('Pairing code'), 'x')
   expect((await screen.findByRole('alert')).textContent).toContain('expired')
   expect(screen.getByRole('button', { name: 'Pair and open' }).getAttribute('disabled')).not.toBeNull()
@@ -629,6 +643,8 @@ it('keeps malformed or expired pairing codes out of a connection, and accepts a 
   await userEvent.clear(screen.getByLabelText('Pairing code'))
   await userEvent.type(screen.getByLabelText('Pairing code'), 'new-code')
   expect(await screen.findByText('https://replacement.test')).not.toBeNull()
+  await userEvent.clear(screen.getByLabelText('Name'))
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   expect(screen.queryByRole('alert')).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Pair and open' }))
   await waitFor(() => expect(pair).toHaveBeenCalledExactlyOnceWith('new-code', 'My VPS'))
@@ -644,9 +660,10 @@ it('retains the private pairing code and name on failure, shows busy immediately
   const close = vi.fn()
   const pairingInfo = vi.fn(async () => ({ origin: 'https://home.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER }))
   render(<ConnectHome homes={{ ...at.homes, pair, pairingInfo }} onClose={close} />)
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.type(screen.getByLabelText('Pairing code'), 'same-code')
   await screen.findByText('https://home.test')
+  await userEvent.clear(screen.getByLabelText('Name'))
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.click(screen.getByRole('button', { name: 'Pair and open' }))
   expect(screen.getByLabelText('Pairing code').getAttribute('disabled')).not.toBeNull()
   expect(screen.getByLabelText('Name').getAttribute('disabled')).not.toBeNull()
@@ -667,7 +684,6 @@ it('cancels an in-flight pairing when the dialog closes and ignores its late rep
   const pair = vi.fn(() => waiting.promise)
   const pairingInfo = vi.fn(async () => ({ origin: 'https://home.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER }))
   const view = render(<ConnectHome homes={{ ...at.homes, pair, pairingInfo }} onClose={close} />)
-  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
   await userEvent.type(screen.getByLabelText('Pairing code'), 'pending-code')
   await screen.findByText('https://home.test')
   await userEvent.click(screen.getByRole('button', { name: 'Pair and open' }))
@@ -1248,7 +1264,9 @@ it('holds the host and the method while it connects, and closes once the home co
   expect((screen.getByLabelText('SSH host') as HTMLInputElement).value).toBe('fixture')
   expect(screen.getByRole('radio', { name: 'Pairing code' }).hasAttribute('disabled')).toBe(true)
   await act(async () => connecting.resolve())
-  expect(close).toHaveBeenCalledOnce()
+  // Connected shows for a moment, as its window opens, and then the dialog goes.
+  expect(screen.getByRole('button', { name: 'Connecting…' })).not.toBeNull()
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
 })
 
 it('lets a connection abandoned by an edit come to nothing in the form', async () => {

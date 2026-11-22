@@ -293,7 +293,9 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  * failed in a way none of these says (`failed`, all it said in `detail`). Replacing a
  * pull request's commits also stops where the pull request moved on from
  * the head the person saw (`moved`), and where the project's rules never
- * allow a force push (`never`).
+ * allow a force push (`never`). A contributor's branch rejects force pushes
+ * (`contributor_force_push`) and needs the author's current permission for a
+ * plain push (`maintainer_edits_disabled`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
@@ -308,6 +310,8 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
     'failed',
     'moved',
     'never',
+    'contributor_force_push',
+    'maintainer_edits_disabled',
     'fork_gone',
     'unplaced',
     'no_push_address',

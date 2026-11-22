@@ -153,6 +153,11 @@
     background-size 340ms var(--ease-out),
     color 240ms var(--ease-out);
 }
+/* Discarded before it began: it stays where it was, quieter. */
+.discarded .roster,
+.discarded .title {
+  opacity: 0.6;
+}
 .struck {
   color: var(--t-3);
   background-size: 100% 1px;

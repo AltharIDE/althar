@@ -59,6 +59,7 @@ export type LiveEvent =
   | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
   | {
       readonly _tag: 'TurnEnded'
+      readonly compacting?: true
       readonly threadId: string
       readonly turnId: string
       readonly state: string
@@ -207,6 +208,11 @@ export class Live extends Context.Service<
     readonly events: Stream.Stream<LiveEvent>
     /** Events from the moment this returns, for as long as the scope lasts: nothing published after it is missed. */
     readonly subscribe: Effect.Effect<Stream.Stream<LiveEvent>, never, Scope.Scope>
+    /**
+     * What is being drafted now, each thread's latest `Drafting` that still has drafts: a window that starts watching in the
+     * middle of a turn is told them at once, rather than only at the next change, which may be long in coming.
+     */
+    readonly drafting: Effect.Effect<ReadonlyArray<LiveEvent>>
   }
 >()('@althar/runtime/Live') {
   static readonly layer: Layer.Layer<Live> = Layer.effect(
@@ -216,8 +222,16 @@ export class Live extends Context.Service<
       // comes as it comes. A client's watch, which may stall, takes from it as events come too, and holds the newest of each
       // thing for the client (`newestOf`), so a window that stops reading doesn't make this grow.
       const pubsub = yield* PubSub.unbounded<LiveEvent>()
+      const drafting = new Map<string, LiveEvent>()
       return Live.of({
-        publish: (event) => Effect.asVoid(PubSub.publish(pubsub, event)),
+        publish: (event) =>
+          Effect.suspend(() => {
+            if (event._tag === 'Drafting')
+              if (event.drafts.length === 0) drafting.delete(event.threadId)
+              else drafting.set(event.threadId, event)
+            return Effect.asVoid(PubSub.publish(pubsub, event))
+          }),
+        drafting: Effect.sync(() => [...drafting.values()]),
         events: Stream.fromPubSub(pubsub),
         subscribe: Effect.map(PubSub.subscribe(pubsub), Stream.fromSubscription),
       })

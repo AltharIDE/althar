@@ -199,21 +199,24 @@ export function ChangeSet({
         <div className={s.facts}>
           <Head state={state} host={host} prs={prs} branch={branch} remote={remote} uncommitted={uncommitted} push={push} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}
-          {needs !== undefined && needs.length > 0 && (
-            <MergeNeeds
-              needs={needs}
-              host={host?.name ?? ''}
-              {...(target === undefined ? {} : { target })}
-              {...(checks === undefined ? {} : { checks })}
-              {...(needsText === undefined ? {} : { text: needsText })}
-            />
-          )}
-          {((checked && (needs === undefined || needs.length === 0)) || review !== undefined) && (
-            <div className={s.lines}>
-              {checked && (needs === undefined || needs.length === 0) && <ChecksLine checks={checks ?? []} t={t} />}
-              {review !== undefined && <ChangeReviewLine review={review} t={t} />}
-            </div>
-          )}
+          {/* its lines, a list: one rhythm down it, whatever the line holds */}
+          <div className={s.rows}>
+            {needs !== undefined && needs.length > 0 && (
+              <MergeNeeds
+                needs={needs}
+                host={host?.name ?? ''}
+                {...(target === undefined ? {} : { target })}
+                {...(checks === undefined ? {} : { checks })}
+                {...(needsText === undefined ? {} : { text: needsText })}
+              />
+            )}
+            {((checked && (needs === undefined || needs.length === 0)) || review !== undefined) && (
+              <div className={s.lines}>
+                {checked && (needs === undefined || needs.length === 0) && <ChecksLine checks={checks ?? []} t={t} />}
+                {review !== undefined && <ChangeReviewLine review={review} t={t} />}
+              </div>
+            )}
+          </div>
         </div>
         {acting && <div className={s.actions}>{actions}</div>}
         {error && (

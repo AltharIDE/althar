@@ -161,7 +161,8 @@ describe('the client', () => {
     await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
     const planned = await waitFor(
       () => client.getCoordinator(project.id, { limit: 50 }),
-      (snapshot) => snapshot.items.some((item) => item.kind === 'task'),
+      // Its plan, not only its card: the card is there from when the task is drafted, before its plan comes.
+      (snapshot) => snapshot.items.some((item) => item.kind === 'task' && item.content.plan != null),
     )
     const card = planned.items.find((item) => item.kind === 'task')
     const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
@@ -225,6 +226,16 @@ describe('the client', () => {
     const handlers = apiLayer(
       Effect.succeed(
         Api.of({
+          ListProjectWorkers: () => Effect.succeed([]),
+          ReadLaunchPreview: () => Effect.die('unused'),
+          OpenLaunchPreviewSocket: () => Effect.die('unused'),
+          ReadLaunchPreviewSocket: () => Stream.die('unused'),
+          WriteLaunchPreviewSocket: () => Effect.die('unused'),
+          CloseLaunchPreviewSocket: () => Effect.die('unused'),
+          PrepareWorkerSnapshot: () => Effect.die('unused'),
+          ReadWorkerFile: () => Effect.die('unused'),
+          ReadWorkerSnapshotChunk: () => Effect.die('unused'),
+          ReleaseWorkerSnapshot: () => Effect.die('unused'),
           WatchAttention: () => Stream.die('unused'),
           GetConnectionInfo: () => Effect.die('unused'),
           ListClientDevices: () => Effect.die('unused'),
@@ -235,6 +246,7 @@ describe('the client', () => {
           WatchFrom: () => Stream.die('unused'),
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
+          TrustBot: () => Effect.die('unused'),
           GetTaskFindings: () => Effect.die('unused'),
           GetLineComments: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
@@ -377,6 +389,7 @@ describe('the client', () => {
           SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
+          SetThreadGoal: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
           UndoTurn: () => Effect.die('unused'),
@@ -457,6 +470,7 @@ describe('the client', () => {
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),
           LeaveOutRepository: () => Effect.die('unused'),
+          AddParentRemote: () => Effect.die('unused'),
           SetRepository: () => Effect.die('unused'),
           CreateBranch: () => Effect.die('unused'),
           SetProjectRules: () => Effect.die('unused'),

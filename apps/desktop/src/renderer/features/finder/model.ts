@@ -88,6 +88,8 @@ const FILLER = new Set(
   ),
 )
 
+export const questionWords = (query: string) => wordsOf(query).filter((word) => !FILLER.has(word))
+
 export interface Found {
   readonly entry: Entry
   readonly score: number
@@ -148,7 +150,7 @@ const keyOf = (word: string) => fold(word).replace(/^#/, '')
 
 /** Scores every entry against the words, best first. */
 export const search = (entries: ReadonlyArray<Entry>, query: string, context: Context, ask: Ask = {}): ReadonlyArray<Found> => {
-  const words = ask.any === true ? wordsOf(query).filter((word) => !FILLER.has(word)) : wordsOf(query)
+  const words = ask.any === true ? questionWords(query) : wordsOf(query)
   const inside = ask.inside ?? 0.35
   const out: Array<Found> = []
   for (const entry of entries) {
@@ -163,11 +165,13 @@ export const search = (entries: ReadonlyArray<Entry>, query: string, context: Co
       const key = entry.keys?.some((one) => keyOf(one) === keyOf(word)) === true
       if (key) {
         exact = true
+        matched += 1
         score += 40
         continue
       }
       // The start of a number or a key: #84 finds #840 to #849.
       if (/\d/.test(word) && entry.keys?.some((one) => keyOf(one).startsWith(keyOf(word))) === true) {
+        matched += 1
         score += 14
         continue
       }

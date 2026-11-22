@@ -4,8 +4,32 @@ use prost::Message;
 use std::{error::Error, fmt};
 
 #[cfg(target_os = "linux")]
+pub mod agent;
+#[cfg(target_os = "linux")]
+mod agent_capacity;
+#[cfg(target_os = "linux")]
+mod agent_files;
+#[cfg(target_os = "linux")]
+mod agent_managed;
+#[cfg(target_os = "linux")]
+mod agent_preview;
+#[cfg(target_os = "linux")]
+mod agent_reservation;
+#[cfg(target_os = "linux")]
+mod agent_setup;
+#[cfg(target_os = "linux")]
+mod agent_skills;
+#[cfg(target_os = "linux")]
+mod agent_tools;
+#[cfg(target_os = "linux")]
+mod agent_workspace;
+#[cfg(target_os = "linux")]
+mod agent_workspace_set;
+#[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;
+#[cfg(target_os = "linux")]
+pub mod project;
 #[cfg(target_os = "linux")]
 pub mod relay;
 
@@ -61,6 +85,8 @@ pub fn worker_hello(worker_id: &str) -> Result<wire::WorkerFrame, HandshakeError
             max_version: PROTOCOL_VERSION,
             accepts_diagnostics: false,
             renews_diagnostic_lease: false,
+            streams_diagnostic_logs: false,
+            accepts_project_commands: false,
         })),
     })
 }
@@ -124,6 +150,8 @@ mod tests {
             version: PROTOCOL_VERSION,
             supports_diagnostics: false,
             supports_diagnostic_lease_renewal: false,
+            supports_diagnostic_logs: false,
+            supports_project_commands: false,
         }
     }
 

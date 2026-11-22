@@ -18,7 +18,7 @@ import { stageUpdate } from '../src/updates/stage'
 import { loadInstallation, readState } from '../src/updates/store'
 import { digest, releaseIdentity, type ReleaseManifest } from '../src/updates/release'
 import { releaseInfo } from '../src/updates/info'
-import type { BundleSource } from '../src/updates/bundle'
+import { copyHostAssets, type BundleSource } from '../src/updates/bundle'
 import type { UpdateServices } from '../src/updates/execute'
 import { temporary } from './support'
 
@@ -46,6 +46,7 @@ const assembleFixture = async (source: BundleSource, folder: string) => {
   copyFileSync(source.node, join(folder, 'node/bin/node'))
   chmodSync(join(folder, 'node/bin/node'), 0o700)
   put(join(folder, 'dist/althar-host.js'), readFileSync(source.entry, 'utf8'))
+  await copyHostAssets(bundle, join(folder, 'dist'))
   put(join(folder, 'node/LICENSE'), 'Process fixture; not a distributed release')
   put(join(folder, 'package.json'), '{"type":"module"}')
   put(join(folder, 'LICENSE'), 'Fixture application license')

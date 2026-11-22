@@ -6,7 +6,7 @@ matters, and says plainly what is decided but not built yet.
 
 | Document | What it covers |
 |---|---|
-| [Foundations](foundations.md) | The Electron shell and the runtime, the UI is instant, staying quick while the computer is busy, Effect, the desktop app's layers, how failures stay small, what CI gates, one feature for every host and agent, where the runtime runs |
+| [Foundations](foundations.md) | The Electron shell and the runtime, the UI is instant, staying quick while the computer is busy, Effect, the desktop app's layers, how failures stay small, what CI gates, numbers that can't collide, one feature for every host and agent, where the runtime runs |
 | [Agents](agents.md) | ACP, which agents join, accounts, briefs and switching, how models are picked, keeping context small, plan usage and what a task used |
 | [The coordinator](coordinator.md) | Always on, one pool of tools with leads, directing leads, its copies, its notes and handover, moving tasks, clearing its chat |
 | [What agents may do](what-agents-may-do.md) | Allow everything, what asks, speaking for the person, the sandbox as the boundary, git's guard, the person's rules, the web, what stays and why |
@@ -36,6 +36,11 @@ Edit the area document that holds it, so it keeps describing the current
 state, and add a dated line to that document's **Changes** list at its foot.
 There are no more numbered ADRs. A proposal that isn't decided yet lives in
 [`proposed/`](proposed/) until it is, and then folds into its area document.
+A proposal is numbered `NNN-name.md`, with the number after the last in the
+table below, and adds its row to the table in the same pull request. The
+`numbers` check refuses a number main or a pull request ahead of it in the
+merge queue already has
+([foundations § Numbers that can't collide](foundations.md#numbers-that-cant-collide)).
 
 Proposals waiting now:
 
@@ -98,14 +103,14 @@ one.
 | 028 | Linux windows, packages and the keyring | [packaging § Off a Mac: windows and the keyring](packaging.md#off-a-mac-windows-and-the-keyring) |
 | 029 | How hard the computer works is read by the runtime, only while a window shows it | [scheduling § Althar's share of the load](scheduling.md#althars-share-of-the-load) |
 | 030 | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge | [code-hosts § Conflicts](code-hosts.md#conflicts) |
-| 031 | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes | [coordinator § Handover before its context fills](coordinator.md#handover-before-its-context-fills) |
+| 031 | The coordinator compacts in place, with current project records | [coordinator § Compaction and session recovery](coordinator.md#compaction-and-session-recovery) |
 | 032 | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn | [scheduling § How many agents work at once](scheduling.md#how-many-agents-work-at-once) |
 | 033 | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node | [agents § The Node the adapters run on](agents.md#the-node-the-adapters-run-on) |
 | 034 | A task goes back to work whenever its lead does, and ships again in a pull request of its own | [tasks § Rounds: back to work, and shipping again](tasks.md#rounds-back-to-work-and-shipping-again), [reviews § How a review round runs](reviews.md#how-a-review-round-runs) |
 | 035 | A task's kind is read from what it has, and its card has nothing to press | [tasks § Kinds, read from what a task has](tasks.md#kinds-read-from-what-a-task-has), [reviews § Reviewing someone else's pull request](reviews.md#reviewing-someone-elses-pull-request) |
 | 036 | Anonymous usage data goes from the main process, named events only | [packaging § Usage data](packaging.md#usage-data) |
 | 037 | What the person does goes first, a task keeps its place between its steps, and new work waits | [scheduling § What goes first](scheduling.md#what-goes-first) |
-| 038 | A task's lead starts afresh before its context grows large | [agents § Keeping context small](agents.md#keeping-context-small) |
+| 038 | A task's lead compacts its context in place | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 039 | The person can have an agent compact its context, at once, with the agent's own command | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 040 | Until the person has looked, a change's checks are Althar's to see through | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |
 | 041 | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |
@@ -174,3 +179,4 @@ one.
 | [104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md) | A project keeps canvases: its agents write files and publish them as versions any lead or the coordinator can get, change and look at; HTML runs in a view and scheme of its own; the person's comments go to the conversation and stay on the canvas | Proposed, first slice built; would fold into [desktop-app](desktop-app.md), [tasks § What agents hand back](tasks.md#what-agents-hand-back) and [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |
 | 105 | Undo from a delivered task message restores its turn and later turns from private checkpoints, preserves commits and unrelated edits, and restarts the agent from retained context | [desktop-app § Undo from a task message](desktop-app.md#undo-from-a-task-message) |
 | [106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) | Agent process families share CPU where supported, with background priority and pressure-aware admission everywhere and no per-language setup | [scheduling § Process families](scheduling.md#how-agent-process-families-share-the-machine) |
+| 107 | Migrations keep their numbers, and `numbers` refuses a migration or ADR number main or a pull request ahead in the merge queue already has, with an open pull request's same number a warning | [foundations § Numbers that can't collide](foundations.md#numbers-that-cant-collide) |

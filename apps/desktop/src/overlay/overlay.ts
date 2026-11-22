@@ -37,7 +37,7 @@ export interface Overlay {
   /** Takes the element outlined, as a press would. */
   readonly take: () => void
   /** Draws these pins, in place of those drawn; returns how many of their elements are on the page. */
-  readonly pins: (pins: ReadonlyArray<Pin>) => number
+  readonly pins: (pins: ReadonlyArray<Pin>) => ReadonlyArray<number>
   /** Brings an element into view and describes it as it is now, or null where it isn't on the page. */
   readonly find: (selector: string) => Picked | null
 }
@@ -205,7 +205,7 @@ const install = (): { readonly overlay: Overlay; readonly mark: (rect: Box) => v
         return { ...pin, node }
       })
       redraw()
-      return list.filter((pin) => document.querySelector(pin.selector) !== null).length
+      return list.filter((pin) => document.querySelector(pin.selector) !== null).map((pin) => pin.n)
     },
     find: (selector) => {
       let element: Element | null = null

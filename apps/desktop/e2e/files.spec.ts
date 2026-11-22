@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, shown, startTask, toConversation } from './support'
+import { launch, openFirstProject, reveal, shown, startTask, toConversation } from './support'
 
 /*
  * Files and folders added to a message, in a real window with the fake
@@ -111,10 +111,11 @@ test('sends a PDF, a log and a folder to the coordinator and to a lead, which op
       page.getByText(/saw files: checkout-errors\.log \(linked, text\/plain, 55 B\): error: payment call timed out/),
     ).toBeVisible()
     await expect(page.getByText(/fixtures \(linked folder\): card-declined\.json, timeout\.json/)).toBeVisible()
-    const sent = page.getByRole('article', { name: 'You' }).filter({ hasText: 'Why does checkout fail?' })
+    const sent = page.getByRole('article', { name: 'You' }).filter({ hasText: 'Why does checkout fail?', visible: true })
     await expect(sent.getByText('checkout-errors.log')).toBeVisible()
     await expect(sent.getByText('2 files · 28 B')).toBeVisible()
-    await sent.screenshot({ path: 'test-results/files-sent.png', scale: 'css' })
+    await reveal(page, sent)
+    await page.screenshot({ path: 'test-results/files-sent.png', scale: 'css', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

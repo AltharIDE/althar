@@ -51,19 +51,21 @@ import { NOTHING_HEARD } from '../../shared/heard'
 import { Now } from '../../shared/Now'
 import { MINUTE, SECOND } from '../../shared/time'
 import { UnsentBringIn } from '../elsewhere/UnsentBringIn'
-import { useThreadHost } from '../../shared/ThreadHost'
+import { BoardWorkbench, ConversationFace, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
+import { useFootShown } from '../foot/shown'
 import { pages, usePage } from '../browser/pages'
+import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
 import {
   composerComment,
   cropsOf,
   drop,
-  giveBack as giveCommentsBack,
-  takeAll,
+  takeComments,
+  readingCommentCrops,
   useComments,
   withComments,
   canvasCommentsOf,
@@ -89,6 +91,7 @@ import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftingCard, useDraftingCards } from './DraftingCard'
+import { planIt, usePlansAsked } from '../../shared/planIt'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -241,32 +244,32 @@ const useBothWidth = () => {
 
 /**
  * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
- * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
- * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
- * property, which every element of the thread would inherit and have its style worked out again for each move. While
- * its divider is dragged, the column is marked `data-resizing`, so the thread in it lays out only the turns on screen.
- * What opens over the board (`over`) is drawn again on each move, as it is placed by the width and as wide as the room
- * it leaves: with a file open on it, that file's panel is drawn again too.
+ * its own so dragging redraws only the column and the workbench beside it.
  */
-function TalkColumn({
-  beside,
-  swapped,
-  children,
-  over,
-}: {
-  beside: boolean
-  /** On the right of the board: dragged by its start, and what opens over the board opens on its left. */
-  swapped: boolean
-  children: ReactNode
-  /** What opens over the board, against the conversation: by the conversation's width and the window's (`room`). */
-  over: (width: number, room: number) => ReactNode
-}) {
+function TalkColumn({ beside, swapped, children }: { beside: boolean; swapped: boolean; children: ReactNode }) {
   const both = useBothWidth()
   const column = useRef<HTMLDivElement>(null)
+  const [target, setTarget] = useState<HTMLDivElement | null>(null)
+  const board = useMemo(
+    () =>
+      beside && target !== null
+        ? {
+            target,
+            over: {
+              room: both.room - both.width,
+              keep: WIDTH.lane,
+              edge: swapped ? ('start' as const) : ('end' as const),
+              className: classes(s.over, swapped && s.overLeft),
+              style: swapped ? { right: both.width } : { left: both.width },
+            },
+          }
+        : null,
+    [beside, target, both.room, both.width, swapped],
+  )
   return (
     <>
       <div ref={column} className={s.talk} style={beside ? { width: both.width } : undefined}>
-        {children}
+        <BoardWorkbench.Provider value={board}>{children}</BoardWorkbench.Provider>
         {beside && (
           <ResizeHandle
             value={both.width}
@@ -281,7 +284,7 @@ function TalkColumn({
           />
         )}
       </div>
-      {beside && over(both.width, both.room)}
+      {beside && <div ref={setTarget} style={{ display: 'contents' }} />}
     </>
   )
 }
@@ -341,6 +344,7 @@ export function ProjectView({
   const [home, setHome] = useState<HomeRoom>(asked !== undefined && isHome(asked) ? asked : Room.Both)
   if (isHome(room) && room !== home) setHome(room)
   const [swapped, swap] = useSwapped()
+  const [footShown, setFootShown] = useFootShown()
   const panes = shownOf(room)
   const both = panes.talk && panes.board
   const coordinatorFace = useRef<HTMLDivElement>(null)
@@ -374,10 +378,17 @@ export function ProjectView({
   const closing = useClosePullRequests()
   /** A pane shown or hidden, from ⋯ or its key. */
   const togglePane = useCallback((pane: Pane) => setRoom((was) => toggled(was, home, pane)), [home])
-  // c and b toggle the conversation and the board, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
+  // c and b toggle the conversation and the board, t the terminal bar, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.key !== 'b' && event.key !== 'c') || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
+      if (
+        (event.key !== 'b' && event.key !== 'c' && event.key !== 't') ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.defaultPrevented
+      )
+        return
       const target = event.target
       if (
         target instanceof HTMLElement &&
@@ -385,18 +396,26 @@ export function ProjectView({
       )
         return
       event.preventDefault()
-      togglePane(event.key === 'c' ? 'talk' : 'board')
+      if (event.key === 't') setFootShown(!footShown)
+      else togglePane(event.key === 'c' ? 'talk' : 'board')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane])
+  }, [togglePane, footShown, setFootShown])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
-  // What was said in every conversation, for the bar's search: read as it opens (the finder's catalog, kept a moment), the
-  // titles being found at once without it.
-  const [asideSearching, setAsideSearching] = useState(false)
+  // Titles already in the bar are found at once. Only matching passages in
+  // this project come back from the store as the person types.
+  const [asideSearch, setAsideSearch] = useState('')
   const catalogClient = useServices().client
-  const said = useQuery({ ...catalogRead(catalogClient), enabled: asideSearching }).data
+  const asideWords = asideSearch.trim()
+  const said = useQuery(
+    catalogRead(
+      catalogClient,
+      { text: asideWords, kinds: ['said'], ...(about === null ? {} : { projectId: about }) },
+      about !== null && asideWords !== '',
+    ),
+  ).data?.documents
   const passages = useMemo(() => (said === undefined ? undefined : passagesOf(said, about)), [said, about])
   const draftOf = draftKey.coordinator(about ?? '')
   // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the project again.
@@ -456,6 +475,7 @@ export function ProjectView({
   }, [pageWhere, beforeKey, about])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
+  useDraftCanvasVersions(draftOf, comments)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread, a page.
   const shown = useThreadHost(
@@ -500,7 +520,7 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
-  // The tasks the coordinator is drafting, each as its card fills in, until the thread's card takes its place.
+  // The tasks the coordinator is drafting, each as its card fills in, in its card's place in the thread once it is a task.
   const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
@@ -528,6 +548,8 @@ export function ProjectView({
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
+  // With a stand-in for each draft that is a task, its card not read yet, where it will be.
+  const draftedItems = drafting.placed
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
   const reading = readingNow(session, model.pending, false, coordinator?.accepting)
@@ -538,7 +560,7 @@ export function ProjectView({
       coordinatorItems === undefined
         ? null
         : {
-            items: coordinatorItems,
+            items: draftedItems,
             turnRunning: busy,
             turnStarted,
             reading,
@@ -548,7 +570,7 @@ export function ProjectView({
             queue,
             turns: turnsById(turns),
           },
-    [coordinatorItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
+    [coordinatorItems, draftedItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
   )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -600,12 +622,15 @@ export function ProjectView({
 
   // The team of a task, open from its row up next or from a small change's card, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
+  // Drafts whose plan the person asked for, each until its ask is over (`usePlansAsked`).
+  const plansAsked = usePlansAsked(coordinator?.items ?? NO_DRAFTED_ITEMS, session)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
-    onStart: (planId) => void model.startPlan(planId),
+    workers: model.workers,
+    onStart: (planId, workerId) => model.startPlan(planId, workerId),
     onHold: (planId) => void model.holdPlan(planId),
     onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
     onReopen: (taskId) => void model.reopenTask(taskId),
@@ -619,6 +644,18 @@ export function ProjectView({
       (seen?.tasks ?? NO_TASKS).some((one) => one.taskId === taskId && opensInPlace(one)) ? asides.pick(taskId) : onTask(threadId),
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
+    // A draft whose plan didn't come: the coordinator is asked for it, in the person's words, which show in the thread at once.
+    onPlanDraft: (task) => {
+      plansAsked.ask(task)
+      void model
+        .say(planIt(task), null)
+        .then((sent) => {
+          if (!sent) plansAsked.unask(task.taskId)
+        })
+        .catch(() => plansAsked.unask(task.taskId))
+    },
+    planAsked: plansAsked.asked,
+    onDiscard: (taskId) => model.discardTask(taskId),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
     ...(presets === undefined
@@ -670,39 +707,41 @@ export function ProjectView({
       return
     }
     // Images that can't go yet hold the message back, and the composer says why.
-    const own = images.take(receiver)
-    if (own === null) return
-    // The comments made on a page beside the conversation go after the person's words, their crops after the person's own pictures.
-    const gathered = takeAll(draftOf)
     const pictures = receiver.takes !== false
-    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-    const outgoing: Outgoing = {
-      ...own,
-      sent: [...own.sent, ...crops.sent],
-      pictures: [...own.pictures, ...crops.pictures],
-      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
-      canvasComments: canvasCommentsOf(gathered),
-    }
-    const words = withComments(body, gathered, own.sent.length, pictures)
+    const own = images.take(receiver, pictures && readingCommentCrops(draftOf))
+    if (own === null) return
+    const batch = takeComments(draftOf)
     setDraft('')
     images.clear()
     const picked = waiting
     if (picked !== null) setHandover(null)
-    const said =
-      picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
     // Sent from under the board, the coordinator's conversation comes back for the answer.
     if (docked) {
       asides.back()
       togglePane('talk')
     }
-    // One Althar doesn't take goes back in the composer: its words, its images and comments, and the agent picked to take over.
-    void said.then((accepted) => {
-      if (accepted) return
+    const gathered = batch.taken
+    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      canvasComments: canvasCommentsOf(gathered),
+      onAccepted: () => batch.finish(true),
+    }
+    const words = withComments(body, gathered, own.sent.length, pictures)
+    const restore = () => {
+      batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      giveCommentsBack(draftOf, gathered)
       if (picked !== null) setHandover(picked)
-    })
+    }
+    const said =
+      picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
+    void said.then((accepted) => {
+      if (accepted) batch.finish(true)
+      else restore()
+    }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -825,13 +864,16 @@ export function ProjectView({
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
-          // Pressed, a comment opens again on its page beside the conversation.
-          pages.place(about, 'beside')
+          const spot = comments.find((one) => one.id === id)?.on
           setRoom((was) => {
             rememberRoom(was)
             return Room.Talk
           })
-          pages.reopen(about, id)
+          if (spot?.kind === 'canvas') shown.openCanvas(spot.canvasId, spot.version, false)
+          if (spot?.kind === 'page') {
+            pages.place(about, 'beside')
+            pages.reopen(about, id)
+          }
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
@@ -919,7 +961,14 @@ export function ProjectView({
       room={room}
       // Home is the home as it was last laid out.
       onRoom={(next) => setRoom(next === Room.Both ? home : next)}
-      panes={{ shown: panes, onToggle: togglePane, swapped, onSwap: swap, keys: { talk: 'c', board: 'b' } }}
+      panes={{
+        shown: panes,
+        onToggle: togglePane,
+        swapped,
+        onSwap: swap,
+        keys: { talk: 'c', board: 'b' },
+        foot: { shown: footShown, onToggle: () => setFootShown(!footShown), key: 't' },
+      }}
       settingsNeedYou={settingsNeedYou}
       automationsNeedYou={automations.needsYou}
       parts={partsOf({
@@ -1012,23 +1061,7 @@ export function ProjectView({
         ) : (
           <div className={classes(s.rooms, both && s.both, both && swapped && s.swapped)}>
             {panes.talk && (
-              <TalkColumn
-                beside={both}
-                swapped={swapped}
-                /*
-                 * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
-                 * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
-                 */
-                over={(width, windowWidth) =>
-                  shown.workbench(null, {
-                    room: windowWidth - width,
-                    keep: WIDTH.lane,
-                    edge: swapped ? 'start' : 'end',
-                    className: classes(s.over, swapped && s.overLeft),
-                    style: swapped ? { right: width } : { left: width },
-                  })
-                }
-              >
+              <TalkColumn beside={both} swapped={swapped}>
                 {coordinator === null ? (
                   model.error === null ? (
                     <div className={s.reading}>
@@ -1058,7 +1091,7 @@ export function ProjectView({
                             board={seen?.tasks ?? []}
                             now={Date.parse(now)}
                             passages={passages}
-                            onSearching={setAsideSearching}
+                            onSearch={setAsideSearch}
                           />
                         )}
                       </Now>
@@ -1086,13 +1119,7 @@ export function ProjectView({
                       </TaskFace>
                     ) : (
                       <div ref={coordinatorFace} className={s.coordinatorFace}>
-                        <TaskFace
-                          className={s.face}
-                          composer={composer}
-                          under
-                          // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
-                          {...(both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
-                        >
+                        <ConversationFace className={s.face} composer={composer} under host={shown}>
                           <Thread label={text.conversation} busy={busy}>
                             {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
                             {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
@@ -1123,7 +1150,23 @@ export function ProjectView({
                                 retryable={coordinator.retryable}
                                 {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                                 {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                                card={(card) => <Card card={card} actions={actions} />}
+                                card={(card) => {
+                                  // Still being drafted: the live draft fills its card's place, until its plan is in.
+                                  const draft = drafting.inPlace(card)
+                                  return draft === undefined ? (
+                                    <Card card={card} actions={actions} />
+                                  ) : (
+                                    <DraftingCard
+                                      draft={draft}
+                                      project={name}
+                                      held={drafting.held(draft)}
+                                      onHold={() => drafting.hold(draft)}
+                                      onPlan={actions.onPlanDraft}
+                                      planAsked={actions.planAsked}
+                                      onDiscard={actions.onDiscard}
+                                    />
+                                  )
+                                }}
                                 draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                                 automation={(card, itemId) => (
                                   <AutomationInThread
@@ -1159,11 +1202,14 @@ export function ProjectView({
                                   project={name}
                                   held={drafting.held(draft)}
                                   onHold={() => drafting.hold(draft)}
+                                  onPlan={actions.onPlanDraft}
+                                  planAsked={actions.planAsked}
+                                  onDiscard={actions.onDiscard}
                                 />
                               ))}
                             </ThreadShellProvider>
                           </Thread>
-                        </TaskFace>
+                        </ConversationFace>
                         <AskInAside within={coordinatorFace} onAsk={asides.begin} />
                       </div>
                     )}
@@ -1207,7 +1253,9 @@ export function ProjectView({
                           {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                           team={{
                             projectId,
-                            start: (planId) => model.startPlan(planId),
+                            start: async (planId) => {
+                              await model.startPlan(planId)
+                            },
                             hold: (planId) => model.holdPlan(planId),
                             change: setTeamFor,
                           }}

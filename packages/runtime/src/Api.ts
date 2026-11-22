@@ -1,6 +1,9 @@
+import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
+import { taskWorker } from './workerExecution'
+import { WorkerSnapshots } from './WorkerSnapshots'
+import { workerPreviewSockets } from './workerPreviewSockets'
 import { agentCatalogHandlers } from './AgentCatalog'
-import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -21,6 +24,8 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type GoalControl,
+  goalCommand,
   type StorageSize,
   type Attachment,
   type PortLike,
@@ -30,10 +35,14 @@ import {
   type SentFile,
   type SentImage,
   type LineComment,
+  workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerRepositoryLimit,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
-import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -83,6 +92,8 @@ import { Launches } from './Launches'
 import { Terminals } from './Terminals'
 import { LeftBehind } from './LeftBehind'
 import { localTasksIn } from './local'
+import { PARENT_KEPT, tellOf, toldOf } from './forks'
+import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -106,9 +117,11 @@ import {
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
+  trustedBotsOf,
   usageLimitOf,
   afterMergeReviewOf,
 } from './Policies'
+import { botLogin, botName } from './reviewerBots'
 import { Models } from './Models'
 import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
@@ -163,6 +176,7 @@ import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { searchDocuments } from './searchDocuments'
+import { findDocuments } from './finderIndex'
 import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
@@ -209,6 +223,9 @@ const PUSHABLE_KEPT = 5 * 60_000
 
 /** How long a repository's page waits for a host to say who can push: it reads on without. */
 const PUSHABLE_WAIT = Duration.seconds(5)
+
+/** How long a host that didn't say whether a repository is a fork (it failed, took too long, or doesn't say) isn't asked again. */
+const PARENT_RETRY = 5 * 60_000
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 /** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
@@ -277,6 +294,7 @@ export const handlers = apiLayer(
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     type QueryServices =
       | SqlClient.SqlClient
+      | Database.ReadLane
       | RuntimeConfig
       | Accounts
       | Agents
@@ -292,6 +310,9 @@ export const handlers = apiLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const workerSnapshots = yield* WorkerSnapshots
+    const previews = workerPreviewSockets(yield* Effect.scope)
+    yield* Effect.addFinalizer(() => previews.close)
     const terminals = yield* Terminals
     const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
@@ -341,7 +362,7 @@ export const handlers = apiLayer(
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
-    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
     // What bringing a task's removed folder back needs (ADR-056).
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
@@ -500,7 +521,7 @@ export const handlers = apiLayer(
 
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
       Effect.provideContext(
-        Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
+        Effect.catchCause(timedCall(effect), (cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
           const error = Cause.findErrorOption(cause)
           // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -517,6 +538,30 @@ export const handlers = apiLayer(
         }),
         queryContext,
       )
+
+    const personSetsGoal = sender.kind === 'window' || sender.kind === 'paired_device'
+    const setThreadGoal = (
+      threadId: string,
+      control: GoalControl,
+      lead?: { readonly agentId: string; readonly model?: string | undefined; readonly effort?: string | undefined },
+    ) =>
+      Effect.gen(function* () {
+        if (!personSetsGoal)
+          return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+        const choice =
+          lead === undefined
+            ? undefined
+            : {
+                agentId: lead.agentId,
+                ...(lead.model === undefined ? {} : { model: lead.model }),
+                ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+              }
+        const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
+        if (!result.changed) return result.goal
+        if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
+        if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
+        return result.goal
+      })
 
     /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
     const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
@@ -609,6 +654,52 @@ export const handlers = apiLayer(
         return can
       })
 
+    /** When each `origin` last had no answer from its host, by its address: asked again only after PARENT_RETRY. */
+    const unanswered = new Map<string, number>()
+
+    /**
+     * Asks the host of a repository's `origin` whether it is a fork, and of
+     * which repository, through the connection that reaches it, and keeps the
+     * answer (forks.ts) for PARENT_KEPT, so reading the project again doesn't
+     * ask again. A host that can't be reached, or doesn't say, leaves what was
+     * known: the remotes' names, or what a host said before; and isn't asked
+     * again for PARENT_RETRY, so one that hangs holds up reading a project's
+     * repositories once, not every time. True where the answer is new.
+     */
+    const askParent = (path: string | null) =>
+      Effect.gen(function* () {
+        if (path === null) return false
+        const origin = (yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))).find((remote) => remote.name === 'origin')
+        if (origin === undefined) return false
+        const now = yield* Clock.currentTimeMillis
+        const kept = toldOf(origin.url)
+        if (kept !== undefined && now - kept.at < PARENT_KEPT) return false
+        const missed = unanswered.get(origin.url)
+        if (missed !== undefined && now - missed < PARENT_RETRY) return false
+        const found = yield* Effect.orElseSucceed(connections.hostOf([origin.url]), () => null)
+        if (found === null) return false
+        const read = yield* found.host.repository(found.path).pipe(
+          Effect.timeout(PUSHABLE_WAIT),
+          Effect.orElseSucceed(() => null),
+        )
+        const changed = read !== null && tellOf(origin.url, read, now, found.host.product)
+        if (toldOf(origin.url)?.at === now) unanswered.delete(origin.url)
+        else unanswered.set(origin.url, now)
+        return changed
+      })
+
+    /**
+     * A project's repositories as its page shows them, each fork as its host says, asked first, all at once: where a host's answer
+     * is new, they are read again with it.
+     */
+    const repositoriesShown = (projectId: string) =>
+      Effect.gen(function* () {
+        const first = yield* projects.repositories(projectId)
+        const asked = yield* Effect.forEach(first, (repository) => askParent(repository.path), { concurrency: 'unbounded' })
+        const list = asked.some(Boolean) ? yield* projects.repositories(projectId) : first
+        return yield* Effect.forEach(list, repositoryOf, { concurrency: 'unbounded' })
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
@@ -624,6 +715,8 @@ export const handlers = apiLayer(
             : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
                 fork: forked.fork,
                 upstream: forked.upstream,
+                remote: forked.upstreamRemote,
+                by: forked.by,
                 target: forked.target,
                 canPush,
                 offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
@@ -682,13 +775,23 @@ export const handlers = apiLayer(
         }
         // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
         const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
+        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (code-hosts § Review and triage bots).
+        const spoke = yield* sql<{ login: string | null; name: string | null }>`
+          SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
+          WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
+        const trusted = new Set(trustedBotsOf(rules).map(botLogin))
+        const suggested = new Map<string, { readonly login: string; readonly name: string }>()
+        for (const one of spoke)
+          if (one.login !== null && !trusted.has(one.login) && !suggested.has(one.login))
+            suggested.set(one.login, { login: one.login, name: one.name ?? botName(one.login) })
+        const suggestedBots = [...suggested.values()]
+        return { ...rulesFields(projectId, rules), suggestedBots, revision, conventions, sandbox, tally }
       })
 
     const rulesFields = (
       projectId: string,
       rules: ProjectRules,
-    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally' | 'suggestedBots'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -704,6 +807,7 @@ export const handlers = apiLayer(
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
+        trustedBots: trustedBotsOf(rules).map((login) => ({ login, name: botName(login) })),
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
@@ -754,17 +858,6 @@ export const handlers = apiLayer(
         ),
       )
 
-    /* Each agent's version, asked of its CLI once a launch. */
-    const versions = new Map<string, string | null>()
-    const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
-        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(
-            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
-            // Asked again next time: one that failed says no version, not a wrong one.
-            contained('Status.version', () => null, entry.definition.id),
-          )
-
     /*
      * An agent, with its accounts: each check starts the agent's own status
      * command, in the account's home. An agent that couldn't be looked at
@@ -787,7 +880,7 @@ export const handlers = apiLayer(
               : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version: yield* installs.version(entry.definition).pipe(contained('Status.version', () => null, entry.definition.id)),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
@@ -861,7 +954,10 @@ export const handlers = apiLayer(
     const streaming = (deltas: boolean): Stream.Stream<WatchEvent> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const events = Stream.flatMap(yield* live.subscribe, (event) => {
+          // Listening first, then what is being drafted now: nothing between is missed, and a newer draft takes its place.
+          const subscribed = yield* live.subscribe
+          const now = yield* live.drafting
+          const events = Stream.flatMap(Stream.concat(Stream.fromIterable(now), subscribed), (event) => {
             const shown = watchedOf(event)
             return shown === undefined ? Stream.empty : Stream.make(shown)
           })
@@ -1164,8 +1260,7 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) =>
-        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
+      GetRepositories: ({ projectId }) => api(repositoriesShown(projectId)),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -1215,6 +1310,16 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      AddParentRemote: ({ commandId, projectId, repositoryId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.add_parent_remote', { projectId, repositoryId }, commandId)
+              yield* projects.addParentRemote(projectId, repositoryId, said.commandId)
+            }),
+          ),
+        ),
       CreateBranch: ({ commandId, projectId, repositoryId, branch }) =>
         once(
           commandId,
@@ -1229,12 +1334,13 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
-      GetSearchDocuments: ({ after }) =>
+      GetSearchDocuments: ({ after, search }) =>
         api(
           Effect.gen(function* () {
             const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
-            return yield* searchDocuments(after, working)
+            return yield* search === undefined ? searchDocuments(after, working) : findDocuments(search, working)
           }),
         ),
       GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
@@ -1298,10 +1404,10 @@ export const handlers = apiLayer(
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
       GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
-      GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetBoard: ({ projectId, cached }) => api(queries.board(projectId, cached)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
-      GetHome: ({ since }) => api(queries.home(since, identity.deviceId)),
+      GetHome: ({ since, cached }) => api(queries.home(since, identity.deviceId, cached)),
       LeftHome: () =>
         api(
           Effect.gen(function* () {
@@ -1574,13 +1680,14 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              yield* Effect.provideContext(pauseGoal(threadId), store)
               const live = yield* sessions.running(threadId)
               if (Option.isNone(live) || !live.value.turnRunning) {
                 const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId)
+              yield* sessions.interrupt(threadId, 'person', true)
             }),
           ),
         ),
@@ -1638,7 +1745,15 @@ export const handlers = apiLayer(
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+        once(
+          commandId,
+          api(
+            Effect.andThen(
+              Effect.provideContext(pauseGoal(threadId), store),
+              Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })),
+            ),
+          ),
+        ),
       SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
         once(
           commandId,
@@ -1726,11 +1841,36 @@ export const handlers = apiLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
+      SetThreadGoal: ({ threadId, control, lead }) => api(setThreadGoal(threadId, control, lead)),
       Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
             Effect.gen(function* () {
+              const goal = goalCommand(body)
+              if (goal !== undefined) {
+                const task = yield* goalThread(threadId)
+                if (task !== undefined) {
+                  if (!personSetsGoal)
+                    return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+                  if ([images, files, comments, canvasComments].some((parts) => (parts?.length ?? 0) > 0))
+                    return yield* new ApiError({ reason: 'Invalid', message: 'Send attachments in a message alongside the goal.' })
+                  if (goal.action !== 'show') yield* setThreadGoal(threadId, goal)
+                  else {
+                    const current = yield* readGoal(threadId)
+                    yield* Effect.provideContext(
+                      addItem({ projectId: task.projectId, threadId }, 'notice', {
+                        source: 'runtime',
+                        severity: 'info',
+                        title: current === null ? 'Set an objective with /goal.' : `Goal · ${current.waiting ? 'waiting' : current.status}`,
+                        ...(current === null ? {} : { description: current.objective }),
+                      }),
+                      store,
+                    )
+                  }
+                  return
+                }
+              }
               // A conversation brought in from another tool that it still has open waits, before anything of it is kept.
               yield* closedElsewhere(threadId)
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
@@ -1787,7 +1927,20 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
+      StartTask: ({
+        commandId,
+        projectId,
+        title,
+        description,
+        steps,
+        issue: named,
+        issues: others,
+        end,
+        repositories,
+        chat,
+        taskId,
+        workerId,
+      }) =>
         once(
           commandId,
           api(
@@ -1797,14 +1950,36 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              let repositoryLimit: number | undefined
+              if (workerId !== undefined) {
+                const available = config.workers?.list(projectId) ?? []
+                const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
+                const message = aside
+                  ? 'This task stays on its home.'
+                  : workerId === 'auto' && worker === undefined
+                    ? automaticWorkerUnavailable
+                    : workerProblem(worker, steps)
+                if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
+                repositoryLimit =
+                  workerId === 'auto'
+                    ? Math.max(
+                        1,
+                        ...available
+                          .filter((one) => workerProblem(one, steps) === undefined)
+                          .map((one) => workerRepositoryLimit(one, steps)),
+                      )
+                    : workerRepositoryLimit(worker, steps)
+              }
+
               const created = yield* projects.createTask({
-                envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
+                envelope: yield* envelope('task.create', { projectId, title, description, issue, workerId }, commandId),
                 projectId,
                 title,
                 ...(description === undefined ? {} : { description }),
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
+                ...(repositoryLimit === undefined ? {} : { workerRepositoryLimit: repositoryLimit }),
                 ...(taskId === undefined ? {} : { taskId }),
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
@@ -1822,6 +1997,7 @@ export const handlers = apiLayer(
                 reason: null,
                 actorId: actorId,
                 startsIn: Duration.zero,
+                ...(workerId === undefined ? {} : { held: true }),
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
@@ -1832,12 +2008,12 @@ export const handlers = apiLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, actorId)
+              yield* plans.start(planId, actorId, workerId)
               return yield* queries.task(created.taskId)
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
+      StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
@@ -2351,6 +2527,25 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      TrustBot: ({ commandId, taskId, login }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+              const { rules } = yield* policies.current(task.projectId as ProjectId)
+              const trusted = trustedBotsOf(rules)
+              if (trusted.map(botLogin).includes(botLogin(login))) return
+              yield* applyRules(task.projectId, { trustedBots: [...trusted, login] }, instance.personId).pipe(
+                Effect.provideService(Policies, policies),
+                Effect.provideService(Permissions, permissions),
+                Effect.provideService(Changes, pullRequests),
+                Effect.provideService(PullRequestScreenshots, screenshots),
+              )
+            }),
+          ),
+        ),
       SetProjectAccounts: ({ commandId, projectId, rotate, only }) =>
         once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, actorId))),
       SetUsageLimit: ({ commandId, projectId, policy }) => once(commandId, api(policies.setUsageLimit(projectId, policy, actorId))),
@@ -2449,7 +2644,6 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const entry = yield* agents.get(agentId)
             yield* installs.install(entry.definition)
-            versions.delete(agentId)
             yield* models.forget(agentId)
           }),
         ),
@@ -2457,7 +2651,7 @@ export const handlers = apiLayer(
         api(
           Effect.gen(function* () {
             const open = config.editors?.open
-            if (open === undefined) return false
+            if (open === undefined || (yield* taskWorker(taskId)) !== null) return false
             yield* openingFolder(taskId)
             // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
             const worktrees = yield* sql<{ path: string }>`
@@ -2478,7 +2672,10 @@ export const handlers = apiLayer(
             const open = config.editors?.open
             if (open === undefined) return false
             const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
-            if (thread?.taskId != null) yield* openingFolder(thread.taskId)
+            if (thread?.taskId != null) {
+              if ((yield* taskWorker(thread.taskId)) !== null) return false
+              yield* openingFolder(thread.taskId)
+            }
             const place = yield* queries.codeRoots(threadId)
             const found = codeRootOf(place, path)
             if (found === null) return false
@@ -2633,6 +2830,32 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
+      ReadLaunchPreview: (input) => api(launches.preview(input)),
+      OpenLaunchPreviewSocket: (input) => api(previews.open(launches.previewSocket(input))),
+      ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
+      WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
+      CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
+        api(
+          Effect.gen(function* () {
+            const [site] = yield* sql<{ path: string }>`SELECT path FROM workspaces
+            WHERE task_id = ${taskId} AND project_id = ${projectId} AND device_id = ${instance.deviceId}
+              AND access = 'write' AND state = 'ready'
+              AND (${workspaceId ?? null} IS NULL OR id = ${workspaceId ?? null})
+            ORDER BY created_at, rowid LIMIT 1`
+            const workerId = yield* taskWorker(taskId)
+            const read = config.workers?.readFile
+            if (site === undefined || workerId === null || read === undefined)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This worker file is unavailable.' })
+            const file = yield* read({ workerId, projectId, worktree: site.path, path: relativePath }).pipe(
+              Effect.mapError((error) => new ApiError({ reason: 'NotFound', message: error.message })),
+            )
+            return { sha256: file.sha256, size: file.bytes.byteLength, bodyBase64: Buffer.from(file.bytes).toString('base64') }
+          }),
+        ),
+      PrepareWorkerSnapshot: (input) => api(workerSnapshots.prepare(identity, input)),
+      ReadWorkerSnapshotChunk: (input) => workerSnapshots.read(identity, input),
+      ReleaseWorkerSnapshot: ({ id }) => workerSnapshots.release(identity, id),
       OpenTerminal: ({ commandId, ...input }) =>
         once(
           commandId,
@@ -2779,7 +3002,12 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                   reason: 'PersonRequired',
                   message: 'This call needs the person in the window or on a paired device.',
                 })
-              const positioned = Effect.flatMap(effect, (value) => {
+              const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
+              const prioritized = effect.pipe(
+                Effect.provideService(Foreground, !background),
+                Effect.provideService(Database.ReadPriority, background ? 'background' : 'interactive'),
+              )
+              const positioned = Effect.flatMap(prioritized, (value) => {
                 if (typeof value !== 'object' || value === null || !('cursor' in value) || typeof value.cursor !== 'number')
                   return Effect.succeed(value)
                 const cursor = value.cursor
@@ -2800,9 +3028,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
                 // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
-                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
-                  ? behind.withPermits(1)(positioned)
-                  : positioned
+                return yield* background ? behind.withPermits(1)(positioned) : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
               const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
               const handle = Effect.andThen(identities.check(identity), positioned).pipe(

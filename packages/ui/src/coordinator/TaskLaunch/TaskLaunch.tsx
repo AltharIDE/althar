@@ -119,10 +119,14 @@ export type LaunchPhase = 'writing' | 'sizing' | 'lead' | 'review' | 'end'
 /**
  * A plan still being drafted: the card shows as the coordinator writes it.
  * Its steps so far are `steps`, a step whose model isn't chosen yet with no
- * agents; the title is '' until written.
+ * agents; the title is '' until written. `ended` once drafting stopped short of
+ * a plan: `unplanned`, its plan didn't come, which it says plainly, offering to
+ * plan or discard it; `discarded`, its task was discarded. Nothing on it moves
+ * then.
  */
 export interface LaunchDrafting {
   readonly phase: LaunchPhase
+  readonly ended?: 'unplanned' | 'discarded'
 }
 
 export interface TaskLaunchText {
@@ -174,6 +178,12 @@ export interface TaskLaunchText {
   deciding: string
   /** Drafting, held: it won't start once planned until it is started. */
   heldDrafting: string
+  /** Drafting stopped short of a plan: the kicker without a preset, what its foot says, and what it offers. */
+  draft: string
+  unplanned: string
+  discarded: string
+  plan: string
+  discard: string
   /** The skip in the picker of a step that can be skipped. */
   skipStep: (step: LaunchStep) => string
   /** A task it waits for, as a row: its merge is the stop. */
@@ -231,6 +241,11 @@ export const taskLaunchText: TaskLaunchText = {
   open: 'Open seat',
   deciding: 'Deciding…',
   heldDrafting: 'Held · starts when you say',
+  draft: 'Draft',
+  unplanned: 'No plan yet',
+  discarded: 'Discarded',
+  plan: 'Plan it',
+  discard: 'Discard',
   skipStep: (step) => `Skip the ${step.label.toLowerCase()}`,
   merges: (name) => `${name} merges`,
   stands: blockerStandsText,
@@ -531,13 +546,19 @@ export interface TaskLaunchProps {
   /** Makes a branch its list doesn't have, from the default branch, for it to work toward; without it, only one listed. */
   onCreateBranch?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
-  onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
+  onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void | Promise<boolean>
+  /** An explicit launch choice needs to change before the task can start. */
+  startDisabled?: boolean
   /**
    * Still being drafted: it shows as the coordinator writes it, with no
    * choices yet and Hold its only action. Its end, without `end`, isn't
    * known yet.
    */
   drafting?: LaunchDrafting
+  /** Drafting ended with no plan: asks for its plan, from its foot. */
+  onPlan?: () => void
+  /** Drafting ended with no plan: discards it, from its foot. */
+  onDiscard?: () => void
   /** Something offered about the task, quiet in the foot after the estimate, below Start: keeping its parts as a preset. */
   footNote?: ReactNode
   /**
@@ -586,7 +607,10 @@ export function TaskLaunch({
   onTowardChange,
   onCreateBranch,
   onStart,
+  startDisabled = false,
   drafting,
+  onPlan,
+  onDiscard,
   waitsFor = [],
   text,
 }: TaskLaunchProps) {
@@ -605,9 +629,16 @@ export function TaskLaunch({
     onScreen.current = true
   }, [])
   const start = () => {
-    if (started || drafting !== undefined) return
+    if (started || drafting !== undefined || startDisabled) return
     setStarted(true)
-    onStart(steps, end)
+    const attempt = onStart(steps, end)
+    if (attempt !== undefined)
+      void attempt.then(
+        (accepted) => {
+          if (!accepted) setStarted(false)
+        },
+        () => setStarted(false),
+      )
   }
   const startWhenDue = useEffectEvent(start)
   // Waiting for other tasks, it runs no clock of its own: it starts once they merge.
@@ -631,8 +662,8 @@ export function TaskLaunch({
   const [announced, setAnnounced] = useState(false)
   if (seen && !announced) setAnnounced(true)
   const when = (() => {
+    if (due || started) return t.starting
     if (held) return t.held
-    if (due) return t.starting
     if (seen || startsAt !== undefined) return t.startsIn(left)
     return t.startsAfterSeen(left)
   })()
@@ -661,7 +692,9 @@ export function TaskLaunch({
   const where = worksIn === undefined || drafting !== undefined ? null : whereLine(worksIn, worksInWhy, localTaken ?? null, t)
 
   // A row for each of each step's agents, or one for a step whose agent isn't chosen yet; then how the work ends.
-  const phase = drafting?.phase
+  // Drafting that stopped short of a plan is at nothing: no row is being chosen, nothing turns.
+  const ended = drafting?.ended
+  const phase = ended === undefined ? drafting?.phase : undefined
   const choosingStep = phase === 'lead' ? 0 : phase === 'review' ? 1 : -1
   const rows = steps.flatMap((st, i) =>
     st.agents.length === 0
@@ -678,7 +711,7 @@ export function TaskLaunch({
         : row.i === 0 && (phase === 'writing' || phase === 'sizing')
           ? 'next'
           : 'idle'
-  const endState: NodeState = endKnown ? 'filled' : phase === 'end' ? 'choosing' : 'idle'
+  const endState: NodeState = endKnown && ended === undefined ? 'filled' : phase === 'end' ? 'choosing' : 'idle'
   const states = [...rows.map(stateOf), ...(endRow ? [endState] : [])]
   const linkAt = (n: number) => {
     const next = states[n + 1]
@@ -689,15 +722,15 @@ export function TaskLaunch({
   return (
     <OnScreen.Provider value={onScreen}>
       <div
-        className={cx(s.launch, held && s.held, drafting !== undefined && s.drafting)}
+        className={cx(s.launch, held && s.held, drafting !== undefined && s.drafting, ended === 'discarded' && s.discarded)}
         ref={ref}
         data-rhythm={Rhythm.Card}
-        aria-busy={drafting !== undefined}
+        aria-busy={drafting !== undefined && ended === undefined}
       >
         <div className={s.head}>
           {(preset !== undefined || from !== undefined || drafting !== undefined) && (
             <span className={s.kicker}>
-              {preset === undefined && drafting !== undefined && t.drafting}
+              {preset === undefined && drafting !== undefined && (ended === undefined ? t.drafting : t.draft)}
               {preset !== undefined &&
                 (drafting !== undefined || presets === undefined || presets.length < 2 || onPresetChange === undefined ? (
                   <Roll key={preset}>{preset}</Roll>
@@ -784,7 +817,7 @@ export function TaskLaunch({
                     )}
                     <MenuSeparator />
                     {waitsFor.length === 1 || blocker.onStopWaiting === undefined ? (
-                      <MenuItem icon="play" onSelect={start}>
+                      <MenuItem icon="play" onSelect={start} disabled={startDisabled || started}>
                         {t.startWithout}
                       </MenuItem>
                     ) : (
@@ -917,7 +950,20 @@ export function TaskLaunch({
             />
           )}
         </ol>
-        {drafting !== undefined ? (
+        {ended !== undefined ? (
+          <div className={s.foot}>
+            <span className={s.estimate}>{estimate}</span>
+            <span className={s.when} role="status">
+              {ended === 'discarded' ? t.discarded : t.unplanned}
+            </span>
+            {ended === 'unplanned' && onDiscard !== undefined && (
+              <Button variant="quiet" onClick={onDiscard}>
+                {t.discard}
+              </Button>
+            )}
+            {ended === 'unplanned' && onPlan !== undefined && <Button onClick={onPlan}>{t.plan}</Button>}
+          </div>
+        ) : drafting !== undefined ? (
           <div className={s.foot}>
             <span className={s.estimate}>{estimate}</span>
             {held ? (
@@ -948,7 +994,9 @@ export function TaskLaunch({
               })()}
             </span>
             {held ? (
-              <Button onClick={start}>{t.start}</Button>
+              <Button onClick={start} disabled={startDisabled || started}>
+                {t.start}
+              </Button>
             ) : (
               <Button variant="quiet" onClick={() => setHeld(true)}>
                 {t.hold}
@@ -986,7 +1034,9 @@ export function TaskLaunch({
                 {t.hold}
               </Button>
             )}
-            <Button onClick={start}>{held ? t.start : t.startNow}</Button>
+            <Button onClick={start} disabled={startDisabled || started}>
+              {held ? t.start : t.startNow}
+            </Button>
             {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
           </div>
         )}

@@ -166,6 +166,7 @@ export const scenarios = {
    * `[lead:serve-apart]` runs a real server for it as Claude Code runs one:
    * under a shell in a process group of its own, which stopping the agent's
    * group misses, and stopping it ends the shell, not the server.
+   * `[lead:serve-apart-without-output]` starts the same server without reporting its output file.
    */
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
@@ -257,7 +258,14 @@ export const codexLikeMeanings = {
 
 export interface FakeAgentOptions {
   /** Lets a test deliver a connection failure between turns, or close ACP during one. */
-  readonly sessionControls?: (controls: { readonly lose: () => Promise<void>; readonly close: () => void }) => void
+  readonly sessionControls?: (controls: {
+    readonly id: string
+    readonly cwd: string
+    readonly live: () => boolean
+    readonly lose: () => Promise<void>
+    readonly close: () => void
+    readonly tool: (state: 'in_progress' | 'completed') => Promise<void>
+  }) => void
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
@@ -287,6 +295,8 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Holds a session close while a test sends another input. IDs are local to the fake connection. */
+  readonly beforeClose?: (sessionId: string, coordinator: boolean) => Promise<void>
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
   /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
@@ -453,6 +463,8 @@ const SETTLED_AGAIN = 'This task is settled:'
 
 /** How the runtime's reminder to report begins, which the person's words waiting for the turn go after (the runtime's Runs.ts). */
 const REMINDED = /^Your (step|review) isn't done until you call Althar's /
+/** The line Althar puts first in a turn to tell the time again (the runtime's `timeAgainLine`), with the blank line after it. */
+const TIME_AGAIN = /^\(It is now [^\n]* on the person's computer\.\)\n\n/
 
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
@@ -468,7 +480,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean; readonly omitOutputPath?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -530,7 +542,7 @@ const leaveRunning = async (
     canStop: true,
     toolCallId,
   })
-  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  if (options.omitOutputPath !== true) await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
   await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
   // Background work that isn't a command, as Claude Code reports some.
   await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: `dream-${id}`, name: 'Dreaming', taskType: 'dream', canStop: true })
@@ -607,7 +619,7 @@ const playStall = async (
   }
   // Its first session in its worktree is lost, as claude-agent-acp drops one whose Claude Code process died, and it answers
   // the prompt as that did on 2 November 2026; the coordinator that plans it only passes the marker on.
-  if (session.markers.has('[lead:lost-once]') && !session.coordinator && !lostIn.has(session.cwd)) {
+  if (session.markers.has(session.coordinator ? '[coordinator:lost-once]' : '[lead:lost-once]') && !lostIn.has(session.cwd)) {
     lostIn.add(session.cwd)
     throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
   }
@@ -672,7 +684,10 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
- * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does; `[coordinator:plan-fails]` with a
+ * plan Althar refuses, so the draft never gets one; `[coordinator:plan-another-fails]` drafts a second after it, in the same
+ * turn, whose plan Althar refuses; `[coordinator:plan-prototype]` from the Prototype preset, its lead on
+ * the large model), `[coordinator:discard]` discards each task named `[discard:<slug>]`,
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
@@ -939,7 +954,7 @@ const untilStopped = async (session: SessionState, marker: string) => {
 const playRole = async (
   session: SessionState,
   text: string,
-  serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
+  serve: (how: { readonly exits: boolean; readonly apart: boolean; readonly omitOutputPath: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
     readonly commits?: () => Promise<void>
@@ -980,8 +995,11 @@ const playRole = async (
   await client.connect(transport as Parameters<typeof client.connect>[0])
   try {
     const available = new Set((await client.listTools()).tools.map((tool) => tool.name))
+    // Whether the last call was refused: streamed, a refused call ends failed, as an agent's does.
+    let refused = false
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = await client.callTool({ name, arguments: args })
+      refused = result.isError === true
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
@@ -1017,7 +1035,7 @@ const playRole = async (
       await notify({
         sessionUpdate: 'tool_call_update',
         toolCallId,
-        status: 'completed',
+        status: refused ? 'failed' : 'completed',
         content: [{ type: 'content', content: { type: 'text', text: answer } }],
         _meta: meta,
       })
@@ -1096,7 +1114,12 @@ const playRole = async (
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
-        await serve({ exits: text.includes('[lead:serve-exits]'), apart: text.includes('[lead:serve-apart]') })
+        const omitOutputPath = text.includes('[lead:serve-apart-without-output]')
+        await serve({
+          exits: text.includes('[lead:serve-exits]'),
+          apart: omitOutputPath || text.includes('[lead:serve-apart]'),
+          omitOutputPath,
+        })
       }
       // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
       // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
@@ -1174,6 +1197,10 @@ const playRole = async (
           }
         }
         if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-open]')) {
+          const answer = await told('canvas_open', { name: 'sign-in' })
+          return `${answer} The repository also has a \`README.md\`.`
+        }
         if (text.includes('[lead:canvas-again]')) {
           await told('canvas_get', { name: 'sign-in' })
           const read = await told('canvas_read', { name: 'sign-in' })
@@ -1514,6 +1541,13 @@ const playRole = async (
       const said = (ask.slice(0, ask.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
+    // Told to discard tasks, `[discard:<slug>]` each, it discards them, one after another.
+    if (available.has('settle_task') && ask.includes('[coordinator:discard]')) {
+      const said: Array<string> = []
+      for (const [, task] of ask.matchAll(/\[discard:([a-z0-9-]+)\]/g))
+        said.push(await callStreamed('settle_task', { task, how: 'discard', why: 'One task, not several.' }))
+      return said.join('\n')
+    }
     // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
     if (available.has('propose_automation') && ask.includes('[coordinator:automate]')) {
       return await call('propose_automation', {
@@ -1566,20 +1600,34 @@ const playRole = async (
       const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
-          agent: 'claude-code',
+          // `[coordinator:plan-fails]`: on a model nobody has, so its plan is refused and never comes.
+          agent: ask.includes('[coordinator:plan-fails]') ? 'no-such-agent' : 'claude-code',
           // `[coordinator:plan-effort]`: on its large model, thinking hard.
           ...(ask.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          // `[coordinator:plan-prototype]`: on its large model, whatever the preset's own is.
+          ...(ask.includes('[coordinator:plan-prototype]') ? { model: 'large' } : {}),
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
+        // `[coordinator:plan-prototype]`: planned from the Prototype preset.
+        ...(ask.includes('[coordinator:plan-prototype]') ? { preset: 'Prototype' } : {}),
         // `[after:<slug>]`: it waits for that task, and starts by itself once it has merged.
         ...(after === undefined ? {} : { waits_for: [after] }),
       })
       // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
       if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
         await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      // `[coordinator:plan-another-fails]`: a second task drafted in the same turn, "…, the rest", whose plan Althar refuses.
+      if (ask.includes('[coordinator:plan-another-fails]')) {
+        const another = await callStreamed('draft_task', { ...draft, title: `${title}, the rest` })
+        await callStreamed('propose_plan', {
+          task: /Drafted ([^\s,.]+)/.exec(another)?.[1] ?? '',
+          lead: { agent: 'no-such-agent', reason: 'It knows the code.' },
+          review: { agent: 'codex' },
+        })
+      }
       return planned
     }
     return undefined
@@ -1758,6 +1806,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       sessions.set(sessionId, session)
       options.sessionControls?.({
+        id: sessionId,
+        cwd: session.cwd,
+        live: () => !session.closed,
         lose: () =>
           client.notify(acp.methods.client.session.update, {
             sessionId,
@@ -1772,6 +1823,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             },
           }),
         close: () => connections.get(shared(client))?.close(),
+        tool: (state) =>
+          client.notify(acp.methods.client.session.update, {
+            sessionId,
+            update:
+              state === 'in_progress'
+                ? { sessionUpdate: 'tool_call', toolCallId: 'outside-turn', title: 'Read', kind: 'read', status: state }
+                : { sessionUpdate: 'tool_call_update', toolCallId: 'outside-turn', status: state },
+          }),
       })
       // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
       connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
@@ -1818,8 +1877,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
-    .onRequest(acp.methods.agent.session.close, ({ params }) => {
+    .onRequest(acp.methods.agent.session.close, async ({ params }) => {
       const closing = sessions.get(params.sessionId)
+      await options.beforeClose?.(params.sessionId, closing?.coordinator === true)
       if (closing !== undefined) closing.closed = true
       sessions.delete(params.sessionId)
       options.closed?.(params.sessionId)
@@ -1877,7 +1937,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Told the time first, on a new day or after a long gap (the runtime's localTime.ts), it reads what it was asked after it:
+      // the time is no part of the ask, so a check that fails just after midnight is fixed as at any other time.
+      const whole = (filled === null ? prompted : prompted.slice(0, filled.index)).replace(TIME_AGAIN, '')
       // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
@@ -1914,6 +1976,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
+      // A process-transport test can check cleanup of a child the agent never reported as a background job.
+      const childFile = /\[test-child:([^\]]+)\]/.exec(text)?.[1]
+      if (childFile !== undefined) {
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+        child.unref()
+        writeFileSync(childFile, String(child.pid))
+      }
       // A step of work between what it says, so each is a message of its own, as an agent's tool call between them makes it.
       let steps = 0
       const aloud = {
@@ -1970,6 +2039,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
+        if (session.markers.has('[lead:compact-lost]')) throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
         if (session.markers.has('[lead:compact-fails]')) {
           await update({
             sessionUpdate: 'tool_call',
@@ -1980,6 +2050,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           })
           await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
           return ended()
+        }
+        // With `[lead:compact-reports]`, it reports the compaction as such (ACP's `compaction_update`), with its summary in
+        // pieces, as Claude Code, Codex and OpenCode do for a client that takes them.
+        if (session.markers.has('[lead:compact-reports]')) {
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'in_progress' })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'We were ' },
+          })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'fixing the checkout retry.' },
+          })
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'completed' })
         }
         await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
         await say('Compacted the conversation.')
@@ -1992,6 +2078,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
       }
+
+      // Spontaneous compaction may complete before a fresh usage figure reaches the client.
+      if (text.includes('[context-compacted]'))
+        await update({ sessionUpdate: 'compaction_update', compactionId: 'automatic', status: 'completed' })
 
       // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
@@ -2147,6 +2237,20 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         session.played.add('[lead:ask]')
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
+      }
+      if (text.includes('[lead:permission]') && !session.played.has('[lead:permission]') && !session.coordinator) {
+        session.played.add('[lead:permission]')
+        const toolCall = {
+          toolCallId: 'lead-deploy',
+          title: 'Run make deploy',
+          kind: 'execute' as const,
+          rawInput: { command: 'make deploy' },
+        }
+        await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+        const chosen = await ask(toolCall, commandOptions)
+        const allowed = chosen.startsWith('allow')
+        await update({ sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: allowed ? 'completed' : 'failed' })
+        if (!allowed || session.cancelled) return { stopReason: 'cancelled' }
       }
 
       // A lead that stalls or loops, where a marker says so.

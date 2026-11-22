@@ -1,6 +1,19 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { getPriority, setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { assert, beforeAll, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
@@ -10,6 +23,7 @@ import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
 import { keeper } from '../src/keeper'
 import { adapterNode, asNode, BACKGROUND, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { unixTrees } from '../src/processTrees'
 import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
@@ -38,6 +52,8 @@ const reject = () => Effect.succeed({ decision: 'reject' as const })
 const isAlive = (pid: number) => {
   try {
     process.kill(pid, 0)
+    // Some container init processes leave a reparented child as a zombie.
+    if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)?.startsWith('Z')) return false
     return true
   } catch {
     return false
@@ -61,6 +77,89 @@ describe('the process transport', () => {
   beforeAll(async () => {
     if (windows) await Effect.runPromise(keeper())
   })
+
+  it.live.skipIf(windows)('stops a process even when its start-time lookup fails after spawn', () =>
+    Effect.gen(function* () {
+      let pid = 0
+      const opened = yield* Effect.exit(
+        Effect.scoped(
+          spawnOwned(onNode('setInterval(() => {}, 1000)'), here, {
+            trees: {
+              ...unixTrees,
+              startedAt: (started) =>
+                Effect.sync(() => {
+                  pid = started
+                  throw new Error('start time lookup failed')
+                }),
+            },
+          }),
+        ),
+      )
+      assert.isTrue(Exit.isFailure(opened))
+      assert.isAbove(pid, 0)
+      assert.isFalse(isAlive(pid))
+    }),
+  )
+
+  it.live.skipIf(windows)('stops a group when the effect that started it times out', () =>
+    Effect.gen(function* () {
+      const pids: Array<number> = []
+      const result = yield* Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const owned = yield* spawnOwned({ command: '/bin/sh', args: ['-c', 'sleep 30 & echo $!; wait'] }, here, {
+              stopWithOwner: true,
+            })
+            const { value } = yield* Effect.promise(() => owned.stdout.getReader().read())
+            const child = Number(new TextDecoder().decode(value).trim())
+            assert.isAbove(child, 0)
+            pids.push(owned.pid, child)
+            yield* Effect.never.pipe(Effect.timeout('50 millis'))
+          }),
+        ),
+      )
+      assert.isTrue(Exit.isFailure(result))
+      assert.lengthOf(pids, 2)
+      for (const pid of pids) assert.isTrue(yield* goneSoon(pid))
+    }),
+  )
+
+  it.live.skipIf(windows)('stops a run and its child when the launcher is killed without running finalizers', () =>
+    Effect.gen(function* () {
+      const module = fileURLToPath(new URL('../src/process.ts', import.meta.url))
+      const owner = spawnSync(
+        'bun',
+        [
+          '-e',
+          `
+          import { Effect } from 'effect'
+          import { spawnOwned } from ${JSON.stringify(module)}
+          await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+            const owned = yield* spawnOwned(
+              { command: '/bin/sh', args: ['-c', 'sleep 30 & echo $!; wait'] },
+              process.cwd(),
+              { stopWithOwner: true },
+            )
+            const { value } = yield* Effect.promise(() => owned.stdout.getReader().read())
+            console.log(owned.pid, new TextDecoder().decode(value).trim())
+            process.kill(process.pid, 'SIGKILL')
+          })))
+        `,
+        ],
+        { cwd: import.meta.dirname, encoding: 'utf8', timeout: 8000 },
+      )
+      const [group, child] = owner.stdout.trim().split(/\s+/).map(Number)
+      assert.isAbove(group ?? 0, 0, owner.stderr)
+      try {
+        assert.strictEqual(owner.signal, 'SIGKILL')
+        assert.isAbove(child ?? 0, 0)
+        assert.isTrue(yield* goneSoon(group!))
+        assert.isTrue(yield* goneSoon(child!))
+      } finally {
+        yield* unixTrees.signal(group!, 'SIGKILL')
+      }
+    }),
+  )
 
   it.live('runs a turn with the agent as a process it owns, and records what it started', () =>
     Effect.scoped(
@@ -264,18 +363,20 @@ describe('the process transport', () => {
 
   it.live.skipIf(windows)('kills a process that ignores TERM once the grace period ends', () =>
     Effect.gen(function* () {
-      const scope = yield* Scope.make()
+      const scope = yield* Scope.fork(yield* Effect.scope)
+      const ready = yield* Deferred.make<void>()
       const owned = yield* Scope.provide(scope)(
-        spawnOwned({ command: 'bun', args: ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"] }, here, {
+        spawnOwned(onNode("process.on('SIGTERM', () => {}); console.error('ready'); setInterval(() => {}, 1000)"), here, {
           grace: '200 millis',
+          stderr: () => Deferred.doneUnsafe(ready, Effect.void),
         }),
       )
-      yield* Effect.sleep('300 millis')
+      yield* Deferred.await(ready)
       yield* Scope.close(scope, Exit.void)
       assert.isFalse(isAlive(owned.pid))
       assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'SIGKILL', survivors: false })
-      assert.strictEqual(owned.stderrTail(), '')
-    }),
+      assert.strictEqual(owned.stderrTail().trim(), 'ready')
+    }).pipe(Effect.scoped),
   )
 
   it.live.skipIf(windows)('stops what an agent left running after it exited', () =>

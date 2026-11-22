@@ -9,6 +9,7 @@ import {
   PAGE,
   type PlanStep,
   type ProjectList,
+  type ProjectWorker,
   type ProjectRepository,
   type ProjectSummary,
   type TaskEnd,
@@ -139,11 +140,14 @@ export interface ProjectModel {
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
-  readonly startPlan: (planId: string) => Promise<void>
+  readonly workers: ReadonlyArray<ProjectWorker>
+  readonly startPlan: (planId: string, workerId?: string) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers). */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Discards a task, from its card: the card shows it discarded at once, and as it was again where this fails, the line saying why. */
+  readonly discardTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
@@ -193,6 +197,13 @@ export const useProject = (projectId: string): ProjectModel => {
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const readNow = thread.data ?? null
+  const workers =
+    useQuery({
+      queryKey: ['project-workers', projectId],
+      queryFn: () => client.listProjectWorkers(projectId),
+      retry: false,
+      refetchInterval: 5000,
+    }).data ?? []
   // What a clear or a forgotten conversation takes from the thread, gone from the press until the thread is read rewritten:
   // the view's version as it was pressed on, and what goes, by id.
   const [rewriting, setRewriting] = useState<{ readonly version: number; readonly gone: ReadonlySet<string> } | null>(null)
@@ -535,6 +546,7 @@ export const useProject = (projectId: string): ProjectModel => {
     return act(async () => {
       try {
         await action()
+        images?.onAccepted?.()
       } catch (failure) {
         accepted = false
         setCoordinator((current) => ({ ...current, items: unsent(current.items, id, text) }))
@@ -694,9 +706,22 @@ export const useProject = (projectId: string): ProjectModel => {
         () => null,
         (failure: unknown) => messageOf(failure),
       ),
-    startPlan: (planId) => act(() => client.startPlan(planId)),
+    workers,
+    startPlan: async (planId, workerId) => {
+      let accepted = false
+      await act(async () => {
+        await (workerId === undefined ? client.startPlan(planId) : client.startPlan(planId, workerId))
+        accepted = true
+      })
+      return accepted
+    },
     stopWaiting: (taskId, on) => act(() => client.stopWaiting(taskId, on)),
     reopenTask: (taskId) => act(() => client.reopenTask(taskId)),
+    discardTask: (taskId) =>
+      client.abandonTask(taskId).catch((failure: unknown) => {
+        fail(failure)
+        throw failure
+      }),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
     holdDraft: (threadId, key) =>

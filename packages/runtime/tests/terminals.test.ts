@@ -1,5 +1,6 @@
 import { basename } from 'node:path'
 
+import { until } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Layer, Stream } from 'effect'
 
@@ -151,13 +152,13 @@ describe('terminals', () => {
       const first = yield* reading(terminals, 'term_project1')
       pty.print('$ ')
       pty.print('ls\r\n')
-      yield* settle
-      assert.strictEqual(first.seen.join(''), '$ ls\r\n')
+      const output = (window: typeof first) => Effect.sync(() => window.seen.join(''))
+      yield* until(output(first), (data) => data === '$ ls\r\n')
       const second = yield* reading(terminals, 'term_project1')
+      yield* until(output(second), (data) => data === '$ ls\r\n')
       pty.print('a.txt\r\n')
-      yield* settle
-      assert.strictEqual(second.seen.join(''), '$ ls\r\na.txt\r\n')
-      assert.strictEqual(first.seen.join(''), '$ ls\r\na.txt\r\n')
+      yield* until(output(second), (data) => data === '$ ls\r\na.txt\r\n')
+      yield* until(output(first), (data) => data === '$ ls\r\na.txt\r\n')
       yield* terminals.write('term_project1', 'echo hi\r')
       yield* terminals.resize('term_project1', 120, 40)
       assert.deepStrictEqual(pty.written, ['echo hi\r'])

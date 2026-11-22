@@ -1,6 +1,19 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type ChangeSummary,
+  type PlanStep,
+  type Product,
+  type ProjectWorker,
+  type TaskEnd as End,
+  type WorksIn as Where,
+  workerPlanProblem,
+  workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerName,
+} from '@althar/contracts'
 import {
   AsideCard,
   AsideState,
@@ -8,6 +21,7 @@ import {
   type LaunchStep,
   LinkButton,
   PresetOffer,
+  Select,
   TaskCard,
   TaskEnd,
   TaskLaunch,
@@ -18,6 +32,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
+import { factsOf, readyText, readyWordOf } from '../../shared/standing'
 import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
@@ -54,6 +69,8 @@ export const text = {
   now: stepText.now,
   /** A small change's card, as Team's dialog entry elsewhere is named. */
   changeTeam: 'Change the team…',
+  /** A task discarded once it had begun: its card's word. */
+  discarded: 'Discarded',
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -74,7 +91,8 @@ export interface CardActions {
   readonly projectId?: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
-  readonly onStart: (planId: string) => void
+  readonly workers?: ReadonlyArray<ProjectWorker>
+  readonly onStart: (planId: string, workerId?: string) => void | Promise<boolean>
   readonly onHold: (planId: string) => void
   /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
   readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
@@ -103,6 +121,12 @@ export interface CardActions {
   readonly presets?: ReadonlyArray<{ readonly name: string; readonly about: string; readonly reviews: boolean }>
   /** Picks another preset for a plan: its parts change to match. */
   readonly onPreset?: (planId: string, preset: string) => void
+  /** Asks the coordinator for the plan of a draft whose plan didn't come. */
+  readonly onPlanDraft?: (task: { readonly taskId: string; readonly title: string; readonly slug: string }) => void
+  /** Whether a draft's plan was asked for and is still on its way: Plan it isn't offered again until it isn't. */
+  readonly planAsked?: (taskId: string) => boolean
+  /** Discards a task from its card; done once the runtime has it, rejected where it didn't. */
+  readonly onDiscard?: (taskId: string) => Promise<void>
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -238,7 +262,60 @@ function PlanCard({
     if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
+  const workers = actions.workers ?? []
+  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
+  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
+  const best = automaticWorker(workers, steps, plan.workerRequirements?.repositoryCount)
+  const selection = selected === 'auto' ? best : workers.find((worker) => worker.workerId === selected)
+  const hasCapacity = selected === 'auto' || workers.some((worker) => worker.capacity !== undefined)
+  const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
+  const startProblem =
+    selected === 'home'
+      ? undefined
+      : (planProblem ??
+        (selected === 'auto' && selection === undefined
+          ? automaticWorkerUnavailable
+          : workerProblem(selection, steps, plan.workerRequirements?.repositoryCount)))
   const from = fromOf(card)
+  const placementNote =
+    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
+  const placement =
+    card.phase !== 'held' || (workers.length === 0 && selected === 'home') ? undefined : (
+      <>
+        {(planProblem === undefined || selected !== 'home') && (
+          <Select
+            label="Run on"
+            variant="filled"
+            value={selected}
+            options={[
+              { value: 'home', label: 'This home' },
+              ...(hasCapacity
+                ? [{ value: 'auto', label: 'Best available worker', disabled: best === undefined || planProblem !== undefined }]
+                : []),
+              ...workers.map((worker) => {
+                const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
+                const label = workerName(worker)
+                return {
+                  value: worker.workerId,
+                  label: problem === undefined ? label : `${label} · ${problem}`,
+                  disabled: problem !== undefined,
+                }
+              }),
+              ...(selected !== 'home' && selected !== 'auto' && selection === undefined
+                ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
+                : []),
+            ]}
+            onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
+          />
+        )}
+        {placementNote !== undefined && (
+          <>
+            {' '}
+            <span role="status">{placementNote}</span>
+          </>
+        )}
+      </>
+    )
   return (
     <TaskLaunch
       task={card.slug}
@@ -315,8 +392,66 @@ function PlanCard({
                   },
                 }),
           })}
-      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
-      onStart={() => actions.onStart(plan.id)}
+      {...(card.presetOffer === undefined && placement === undefined
+        ? {}
+        : {
+            footNote: (
+              <>
+                {' '}
+                {placement} {card.presetOffer === undefined ? undefined : <Offer card={card} />}{' '}
+              </>
+            ),
+          })}
+      onStart={() => actions.onStart(plan.id, selected === 'home' ? undefined : selected)}
+      startDisabled={startProblem !== undefined}
+    />
+  )
+}
+
+/** A draft's steps before anyone is chosen for them: a lead's and a reviewer's seat, open. */
+const OPEN_SEATS: ReadonlyArray<LaunchStep> = [
+  { id: 'implement', label: text.label.implement, agents: [] },
+  { id: 'review', label: text.label.review, agents: [] },
+]
+
+/**
+ * A task that never began, as its card stays: drafted with no plan, which it says plainly, offering to plan it (the
+ * coordinator is asked) or discard it; or discarded before it began, from a draft or a plan, planned or held, which it
+ * says where its foot said when it starts. Discard shows at once, and as it was again where the runtime turns it down.
+ */
+function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const title = useTaskTitle(card.taskId, card.title)
+  const named = useModelNames()
+  const effortOf = useEffortNames()
+  const [discarding, setDiscarding] = useState(false)
+  const plan = card.plan
+  const discarded = card.discarded === true || discarding
+  const { onPlanDraft, onDiscard } = actions
+  const asked = actions.planAsked?.(card.taskId) ?? false
+  return (
+    <TaskLaunch
+      task={card.slug}
+      title={title}
+      {...(plan?.preset === undefined ? {} : { preset: plan.preset })}
+      project={actions.project}
+      steps={plan === null ? OPEN_SEATS : launchSteps(plan, named, effortOf, card.reviewing != null)}
+      picker={() => null}
+      onStart={() => undefined}
+      {...(plan === null ? {} : plan.end === null ? { hideEnd: true } : { end: ENDS[plan.end] })}
+      drafting={{ phase: 'end', ended: discarded ? 'discarded' : 'unplanned' }}
+      {...(discarded || onPlanDraft === undefined || asked
+        ? {}
+        : {
+            onPlan: () => onPlanDraft({ taskId: card.taskId, title, slug: card.slug }),
+          })}
+      {...(discarded || onDiscard === undefined
+        ? {}
+        : {
+            onDiscard: () => {
+              setDiscarding(true)
+              void onDiscard(card.taskId).catch(() => setDiscarding(false))
+            },
+          })}
     />
   )
 }
@@ -341,6 +476,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // Never begun: drafted with no plan, or discarded before it started, wherever it was then, on Scratch too: an aside's card
+  // would show it running or ready.
+  if (card.unplanned === true || (card.discarded === true && card.startedAt === null)) return <NotBegun card={card} actions={actions} />
   // An aside (a quick job on Scratch, off the board) has no steps to show or plan to change: its own card, lighter, says so,
   // whatever it waits for. Only one counting down to its start keeps the plan's card, which can hold it.
   if (card.scratch === true && !(card.phase === 'planned' && card.plan?.startsAt != null))
@@ -365,22 +503,40 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
-  // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
-  const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
+  // Ready, in the word the board, its header and Needs you say it in (`readyWordOf`), read from where its pull request stands
+  // now, whatever its lead handed back or didn't.
+  const word = card.phase === 'ready' ? readyWordOf(card) : null
+  // Its lead couldn't resolve a conflict, or wasn't asked to, or brought its failing checks to the person: why, in its lead's line.
+  const why = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? card.conflictUnsent ?? null) : null
+  // Something in its way is the person's, as the board has it in Needs you: a reason handed back, or its open pull request not
+  // ready to accept, or ready once they push. Its checks still running, it is under way. Nothing asks a question, so its way in
+  // opens it, rather than offering to answer one that was never asked.
+  const inTheWay = why !== null || word === readyText.blocked || word === readyText.readyOnPush
+  const checking = !inTheWay && word === readyText.checksRunning
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
-  const status =
-    card.queued !== null
+  // Discarded once it had begun: it stopped there, and says it was discarded.
+  const discarded = card.discarded === true
+  const status = discarded
+    ? TaskStatus.Stopped
+    : card.queued !== null
       ? TaskStatus.Queued
-      : handedBack !== null
+      : inTheWay
         ? TaskStatus.Yours
-        : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
-          ? TaskStatus.Paused
-          : STATUS[card.phase]
+        : checking
+          ? TaskStatus.Running
+          : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
+            ? TaskStatus.Paused
+            : STATUS[card.phase]
+  // Said as the board says it, where its standing is what it says.
+  const said = (status === TaskStatus.Yours && inTheWay) || (status === TaskStatus.Running && checking) ? word : null
+  // Beside it, why, or what of its pull request stands first, as the board's card says it: a failed check, checks running.
+  const standing = said === null ? undefined : (why ?? (card.change === null ? undefined : factsOf(card.change)[0]?.words))
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
-  const now =
-    handedBack !== null
-      ? handedBack
+  const now = discarded
+    ? undefined
+    : standing !== undefined
+      ? standing
       : status === TaskStatus.Done
         ? card.summary?.split('\n')[0]
         : card.externalWait !== undefined
@@ -409,7 +565,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       title={title}
       status={status}
       steps={steps}
-      at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
+      at={status === TaskStatus.Done || said !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
@@ -426,8 +582,15 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               </>
             ),
           })}
+      {...(said === null ? {} : { asks: false })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status }}
+      text={{
+        status: discarded
+          ? { ...text.status, [TaskStatus.Stopped]: text.discarded }
+          : said === null
+            ? text.status
+            : { ...text.status, [status]: said },
+      }}
     />
   )
 }

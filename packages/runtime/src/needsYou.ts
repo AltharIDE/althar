@@ -1,4 +1,4 @@
-import type { ChangeSummary } from '@althar/contracts'
+import { type ChangeSummary, checkFailuresOf } from '@althar/contracts'
 
 import { heldBack } from './mergeNeeds'
 
@@ -34,7 +34,7 @@ export const byItself = (
   const unpushed = change.localHead !== null && change.unpushed > 0
   if (unpushed) return change.pushing !== undefined && change.pushing.held === null ? 'pushing' : null
   const checks = change.checks
-  if (change.conflicts === true || (checks !== null && checks.failed > 0 && how.failuresGo !== true)) return null
+  if (change.conflicts === true || (checkFailuresOf(change).failed > 0 && how.failuresGo !== true)) return null
   // A recorded push in a repository with CI may have no check read at all yet, or an empty first read. Permission failures
   // never set this flag: their recovery remains the person's rather than waiting for checks that Althar cannot read.
   if ((checks === null || checks.outcome === 'none') && how.checksAppearing === true) return 'checks_running'
@@ -52,7 +52,9 @@ export const isMergeable = (change: ChangeSummary | null): boolean => {
   if (change === null || change.state !== 'open' || change.draft || change.queued === true) return false
   if (change.diverged !== null || change.conflicts === true || (change.localHead !== null && change.unpushed > 0)) return false
   const checks = change.checks
-  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0 && !heldBack(change.needs)
+  // Only checks its host doesn't require failed: as good as passed (#1117).
+  const passed = checks !== null && checkFailuresOf(change).outcome === 'passed'
+  return checks !== null && passed && checks.running === 0 && !heldBack(change.needs)
 }
 
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */
