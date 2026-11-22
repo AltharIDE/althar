@@ -2,6 +2,7 @@ import { createHashHistory, createRouter, type RouterHistory } from '@tanstack/r
 
 import { pageRoute } from './features/browser/route'
 import { newProjectRoute } from './features/newProject/route'
+import { altharRoute } from './features/news/route'
 import { projectRoute } from './features/project/route'
 import { settingsRoute } from './features/settings/route'
 import { startRoute } from './features/start/route'
@@ -22,7 +23,15 @@ import { type RouterContext, rootRoute } from './root'
  * is kept as they left it (`KeptScreens`).
  */
 
-export const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute, pageRoute])
+export const routeTree = rootRoute.addChildren([
+  startRoute,
+  newProjectRoute,
+  projectRoute,
+  taskRoute,
+  settingsRoute,
+  pageRoute,
+  altharRoute,
+])
 
 /** How long a read may take before the place's outline shows, and how long the outline stays once it does. */
 export const PENDING = { after: 150, atLeast: 300 }

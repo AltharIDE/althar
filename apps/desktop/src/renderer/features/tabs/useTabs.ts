@@ -92,7 +92,7 @@ export const useTabs = (): TabsModel => {
 
   const where = whereOf(pathname)
   const known =
-    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings' || where.kind === 'page'
+    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings' || where.kind === 'page' || where.kind === 'althar'
       ? null
       : where.kind === 'project'
         ? where.projectId

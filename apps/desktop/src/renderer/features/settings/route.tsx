@@ -47,6 +47,7 @@ function Settings() {
         void navigate({ to: '/settings/$section', params: { section: next }, search: to === undefined ? {} : { focus: to } })
       }
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
+      onWhatsNew={() => void navigate({ to: '/althar' })}
     />
   )
 }
