@@ -71,7 +71,7 @@ const params = () => new URLSearchParams(location.search)
 const read = () => {
   const now = params()
   return {
-    d: TAKES.find((one) => one.key === now.get('d'))?.key ?? 'a',
+    d: TAKES.find((one) => one.key === now.get('d'))?.key ?? 'c',
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
     h: (HOMES.find((one) => one.key === now.get('h'))?.key ?? 'mac') as Home,
     u: now.get('u') === '1',
@@ -84,6 +84,7 @@ const read = () => {
     screen: (now.get('screen') === 'board' ? 'board' : 'settings') as 'board' | 'settings',
     sec: now.get('sec'),
     w: now.get('w'),
+    from: now.get('from'),
   }
 }
 type State = ReturnType<typeof read>
@@ -177,6 +178,7 @@ function Lab() {
     for (const [key, value] of [
       ['sec', merged.sec],
       ['w', merged.w],
+      ['from', merged.from],
     ] as const)
       if (value === null) url.delete(key)
       else url.set(key, value)
@@ -254,7 +256,7 @@ function Lab() {
     settings: (worker) => {
       setOpen({ peek: false, quick: false })
       const where = at(worker ?? null, take)
-      set({ screen: 'settings', sec: where.section, w: where.worker })
+      set({ screen: 'settings', sec: where.section, w: where.worker, from: null })
       if (worker !== undefined)
         requestAnimationFrame(() => document.getElementById(`worker-${worker}`)?.scrollIntoView({ block: 'center' }))
     },
@@ -262,8 +264,8 @@ function Lab() {
   }
 
   // Where Settings is: as the address says, or where the take opens.
-  const place: Place = state.sec === null ? at(null) : { section: state.sec, worker: state.w }
-  const go = (next: Place) => set({ sec: next.section, w: next.worker })
+  const place: Place = state.sec === null ? at(null) : { section: state.sec, worker: state.w, from: state.from }
+  const go = (next: Place) => set({ sec: next.section, w: next.worker, from: next.from ?? null })
 
   const boardKey = `${state.p}-${state.k}-${state.m}-${state.h}-${withRunners}-${state.n}-${home.configured}`
 
@@ -273,12 +275,12 @@ function Lab() {
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
       const found = TAKES.find((one) => one.kbd === key)
-      if (found !== undefined) return set({ d: found.key, sec: null, w: null })
+      if (found !== undefined) return set({ d: found.key, sec: null, w: null, from: null })
       const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
       const homeAt = HOMES[Number(key) - 1]
-      if (homeAt !== undefined) return set({ h: homeAt.key, sec: null, w: null })
-      if (key === 'u') return set({ u: !state.u, sec: null, w: null })
+      if (homeAt !== undefined) return set({ h: homeAt.key, sec: null, w: null, from: null })
+      if (key === 'u') return set({ u: !state.u, sec: null, w: null, from: null })
       if (key === 'h') return set({ two: !state.two })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'm') return set({ m: !state.m })
@@ -350,7 +352,7 @@ function Lab() {
               key={one.key}
               type="button"
               aria-pressed={state.d === one.key}
-              onClick={() => set({ d: one.key, sec: null, w: null })}
+              onClick={() => set({ d: one.key, sec: null, w: null, from: null })}
               title={one.idea}
             >
               <kbd>{one.kbd.toUpperCase()}</kbd>
@@ -359,7 +361,12 @@ function Lab() {
           ))}
           <span className={s.rule} />
           {HOMES.map((one, i) => (
-            <button key={one.key} type="button" aria-pressed={state.h === one.key} onClick={() => set({ h: one.key, sec: null, w: null })}>
+            <button
+              key={one.key}
+              type="button"
+              aria-pressed={state.h === one.key}
+              onClick={() => set({ h: one.key, sec: null, w: null, from: null })}
+            >
               <kbd>{i + 1}</kbd>
               {one.label}
             </button>
@@ -368,7 +375,7 @@ function Lab() {
             type="button"
             aria-pressed={withRunners}
             disabled={pov === 'cloud'}
-            onClick={() => set({ u: !state.u, sec: null, w: null })}
+            onClick={() => set({ u: !state.u, sec: null, w: null, from: null })}
             title="The home uses Althar Cloud; hosted there, it always does"
           >
             <kbd>U</kbd>Cloud

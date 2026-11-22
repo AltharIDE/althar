@@ -511,3 +511,39 @@
   gap: 22px;
   padding: 8px 0 4px;
 }
+
+/* C's own page, opened from Computers: the way back, as a sheet's back reads, above the page's first group */
+.backTo {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: -6px 0 -8px -4px;
+  padding: 3px 9px 3px 3px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-2);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.backTo:hover {
+  background: var(--hover-paper);
+  color: var(--t-1);
+}
+.backChevron {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--sunk);
+}
+.backChevron svg {
+  transform: rotate(180deg);
+}
+/* the way back heads the page: the first group under it keeps no rule above */
+.backTo + .group.group {
+  border-top: 0;
+}

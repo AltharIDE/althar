@@ -59,6 +59,8 @@ export interface Page {
 export interface Place {
   section: string
   worker: string | null
+  /** The section it was opened from, where it has a way back to it: Althar Cloud's own page, from Computers. */
+  from?: string | null
 }
 
 /** Where a take puts Althar Cloud's use and limit: a module that opens, a panel on the page, or a page of its own. */

@@ -33,8 +33,10 @@ are where that lives:
 - **B · Panel:** the control panel on the page, nothing to open: the month's
   figures, each day's spend, what runs now, its controls, leaving it at the
   foot.
-- **C · Own page:** Althar Cloud a section of Settings of its own, after
-  Computers; Computers keeps a line for it with this month's spend.
+- **C · Own page** (picked): Althar Cloud a section of Settings of its own,
+  after Computers; Computers keeps a line for it with this month's spend.
+  Opened from that line, the page has a way back to Computers at its top;
+  from the side, it is a section like any other. The lab opens on C.
 
 Hosted in Althar Cloud (3), the home is the cloud: the take's form of it
 stands under Home, always on, with pausing all where leaving would be; the

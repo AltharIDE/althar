@@ -117,7 +117,10 @@ const ledeOf = (ctx: Ctx) => (ctx.pov === 'local' ? undefined : `Where ${ctx.hom
 export function pageOf(ctx: Ctx, take: Take, place: Place, go: (place: Place) => void): Page | null {
   if (place.section === 'this-mac') return page(sectionText['this-mac'].title, <MacSection ctx={ctx} />)
   const hosted = ctx.home.hosted !== null
-  if (place.section === 'cloud') return ownPage(ctx, take) ? page(words.cloud, <CloudPage ctx={ctx} hosted={hosted} />) : null
+  // Opened from Computers, it has a way back there; from the side, it is a section like any other.
+  const backTo = place.from === 'computers' ? () => go(at(null)) : null
+  if (place.section === 'cloud')
+    return ownPage(ctx, take) ? page(words.cloud, <CloudPage ctx={ctx} hosted={hosted} onBack={backTo} />) : null
   if (place.section !== 'computers') return null
   const back = () => go(at(null))
   const lede = ledeOf(ctx)
@@ -125,7 +128,7 @@ export function pageOf(ctx: Ctx, take: Take, place: Place, go: (place: Place) =>
   if (cloudOpened && take.cloud === 'module') return page(words.computers, <CloudSheet ctx={ctx} hosted={hosted} onBack={back} />, lede)
   const opened = computersOf(ctx).find((one) => one.id === place.worker && one.hosted === null)
   if (opened !== undefined) return page(words.computers, <ComputerSheet ctx={ctx} worker={opened} onBack={back} />, lede)
-  return page(words.computers, <Computers ctx={ctx} take={take} open={(id) => go(at(id, take))} />, lede)
+  return page(words.computers, <Computers ctx={ctx} take={take} open={(id) => go({ ...at(id, take), from: 'computers' })} />, lede)
 }
 
 /* ---- a module's head: a picture, its name, a line under it ---- */
@@ -292,10 +295,18 @@ function CloudLine({ ctx, who, onClick }: { ctx: Ctx; who: Who; onClick: () => v
 }
 
 /** C's own page: this month and each day, what runs now, when it runs; leaving it at the foot. */
-function CloudPage({ ctx, hosted }: { ctx: Ctx; hosted: boolean }) {
+function CloudPage({ ctx, hosted, onBack }: { ctx: Ctx; hosted: boolean; onBack: (() => void) | null }) {
   const runners = ctx.runners!
   return (
     <div className={x.computers}>
+      {onBack !== null && (
+        <button type="button" className={x.backTo} onClick={onBack}>
+          <span className={x.backChevron} aria-hidden="true">
+            <Icon name="chevron" size={11} />
+          </span>
+          {words.computers}
+        </button>
+      )}
       <SettingGroup className={x.group} title={words.thisMonth} note={`${words.resets} · ${words.rateFigure}`}>
         <span className={x.pageUse}>
           <Stats runners={runners} spentName={words.spent} />
