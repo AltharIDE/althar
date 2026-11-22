@@ -1,4 +1,5 @@
 import { createServer } from 'node:https'
+import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 
@@ -10,6 +11,9 @@ import { connection } from './Api'
 import { ClientIdentities } from './ClientIdentities'
 import { DevicePairings } from './DevicePairings'
 import { Instance } from './Instance'
+import { networkPermissionApprovals } from './networkPermissionApprovals'
+import { permissionApprovalPage } from './permissionApprovalPage'
+import type { ApprovalCredentials } from './permissionApprovals'
 
 const MAX_CONNECTIONS = 32
 const MAX_BODY = 16 * 1024
@@ -25,6 +29,7 @@ export interface NetworkApiOptions {
   readonly certificate: Buffer
   readonly key: Buffer
   readonly version: string
+  readonly approvalCredentials?: ApprovalCredentials
 }
 
 const body = (request: IncomingMessage) =>
@@ -70,6 +75,8 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
     const identities = yield* ClientIdentities
     const pairings = yield* DevicePairings
     const instance = yield* Instance
+    const approvals =
+      given.approvalCredentials === undefined ? undefined : yield* networkPermissionApprovals(origin, given.approvalCredentials)
     const context = yield* Effect.context<Services | Scope.Scope>()
     const scope = yield* Effect.scope
     const sockets = new Set<Duplex>()
@@ -98,6 +105,20 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
       response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
       response.end(JSON.stringify(value))
     }
+    const authenticate = (request: IncomingMessage) =>
+      Effect.gen(function* () {
+        const authorization = request.headers.authorization ?? ''
+        if (authorization.length > 4096 || !authorization.startsWith('Althar-Device ')) return yield* rejected()
+        const encoded = authorization.slice('Althar-Device '.length)
+        if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return yield* rejected()
+        const proof = yield* Schema.decodeUnknownEffect(Proof)(
+          JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(encoded, 'base64url'))),
+        )
+        const identity = yield* identities.authenticate(proof.challenge, proof.signature)
+        if (identity.role !== 'socket') return yield* rejected()
+        yield* identities.check(identity)
+        return identity
+      })
     const run = (effect: Effect.Effect<void, unknown, Services | Scope.Scope>) =>
       Effect.runFork(
         Effect.forkIn(
@@ -141,7 +162,58 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
               })
               return
             }
+            if (
+              approvals !== undefined &&
+              request.method === 'GET' &&
+              (request.url === '/approve-permission' || request.url === '/enroll-approval-key')
+            ) {
+              const nonce = randomBytes(18).toString('base64')
+              response.writeHead(200, {
+                'content-type': 'text/html; charset=utf-8',
+                'cache-control': 'no-store',
+                'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+                'referrer-policy': 'no-referrer',
+                'permissions-policy': 'publickey-credentials-create=(self), publickey-credentials-get=(self)',
+                'x-content-type-options': 'nosniff',
+                'x-frame-options': 'DENY',
+              })
+              response.end(permissionApprovalPage(nonce, request.url === '/enroll-approval-key'))
+              return
+            }
             if (request.method !== 'POST' || request.headers['content-type']?.split(';')[0] !== 'application/json') return yield* rejected()
+            if (approvals !== undefined) {
+              if (request.url === '/v1/permission-approvals') {
+                const identity = yield* authenticate(request)
+                reply(response, 200, yield* approvals.begin(identity, yield* body(request)))
+                return
+              }
+              if (request.url === '/v1/approval-keys') {
+                reply(response, 200, yield* approvals.enroll(yield* authenticate(request)))
+                request.resume()
+                return
+              }
+              if (request.headers.origin === origin.origin && request.url === '/v1/approval-keys/view') {
+                reply(response, 200, yield* approvals.enrollmentOptions(yield* body(request)))
+                return
+              }
+              if (request.headers.origin === origin.origin && request.url === '/v1/approval-keys/export') {
+                reply(response, 200, yield* approvals.exportKey(yield* body(request)))
+                return
+              }
+              if (request.url === '/v1/permission-approvals/result') {
+                reply(response, 200, yield* approvals.result(yield* body(request)))
+                return
+              }
+              if (request.headers.origin === origin.origin && request.url === '/v1/permission-approvals/view') {
+                reply(response, 200, yield* approvals.view(yield* body(request)))
+                return
+              }
+              if (request.headers.origin === origin.origin && request.url === '/v1/permission-approvals/answer') {
+                yield* approvals.answer(yield* body(request))
+                reply(response, 200, { accepted: true })
+                return
+              }
+            }
             if (request.url === '/v1/connections/challenge') {
               const input = yield* Schema.decodeUnknownEffect(ChallengeRequest)(yield* body(request))
               if (input.homeId !== instance.homeId) return yield* rejected()
@@ -191,16 +263,7 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
       run(
         Effect.gen(function* () {
           if (!(yield* admit(request))) return yield* rejected()
-          const authorization = request.headers.authorization ?? ''
-          if (authorization.length > 4096 || !authorization.startsWith('Althar-Device ')) return yield* rejected()
-          const encoded = authorization.slice('Althar-Device '.length)
-          if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return yield* rejected()
-          const proof = yield* Schema.decodeUnknownEffect(Proof)(
-            JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(encoded, 'base64url'))),
-          )
-          const identity = yield* identities.authenticate(proof.challenge, proof.signature)
-          if (identity.role !== 'socket') return yield* rejected()
-          yield* identities.check(identity)
+          const identity = yield* authenticate(request)
           if (socket.destroyed || active.size >= MAX_CONNECTIONS) return yield* rejected()
           ws.handleUpgrade(request, socket, head, (webSocket) => {
             upgraded = true

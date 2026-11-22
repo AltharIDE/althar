@@ -8,6 +8,7 @@ import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services
 
 import metadata from '../package.json'
 import { configuredHome } from './configuration'
+import { HostError } from './errors'
 import type { HostOptions } from './options'
 import { initializeVault, openVault } from './vault'
 import { listenWorkers } from './workers'
@@ -92,10 +93,17 @@ export const serveHome = (
       const network = yield* readNetworkConfiguration(options.profile)
       if (network !== undefined) {
         const files = yield* networkFiles(options, network)
-        yield* listenNetworkApi({ ...files.config, certificate: files.certificate, key: files.key, version: HOST_VERSION }).pipe(
-          Effect.provideContext(context),
-          Effect.ensuring(Effect.sync(() => files.key.fill(0))),
-        )
+        yield* Effect.gen(function* () {
+          if (files.approvalKeys !== undefined && files.approvalKeys.homeId !== instance.homeId)
+            return yield* new HostError({ code: 'InvalidConfig', message: 'The approval keys belong to a different home.' })
+          return yield* listenNetworkApi({
+            ...files.config,
+            certificate: files.certificate,
+            key: files.key,
+            version: HOST_VERSION,
+            ...(files.approvalKeys === undefined ? {} : { approvalCredentials: files.approvalKeys.credentials }),
+          })
+        }).pipe(Effect.provideContext(context), Effect.ensuring(Effect.sync(() => files.key.fill(0))))
       }
       worker = yield* listenWorkers(options, instance.homeId)
       const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))

@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('althar', {
     list: () => ipcRenderer.invoke('althar:homes-list'),
     pairingInfo: (code: string) => ipcRenderer.invoke('althar:homes-pairing-info', code),
     pair: (code: string, name: string) => ipcRenderer.invoke('althar:homes-pair', code, name),
+    answerPermission: (answer: unknown) => ipcRenderer.invoke('althar:homes-answer-permission', answer),
+    enrollApprovalKey: () => ipcRenderer.invoke('althar:homes-enroll-approval-key'),
     overview: () => ipcRenderer.invoke('althar:homes-overview'),
     inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
     connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),

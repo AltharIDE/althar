@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { decodePairingCode } from '@althar/transport-node'
+import { decodePairingCode, prepareApprovalKeyEnrollment, preparePermissionApproval, signDeviceMessage } from '@althar/transport-node'
+import { PermissionApproval } from '@althar/contracts'
 import { connectionCredentials, type ProtectCredential } from './credentials'
-import { Effect } from 'effect'
-import { app, BrowserWindow, ipcMain, MessageChannelMain, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { Effect, Schema } from 'effect'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
@@ -53,6 +54,7 @@ export const startHomeConnections = ({
   readonly log: (message: string) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
+  const approvals = new Map<number, AbortController>()
   const children = new Map<Electron.UtilityProcess, Promise<void>>()
   let processes = 0
   const fork = () => {
@@ -166,6 +168,52 @@ export const startHomeConnections = ({
     return { origin: code.origin, homeId: code.homeId, expiresAt: code.expiresAt }
   })
   ipcMain.handle('althar:homes-pair', (event, code: unknown, name: unknown) => controller.pair(owner(event), code, name))
+  const currentHttpsHome = (caller: number) => {
+    const state = controller.state(caller)
+    if (state.current.kind !== 'https' || state.connection !== 'connected' || state.current.home.https === undefined)
+      throw new Error('Open the home through its paired HTTPS connection first.')
+    return { home: state.current.home, target: state.current.home.https }
+  }
+  const withApprovalPage = async (
+    caller: number,
+    prepare: (
+      key: Awaited<ReturnType<typeof credentials.load>>,
+      target: ReturnType<typeof currentHttpsHome>['target'],
+      signal: AbortSignal,
+    ) => Promise<{ url: string; wait?: Effect.Effect<void, unknown> }>,
+  ) => {
+    const { home, target } = currentHttpsHome(caller)
+    if (approvals.has(caller)) throw new Error('Finish the security-key confirmation already open in your browser.')
+    const abort = new AbortController()
+    approvals.set(caller, abort)
+    try {
+      const key = await credentials.load(home.id)
+      const { url, wait } = await prepare(key, target, abort.signal)
+      if (abort.signal.aborted || currentHttpsHome(caller).target !== target) throw new Error('This home connection changed.')
+      await shell.openExternal(url)
+      if (wait !== undefined) await Effect.runPromise(wait, { signal: abort.signal })
+    } finally {
+      if (approvals.get(caller) === abort) approvals.delete(caller)
+    }
+  }
+  ipcMain.handle('althar:homes-answer-permission', (event, input: unknown) => {
+    const caller = owner(event)
+    const action = Schema.decodeUnknownSync(PermissionApproval)(input)
+    return withApprovalPage(caller, (key, target, signal) =>
+      Effect.runPromise(
+        preparePermissionApproval(target, (message) => signDeviceMessage(key.privateKey, message), action),
+        { signal },
+      ),
+    )
+  })
+  ipcMain.handle('althar:homes-enroll-approval-key', (event) =>
+    withApprovalPage(owner(event), async (key, target, signal) => ({
+      url: await Effect.runPromise(
+        prepareApprovalKeyEnrollment(target, (message) => signDeviceMessage(key.privateKey, message)),
+        { signal },
+      ),
+    })),
+  )
   ipcMain.handle('althar:homes-inspect', (event, target: unknown) => controller.inspect(owner(event), target))
   ipcMain.handle('althar:homes-connect', (event, check: unknown, name: unknown) => controller.connect(owner(event), check, name))
   ipcMain.handle('althar:homes-overview', (event) => {
@@ -241,6 +289,8 @@ export const startHomeConnections = ({
   })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
+    approvals.get(id)?.abort()
+    approvals.delete(id)
     const connection = connections.get(id)
     connections.delete(id)
     return connection === undefined

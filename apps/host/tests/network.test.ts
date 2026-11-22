@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 
@@ -6,12 +6,14 @@ import { assert, describe, it } from '@effect/vitest'
 import { Agents } from '@althar/runtime'
 import { completeDevicePairing, createDeviceKey, decodePairingCode, openHttpsConnection, signDeviceMessage } from '@althar/transport-node'
 import { Deferred, Effect, Fiber, Layer, Schema } from 'effect'
+import { vi } from 'vitest'
 
 import { runCommand } from '../src/commands'
-import { serveHome, type HomeReady } from '../src/home'
+import { initializeHome, serveHome, type HomeReady } from '../src/home'
 import { configureNetwork, disableNetwork, networkFiles, readNetworkConfiguration } from '../src/network'
 import { parseOptions } from '../src/options'
 import { temporary } from './support'
+import * as approvalKeys from '../src/approvalKeys'
 
 const fixture = () => {
   const root = temporary()
@@ -61,6 +63,48 @@ const freePort = Effect.promise(
 )
 
 describe('opt-in HTTPS home configuration', () => {
+  it.live('checks the administrator’s key file before saving HTTPS configuration', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { root, options } = fixture()
+        if (options.network === undefined) throw new Error('Missing HTTPS fixture')
+        const port = yield* freePort
+        const origin = `https://localhost:${port}`
+        const filename = join(root, 'approval-keys.json')
+        const guarded = { ...options, network: { ...options.network, address: '127.0.0.1', port, origin, approvalKeys: filename } }
+        assert.include((yield* Effect.flip(configureNetwork(guarded))).message, 'server administrator')
+        const dependencies = {
+          agents: Layer.succeed(Agents, Agents.from([])),
+          agentConfigs: { homeDir: root, folder: join(root, 'agent-sync') },
+        }
+        const initialized = yield* initializeHome(guarded, dependencies)
+        const read = vi.spyOn(approvalKeys, 'readApprovalKeys').mockResolvedValue({
+          version: 1,
+          homeId: `home_${'3'.repeat(32)}`,
+          origin,
+          credentials: [],
+        })
+        try {
+          yield* configureNetwork(guarded)
+          assert.strictEqual((yield* readNetworkConfiguration(options.profile))?.approvalKeys, filename)
+          assert.deepStrictEqual(read.mock.calls, [[filename, origin]])
+          assert.include((yield* Effect.flip(serveHome(guarded, () => Effect.void, dependencies))).message, 'different home')
+          read.mockResolvedValue({ version: 1, homeId: initialized.homeId, origin, credentials: [] })
+          const ready = yield* Deferred.make<HomeReady, unknown>()
+          const server = yield* Effect.forkScoped(
+            serveHome(guarded, (info) => Effect.asVoid(Deferred.succeed(ready, info)), dependencies).pipe(
+              Effect.catchCause((cause) => Effect.andThen(Deferred.failCause(ready, cause), Effect.failCause(cause))),
+            ),
+          )
+          assert.strictEqual((yield* Deferred.await(ready)).homeId, initialized.homeId)
+          yield* Fiber.interrupt(server)
+        } finally {
+          read.mockRestore()
+        }
+      }),
+    ),
+  )
+
   it.live('runs the operator pairing, inventory and revocation commands against a real configured home', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -128,6 +172,19 @@ describe('opt-in HTTPS home configuration', () => {
     }),
   )
 
+  it.live('reports damaged settings and refuses to configure without HTTPS options', () =>
+    Effect.gen(function* () {
+      const { options } = fixture()
+      const { network: _network, ...withoutNetwork } = options
+      assert.strictEqual((yield* Effect.flip(configureNetwork(withoutNetwork))).code, 'InvalidConfig')
+      const path = join(options.profile, 'network.json')
+      writeFileSync(path, '{damaged', { mode: 0o600 })
+      assert.strictEqual((yield* Effect.flip(readNetworkConfiguration(options.profile))).code, 'InvalidConfig')
+      chmodSync(path, 0o644)
+      assert.include((yield* Effect.flip(readNetworkConfiguration(options.profile))).message, 'private')
+    }),
+  )
+
   it.live('refuses public key files, insecure origins and a private TLS key inside project storage', () =>
     Effect.gen(function* () {
       const { options, certificate, key } = fixture()
@@ -160,6 +217,7 @@ describe('opt-in HTTPS home configuration', () => {
       ['configure-network'],
       ['configure-network', '--origin', 'https://host.test'],
       ['serve', '--origin', 'https://host.test'],
+      ['serve', '--approval-keys', '/trusted-keys.json'],
       ['revoke-device'],
       ['devices', '--device-id', `dev_${'1'.repeat(32)}`],
       ['serve', '--after', `dev_${'1'.repeat(32)}`],
