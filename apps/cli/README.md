@@ -58,6 +58,36 @@ In an attached session, `/quit`, Ctrl-C and a closed terminal disconnect your vi
 
 If the connection fails while creating a task, reuse the printed `--command-id cmd_…` with the same options to recover the creation receipt. For an existing task, use its thread ID. The terminal shows the latest 100 items, up to 65,536 characters each. Use the desktop for older history and files.
 
+## Connect a worker to the Desktop home
+
+The Desktop app can use the same Linux workers as a standalone Linux home.
+The worker connects to Desktop's built-in home, where your project and its task
+history already live. Use a worker certificate issued by the CA you configure
+for this home. Keep the worker and home private keys on their respective machines.
+[Worker certificates and routes](../host/README.md#native-worker-diagnostic)
+
+Use the CLI under the same OS account and with the same profile and worktree
+paths as Desktop. Enable the private local API with `ALTHAR_API_SOCKET=1` when
+starting Desktop so the CLI can look up that home's identity and projects.
+
+```sh
+node dist/althar.js workers configure --address "$PRIVATE_IP" \
+  --ca "$TLS/home-ca.pem" --certificate "$TLS/home.pem" --key "$TLS/home.key"
+node dist/althar.js inspect
+node dist/althar.js workers enroll --certificate "$TLS/worker.pem" --project "$PROJECT_ID"
+```
+
+Restart Desktop after changing the listener configuration. Enrollment prints
+the home and worker IDs for the worker's connection arguments. Use the name on
+the home certificate and port 6770 by default. The worker appears in **Run on**
+when a held plan can use it. To cut off a certificate, use
+`workers revoke --worker <id>`. To turn off the listener, use `workers disable`
+and restart Desktop. [Start an agent on the worker](../host/README.md#run-an-althar-task-on-a-separate-worker)
+
+For an outbound worker relay on both machines, give `workers configure` the
+home link file with `--relay <file>` and leave its address at the default
+`127.0.0.1`. The worker connects with its own relay credentials. [Relay setup](../../packages/worker-protocol/README.md#outbound-worker-relay)
+
 ## Work on it
 
 Run these from `apps/cli`.
