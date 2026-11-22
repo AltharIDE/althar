@@ -5146,6 +5146,7 @@ const socketCalls = new Set<string>([
   'GetRepositoryScripts',
   'ReadLaunchPreview',
   'OpenLaunchPreviewSocket',
+  'ReadLaunchPreviewSocket',
   'WriteLaunchPreviewSocket',
   'CloseLaunchPreviewSocket',
   'PrepareWorkerSnapshot',
