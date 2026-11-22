@@ -598,13 +598,25 @@ describe('saving a canvas to its repository', () => {
         yield* git(other, 'add', 'designs/sign-in/notes.md')
         yield* git(other, '-c', 'user.name=Ana', '-c', 'user.email=ana@althar.test', 'commit', '-q', '-m', 'Notes')
         yield* git(other, 'push', '-q', 'origin', 'HEAD:main')
+        const anas = yield* git(bare, 'rev-parse', 'main')
+
+        // A version with a file of its own where Ana's is refuses, and leaves hers and the branch as they were.
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v2\n', 'notes.md': '# The artifact’s notes\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        const claimed = yield* until(detail(), ({ summary }) => summary.saved?.state === 'failed')
+        assert.strictEqual(claimed.summary.saved?.version, 1)
+        assert.include(claimed.summary.saved?.problem ?? '', 'would write over designs/sign-in/notes.md')
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), anas)
+        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/notes.md'), '# Ana’s notes')
 
         // A new version replaces the artifact's own files and keeps Ana's.
-        draw(folder, 'sign-in', { 'index.md': '# Sign in, v2\n' })
-        assert.include(yield* publish, 'Published sign-in v2')
-        yield* until(detail(), ({ summary }) => summary.saved?.version === 2 && summary.saved.state === 'saved')
+        rmSync(join(folder, CANVASES_FOLDER, 'sign-in', 'notes.md'))
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v3\n' })
+        assert.include(yield* publish, 'Published sign-in v3')
+        yield* save('designs/sign-in/')
+        assert.include((yield* settled()).summary.saved, { state: 'saved', version: 3 })
         assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/notes.md'), '# Ana’s notes')
-        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/index.md'), '# Sign in, v2')
+        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/index.md'), '# Sign in, v3')
 
         // A move to a folder that holds files refuses; to an empty one, it takes only its own files and leaves Ana's.
         yield* save('designs/existing/')
@@ -612,7 +624,7 @@ describe('saving a canvas to its repository', () => {
         yield* save('docs/sign-in/')
         assert.include((yield* settled()).summary.saved, { state: 'saved', path: 'docs/sign-in/' })
         assert.strictEqual(yield* git(bare, 'ls-tree', '-r', '--name-only', 'main', '--', 'designs/sign-in'), 'designs/sign-in/notes.md')
-        assert.strictEqual(yield* git(bare, 'show', 'main:docs/sign-in/index.md'), '# Sign in, v2')
+        assert.strictEqual(yield* git(bare, 'show', 'main:docs/sign-in/index.md'), '# Sign in, v3')
 
         // Where someone changed one of its own files, it refuses rather than overwrite their work.
         yield* git(other, 'fetch', '-q', 'origin')
@@ -621,11 +633,11 @@ describe('saving a canvas to its repository', () => {
         yield* git(other, 'add', 'docs/sign-in/index.md')
         yield* git(other, '-c', 'user.name=Ana', '-c', 'user.email=ana@althar.test', 'commit', '-q', '-m', 'Ana’s edit')
         yield* git(other, 'push', '-q', 'origin', 'HEAD:main')
-        draw(folder, 'sign-in', { 'index.md': '# Sign in, v3\n' })
-        assert.include(yield* publish, 'Published sign-in v3')
-        // It stays saved at v2, and says why v3 isn't.
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v4\n' })
+        assert.include(yield* publish, 'Published sign-in v4')
+        // It stays saved at v3, and says why v4 isn't.
         const refused = yield* until(detail(), ({ summary }) => summary.saved?.state === 'failed')
-        assert.strictEqual(refused.summary.saved?.version, 2)
+        assert.strictEqual(refused.summary.saved?.version, 3)
         assert.include(refused.summary.saved?.problem ?? '', 'Someone changed docs/sign-in/index.md')
         assert.strictEqual(yield* git(bare, 'show', 'main:docs/sign-in/index.md'), '# Sign in, as Ana left it')
       }),
@@ -771,6 +783,48 @@ describe('saving a canvas to its repository', () => {
         assert.include(refused, { state: 'failed', pullRequest: null })
         assert.include(refused?.problem ?? '', 'didn’t open for this artifact')
         assert.lengthOf(github.changes, 1)
+      }),
+    ),
+  )
+
+  it.live('after a push whose pull request didn’t open, takes for its own only the one the host opened for it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        const github = makeFakeService({ pushUrl: () => bare })
+        github.addRepository(['meridian', 'api'])
+        const setup = yield* connectedWith(github)
+        const { personId } = Context.get(setup.context, Instance)
+        yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
+        const { canvasId, save, settled } = yield* publishedAt(setup, working)
+        const branch = branchOf(canvasId)
+        // Someone opens a pull request from its branch, between its push and its trying again: by its title, as anyone may.
+        const opensOne = (author: string) =>
+          github.addPullRequest({ path: ['meridian', 'api'], title: 'Add Sign in', author, source: branch, target: 'main' })
+        const tryAgain = Effect.suspend(() => Effect.andThen(save('design/sign-in/', 'pr'), settled()))
+
+        // The host said no: one opened after, even by the same account, is the person's own doing, not this artifact's.
+        github.failNext('openChange', 'rejected')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        const byHand = opensOne('you')
+        const refused = (yield* tryAgain).summary.saved
+        assert.include(refused, { state: 'failed', pullRequest: null })
+        assert.include(refused?.problem ?? '', 'didn’t open for this artifact')
+        github.close(byHand.number)
+
+        // Its answer lost, the host may have opened it: still, one by anyone else isn't.
+        github.failNext('openChange', 'unreachable')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        const anas = opensOne('ana')
+        assert.include((yield* tryAgain).summary.saved?.problem ?? '', 'didn’t open for this artifact')
+        github.close(anas.number)
+
+        // The one by the account it asked with, with the title it asked for, is the one the host opened: it carries on in it.
+        const lost = opensOne('you')
+        const adopted = (yield* tryAgain).summary.saved
+        assert.include(adopted, { state: 'saved', version: 1 })
+        assert.deepStrictEqual(adopted?.pullRequest, { number: lost.number, url: lost.url })
+        assert.strictEqual(adopted?.commit, yield* git(bare, 'rev-parse', branch))
       }),
     ),
   )

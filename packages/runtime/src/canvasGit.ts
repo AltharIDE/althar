@@ -133,6 +133,27 @@ const filesUnder = (worktree: string, rev: string, path: string) =>
     return files
   })
 
+/**
+ * The incoming paths that would land on a file in git that isn't the canvas's own, or that would turn a folder of theirs
+ * into a file or a file of theirs into a folder.
+ */
+const overTheirs = (incoming: ReadonlyArray<string>, theirs: ReadonlyArray<string>) => {
+  const files = new Set(theirs)
+  const folders = new Set(
+    theirs.flatMap((name) =>
+      name
+        .split('/')
+        .slice(0, -1)
+        .map((_, i, parts) => parts.slice(0, i + 1).join('/')),
+    ),
+  )
+  return incoming.filter((name) => {
+    if (files.has(name) || folders.has(name)) return true
+    const parts = name.split('/')
+    return parts.slice(0, -1).some((_, i) => files.has(parts.slice(0, i + 1).join('/')))
+  })
+}
+
 /** The blob git would keep for these bytes, unfiltered, in the repository's own hash. */
 const blobOf = (format: string, bytes: Uint8Array) =>
   createHash(format === 'sha256' ? 'sha256' : 'sha1')
@@ -144,8 +165,8 @@ const blobOf = (format: string, bytes: Uint8Array) =>
  * Stages the canvas's files at `path`, with the store's bytes even where git would apply a filter, touching nothing it
  * didn't write itself. A first save, and a move, need a folder that holds nothing yet. A save after that replaces and
  * removes only the files its last save wrote (`previous`: that version's files, where it put them), as long as no one
- * changed them since; files others added beside them stay. Where someone changed one of its files, it refuses rather than
- * overwrite or delete their work.
+ * changed them since; files others added beside them stay. Where someone changed one of its files, or a new file of its
+ * would land on one someone else added, it refuses rather than overwrite or delete their work.
  */
 export const stageCanvas = (
   worktree: string,
@@ -170,6 +191,16 @@ export const stageCanvas = (
       if (changed.length > 0)
         return yield* refuse(
           `Someone changed ${changed.map((name) => `${previous.path}/${name}`).join(', ')} in git since Althar last saved it. Bring those changes into the artifact or move them aside, then save again.`,
+        )
+      // Every path this version writes, its old ones and its new, lands only on what is its own: never on what others put there.
+      const theirs = [...here.keys()].filter((name) => !owned.has(name))
+      const over = overTheirs(
+        files.map((file) => file.path),
+        theirs,
+      )
+      if (over.length > 0)
+        return yield* refuse(
+          `This version would write over ${over.map((name) => `${path}/${name}`).join(', ')}, which someone else put in git. Rename ${over.length === 1 ? 'it' : 'them'} in the artifact, or move theirs aside, then save again.`,
         )
       const kept = new Set(files.map((file) => file.path))
       for (const name of owned.keys()) if (there.has(name) && (moved || !kept.has(name))) removed.push(`${previous.path}/${name}`)
