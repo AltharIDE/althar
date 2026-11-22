@@ -49,6 +49,13 @@ Proposals waiting now:
   and worker-language choices are in [Foundations](foundations.md#remote-connections-and-native-workers); the wider design remains proposed.
 - [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
   canvases the project's agents draw, version and hear comments on; the first slice is built.
+- [ADR-108](proposed/108-a-role-is-a-lens-not-a-separate-app.md) to
+  [ADR-112](proposed/112-panels-are-read-only-connectors-with-a-view-devops-first.md):
+  Althar for the whole team, a feature from product to devops. Roles are
+  lenses, features and stages are read from the repository, a stage hands
+  over when its artefact merges, gates are the code host's and the
+  tracker's, and panels are read-only connectors. The plan is
+  [whole-team](../plans/whole-team.md).
 
 ## The old ADRs
 
@@ -180,3 +187,8 @@ one.
 | 105 | Undo from a delivered task message restores its turn and later turns from private checkpoints, preserves commits and unrelated edits, and restarts the agent from retained context | [desktop-app § Undo from a task message](desktop-app.md#undo-from-a-task-message) |
 | [106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) | Agent process families share CPU where supported, with background priority and pressure-aware admission everywhere and no per-language setup | [scheduling § Process families](scheduling.md#how-agent-process-families-share-the-machine) |
 | 107 | Migrations keep their numbers, and `numbers` refuses a migration or ADR number main or a pull request ahead in the merge queue already has, with an open pull request's same number a warning | [foundations § Numbers that can't collide](foundations.md#numbers-that-cant-collide) |
+| [108](proposed/108-a-role-is-a-lens-not-a-separate-app.md) | A role (product, design, engineering, devops or the project's own; per person per project, several allowed) is a lens that changes only defaults: landing view, pinned panels, board grouping and filters, preset order, notifications, sandbox profile and models; nothing is hidden or forbidden | Proposed; would fold into [desktop-app](desktop-app.md), [tasks § Presets](tasks.md#presets) and [what-agents-may-do](what-agents-may-do.md) |
+| [109](proposed/109-a-feature-moves-through-stages-kept-in-the-repository.md) | A feature is `specs/<feature>/` in its home repository, its stages are `.althar/flow.yaml`'s, and its stage is read from what merged on the default branch and `spec.md`'s frontmatter, linked across repositories by `Feature:` and mirrored to a tracker optionally | Proposed; would fold into [tasks](tasks.md) and [code-hosts § Trackers](code-hosts.md#trackers) |
+| [110](proposed/110-a-stage-hands-over-when-its-artefact-merges.md) | A stage is done when its artefact, and every pull request linked for it, merged; each person's Althar reads that from main and its coordinator proposes the next role's tasks, held; "ready for next" is a soft signal; errands for later asks wait on DEV-267 | Proposed; would fold into [coordinator](coordinator.md), [code-hosts § Hearing from the host](code-hosts.md#hearing-from-the-host) and [tasks](tasks.md) |
+| [111](proposed/111-gates-live-on-the-code-host-and-the-tracker.md) | Althar adds no gate: approval is the code host's and the tracker's (CODEOWNERS, branch protection, required reviews, tracker workflows), which Althar reads and shows, CODEOWNERS included | Proposed; would fold into [code-hosts § Merging and the merge line](code-hosts.md#merging-and-the-merge-line) |
+| [112](proposed/112-panels-are-read-only-connectors-with-a-view-devops-first.md) | A panel is a read-only connector of Althar's own and a view beside the conversation, read by agents through tools; Kubernetes and then Prometheus first, with no writes | Proposed; would fold into [code-hosts § Connectors](code-hosts.md#connectors), [desktop-app](desktop-app.md) and [what-agents-may-do](what-agents-may-do.md) |
