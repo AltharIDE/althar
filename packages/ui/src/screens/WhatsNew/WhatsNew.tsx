@@ -12,7 +12,7 @@ import { safeHref } from '../../lib/safeHref'
 import { Heading } from '../../primitives/Heading/Heading'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { FeatureArt, type FeatureArtKey } from './FeatureArt'
-import { dated, type ReleaseNotes } from './notes'
+import { dated, named, type ReleaseNotes } from './notes'
 import { Releases, type ReleasesText, Words } from './Releases'
 import l from './WhatsNew.module.css'
 
@@ -233,11 +233,15 @@ export function WhatsNew({
             </ul>
           ) : (
             <ul className={l.alsoList}>
-              {also.map((line) => (
-                <li key={line}>
-                  <Words text={line} />
-                </li>
-              ))}
+              {also.map((line) => {
+                const { name, rest } = named(line)
+                return (
+                  <li key={line}>
+                    {name !== null && <b>{name}. </b>}
+                    <Words text={rest} />
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>

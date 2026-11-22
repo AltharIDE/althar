@@ -348,15 +348,17 @@ export function ProjectTabs({
           )}
           {althar !== undefined && (
             <li className={cx(s.tab, s.project, althar.current && s.current)}>
-              <button type="button" className={s.select} aria-current={althar.current ? 'page' : undefined} onClick={althar.onSelect}>
+              <button
+                type="button"
+                className={s.select}
+                aria-current={althar.current ? 'page' : undefined}
+                // Named whole, so every reader says it as one: "Althar, what's new in this version".
+                aria-label={althar.news === true ? `${t.althar}, ${t.news}` : undefined}
+                onClick={althar.onSelect}
+              >
                 <Icon name="news" size={15} className={s.logo} />
                 <span className={s.name}>{t.althar}</span>
-                {althar.news === true && (
-                  <>
-                    <span className={cx(s.yours, s.news)} aria-hidden="true" />
-                    <VisuallyHidden>, {t.news}</VisuallyHidden>
-                  </>
-                )}
+                {althar.news === true && <span className={cx(s.yours, s.news)} aria-hidden="true" />}
               </button>
               {althar.onClose !== undefined && (
                 <IconButton icon="close" label={t.closeAlthar} size="small" className={s.close} onClick={althar.onClose} />

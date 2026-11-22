@@ -550,6 +550,9 @@
   padding: 0;
   list-style: none;
 }
+.alsoList b {
+  font-weight: 600;
+}
 .alsoList li {
   break-inside: avoid;
   padding: 12px 0 14px;

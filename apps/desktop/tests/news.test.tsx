@@ -87,6 +87,13 @@ describe('the notes, as Althar’s page reads them', () => {
     ])
     expect(featuresOf(lines, [0])).toEqual([])
     expect(alsoOf(lines, [0])).toEqual(['Markdown files open rendered.'])
+    // Fewer named ones than a row of tiles read better as lines too.
+    const two = release([
+      { kind: 'new', text: 'Steer or queue: choose what a message does.' },
+      { kind: 'new', text: 'Merge without queue, where GitHub lets you.' },
+    ])
+    expect(featuresOf(two)).toEqual([])
+    expect(alsoOf(two)).toEqual(['Steer or queue: Choose what a message does.', 'Merge without queue, where GitHub lets you.'])
   })
 
   it('says what feels better in the first few improvements’ first sentences', () => {

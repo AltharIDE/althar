@@ -45,8 +45,9 @@ const DRAWN: readonly Drawn[] = [
   { starts: 'Bring in work from', name: 'Bring in your work', icon: 'download', art: 'bring-in' },
 ]
 
-/** A release with no feature the app draws shows its first named ones, as many as a page holds. */
+/** A release with no feature the app draws shows its first named ones, as many as a page holds; with fewer than a row of them, its lines. */
 const PLAIN_FEATURES = 6
+const PLAIN_ROW = 3
 
 /** What feels better: the release's first few improvements. */
 const BETTER = 4
@@ -86,7 +87,7 @@ export interface Feature {
   readonly way?: { readonly label: string; readonly to: Way }
 }
 
-/** The rest of what's new, as tiles: the features the app draws, in the notes' order; where it draws none, the first named ones. */
+/** The rest of what's new, as tiles: the features the app draws, in the notes' order; where it draws none, the first named ones, a row of them at least. */
 export const featuresOf = (release: Release, covers: readonly number[] = []): readonly Feature[] => {
   const lines = release.changes.filter((change, i) => change.kind === 'new' && !covers.includes(i))
   const drawn = lines.flatMap((change) => {
@@ -95,10 +96,9 @@ export const featuresOf = (release: Release, covers: readonly number[] = []): re
     return [{ ...featureOf(change.text, how), icon: how.icon, art: how.art, ...(how.way === undefined ? {} : { way: how.way }) }]
   })
   if (drawn.length > 0) return drawn
-  return lines
-    .filter((change) => named(change.text).name !== null)
-    .slice(0, PLAIN_FEATURES)
-    .map((change) => featureOf(change.text, undefined))
+  const plain = lines.filter((change) => named(change.text).name !== null)
+  if (plain.length < PLAIN_ROW) return []
+  return plain.slice(0, PLAIN_FEATURES).map((change) => featureOf(change.text, undefined))
 }
 
 /** Where no feature is drawn or named, the rest of what's new, a line each: the first few, past what the lead covers. */
@@ -106,7 +106,11 @@ export const alsoOf = (release: Release, covers: readonly number[] = []): readon
   release.changes
     .filter((change, i) => change.kind === 'new' && !covers.includes(i))
     .slice(0, PLAIN_FEATURES)
-    .map((change) => firstSentence(change.text))
+    .map((change) => {
+      const { name } = named(change.text)
+      const first = firstSentence(change.text)
+      return name === null ? first : `${name}: ${first}`
+    })
 
 /** What feels better, a line each. */
 export const betterOf = (release: Release): readonly string[] =>
