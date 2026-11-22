@@ -67,3 +67,24 @@ export const standsFor = (
   if (model === undefined || !isAgentDefault(model)) return id
   return models.find((one) => !isAgentDefault(one) && one.name === model.description)?.id ?? null
 }
+
+/** Model families, as their ids name them; any other is `other`, so a model of someone's own is never named. */
+export const MODEL_FAMILIES = [
+  'opus',
+  'sonnet',
+  'haiku',
+  'fable',
+  'gpt',
+  'codex',
+  'o3',
+  'o4',
+  'glm',
+  'kimi',
+  'qwen',
+  'deepseek',
+  'gemini',
+  'grok',
+  'llama',
+  'mistral',
+  'minimax',
+] as const

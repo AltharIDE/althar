@@ -1,6 +1,19 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type ChangeSummary,
+  type PlanStep,
+  type Product,
+  type ProjectWorker,
+  type TaskEnd as End,
+  type WorksIn as Where,
+  workerPlanProblem,
+  workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerName,
+} from '@althar/contracts'
 import {
   AsideCard,
   AsideState,
@@ -79,7 +92,7 @@ export interface CardActions {
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly workers?: ReadonlyArray<ProjectWorker>
-  readonly onStart: (planId: string, workerId?: string) => void
+  readonly onStart: (planId: string, workerId?: string) => void | Promise<boolean>
   readonly onHold: (planId: string) => void
   /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
   readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
@@ -249,33 +262,59 @@ function PlanCard({
     if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
-  const lead = steps.find((step) => step.key === 'implement' && !step.skipped)
-  const workers =
-    card.phase === 'held' && card.reviewing == null && worksIn !== 'checkout' && lead !== undefined
-      ? (actions.workers ?? []).filter((worker) => worker.providers.includes(lead.agentId))
-      : []
+  const workers = actions.workers ?? []
   const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
-  const selected = place.planId === plan.id ? place.workerId : 'home'
+  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
+  const best = automaticWorker(workers, steps, plan.workerRequirements?.repositoryCount)
+  const selection = selected === 'auto' ? best : workers.find((worker) => worker.workerId === selected)
+  const hasCapacity = selected === 'auto' || workers.some((worker) => worker.capacity !== undefined)
+  const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
+  const startProblem =
+    selected === 'home'
+      ? undefined
+      : (planProblem ??
+        (selected === 'auto' && selection === undefined
+          ? automaticWorkerUnavailable
+          : workerProblem(selection, steps, plan.workerRequirements?.repositoryCount)))
   const from = fromOf(card)
+  const placementNote =
+    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
   const placement =
-    workers.length === 0 && selected === 'home' ? undefined : (
-      <Select
-        label="Run on"
-        variant="filled"
-        value={selected}
-        options={[
-          { value: 'home', label: 'This home' },
-          ...workers.map((worker) => ({
-            value: worker.workerId,
-            label: 'Linux worker ' + worker.workerId.slice(-6),
-            disabled: worker.busy,
-          })),
-          ...(selected !== 'home' && !workers.some((worker) => worker.workerId === selected)
-            ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
-            : []),
-        ]}
-        onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
-      />
+    card.phase !== 'held' || (workers.length === 0 && selected === 'home') ? undefined : (
+      <>
+        {(planProblem === undefined || selected !== 'home') && (
+          <Select
+            label="Run on"
+            variant="filled"
+            value={selected}
+            options={[
+              { value: 'home', label: 'This home' },
+              ...(hasCapacity
+                ? [{ value: 'auto', label: 'Best available worker', disabled: best === undefined || planProblem !== undefined }]
+                : []),
+              ...workers.map((worker) => {
+                const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
+                const label = workerName(worker)
+                return {
+                  value: worker.workerId,
+                  label: problem === undefined ? label : `${label} · ${problem}`,
+                  disabled: problem !== undefined,
+                }
+              }),
+              ...(selected !== 'home' && selected !== 'auto' && selection === undefined
+                ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
+                : []),
+            ]}
+            onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
+          />
+        )}
+        {placementNote !== undefined && (
+          <>
+            {' '}
+            <span role="status">{placementNote}</span>
+          </>
+        )}
+      </>
     )
   return (
     <TaskLaunch
@@ -364,6 +403,7 @@ function PlanCard({
             ),
           })}
       onStart={() => actions.onStart(plan.id, selected === 'home' ? undefined : selected)}
+      startDisabled={startProblem !== undefined}
     />
   )
 }

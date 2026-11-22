@@ -168,20 +168,41 @@ export const HeldWithWorker: Story = {
         held
         estimate={undefined}
         footNote={
-          <Select
-            label="Run on"
-            variant="filled"
-            value={worker}
-            options={[
-              { value: 'home', label: 'This home' },
-              { value: 'worker', label: 'Linux worker aaaaaa' },
-            ]}
-            onChange={choose}
-          />
+          <>
+            <Select
+              label="Run on"
+              variant="filled"
+              value={worker}
+              options={[
+                { value: 'home', label: 'This home' },
+                { value: 'auto', label: 'Best available worker' },
+                { value: 'worker', label: 'Linux worker aaaaaa' },
+              ]}
+              onChange={choose}
+            />
+            {worker !== 'home' && (
+              <>
+                {' '}
+                <span role="status">Setup and lead run on the worker. Review runs on this home.</span>
+              </>
+            )}
+          </>
         }
       />
     )
   },
+}
+
+export const HeldWithAutomaticPlacement: Story = {
+  ...HeldWithWorker,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Run on' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Best available worker' }))
+  },
+}
+
+export const HeldOnHome: Story = {
+  render: () => <Launch held estimate={undefined} footNote={<span role="status">A worker needs a task with one repository.</span>} />,
 }
 
 const started = fn()

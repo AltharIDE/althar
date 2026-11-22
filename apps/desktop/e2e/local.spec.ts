@@ -27,11 +27,14 @@ const git = (cwd: string, ...args: Array<string>) =>
 const blockWith = (page: Page, ...parts: Array<Locator>) =>
   parts.reduce((block, part) => block.filter({ has: part }), page.locator('div').filter({ visible: true })).last()
 
+const planOf = (page: Page, title: string) =>
+  page.locator('[data-rhythm="card"]').filter({ has: page.getByText(title, { exact: true }), visible: true })
+
 /** Photograph a complete plan held still: its real countdown can otherwise start it between the light and dark shots. */
-const holdForShot = async (page: Page) => {
-  await expect(page.getByRole('button', { name: 'Start now', exact: true }).last()).toBeVisible()
-  await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
-  const start = page.getByRole('button', { name: 'Start', exact: true }).last()
+const holdForShot = async (plan: Locator) => {
+  await expect(plan.getByRole('button', { name: 'Start now', exact: true })).toBeVisible()
+  await plan.getByRole('button', { name: 'Hold', exact: true }).click()
+  const start = plan.getByRole('button', { name: 'Start', exact: true })
   await expect(start).toBeVisible()
   return start
 }
@@ -79,17 +82,17 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     // Planned, it works Local, as the project starts tasks; the person's own edit isn't committed there.
     writeFileSync(join(root, 'NOTES.md'), 'Mine, not committed\n')
     await planTask(page, 'Fix the login', '[lead:wait]')
-    const worksIn = page.getByRole('radiogroup', { name: 'Works in' }).last()
+    const login = planOf(page, 'Fix the login')
+    const worksIn = login.getByRole('radiogroup', { name: 'Works in' })
     await expect(worksIn.getByRole('radio', { name: 'Local' })).toHaveAttribute('aria-checked', 'true')
-    const start = await holdForShot(page)
-    await shoot(page, blockWith(page, worksIn, start), 'plan')
+    const start = await holdForShot(login)
+    await shoot(page, login, 'plan')
     await start.click()
 
     // It asks before it takes the checkout, in its thread; nothing switches under the edit.
-    await page
-      .getByRole('button', { name: /Open task/ })
-      .last()
-      .click()
+    const work = page.getByRole('region', { name: 'The project’s work' })
+    await showPanes(page, { conversation: false, board: true })
+    await work.getByRole('button', { name: 'Fix the login', exact: true }).click()
     const wait = page.getByRole('button', { name: 'Wait until they’re committed' })
     await expect(wait).toBeVisible()
     await shoot(page, blockWith(page, page.getByText('Before it starts'), wait), 'ask')
@@ -114,13 +117,13 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await backToWork(page)
     await planTask(page, 'Dark mode for Settings', '[lead:finish]')
-    const taken = page.getByText('Waits for Fix the login.').filter({ visible: true }).last()
+    const darkMode = planOf(page, 'Dark mode for Settings')
+    const taken = darkMode.getByText('Waits for Fix the login.', { exact: true })
     await expect(taken).toBeVisible()
-    const startWaiting = await holdForShot(page)
-    await shoot(page, blockWith(page, page.getByRole('radiogroup', { name: 'Works in' }), taken), 'plan-taken')
+    const startWaiting = await holdForShot(darkMode)
+    await shoot(page, darkMode, 'plan-taken')
     await startWaiting.click()
     await showPanes(page, { conversation: false, board: true })
-    const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
     await expect(next.getByText('After Fix the login')).toBeVisible()
     await expect(next.getByText('Waits for Local', { exact: true })).toBeVisible()

@@ -1,4 +1,4 @@
-import { ApiError } from '@althar/contracts'
+import { ApiError, automaticWorker, automaticWorkerUnavailable, workerPlanProblem, workerProblem } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -26,6 +26,7 @@ import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
 import { blockedIn } from './waits'
+import { workerRequirementsOf } from './workerRequirements'
 
 /*
  * A task's plan before it runs (docs/architecture/04): its steps and who does
@@ -205,6 +206,7 @@ export class Plans extends Context.Service<
           preset?: string
           reviewAfterMerge?: boolean
           smallChange?: boolean
+          workerId?: string
         }
 
       /** Whether a plan still counts down. */
@@ -322,29 +324,31 @@ export class Plans extends Context.Service<
        * Starts a proposed plan: when the person says, or, `due`, when its countdown has ended, it isn't held, and nothing it
        * waits for is open (waits.ts). The person's own start doesn't wait.
        */
-      const placeOn = (workerId: string) => (plan: PlanRow) =>
+      const placeOn = (workerId: string | undefined) => (plan: PlanRow) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
           const parameters = parametersOf(plan)
-          const lead = parameters.steps.find((step) => step.key === 'implement' && !step.skipped)
-          const worker = config.workers?.list(plan.projectId).find((one) => one.workerId === workerId)
-          if (
-            parameters.reads === true ||
-            parameters.worksIn === 'checkout' ||
-            lead === undefined ||
-            worker?.busy !== false ||
-            !worker.providers.includes(lead.agentId)
-          )
-            return yield* new ApiError({
-              reason: 'Invalid',
-              message: 'Choose an available worker for the lead and a separate task worktree.',
-            })
-          const repositories = yield* sql.unsafe<{ id: string }>('SELECT id FROM task_repository_requirements WHERE task_id = ?', [
-            plan.taskId,
-          ])
-          if (repositories.length !== 1)
-            return yield* new ApiError({ reason: 'Invalid', message: 'Choose a task that works in one repository.' })
-          return { parameters: JSON.stringify({ ...parameters, workerId }) }
+          if (workerId === undefined) {
+            // A plan brought back to Hold may still hold its previous acceptance's placement.
+            const { workerId: previous, ...atHome } = parameters
+            return previous === undefined ? {} : { parameters: JSON.stringify(atHome) }
+          }
+          const requirements = yield* workerRequirementsOf(plan.taskId, {
+            homeOnly: parameters.here === true,
+            readOnly: parameters.reads === true,
+          })
+          const available = config.workers?.list(plan.projectId) ?? []
+          const worker =
+            workerId === 'auto'
+              ? automaticWorker(available, parameters.steps, requirements.repositoryCount)
+              : available.find((one) => one.workerId === workerId)
+          const message =
+            workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ??
+            (workerId === 'auto' && worker === undefined
+              ? automaticWorkerUnavailable
+              : workerProblem(worker, parameters.steps, requirements.repositoryCount))
+          if (worker === undefined || message !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
+          return { parameters: JSON.stringify({ ...parameters, workerId: worker.workerId }) }
         })
 
       const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>
@@ -362,7 +366,7 @@ export class Plans extends Context.Service<
             () => ({ state: 'accepted', startsAt: null, decidedAt: at }),
             'task_plan.accepted',
             actorId,
-            workerId === undefined ? undefined : placeOn(workerId),
+            placeOn(workerId),
           )
           if (!accepted && workerId !== undefined)
             return yield* new ApiError({ reason: 'Invalid', message: 'That task already started. Choose a worker before starting it.' })
@@ -504,6 +508,7 @@ export class Plans extends Context.Service<
                   ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                   ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
+                  ...(before.workerId === undefined ? {} : { workerId: before.workerId }),
                   // The preset it was planned from: its card names it while its parts still have that preset's shape.
                   ...(before.preset === undefined ? {} : { preset: before.preset }),
                 })
@@ -609,6 +614,8 @@ export class Plans extends Context.Service<
               const now = yield* load(planId)
               if (now.state !== 'accepted') return false
               const parameters = changed(now)
+              const { workerId } = parametersOf(now)
+              if (workerId !== undefined) yield* placeOn(workerId)({ ...now, parameters })
               if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
               if (toward !== undefined) yield* setToward(now.taskId, toward)
               const revision = yield* change('task_plans', planId, { parameters })

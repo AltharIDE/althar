@@ -8,7 +8,7 @@ spec.loader.exec_module(module)
 
 
 def run(i, status='completed', conclusion='success'):
-    return dict(id=i, status=status, conclusion=conclusion, html_url=f'https://example.com/{i}')
+    return dict(id=i, status=status, conclusion=conclusion, html_url=f'https://example.com/{i}', created_at='2026-11-22T02:21:39Z')
 
 
 def job(name='linux', status='completed', conclusion='success'):
@@ -98,6 +98,11 @@ class Tests(unittest.TestCase):
     def test_completed_desktop_without_smoke_decision_blocks(self):
         gate = self.gate([run(1)], {1: [job('plan')]}, ('desktop',))
         with self.assertRaisesRegex(RuntimeError, 'without a completed Windows smoke decision'): gate.check('774')
+
+    def test_ready_desktop_run_can_follow_a_cancelled_run_created_the_same_second(self):
+        gate = self.gate([run(1, conclusion='cancelled'), run(2)],
+                         {1: [job('windows-e2e', conclusion='cancelled')], 2: [job('windows-e2e')]}, ('desktop',))
+        gate.check('774')
 
     def test_changed_head_blocks_even_if_old_checks_passed(self):
         gate = self.gate([run(1)], {1: [job()]})

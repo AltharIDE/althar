@@ -569,6 +569,7 @@ export function TaskView({
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const steers = useSendMidTurn()?.to === 'steer'
   const [goalExpanded, setGoalExpanded] = useState(false)
+  const [savingWorkerCopy, setSavingWorkerCopy] = useState(false)
   const [goalNote, setGoalNote] = useState<string | null>(null)
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
@@ -876,7 +877,7 @@ export function TaskView({
       ? { model: named(reviewer.agentId, reviewer.model), took: tookOf(snapshot, now) ?? '' }
       : null
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
-  const openFile = editor === undefined ? undefined : (path: string) => editors.open(editor.id, { path })
+  const openFile = editor === undefined || snapshot.task.workerId != null ? undefined : (path: string) => editors.open(editor.id, { path })
   // The document open beside the thread, as the editor opens it: by its whole path inside the task's folder.
   const docSource = host.doc?.source ?? host.doc?.path
   const docInEditor = docSource === undefined ? null : editorPath(docSource, snapshot.task.worktree)
@@ -1189,13 +1190,28 @@ export function TaskView({
   const readingAt = (now: string): StartedReading | null =>
     board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
+  const saveCopy = servicesHost.saveWorkerSnapshot
   const partsActionsAt = (reading: StartedReading | null): PartsActions => ({
     ...(reading === null || startedAll.length === 0 ? {} : { started: { tasks: startedAll, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
-    ...(snapshot.task.worktree === null || editor === undefined
+    ...(snapshot.task.worktree === null || editor === undefined || snapshot.task.workerId != null
       ? {}
       : { openInEditor: { name: editor.name, open: () => editors.open(editor.id) } }),
+    ...(snapshot.task.workerId == null || saveCopy === undefined
+      ? {}
+      : {
+          copyWorker: {
+            pending: savingWorkerCopy,
+            open: () => {
+              if (savingWorkerCopy) return
+              setSavingWorkerCopy(true)
+              void saveCopy({ projectId: snapshot.project.id, taskId: snapshot.task.id })
+                .catch(() => undefined)
+                .finally(() => setSavingWorkerCopy(false))
+            },
+          },
+        }),
     ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
       ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
       : {}),

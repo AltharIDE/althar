@@ -4,6 +4,8 @@ import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { taskWorker } from './workerExecution'
+import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -73,7 +75,8 @@ import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schem
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Database, Ledger } from '@althar/persistence-sqlite'
-import { type BoardRow, boardProjections, boardRows, committedAt, homeRows, putProjection } from './boardProjections'
+import { type BoardRow, boardProjections, boardRows, committedAt, putProjection } from './boardProjections'
+import { homeRows, readHomeCards } from './readHomeCards'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
@@ -83,7 +86,7 @@ import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
 import { beforeFirstStep, checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
-import { towardChoicesOf } from './towards'
+import { planTowardChoices } from './towards'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
@@ -433,20 +436,6 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
-/**
- * What a plan card offers to work toward (ADR-093). Only a proposed plan,
- * which a hold stops, can have a branch made for it: one accepted and waiting
- * for a free agent could start while the host makes it, toward the old one,
- * so it is pointed only at a branch the remote has, which changes at once.
- */
-const choicesOf = (taskId: string, proposed: boolean) =>
-  Effect.map(towardChoicesOf(taskId), (choices) => {
-    if (choices === null) return {}
-    if (proposed) return choices
-    const { repositoryId: _made, ...rest } = choices
-    return rest
-  })
-
 /** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
 const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
@@ -3048,6 +3037,9 @@ export class Queries extends Context.Service<
                 : {
                     id: task.planId,
                     steps: teamSteps,
+                    ...(task.planState === 'proposed' && config.workers !== undefined
+                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
@@ -3085,7 +3077,7 @@ export class Queries extends Context.Service<
                           ...(task.planState === 'proposed' || (yield* planWaits(taskId))
                             ? {
                                 localTaken: yield* Effect.andThen(noteUnsure('who works Local'), localTakenFor(taskId)),
-                                ...(yield* choicesOf(taskId, task.planState === 'proposed')),
+                                ...(yield* planTowardChoices(taskId, task.planState === 'proposed')),
                               }
                             : { toward: task.toward }),
                         }),
@@ -3692,17 +3684,17 @@ export class Queries extends Context.Service<
        */
       const homeTasks = (cached = false) =>
         Effect.gen(function* () {
-          const rows = yield* homeRows(SETTLED_SHOWN, cached)
-          const tasks = yield* Effect.forEach(
-            rows,
-            (row) =>
-              Effect.map(cached ? getProjected(row) : onBoard(row), (read) =>
-                read.flatMap((task) =>
-                  // A task kept for later waits on its board, not here.
-                  onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
-                ),
-              ),
-            { concurrency: AT_ONCE },
+          const sessions = yield* Sessions
+          const changes = yield* Changes
+          const rows = yield* homeRows(instance.deviceId, SETTLED_SHOWN, cached, AT_ONCE)
+          const active = new Set((yield* sessions.onTasks).map((one) => one.taskId))
+          // Give other calls a turn between cards. Keep the original history window for pruning worktree facts.
+          const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
+            Effect.gen(function* () {
+              if (!row.candidate && !active.has(row.id) && !(yield* changes.openingNext(row.id))) return []
+              const read = yield* cached ? getProjected(row) : onBoard(row)
+              return read.flatMap((task) => (onHome(task) ? [{ ...task, projectId: row.projectId }] : []))
+            }),
           )
           return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
         })
@@ -4598,6 +4590,7 @@ export class Queries extends Context.Service<
                 }),
               ],
               planId: standing.planId,
+              workerId: yield* taskWorker(head.taskId),
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {

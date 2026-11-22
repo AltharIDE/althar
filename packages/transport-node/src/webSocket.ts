@@ -1,4 +1,11 @@
-import { API_VERSION, ApiError, ClientChallenge, type HttpsHomeTarget, clientChallengeMessage } from '@althar/contracts'
+import {
+  API_VERSION,
+  ApiError,
+  ClientChallenge,
+  type HttpsHomeTarget,
+  type PermissionApproval,
+  clientChallengeMessage,
+} from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import WebSocket, { createWebSocketStream, WebSocketServer } from 'ws'
 
@@ -21,7 +28,7 @@ export const webSocketPort = (socket: WebSocket) => {
   return streamPort({ readable: duplex, writable: duplex })
 }
 
-export const openHttpsConnection = (target: HttpsHomeTarget, sign: (message: string) => Effect.Effect<string, ApiError | TransportError>) =>
+const deviceProof = (target: HttpsHomeTarget, sign: (message: string) => Effect.Effect<string, ApiError | TransportError>) =>
   Effect.gen(function* () {
     const origin = httpsOrigin(target.origin)
     if (target.tlsCertificate === undefined)
@@ -36,6 +43,61 @@ export const openHttpsConnection = (target: HttpsHomeTarget, sign: (message: str
     if (challenge.homeId !== target.homeId || challenge.deviceId !== target.deviceId || challenge.apiVersion !== API_VERSION)
       return yield* transportError('AuthenticationFailed', 'The home returned another device or home identity.')
     const proof = { challenge, signature: yield* sign(clientChallengeMessage(challenge)) }
+    return { agent, origin, authorization: `Althar-Device ${Buffer.from(JSON.stringify(proof)).toString('base64url')}` }
+  })
+
+export const prepareApprovalKeyEnrollment = (target: HttpsHomeTarget, sign: Parameters<typeof deviceProof>[1]) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { agent, origin, authorization } = yield* deviceProof(target, sign)
+      const { path } = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({ path: Schema.String.check(Schema.isPattern(/^\/enroll-approval-key#[A-Za-z0-9_-]{43}$/)) }),
+      )(yield* httpsJson(origin, '/v1/approval-keys', agent, {}, authorization))
+      return new URL(path, origin).href
+    }).pipe(
+      Effect.mapError(() =>
+        transportError('ApprovalUnavailable', 'The home could not start security key setup. Check that the administrator enabled it.'),
+      ),
+    ),
+  )
+
+/** Prepares the browser ceremony without granting the transport key authority to answer the request. */
+export const preparePermissionApproval = (target: HttpsHomeTarget, sign: Parameters<typeof deviceProof>[1], action: PermissionApproval) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { origin, agent, authorization } = yield* deviceProof(target, sign)
+      const response = yield* httpsJson(origin, '/v1/permission-approvals', agent, action, authorization)
+      const { path } = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({ path: Schema.String.check(Schema.isPattern(/^\/approve-permission#[A-Za-z0-9_-]{43}$/)) }),
+      )(response)
+      const url = new URL(path, origin)
+      const wait = Effect.scoped(
+        Effect.gen(function* () {
+          if (target.tlsCertificate === undefined) return yield* transportError('ApprovalUnavailable', 'Pair this home again.')
+          const secure = yield* homeHttpsAgent(origin, { tlsKeyPin: target.tlsKeyPin, tlsCertificate: target.tlsCertificate })
+          const code = url.hash.slice(1)
+          for (;;) {
+            const result = yield* Schema.decodeUnknownEffect(Schema.Struct({ state: Schema.Literals(['pending', 'refused', 'accepted']) }))(
+              yield* httpsJson(origin, '/v1/permission-approvals/result', secure, { code }),
+            )
+            if (result.state === 'accepted') return
+            if (result.state === 'refused') return yield* transportError('ApprovalUnavailable', 'The home refused this confirmation.')
+            yield* Effect.sleep('2 seconds')
+          }
+        }),
+      ).pipe(
+        Effect.timeout('90 seconds'),
+        Effect.mapError(() =>
+          transportError('ApprovalUnavailable', 'The security-key confirmation did not go through. Reopen the request.'),
+        ),
+      )
+      return { url: url.href, wait }
+    }).pipe(Effect.mapError(() => transportError('ApprovalUnavailable', 'This home could not open a security-key confirmation.'))),
+  )
+
+export const openHttpsConnection = (target: HttpsHomeTarget, sign: Parameters<typeof deviceProof>[1]) =>
+  Effect.gen(function* () {
+    const { origin, agent, authorization } = yield* deviceProof(target, sign)
     const opened = yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: (signal) =>
@@ -46,7 +108,7 @@ export const openHttpsConnection = (target: HttpsHomeTarget, sign: (message: str
               perMessageDeflate: false,
               maxPayload: MAX_SOCKET_FRAME + 4,
               handshakeTimeout: 10_000,
-              headers: { authorization: `Althar-Device ${Buffer.from(JSON.stringify(proof)).toString('base64url')}` },
+              headers: { authorization },
             })
             const abort = () => {
               socket.terminate()

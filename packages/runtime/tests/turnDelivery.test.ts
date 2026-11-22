@@ -62,6 +62,34 @@ for (const recovery of ['Try again', 'new message'] as const) {
   })
 }
 
+it.live('keeps a failed turn held when the same message command is retried', () => {
+  const service: { down: 'offline' | undefined } = { down: undefined }
+  return Effect.gen(function* () {
+    const sessions = yield* Sessions
+    const { task: created } = yield* task()
+    const { threadId } = created
+    const accepting = Effect.map(sessions.onTasks, (rows) => rows.find((one) => one.threadId === threadId)?.acceptingTurns)
+    yield* sessions.start({ threadId, agentId: 'codex' })
+    yield* until(turns(threadId), (rows) => rows.length === 1 && rows.every(over))
+    const body = 'Check the refund path.'
+    const envelope = yield* Runtime.envelope('thread.send', { threadId, body })
+    const send = sessions.send({ envelope, threadId, body, sender: { kind: 'window' } })
+    service.down = 'offline'
+    const accepted = yield* send
+    const failed = yield* until(turns(threadId), (rows) => rows.length === 2 && rows.every(over))
+    assert.strictEqual(failed[1]?.errorClass, 'transient')
+    assert.isFalse(yield* accepting)
+
+    service.down = undefined
+    assert.deepStrictEqual(yield* send, accepted)
+    assert.isFalse(yield* accepting)
+    assert.isTrue(yield* sessions.tryAgain(threadId))
+    const resumed = yield* until(turns(threadId), (rows) => rows.length === 3 && rows.every(over))
+    assert.strictEqual(resumed[2]?.state, 'completed')
+    assert.isTrue(resumed[2]?.prompt?.includes(body))
+  }).pipe(Effect.provide(runtime(':memory:', { connection: () => service.down })))
+})
+
 describe('replacement ownership', () => {
   it.live('restores the outgoing session after replacement startup fails, delivering the waiting input once', () => {
     let rejectStartup: (reason: Error) => void = () => {}

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, relative, sep } from 'node:path'
 
-import { inkFor, type ProjectInk } from '@althar/contracts'
+import { inkFor, type ProjectInk, workerRepositoryProblem } from '@althar/contracts'
 import {
   type ActorId,
   ChangeTarget,
@@ -501,6 +501,8 @@ export class Projects extends Context.Service<
       readonly toward?: string | null
       /** The project's repositories it changes, by name; needed only where it has several. */
       readonly repositories?: ReadonlyArray<string>
+      /** The requested execution location currently accepts a single repository. */
+      readonly workerRepositoryLimit?: number
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
       readonly request?: string
       /** The person's messages to the coordinator the request was made from: the images and files they sent with them are the task's too. */
@@ -513,7 +515,7 @@ export class Projects extends Context.Service<
       readonly taskId?: string
       /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
       readonly shelf?: 'scratch'
-    }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure>
+    }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure | ChangeRefused>
     /**
      * Starts another change in a task (a task is a conversation plus parts,
      * "A task holds as many changes as it needs"): a branch of its own, in a
@@ -932,6 +934,7 @@ export class Projects extends Context.Service<
         readonly draft?: boolean
         readonly issueKey?: string
         readonly repositories?: ReadonlyArray<string>
+        readonly workerRepositoryLimit?: number
         readonly request?: string
         readonly requestInputs?: ReadonlyArray<string>
         readonly plain?: boolean
@@ -981,6 +984,9 @@ export class Projects extends Context.Service<
               ? bindings
               : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
+          const placementProblem =
+            input.workerRepositoryLimit === undefined ? undefined : workerRepositoryProblem(chosen.length, input.workerRepositoryLimit)
+          if (placementProblem !== undefined) return yield* new ChangeRefused({ message: placementProblem })
           // The branch each works toward (ADR-093): one asked for is on the remote it starts from, else the task isn't made.
           const towards = new Map(
             yield* Effect.forEach(chosen, (binding) =>

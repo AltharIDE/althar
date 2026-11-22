@@ -383,6 +383,13 @@ export const useTask = (threadId: string): TaskModel => {
   const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
+  const { refetch } = thread
+  const lastShown = useRef<string | null>(null)
+  // A kept screen stops hearing items while hidden. Its latest page catches up when it shows again.
+  useEffect(() => {
+    if (lastShown.current === threadId) void refetch({ cancelRefetch: false })
+    lastShown.current = threadId
+  }, [refetch, threadId])
   // What the presses under way show of it, each held over the thread as read until a read after its answer is shown.
   const [shows, setShows] = useState<ReadonlyMap<number, Showing>>(new Map())
   // The messages taken back from the queue, out of it at once, until a read of each says so.

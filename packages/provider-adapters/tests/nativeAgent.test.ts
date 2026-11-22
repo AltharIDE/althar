@@ -1,8 +1,11 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from '@effect/vitest'
+import { removeTree } from '@althar/testing'
+import { until } from '@althar/testing/effect'
 import { Deferred, Effect, Fiber, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
@@ -14,6 +17,80 @@ const provider = (complete: NativeProvider['complete']): NativeProvider => ({
 })
 
 describe('Althar’s native agent loop', () => {
+  it.live('closes a native session’s MCP process and its child when its scope closes', () =>
+    Effect.gen(function* () {
+      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'althar-native-idle-')))
+      yield* Effect.addFinalizer(() => Effect.promise(() => removeTree(cwd)))
+      const script = join(cwd, 'server.cjs')
+      const pidsFile = join(cwd, 'pids')
+      yield* Effect.promise(() =>
+        writeFile(
+          script,
+          `const fs = require('node:fs'); const { spawn } = require('node:child_process');
+          const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+          fs.writeFileSync(${JSON.stringify(pidsFile)}, JSON.stringify([process.pid, child.pid]));
+          let input = ''; process.stdin.on('data', chunk => { input += chunk; let at;
+            while ((at = input.indexOf('\\n')) >= 0) { const line = input.slice(0, at); input = input.slice(at + 1);
+              const value = JSON.parse(line); if (value.id === undefined) continue;
+              const result = value.method === 'initialize'
+                ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+                : { tools: [] };
+              process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: value.id, result }) + '\\n');
+            }
+          });`,
+        ),
+      )
+      const alive = (pid: number) => {
+        try {
+          process.kill(pid, 0)
+          // Linux can retain an already-exited child as a zombie until its new parent reaps it.
+          if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)?.startsWith('Z')) return false
+          return true
+        } catch {
+          return false
+        }
+      }
+      const stopped: Array<boolean | undefined> = []
+      const pids = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect({
+            transport: {
+              _tag: 'InProcess',
+              agent: nativeAgent(
+                provider(async () => ({ text: 'Ready.', tools: [] })),
+                {
+                  processes: {
+                    starting: async () => 'fixture',
+                    started: async () => {},
+                    stopped: async (_id, report) => {
+                      stopped.push(report?.survivors)
+                    },
+                  },
+                },
+              ),
+            },
+            onPermission: () => Effect.succeed({ decision: 'allow' }),
+          })
+          yield* connection.newSession({
+            cwd,
+            mode: 'ask',
+            mcpServers: [{ type: 'stdio', name: 'fixture', command: process.execPath, args: [script], env: {} }],
+          })
+          const found = JSON.parse(yield* Effect.promise(() => readFile(pidsFile, 'utf8'))) as number[]
+          expect(found).toHaveLength(2)
+          expect(found.every(alive)).toBe(true)
+          return found
+        }),
+      )
+      expect([...stopped]).toEqual([false])
+      yield* until(
+        Effect.sync(() => pids.filter(alive)),
+        (remaining) => remaining.length === 0,
+        'the native MCP fixture and its child to exit',
+      )
+    }).pipe(Effect.scoped),
+  )
+
   it.live('asks Althar before writing, sends the actual tool result to the model, and carries history into the next turn', () =>
     Effect.scoped(
       Effect.gen(function* () {

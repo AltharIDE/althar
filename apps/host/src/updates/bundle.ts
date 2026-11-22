@@ -110,12 +110,22 @@ export interface BundleSource {
   readonly version: string
   readonly license?: string
 }
+export const copyHostAssets = async (entry: string, destination: string) => {
+  const assets = join(dirname(entry), 'assets')
+  try {
+    await fs.cp(assets, join(destination, 'assets'), { recursive: true, errorOnExist: true, force: false })
+  } catch (error) {
+    if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
+    // Builds with a single entry file have no separate assets.
+  }
+}
 export const assembleBundle = async (source: BundleSource, destination: string) => {
   await privateDirectory(destination, true)
   if ((await fs.readdir(destination)).length !== 0) throw failed()
   const dist = join(destination, 'dist')
   await fs.mkdir(dist, { mode: 0o700 })
   await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
+  await copyHostAssets(source.entry, dist)
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
     try {
       await fs.copyFile(join(dirname(source.entry), name), join(destination, name), constants.COPYFILE_EXCL)

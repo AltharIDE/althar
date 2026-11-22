@@ -80,6 +80,22 @@ describe('backups', () => {
     ),
   )
 
+  it.effect('recovers an interrupted copy when the next attempt uses the same backup name', () =>
+    withProfile(({ filename, backups }) =>
+      Effect.gen(function* () {
+        yield* open({ filename, migrations: previous }, addDevice)
+        yield* TestClock.setTime(NOW)
+        mkdirSync(backups)
+        const copy = join(backups, backupName(atPrevious, '2026-10-11T10:32:48.123Z'))
+        writeFileSync(`${copy}.partial`, 'An incomplete SQLite database')
+
+        assert.deepStrictEqual(yield* open({ filename, backups }, inspect), { at: atLatest, devices: [DEVICE] })
+        assert.deepStrictEqual(listBackups(backups), [copy])
+        assert.deepStrictEqual(yield* open({ filename: copy, migrations: previous }, inspect), { at: atPrevious, devices: [DEVICE] })
+      }),
+    ),
+  )
+
   it.effect('keeps the newest three copies, clears half-written ones, and leaves anything else alone', () =>
     withProfile(({ filename, backups }) =>
       Effect.gen(function* () {

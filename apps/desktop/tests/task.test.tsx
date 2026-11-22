@@ -4109,7 +4109,6 @@ describe('the face a task opens on', () => {
     view.rerender(kept('hidden'))
     getThread.mockResolvedValue(snapshot({ items: [{ ...items.you('Now fix the other one'), sequence: 2 + PAGE }], earlier: true }))
     view.rerender(kept('visible'))
-    await act(async () => services.cache.refetchQueries({ queryKey: keys.thread('th1') }))
     await screen.findByText('Now fix the other one')
     expect(screen.queryByText(/It was in the merge/)).toBeNull()
   })

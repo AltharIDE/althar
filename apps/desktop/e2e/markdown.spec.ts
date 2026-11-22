@@ -7,7 +7,7 @@ import { deflateSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { launch, openFirstProject, say, sizeWindow, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, reveal, say, sizeWindow, startTask, still, toConversation } from './support'
 
 /*
  * A task's changed markdown file in a real window, with the fake agent: it
@@ -200,10 +200,10 @@ test('this repository’s own README, written mostly in HTML, opens as GitHub dr
     await expect(changes.getByText(/<\/?(p|a|img|picture|table|td)\b/)).toHaveCount(0)
     await still(page)
     await page.screenshot({ path: 'test-results/readme-top.png', scale: 'css', animations: 'disabled' })
-    await changes.getByRole('heading', { name: sections[1] ?? '' }).scrollIntoViewIfNeeded()
+    await reveal(page, changes.getByRole('heading', { name: sections[1] ?? '' }))
     await expect(changes.getByRole('img', { name: /The first screen/ })).toHaveAttribute('src', /^data:image\/jpeg;base64,/)
     await page.screenshot({ path: 'test-results/readme-features.png', scale: 'css', animations: 'disabled' })
-    await changes.getByRole('note', { name: 'Note' }).scrollIntoViewIfNeeded()
+    await reveal(page, changes.getByRole('note', { name: 'Note' }))
     await page.screenshot({ path: 'test-results/readme-get-started.png', scale: 'css', animations: 'disabled' })
 
     // What the task changed is marked on the same page.

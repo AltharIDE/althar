@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 
 import { useServices } from '../../data/services'
 import { useRunOutput } from '../../shared/RunOf'
+import { addressOf } from '../../shared/running'
 import type { RunContent } from '../../shared/thread'
 import { usePageOpener } from '../browser/opener'
 import { footShown, useFootShown } from './shown'
@@ -282,21 +283,17 @@ function RunActions({
   return (
     <>
       {phase === 'up' && url !== null && (
+        <IconButton icon="external" size="small" label={text.open(addressOf(url))} tooltip="above" onClick={() => onOpen(url)} />
+      )}
+      {launch.workerId === undefined && (
         <IconButton
-          icon="external"
+          icon="terminal"
           size="small"
-          label={text.open(url.replace(/^https?:\/\//, ''))}
+          label={text.terminalHere}
           tooltip="above"
-          onClick={() => onOpen(url)}
+          onClick={() => store.openTerminal({ taskId: launch.taskId, launchId: launch.id, where: launch.branch ?? launch.where })}
         />
       )}
-      <IconButton
-        icon="terminal"
-        size="small"
-        label={text.terminalHere}
-        tooltip="above"
-        onClick={() => store.openTerminal({ taskId: launch.taskId, launchId: launch.id, where: launch.branch ?? launch.where })}
-      />
       {phase === 'failed' && (
         <Button size="small" variant="quiet" icon="agents" onClick={onHelp}>
           {text.help}
