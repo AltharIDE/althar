@@ -155,6 +155,7 @@ ul.windows {
 /* the last good reading, which a failed read didn't renew: its bars and figures quieter, whatever is left */
 .account[data-stale] .window .bar i {
   background: var(--t-4);
+  opacity: 0.5;
 }
 .account[data-stale] .window .windowLeft {
   color: var(--t-3);
