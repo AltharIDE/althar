@@ -12,7 +12,11 @@ const INDEX_REF = 'refs/althar/worker-index'
 const MAX_SET_BYTES = 256 * 1024 * 1024
 
 /** The prefix makes a repository name safe as a Windows directory too. */
-export const workerCopyFolder = (name: string) => 'repo-' + name.replace(/\.+$/, '')
+export const workerCopyFolder = (name: string) => {
+  let end = name.length
+  while (end > 0 && name[end - 1] === '.') end--
+  return 'repo-' + name.slice(0, end)
+}
 
 const beneath = (folder: string, file: string) => {
   const path = relative(folder, file)
