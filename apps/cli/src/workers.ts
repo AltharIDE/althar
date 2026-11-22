@@ -10,7 +10,7 @@ export const WORKER_USAGE = `Usage:
                          [--address <ip>] [--port <port>] [--relay <file>]
   althar workers disable
   althar workers enroll --certificate <pem> --project <id>
-  althar workers revoke --worker <id>
+  althar workers revoke --worker <id> [--project <id>]
 
 Use --profile <dir> for another local Desktop profile. Configure also accepts
 --worktrees <dir> if the profile uses a custom worktree directory.`
@@ -32,7 +32,7 @@ const flags = {
   configure: ['worktrees', 'address', 'port', 'ca', 'certificate', 'key', 'relay'],
   disable: [],
   enroll: ['certificate', 'project'],
-  revoke: ['worker'],
+  revoke: ['worker', 'project'],
 } as const
 
 const required = (value: string | undefined, flag: string) => {
@@ -77,7 +77,11 @@ export const runWorkers = (argv: ReadonlyArray<string>, defaults: { readonly pro
           certificate: resolve(required(values.certificate, 'certificate')),
           projectId: required(values.project, 'project'),
         }
-      : { action: 'revoke' as const, workerId: required(values.worker, 'worker') }
+      : {
+          action: 'revoke' as const,
+          workerId: required(values.worker, 'worker'),
+          projectId: values.project === undefined ? undefined : required(values.project, 'project'),
+        }
   return Effect.scoped(
     Effect.gen(function* () {
       const { api, info } = yield* apiClient(yield* openLocalConnection(profile))
@@ -94,8 +98,9 @@ export const runWorkers = (argv: ReadonlyArray<string>, defaults: { readonly pro
               const workerId = store.enroll(await workerCertificate(selection.certificate), selection.projectId)
               return JSON.stringify({ homeId: info.identity.homeId, workerId, projectId: selection.projectId })
             }
-            store.revoke(selection.workerId)
-            return JSON.stringify({ workerId: selection.workerId, revoked: true })
+            if (selection.projectId === undefined) store.revoke(selection.workerId)
+            else store.unassign(selection.workerId, selection.projectId)
+            return JSON.stringify({ workerId: selection.workerId, projectId: selection.projectId, revoked: true })
           } finally {
             store.close()
           }

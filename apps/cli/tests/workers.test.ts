@@ -69,6 +69,13 @@ it.live('configures a local worker listener and grants a certificate access to a
       (ledger) => Effect.sync(() => ledger.close()),
     )
     assert.isTrue(ledger.agents.permits(enrollment.workerId, project.projectId))
+    assert.deepStrictEqual(JSON.parse(yield* run('revoke', '--worker', enrollment.workerId, '--project', project.projectId)), {
+      workerId: enrollment.workerId,
+      projectId: project.projectId,
+      revoked: true,
+    })
+    assert.isFalse(ledger.agents.permits(enrollment.workerId, project.projectId))
+    assert.strictEqual(yield* enroll(project.projectId), JSON.stringify(enrollment))
     assert.deepStrictEqual(JSON.parse(yield* run('revoke', '--worker', enrollment.workerId)), {
       workerId: enrollment.workerId,
       revoked: true,

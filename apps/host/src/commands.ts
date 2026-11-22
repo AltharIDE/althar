@@ -96,7 +96,7 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
       }
       case 'enroll-worker': {
         const configured = yield* configuredHome(options)
-        const projectId = options.workerEnrollmentProject
+        const projectId = options.workerProjectId
         const workerId = yield* workerOperation(
           configured.profile,
           async (store) => store.enroll(await workerCertificate(options.workerCertificate ?? ''), projectId),
@@ -109,8 +109,13 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
       }
       case 'revoke-worker': {
         const configured = yield* configuredHome(options)
-        yield* workerOperation(configured.profile, (store) => store.revoke(options.workerId ?? ''))
-        return yield* out({ workerId: options.workerId, revoked: true }, 'Worker certificate revoked')
+        const projectId = options.workerProjectId
+        if (projectId === undefined) {
+          yield* workerOperation(configured.profile, (store) => store.revoke(options.workerId ?? ''))
+          return yield* out({ workerId: options.workerId, revoked: true }, 'Worker certificate revoked')
+        }
+        yield* workerOperation(configured.profile, (store) => store.unassign(options.workerId ?? '', projectId))
+        return yield* out({ workerId: options.workerId, projectId, revoked: true }, 'Worker access to the project revoked')
       }
       case 'worker-run': {
         const configured = yield* configuredHome(options)

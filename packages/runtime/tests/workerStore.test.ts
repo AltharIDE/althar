@@ -44,13 +44,20 @@ describe('the private worker ledger', () => {
       expect(first.enroll(otherFingerprint, run.projectId)).toBe(other)
       expect(first.agents.permits(worker, run.projectId)).toBe(true)
       expect(first.agents.begin(worker, run)).toBe(true)
+      expect(first.agents.permitsRun(worker, run.runId)).toBe(true)
+      expect(first.agents.permitsRun(other, run.runId)).toBe(false)
       expect(() => first.enqueue(worker)).toThrow('no outstanding')
+      first.unassign(worker, run.projectId)
+      expect(first.agents.permits(worker, run.projectId)).toBe(false)
+      expect(first.enroll(fingerprint, run.projectId)).toBe(worker)
     } finally {
       first.close()
     }
     const reopened = await openWorkerStore(profile, homeId)
     try {
       expect(reopened.agents.outstanding(worker)).toEqual(run)
+      expect(reopened.agents.permits(worker, run.projectId)).toBe(true)
+      expect(reopened.agents.permitsRun(worker, run.runId)).toBe(false)
       expect(reopened.agents.bind(worker, `wjn_${'8'.repeat(32)}`)).toBe(false)
       expect(reopened.agents.bind(worker, journal)).toBe(true)
       const replaced = { ...run, runId: `war_${'9'.repeat(32)}` }
@@ -61,6 +68,7 @@ describe('the private worker ledger', () => {
       expect(reopened.agents.finish(worker, stopped)).toBe(true)
       expect(reopened.agents.outstanding(worker)).toBeUndefined()
       expect(reopened.agents.begin(other, replaced)).toBe(true)
+      expect(reopened.agents.permitsRun(other, replaced.runId)).toBe(true)
     } finally {
       reopened.close()
     }

@@ -39,6 +39,15 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
       const tree = yield* treeOf(worker)
       const patch = execFileSync('git', ['diff', '--binary', source.tree, tree], { cwd: worker })
       const changes = { head, tree, patch, commits: readFileSync(received) }
+      const mismatch = yield* Effect.flip(acceptWorkerPatch(home, source, { ...changes, tree: source.tree }))
+      assert.include(mismatch.reason, 'does not match its reported checkout')
+      assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), source.head)
+      assert.strictEqual(yield* treeOf(home), source.tree)
+      let checks = 0
+      const revoked = yield* Effect.flip(acceptWorkerPatch(home, source, changes, () => ++checks === 1))
+      assert.include(revoked.reason, 'no longer owns this run')
+      assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), source.head)
+      assert.strictEqual(yield* treeOf(home), source.tree)
       yield* acceptWorkerPatch(home, source, changes)
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), head)
       assert.strictEqual(readFileSync(join(home, 'draft.txt'), 'utf8'), 'Uncommitted work\n')

@@ -134,6 +134,9 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       ) STRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS agent_worker_active ON agent_worker_run(worker_id) WHERE state = 'active';
       CREATE UNIQUE INDEX IF NOT EXISTS agent_workspace_active ON agent_worker_run(workspace_id) WHERE state = 'active';
+      CREATE TABLE IF NOT EXISTS agent_worker_withdrawn (
+        run_id TEXT PRIMARY KEY REFERENCES agent_worker_run(id)
+      ) STRICT;
     `)
     const attempts = (table: 'diagnostic' | 'project_attempt', logs: 'diagnostic_log' | 'project_log') => {
       const appendLog = db.prepare(`
@@ -208,13 +211,17 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       UPDATE agent_worker_run SET state = ?, exit_code = ?
       WHERE id = ? AND worker_id = ? AND state = 'active'
     `)
+    const permits = db.prepare(`SELECT 1 FROM agent_worker_project p JOIN worker_enrollment w ON p.worker_id = w.id
+      WHERE p.worker_id = ? AND p.project_id = ? AND w.revoked = 0`)
+    const permitsRun = db.prepare(`SELECT 1 FROM agent_worker_run r
+      JOIN agent_worker_project p ON p.worker_id = r.worker_id AND p.project_id = r.project_id
+      JOIN worker_enrollment w ON w.id = r.worker_id
+      WHERE r.worker_id = ? AND r.id = ? AND r.state = 'active' AND w.revoked = 0
+        AND NOT EXISTS (SELECT 1 FROM agent_worker_withdrawn WHERE run_id = r.id)`)
     const agents: AgentRunLedger = {
       bind: (workerId, journalId) => journal.get(journalId, workerId) !== undefined,
-      permits: (workerId, projectId) =>
-        db
-          .prepare(`SELECT 1 FROM agent_worker_project p JOIN worker_enrollment w ON p.worker_id = w.id
-          WHERE p.worker_id = ? AND p.project_id = ? AND w.revoked = 0`)
-          .get(workerId, projectId) !== undefined,
+      permits: (workerId, projectId) => permits.get(workerId, projectId) !== undefined,
+      permitsRun: (workerId, runId) => permitsRun.get(workerId, runId) !== undefined,
       outstanding: (workerId) => runningAgent.get(workerId) as ReturnType<AgentRunLedger['outstanding']>,
       begin: (workerId, run) =>
         beginAgent.get(run.runId, run.projectId, run.providerId, run.workspaceId, workerId, run.projectId, run.workspaceId) !== undefined,
@@ -235,18 +242,37 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
       enroll(fingerprint: string, projectId?: string) {
-        db.prepare('INSERT INTO worker_enrollment (id, fingerprint) VALUES (?, ?) ON CONFLICT(fingerprint) DO NOTHING').run(
-          id('wrk'),
-          fingerprint,
-        )
-        const workerId = enrolled.get(fingerprint)?.id
-        if (typeof workerId !== 'string') throw invalid('This certificate was revoked. Enroll a replacement certificate')
-        if (projectId !== undefined)
-          db.prepare('INSERT INTO agent_worker_project (worker_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING').run(
-            workerId,
-            projectId,
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          db.prepare('INSERT INTO worker_enrollment (id, fingerprint) VALUES (?, ?) ON CONFLICT(fingerprint) DO NOTHING').run(
+            id('wrk'),
+            fingerprint,
           )
-        return workerId
+          const workerId = enrolled.get(fingerprint)?.id
+          if (typeof workerId !== 'string') throw invalid('This certificate was revoked. Enroll a replacement certificate')
+          if (projectId !== undefined)
+            db.prepare('INSERT INTO agent_worker_project (worker_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING').run(
+              workerId,
+              projectId,
+            )
+          db.exec('COMMIT')
+          return workerId
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+      },
+      unassign(workerId: string, projectId: string) {
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          db.prepare(`INSERT OR IGNORE INTO agent_worker_withdrawn SELECT id FROM agent_worker_run
+            WHERE worker_id = ? AND project_id = ? AND state = 'active'`).run(workerId, projectId)
+          db.prepare('DELETE FROM agent_worker_project WHERE worker_id = ? AND project_id = ?').run(workerId, projectId)
+          db.exec('COMMIT')
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
       },
       revoke(workerId: string) {
         db.exec('BEGIN IMMEDIATE')

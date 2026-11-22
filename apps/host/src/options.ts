@@ -16,7 +16,7 @@ Commands:
   configure-workers  Configure an opt-in mutual TLS worker listener
   disable-workers  Disable the worker listener on the next restart
   enroll-worker    Register an operator-provisioned worker certificate
-  revoke-worker    Revoke a worker's certificate
+  revoke-worker    Revoke a worker's certificate or a project's agent execution grant
   worker-run       Queue one Linux diagnostic on an enrolled worker
   worker-project-run  Queue a named command for a registered project
   worker-cancel    Cancel a project run
@@ -48,7 +48,7 @@ Options:
   --worker-relay <file>     Private JSON link for an outbound worker relay
   --worker-certificate <file>  Worker client certificate for enroll-worker
   --worker-id <wrk_id>      Worker for worker-run or revoke-worker
-  --project-id <proj_id>   Home project for enroll-worker or worker-project-run
+  --project-id <proj_id>   Home project for enroll-worker, revoke-worker or worker-project-run
   --command-name <name>    Command registered on the worker
   --attempt-id <id>        Worker attempt for worker-result, worker-log or worker-cancel
   --offset <bytes>         Start reading worker-log at this byte offset
@@ -115,7 +115,7 @@ export interface HostOptions {
   readonly network?: NetworkConfiguration
   readonly workerConfiguration?: WorkerConfiguration
   readonly workerCertificate?: string
-  readonly workerEnrollmentProject?: string
+  readonly workerProjectId?: string
   readonly workerId?: string
   readonly workerProject?: { projectId: string; commandName: string }
   readonly workerAttemptId?: string
@@ -384,9 +384,9 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
       return invalid('worker-project-run requires a valid --project-id and --command-name.')
   } else if (
     commandName !== undefined ||
-    (projectId !== undefined && (command !== 'enroll-worker' || !/^proj_[0-9a-f]{32}$/.test(projectId)))
+    (projectId !== undefined && ((command !== 'enroll-worker' && command !== 'revoke-worker') || !/^proj_[0-9a-f]{32}$/.test(projectId)))
   )
-    return invalid('Use --project-id on enroll-worker or worker-project-run and --command-name on worker-project-run.')
+    return invalid('Use --project-id on enroll-worker, revoke-worker or worker-project-run and --command-name on worker-project-run.')
   const workerLogOffset = flags.get('--offset')
   if (
     workerLogOffset !== undefined &&
@@ -466,7 +466,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         }
       : {}),
     ...(flags.has('--worker-certificate') ? { workerCertificate: resolve(flags.get('--worker-certificate') ?? '') } : {}),
-    ...(command === 'enroll-worker' && projectId !== undefined ? { workerEnrollmentProject: projectId } : {}),
+    ...((command === 'enroll-worker' || command === 'revoke-worker') && projectId !== undefined ? { workerProjectId: projectId } : {}),
     ...(workerId === undefined ? {} : { workerId }),
     ...(projectId === undefined || commandName === undefined ? {} : { workerProject: { projectId, commandName } }),
     ...(workerAttemptId === undefined ? {} : { workerAttemptId }),
