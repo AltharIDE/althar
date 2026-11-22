@@ -88,7 +88,7 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       assert.deepStrictEqual(last(), { projectId, workerId })
       assert.throws(() => parseOptions(['revoke-worker', '--worker-id', workerId, '--project-id', 'invalid'], {}, root))
       yield* command('revoke-worker', '--worker-id', workerId, '--project-id', projectId, '--json')
-      assert.deepStrictEqual(last(), { projectId, workerId, revoked: true })
+      assert.deepStrictEqual(last<{ projectId: string; workerId: string; revoked: boolean }>(), { projectId, workerId, revoked: true })
       const revoked = yield* Effect.promise(() => openWorkerStore(profile, homeId))
       try {
         assert.isFalse(revoked.agents.permits(workerId, projectId))
