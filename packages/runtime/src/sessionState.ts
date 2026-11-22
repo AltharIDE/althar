@@ -7,7 +7,7 @@ import { Crypto, Deferred, Duration, Effect, Option, Queue, Schema, Scope, Semap
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
-import { COMPACT } from './compact'
+import { canCompact, COMPACT, contextFull } from './compact'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import type { CoordinatorFolder } from './coordinatorFolder'
 import { Instance } from './Instance'
@@ -154,6 +154,7 @@ export interface TaskThread {
     readonly change: string | null
     /** In a copy of its own, not the change's worktree; `writes`, what it changes there kept as a commit for its lead. */
     readonly copy?: boolean
+    readonly copyOf?: string
     readonly writes?: boolean
   }
 }
@@ -363,13 +364,14 @@ export interface Running {
   workedAt: number | null
   /** When something it left running ended in between turns, if it hasn't spoken since, in milliseconds. */
   wakeAt: number | null
-  /**
-   * A coordinator's or a lead's handover to a fresh session (ADR-031,
-   * ADR-038): under way, it takes no more turns; left, it carries on as it
-   * is, its agent compacting by itself, as one that couldn't start or that
-   * its brief would fill leaves it.
-   */
-  handover: 'none' | 'under_way' | 'left'
+  /** A session being replaced takes no turns until the new one is ready. */
+  handover: 'none' | 'under_way'
+  /** Avoid repeating an automatic request while the agent still reports the same full context. */
+  compactAttempted?: boolean
+  /** Identity of the latest compaction whose Althar records are still owed on a normal turn. */
+  compacted?: symbol
+  /** The agent is compacting on its own between turns. */
+  nativeCompacting?: boolean
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
   /**
@@ -383,6 +385,10 @@ export interface Running {
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
+  /** When this live session became active, including one whose first words were withdrawn. */
+  readonly openedAt: number
+  /** Latest accepted input, including one withdrawn before a turn could take it. */
+  idleTouchedAt: number
   /**
    * A lead's or the coordinator's: when it was last told the person's local date and time, and in which zone (localTime.ts);
    * undefined before its brief, or since a compaction, which may have left it out.
@@ -436,26 +442,59 @@ export const BASELINE_WITHIN = Duration.seconds(5)
 /** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
 export const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
-/** Keeps what the agent last said of its context, from an event it streamed. */
+export const automaticCompactionDue = (running: Running) => {
+  const { thread } = running
+  return (
+    !running.stopping &&
+    running.brief === undefined &&
+    running.handover === 'none' &&
+    running.deliveryHeld === null &&
+    !running.compactAttempted &&
+    !running.nativeCompacting &&
+    running.callsOpen.size === 0 &&
+    (thread.role === 'coordinator' || (thread.role === 'task' && thread.review === null && thread.helper === undefined)) &&
+    contextFull(running.context, thread.role === 'task') &&
+    canCompact(running.entry.definition.id)
+  )
+}
+
+export const markCompacted = (running: Running) => {
+  const { thread } = running
+  if (thread.role === 'coordinator' || (thread.role === 'task' && thread.review === null && thread.helper === undefined))
+    running.compacted = Symbol()
+  running.timeTold = undefined
+}
+
+/** Keeps what the agent last said of its context, including compaction it initiated itself. */
 export const heardContext = (running: Running, event: SessionEvent) => {
-  if (event._tag === 'ContextUsage') running.context = { used: event.used, size: event.size }
+  if (event._tag === 'ContextUsage') {
+    running.context = { used: event.used, size: event.size }
+    if (!contextFull(running.context, running.thread.role === 'task')) running.compactAttempted = false
+  }
+  if (event._tag === 'Compaction') {
+    running.nativeCompacting = event.status === 'in_progress'
+    if (event.status === 'completed') {
+      running.compactAttempted = contextFull(running.context, running.thread.role === 'task')
+      markCompacted(running)
+    }
+  }
 }
 
 /** The account asked for, where one was. */
 export const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
 export type StopRequest =
-  | { readonly state: 'completed'; readonly reason: 'stopped' | 'shutdown' | 'settled' }
+  | { readonly state: 'completed'; readonly reason: 'stopped' | 'shutdown' | 'settled' | 'idle' }
   | { readonly state: 'lost' }
   | { readonly state: 'superseded'; readonly by: string }
 
 /**
- * Why a session's brief is written: a start, another agent taking over, or
- * the same one started afresh to keep its context small, or `lost`, because
- * the agent no longer had its session.
+ * Why a session's brief is written: a start, another agent taking over,
+ * a fresh session after loss or a move, or a refresh after compaction.
  */
 export type Why =
   | { readonly kind: 'start' }
+  | { readonly kind: 'compaction' }
   | { readonly kind: 'takeover'; readonly from: string | undefined }
   | { readonly kind: 'handover'; readonly lost?: boolean }
 

@@ -4,7 +4,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
-- **Updated:** 2026-11-18
+- **Updated:** 2026-11-22
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
@@ -130,10 +130,10 @@ administers its workers. For managed capacity Althar operates the
 machines and allocates workers for the owner's pool. A pool grants
 specific homes and projects access. Within a home, a project can use its
 owner's approved pools, subject to the person's role and the project's
-placement policy. The first version admits each worker to one home at a
-time and uses same-owner pool grants. An owner can later authorize a
-pool for several of its homes through separate enrollments and an
-allocator that prevents them reserving the same capacity.
+placement policy. Personal Linux workers enroll separately with each
+home. One Linux user account can hold one active agent lease at a time,
+including across homes. A shared managed pool will need an allocator that
+reserves resources across workers and checks the project’s grants.
 
 The selected project determines the owner scope before the home resolves
 eligible pools. Check the authenticated person's permission, the project
@@ -172,13 +172,25 @@ choose its place again.
 
 | Capability | On the home today | On an enrolled worker today |
 | --- | --- | --- |
-| Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in a worktree for one repository |
-| Other roles | Coordinator, helpers, reviewers and pull request reviews | The home still runs them |
-| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker's installed toolchain and provider account, with Althar's built-in tools through the home |
-| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git commits and working changes returned to the home |
+| Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in separate worktrees for up to eight repositories |
+| Other roles | Coordinator, helpers, reviewers and pull request reviews | Helpers can join the lead’s checkout or use a separate copy on the same worker. The home runs the coordinator and reviews. |
+| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker’s installed toolchain, provider account and project setup. Built-in and selected HTTP MCP tools connect through the home. Selected command-based MCP tools use executables registered on the worker. Codex and Claude leads and helpers can load selected skills. |
+| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git changes, managed command output, private HTTP and WebSocket previews, verified local Git copies and named files from an active checkout |
 | Assignment | The task's own home | An available worker granted access to the project that advertises the lead's provider |
 
-The worker must eventually describe the OS, tools, workspace shapes and
+Linux workers now report their platform, architecture, usable CPU cores,
+available memory and workspace volume space over the authenticated lease.
+The home offers automatic selection for an eligible project worker and
+resolves that choice again at Start. The worker reserves one execution
+lease. A Linux worker account takes a local lock before accepting the
+checkout transfer. It checks the previous systemd unit and its process
+group before admitting another run. Two homes with the same worker account
+share this limit. A busy worker can refuse the start before the home sends
+the checkout.
+Mac and Windows worker services and requirements for specialized toolchains
+still need their own platform support.
+
+The worker must eventually describe the tools, workspace shapes and
 runtime safeguards it can provide. Placement can then explain the first
 unmet requirement while keeping the person's choice and the home as the
 authority for admission.
@@ -210,6 +222,13 @@ trust boundary. A client's isolated pool never shares those with another
 client's general pool merely because both belong to the same person.
 
 ### Local, runs, files and the editor
+
+The first Desktop copy action downloads the home’s verified Git bundle for
+each task repository. The worker returns its commit, working files and
+staged files under one checkpoint. The home verifies all three before
+packaging them and keeps its own staging area separate. Desktop verifies
+each digest and keeps the copy in its own folder. If the worker cannot checkpoint, the
+person can deliberately choose the home’s current mirror.
 
 **Local keeps its meaning:** the person's existing checkout on a named
 computer, with its simulators and services. It pins execution to that
@@ -315,6 +334,16 @@ If a client cannot protect its key from agents on its own computer, it has
 socket authority until it can; calling its key paired is not a boundary.
 Pairing authenticates a device, not physical human intent for every action.
 The trusted approval path must preserve that distinction.
+
+For direct HTTPS permission answers, the paired connection can request a
+one-use confirmation for a specific open ask. The home presents the exact
+decision on its own HTTPS origin and requires a WebAuthn assertion with
+user verification from a security key linked to that device. An enrollment
+produces a public key for the administrator to verify and install. It grants
+authority only after the home reads its administrator-owned key list. The
+device keeps socket authority throughout. The home checks revocation and the
+open request again before applying the decision, and records the actor and
+device with its receipt.
 
 ADR-081/086's rule stays: fresh words from the window or a paired device,
 or an authorized errand, supply the person's word in the turn they start.
@@ -601,10 +630,10 @@ proposed beyond the accepted transport and language choices.
 
 ```mermaid
 flowchart TD
-    Existing[Built: shared API and persistent Node home]
-    Existing --> Direct[HTTPS/WSS delivered; trusted approval enrollment pending]
-    Existing --> Worker[Built: enrolled Rust worker and recoverable diagnostic]
-    Direct --> Approval[Protected owner keys and approval recovery]
+    Existing[Shared API, identities and persistent Node home]
+    Existing --> Direct[SSH setup and direct HTTPS pairing]
+    Existing --> Worker[Enrolled Rust worker and recoverable diagnostic]
+    Direct --> Approval[Verified security-key approvals]
     Worker --> Commands[Project work, isolation and process-tree cancellation]
     Commands --> Proof[One real project task on a separate worker]
     Proof --> Cloud[First paid product: managed workers for existing homes]

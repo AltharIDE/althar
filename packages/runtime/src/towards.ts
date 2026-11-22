@@ -68,7 +68,7 @@ export const setToward = (taskId: string, toward: string | null) =>
  * remote's branches; and that repository, where a branch typed in the list
  * is made. Null for a task with no repository here.
  */
-export const towardChoicesOf = (taskId: string) =>
+const towardChoicesOf = (taskId: string) =>
   Effect.gen(function* () {
     const [spot] = yield* spotsOf(taskId)
     if (spot === undefined) return null
@@ -80,3 +80,15 @@ export const towardChoicesOf = (taskId: string) =>
       repositoryId: spot.bindingId,
     }
   }).pipe(Effect.orElseSucceed(() => null))
+
+/**
+ * Only a proposed plan can have a branch made for it. A waiting plan may
+ * start while the host makes a branch, so it offers only existing branches.
+ */
+export const planTowardChoices = (taskId: string, proposed: boolean) =>
+  Effect.map(towardChoicesOf(taskId), (choices) => {
+    if (choices === null) return {}
+    if (proposed) return choices
+    const { repositoryId: _made, ...rest } = choices
+    return rest
+  })

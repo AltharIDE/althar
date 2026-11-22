@@ -31,6 +31,7 @@ export const connectAgentTools = (
 ): void => {
   let socket: Socket | undefined
   let release: (() => void) | undefined
+  let active: (() => boolean) | undefined
   let finished = false
   const close = (): void => {
     if (finished) return
@@ -52,6 +53,7 @@ export const connectAgentTools = (
   call.once('close', close)
   call.once('end', () => {
     if (socket === undefined) return fail(status.INVALID_ARGUMENT, 'The worker did not open a tool connection.')
+    if (active?.() !== true) return invalidate()
     socket.end()
   })
 
@@ -76,13 +78,14 @@ export const connectAgentTools = (
       if (lease === undefined) return fail(status.PERMISSION_DENIED, 'This worker has no tool connection for that run.')
       id = enrolled
       release = lease.release
+      active = lease.active
       const next = connect({ host: '127.0.0.1', port: lease.port, allowHalfOpen: true })
       socket = next
       clearTimeout(timer)
       next.on('error', () => fail(status.UNAVAILABLE, 'The home tool server could not be reached.'))
       next.on('data', (output: Buffer) => {
         if (finished) return
-        if (workerId() !== id) return invalidate()
+        if (!lease.active()) return invalidate()
         for (let offset = 0; offset < output.length; offset += MAX_AGENT_CHUNK) {
           const data = output.subarray(offset, offset + MAX_AGENT_CHUNK)
           if (!call.write(Buffer.from(toBinary(AgentToolsResponseSchema, create(AgentToolsResponseSchema, { data }))))) next.pause()
@@ -95,6 +98,7 @@ export const connectAgentTools = (
       })
       return
     }
+    if (active?.() !== true) return invalidate()
     if (frame.case !== 'data' || frame.value.length === 0 || frame.value.length > MAX_AGENT_CHUNK)
       return fail(status.INVALID_ARGUMENT, 'The worker sent invalid tool data.')
     if (!socket.write(frame.value)) {

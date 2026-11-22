@@ -200,11 +200,11 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const [first] = thread.repositories
       const errands = yield* errandLines(thread.projectId, thread.taskId)
       // A conversation brought in from another tool carries on here: its first session reads it, as a fresh one would.
-      const { brought } = yield* asideState(thread.taskId)
+      const brought = why.kind === 'start' && (yield* asideState(thread.taskId)).brought
       return [
-        why.kind === 'start'
+        why.kind === 'start' || why.kind === 'compaction'
           ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
-          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
+          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' ? (why.lost === true ? 'because the session before was lost' : 'because its folder moved') : 'to carry on the conversation'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
         ...askedFor(thread),
         first === undefined
           ? `Read and search ${thread.cwd} to answer.`
@@ -217,10 +217,10 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         `read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool.${errands.length === 0 ? '' : ` Open errands concerning it:\n${errands.join('\n')}`}`,
         ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
         STANDING_DICTATED,
-        ...(brought && why.kind === 'start'
+        ...(brought
           ? ['This conversation was brought in from another tool, where the person had it: carry it on from where it stands.']
           : []),
-        ...(why.kind === 'start' && !brought ? [] : yield* threadSoFar(thread.threadId)),
+        ...(why.kind === 'compaction' || (why.kind === 'start' && !brought) ? [] : yield* threadSoFar(thread.threadId)),
       ].join('\n\n')
     })
 
@@ -254,7 +254,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const cap = (text: string) => (text.length > 4_000 ? `${text.slice(0, 4_000)}\n…` : text)
       const several = thread.repositories.length > 1
       // Where each repository stands, by name where there are several.
-      const states = yield* Effect.forEach(thread.repositories, (repository) =>
+      const states = yield* Effect.forEach(why.kind === 'compaction' ? [] : thread.repositories, (repository) =>
         Effect.gen(function* () {
           const changed =
             repository.baseCommit === null ? '' : yield* quiet(git(repository.worktree, 'diff', '--stat', repository.baseCommit))
@@ -337,12 +337,12 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const changes = thread.repositories.some((repository) => repository.change != null)
       const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
       return [
-        why.kind === 'start'
+        why.kind === 'start' || why.kind === 'compaction'
           ? several
             ? `You are working on a task across several repositories, each ${local ? "in the person's own checkout of it" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
             : `You are working on a task ${local ? "in the person's own checkout of its repository" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
           : why.kind === 'handover'
-            ? `You are carrying on a task an earlier session of yours worked on, in the same ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
+            ? `You are carrying on a task an earlier session of yours worked on, in the ${why.lost === true ? 'same' : 'new'} ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'because its folder moved'}. Its record so far is below.`
             : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${folders}. Its record so far is below.`,
         `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
         ...(why.kind === 'start' && standing?.state === 'done'
@@ -465,7 +465,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         ...(commits === '' ? [] : [`Commits so far:\n${cap(commits)}`]),
         ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
         ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
-        ...(replayed ? yield* threadSoFar(thread.threadId) : []),
+        ...(replayed && why.kind !== 'compaction' ? yield* threadSoFar(thread.threadId) : []),
       ].join('\n\n')
     })
 
@@ -583,53 +583,44 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
   /** Names models by what each agent says of them, or by their ids where that can't be read. */
   const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
 
-  /**
-   * A coordinator session's brief (ADR-031): its role, then the record
-   * of the project and the conversation, the same for every session it
-   * starts, on opening the project or taking over from another agent or a
-   * full context. Only how much of the conversation it carries word for
-   * word differs: a session handed a full context over carries its last
-   * few messages, any other as much of the thread as a brief holds. And
-   * how many tasks are open.
-   */
-  const coordinatorRecordOf = (thread: CoordinatorThread, recent: Recent) =>
+  /** A coordinator's project records, with conversation history when opening a fresh session. */
+  const coordinatorRecordOf = (thread: CoordinatorThread, recent?: Recent) =>
     Effect.gen(function* () {
       const modelOf = yield* modelNamer.pipe(
         Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId)),
       )
-      const [role, record] = yield* Effect.all(
-        [
-          Effect.map(Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId)]), ([worksIn, towards]) =>
-            coordinatorRole(thread, worksIn, towards),
-          ),
-          coordinatorRecord({
-            projectId: thread.projectId,
-            threadId: thread.threadId,
-            modelOf,
-            working: (threadId) => threads.get(threadId)?.turnRunning === true,
-            copies: thread.folder.repositories,
-            recent,
-          }),
-        ],
-        { concurrency: 'unbounded' },
-      )
-      return { role, record }
+      return yield* coordinatorRecord({
+        projectId: thread.projectId,
+        threadId: thread.threadId,
+        modelOf,
+        working: (threadId) => threads.get(threadId)?.turnRunning === true,
+        copies: thread.folder.repositories,
+        ...(recent === undefined ? {} : { recent }),
+      })
     })
 
+  const coordinatorBriefOf = (thread: CoordinatorThread, recent?: Recent, recovery?: string) =>
+    Effect.map(
+      Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId), coordinatorRecordOf(thread, recent)], {
+        concurrency: 'unbounded',
+      }),
+      ([worksIn, towards, record]) =>
+        [...coordinatorRole(thread, worksIn, towards), ...(recovery === undefined ? [] : [recovery]), ...record.sections].join('\n\n'),
+    )
+
   /** The coordinator's brief as a session starts: its role, the record, and as much of the thread as a brief holds. */
-  const coordinatorBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, { budget: PROMPT_BUDGET }), ({ role, record }) => [...role, ...record.sections].join('\n\n'))
+  const coordinatorBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, { budget: PROMPT_BUDGET })
 
-  /**
-   * A fresh coordinator session's brief, when Althar hands the
-   * conversation over (ADR-031): its role, that it took over, then the
-   * record with the last few messages. And how many tasks are open.
-   */
-  const handoverBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, HANDED_OVER), ({ role, record }) => ({
-      text: [...role, TOOK_OVER, ...record.sections].join('\n\n'),
-      open: record.open,
-    }))
+  /** A fresh coordinator's brief after its agent lost the earlier session. */
+  const handoverBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, HANDED_OVER, TOOK_OVER)
 
-  return { asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
+  /** Standing instructions and current records go alongside the agent's own summary on its next ordinary turn. */
+  const afterCompaction = (thread: ThreadContext) =>
+    Effect.gen(function* () {
+      if (thread.role === 'reviewer' || (thread.role === 'task' && (thread.review !== null || thread.helper !== undefined))) return null
+      const brief = thread.role === 'coordinator' ? yield* coordinatorBriefOf(thread) : yield* taskBrief(thread, { kind: 'compaction' })
+      return `Current Althar records after compaction. Earlier conversation is available through read_thread.\n\n${brief}`
+    })
+
+  return { afterCompaction, asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
 }

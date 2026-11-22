@@ -13,6 +13,7 @@ import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type Tas
 import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
+import { addressOf } from '../../shared/running'
 import s from './parts.module.css'
 import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
@@ -28,6 +29,8 @@ import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 export const partsText = {
   worktree: 'Worktree',
+  copyWorker: 'Save a local copy',
+  copyingWorker: 'Saving local copy…',
   local: 'Local',
   /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
   toLocal: 'Move to Local',
@@ -139,6 +142,7 @@ export interface PartsActions {
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
+  readonly copyWorker?: { readonly pending: boolean; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
@@ -249,6 +253,16 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 onClick: act.openInEditor.open,
                 variant: 'quiet' as const,
                 icon: 'external' as const,
+              },
+            ]),
+        ...(act.copyWorker === undefined
+          ? []
+          : [
+              {
+                label: act.copyWorker.pending ? t.copyingWorker : t.copyWorker,
+                onClick: act.copyWorker.open,
+                disabled: act.copyWorker.pending,
+                variant: 'quiet' as const,
               },
             ]),
         ...(act.removeFolder === undefined
@@ -422,10 +436,10 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     parts.push({
       id: `run:${launch.id}`,
       icon: address === null ? 'play' : 'globe',
-      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : address.replace(/^https?:\/\//, '').replace(/\/$/, '')),
+      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : addressOf(address)),
       detail: t.running,
       tone: 'live',
-      facts: address === null ? [] : [[t.answersAt, <code key="a">{address}</code>]],
+      facts: address === null ? [] : [[t.answersAt, <code key="a">{launch.workerId === undefined ? address : addressOf(address)}</code>]],
       actions: [
         ...(address === null ? [] : [{ label: t.open, onClick: () => act.openUrl(address), icon: 'external' as const }]),
         { label: t.stop, onClick: () => act.stopLaunch(launch.id), variant: 'quiet' as const, end: true },

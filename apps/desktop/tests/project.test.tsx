@@ -624,7 +624,7 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('combobox', { name: 'Run on' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Linux worker aaaaaa' }))
-    expect(screen.getByText('Lead on the worker. Setup and review on this home.')).toBeTruthy()
+    expect(screen.getByText('Setup and lead run on the worker. Review runs on this home.')).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln1', workerId)
     await screen.findByText('This worker is already running a task.')
@@ -633,22 +633,54 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
-  it('explains why a task with two repositories can only start on the home', async () => {
+  it('offers the best available worker while keeping This home selected by default', async () => {
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const held = card({
+      phase: 'held',
+      plan: { ...plan, startsAt: null, workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false } },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [
+        {
+          workerId: 'wrk_' + 'e'.repeat(32),
+          providers: ['claude-code'],
+          busy: false,
+          capacity: { platform: 'linux' as const, architecture: 'arm64' as const, cpuCores: 6, freeMemoryMib: 4096, freeDiskMib: 8192 },
+        },
+      ]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const picker = await screen.findByRole('combobox', { name: 'Run on' })
+    expect(picker.textContent).toContain('This home')
+    await userEvent.click(picker)
+    await userEvent.click(await screen.findByRole('option', { name: 'Best available worker' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1', 'auto'))
+  })
+
+  it('offers a task with two repositories on a worker that supports both', async () => {
     const plan = card().plan
     if (plan == null) throw new Error('The task card fixture needs a plan.')
     const held = card({
       phase: 'held',
       plan: { ...plan, startsAt: null, workerRequirements: { repositoryCount: 2, homeOnly: false, readOnly: false } },
     })
+    const available = 'wrk_' + 'c'.repeat(32)
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [
+        { workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false },
+        { workerId: available, providers: ['claude-code'], multiRepoProviders: ['claude-code'], busy: false },
+      ]),
     })
     withServices(<Project room={Room.Talk} />, client)
-    await screen.findByText('A worker needs a task with one repository.')
-    expect(screen.queryByRole('combobox', { name: 'Run on' })).toBeNull()
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Run on' }))
+    expect(screen.getByRole('option', { name: /Worker bbbbbb.*one repository/i }).getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(screen.getByRole('option', { name: 'Linux worker cccccc' }))
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', available)
   })
 
   it('holds, changes and starts a plan before it starts on its own', async () => {

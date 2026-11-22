@@ -49,24 +49,7 @@ const invalid = (message: string): never => {
   throw new Error(message)
 }
 
-export const parseAttachmentOptions = (args: ReadonlyArray<string>): AttachmentOptions => {
-  const command = args[0]
-  if (command !== 'inspect' && command !== 'attach') return invalid('Choose inspect or attach.')
-  const found = new Map<string, string>()
-  let json = false
-  for (let i = 1; i < args.length; i++) {
-    const option = args[i]?.slice(2) ?? ''
-    if (!args[i]?.startsWith('--') || found.has(option) || (option === 'json' && json)) return invalid('Unknown or repeated option.')
-    if (option === 'json') {
-      json = true
-      continue
-    }
-    if (!values.has(option)) return invalid('Unknown option. See attachment usage.')
-    const value = args[++i]
-    if (value === undefined || value.trim() === '' || value.startsWith('--') || value.includes('\0'))
-      return invalid('Each option needs a value.')
-    found.set(option, value)
-  }
+export const attachmentTarget = (found: ReadonlyMap<string, string>): AttachmentTarget => {
   const profile = found.get('profile')
   const ssh = found.get('ssh')
   if ((profile === undefined) === (ssh === undefined)) return invalid('Choose exactly one of --profile or --ssh.')
@@ -89,13 +72,40 @@ export const parseAttachmentOptions = (args: ReadonlyArray<string>): AttachmentO
           },
           ...(homeId === undefined ? {} : { homeId }),
         }
+  return target
+}
+
+export const requireVerifiedHome = (target: AttachmentTarget): void => {
+  if (target.kind === 'ssh' && target.homeId === undefined)
+    return invalid('SSH attachment requires --home. Use inspect to discover it first.')
+}
+
+export const parseAttachmentOptions = (args: ReadonlyArray<string>): AttachmentOptions => {
+  const command = args[0]
+  if (command !== 'inspect' && command !== 'attach') return invalid('Choose inspect or attach.')
+  const found = new Map<string, string>()
+  let json = false
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i]?.slice(2) ?? ''
+    if (!args[i]?.startsWith('--') || found.has(option) || (option === 'json' && json)) return invalid('Unknown or repeated option.')
+    if (option === 'json') {
+      json = true
+      continue
+    }
+    if (!values.has(option)) return invalid('Unknown option. See attachment usage.')
+    const value = args[++i]
+    if (value === undefined || value.trim() === '' || value.startsWith('--') || value.includes('\0'))
+      return invalid('Each option needs a value.')
+    found.set(option, value)
+  }
+  const target = attachmentTarget(found)
   const selectionKeys = ['thread', 'project', 'task', 'agent', 'model', 'command-id']
   if (command === 'inspect') {
     if (selectionKeys.some((key) => found.has(key))) return invalid('inspect does not start or select a task.')
     return { command, target, json }
   }
   if (json) return invalid('--json is only available for inspect.')
-  if (ssh !== undefined && homeId === undefined) return invalid('SSH attachment requires --home. Use inspect to discover it first.')
+  requireVerifiedHome(target)
   const threadId = found.get('thread')
   if (threadId !== undefined) {
     if (!/^thr_[0-9a-f]{32}$/.test(threadId) || selectionKeys.slice(1).some((key) => found.has(key)))

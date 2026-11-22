@@ -1,15 +1,16 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
-import { commitTree, git, treeOf } from './git'
+import { commitTree, git, treeOf, untouched } from './git'
 
 const SNAPSHOT_REF = 'refs/althar/worker-snapshot'
+const INDEX_REF = 'refs/althar/worker-index'
 const COMMITS_REF = 'refs/althar/worker-head'
 
 const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new GitFailed({ cwd, args, reason, stderr: '' })
@@ -20,7 +21,7 @@ const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new
  * A private bare repository gives it a bundle ref without changing any of
  * the task's own refs, index, configuration or working files.
  */
-export const prepareWorkerWorkspace = (worktree: string, maxBytes: number) => {
+export const prepareWorkerWorkspace = (worktree: string, maxBytes: number, saveIndex = false, verifiedIndex?: string) => {
   const failed = (reason: string) =>
     new GitFailed({
       args: ['bundle', 'create'],
@@ -35,6 +36,7 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number) => {
   )
   return Effect.gen(function* () {
     const head = yield* git(worktree, 'rev-parse', '--verify', 'HEAD')
+    const index = verifiedIndex ?? (saveIndex ? yield* git(worktree, 'write-tree') : undefined)
     const tree = yield* treeOf(worktree)
     // Refuse to project a tree read across a concurrent checkout or commit.
     if ((yield* git(worktree, 'rev-parse', '--verify', 'HEAD')) !== head) {
@@ -53,7 +55,11 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number) => {
     )
     yield* git(target, 'update-ref', SNAPSHOT_REF, snapshot)
     const bundle = join(target, 'workspace.bundle')
-    yield* git(target, 'bundle', 'create', bundle, SNAPSHOT_REF)
+    if (index !== undefined) {
+      const staged = yield* commitTree(worktree, index, head, 'Althar workspace index')
+      yield* git(target, 'update-ref', INDEX_REF, staged)
+    }
+    yield* git(target, 'bundle', 'create', bundle, SNAPSHOT_REF, ...(index === undefined ? [] : [INDEX_REF]))
     const { size } = yield* io(() => stat(bundle), 'The worker bundle was not written.')
     if (size > maxBytes || size === 0) {
       return yield* failed('The task’s Git history and changes exceed the worker bundle size limit.')
@@ -66,7 +72,23 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number) => {
       },
       catch: () => failed('Could not verify the prepared worker workspace.'),
     })
-    return { size, sha256, head, tree, contents: (signal: AbortSignal) => createReadStream(bundle, { signal }) }
+    const range = (offset: number, length: number) =>
+      io(async () => {
+        const file = await open(bundle, 'r')
+        try {
+          const bytes = Buffer.alloc(length)
+          let read = 0
+          while (read < length) {
+            const result = await file.read(bytes, read, length - read, offset + read)
+            if (result.bytesRead === 0) throw new Error('The workspace bundle is incomplete')
+            read += result.bytesRead
+          }
+          return bytes
+        } finally {
+          await file.close()
+        }
+      }, 'Could not read the prepared workspace.')
+    return { size, sha256, head, tree, index, contents: (signal: AbortSignal) => createReadStream(bundle, { signal }), range }
   })
 }
 
@@ -74,6 +96,33 @@ export interface WorkerGitState {
   readonly head: string
   readonly tree: string
 }
+
+/** Materialize the worker's staged tree in Git objects without touching either active index. */
+export const verifyWorkerIndex = (worktree: string, base: string, index: { readonly tree: string; readonly patch: Uint8Array }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const mismatch = () => failed(worktree, ['apply', '--cached'], 'The worker’s staged files do not match their reported Git tree.')
+      if (index.patch.byteLength === 0) return index.tree === base ? base : yield* mismatch()
+      const folder = yield* Effect.acquireRelease(
+        Effect.tryPromise({
+          try: () => mkdtemp(join(tmpdir(), 'althar-worker-index-')),
+          catch: () => mismatch(),
+        }),
+        (folder) => cleanUp(folder, 'the received worker index patch'),
+      )
+      const patch = join(folder, 'staged.diff')
+      yield* Effect.tryPromise({ try: () => writeFile(patch, index.patch, { mode: 0o600 }), catch: () => mismatch() })
+      const tree = yield* untouched(
+        worktree,
+        Effect.gen(function* () {
+          yield* git(worktree, 'read-tree', base)
+          yield* git(worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
+          return yield* git(worktree, 'write-tree')
+        }),
+      )
+      return tree === index.tree ? tree : yield* mismatch()
+    }),
+  )
 
 /** Land the worker's changes on the exact tree and commit the home last sent or received. */
 export const acceptWorkerPatch = (
@@ -83,10 +132,13 @@ export const acceptWorkerPatch = (
     readonly patch: Uint8Array
     readonly commits: Uint8Array
   },
+  ownsRun?: () => boolean,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const refuse = (reason: string) => failed(worktree, ['apply'], reason)
+      const lost = 'The worker no longer owns this run. Its changes are still on the worker.'
+      if (ownsRun?.() === false) return yield* refuse(lost)
       const head = yield* git(worktree, 'rev-parse', '--verify', 'HEAD')
       if (head !== base.head || (yield* treeOf(worktree)) !== base.tree)
         return yield* refuse('This task’s checkout changed on the home. The worker’s changes are still on the worker.')
@@ -111,6 +163,19 @@ export const acceptWorkerPatch = (
           },
           catch: () => refuse('Could not save the worker’s changes.'),
         })
+      const patch = incoming.patch.byteLength === 0 ? undefined : yield* received('files.diff', incoming.patch)
+      if (patch !== undefined) {
+        // Verify the proposed tree in a private index before writing any home files.
+        const projected = yield* untouched(
+          worktree,
+          Effect.gen(function* () {
+            yield* git(worktree, 'read-tree', base.tree)
+            yield* git(worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
+            return yield* git(worktree, 'write-tree')
+          }),
+        )
+        if (projected !== incoming.tree) return yield* refuse('The worker’s patch does not match its reported checkout.')
+      }
       if (incoming.commits.byteLength > 0) {
         const archive = yield* received('commits.bundle', incoming.commits)
         if ((yield* git(worktree, 'bundle', 'list-heads', archive)) !== incoming.head + ' ' + COMMITS_REF)
@@ -128,8 +193,8 @@ export const acceptWorkerPatch = (
         )
         yield* git(worktree, 'merge-base', '--is-ancestor', base.head, incoming.head)
       }
-      if (incoming.patch.byteLength > 0) {
-        const patch = yield* received('files.diff', incoming.patch)
+      if (ownsRun?.() === false) return yield* refuse(lost)
+      if (patch !== undefined) {
         // Git apply checks every file before updating any. Keep its checks
         // against edits made since the base was read and against escaping paths.
         yield* git(worktree, 'apply', '--whitespace=nowarn', '--', patch)

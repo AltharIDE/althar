@@ -9,7 +9,7 @@ import {
   type PermissionRequest,
   type SessionEvent,
 } from '@althar/provider-adapters'
-import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import type { Accepting } from './admission'
@@ -36,7 +36,6 @@ import {
 } from './errors'
 import { Failures } from './Failures'
 import { git } from './git'
-import { dueForHandover, dueForLeadHandover, roomFor, shrinks } from './handover'
 import { makeInputBatches } from './inputBatches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
@@ -553,12 +552,16 @@ export class Sessions extends Context.Service<
       const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
+      const coordinatorIdle = Duration.toMillis(runtimeConfig.idle?.coordinator ?? Duration.minutes(30))
       const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
       // The zone the person's local time is told in: the computer's, as its clock says now (localTime.ts).
       const zoneOf = runtimeConfig.zone ?? localZone
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      // A flush that meets an idle retirement starts the last coordinator again once its lifecycle lock is free.
+      const retired = new Set<string>()
+      let wakeRetired: (threadId: string) => Effect.Effect<void> = () => Effect.void
       // Snapshot the old queue before callers can add new work. Only input never dispatched is replayable; an uncertain
       // delivery belongs to the person or its workflow. First stop intent makes Stop durable even if cancellation crashed.
       const recoverable = sessionsSql<{ threadId: string; sessionId: string; inputId: string; projectId: ProjectId }>`
@@ -576,9 +579,9 @@ export class Sessions extends Context.Service<
           AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
             WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id AND f.type = 'provider_session.stop_requested'
-            AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') <> 'shutdown'))
+            AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') NOT IN ('shutdown', 'idle')))
           AND ((s.state = 'completed' AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
-              AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') = 'shutdown'))
+              AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') IN ('shutdown', 'idle')))
             OR (s.state IN ('lost', 'failed') AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
               AND f.type IN ('provider_session.lost', 'provider_session.failed') AND json_extract(f.payload, '$.reason') = 'runtime_restarted')))`
       const recovery = yield* recoverable.pipe(Effect.orDie)
@@ -619,7 +622,10 @@ export class Sessions extends Context.Service<
       const inputBatches = makeInputBatches(sessionsScope, (threadId) =>
         Effect.gen(function* () {
           const running = threads.get(threadId)
-          if (running === undefined) return
+          if (running === undefined || running.stopping) {
+            if (retired.has(threadId)) yield* wakeRetired(threadId)
+            return
+          }
           const interrupting = yield* run(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -865,7 +871,7 @@ export class Sessions extends Context.Service<
           if (abandoned !== undefined) return yield* new TaskRefused({ taskId: abandoned.taskId, why: 'abandoned' })
         })
 
-      const loadThread = (threadId: string) =>
+      const loadThread = (threadId: string, { restoreFolders = true }: { restoreFolders?: boolean } = {}) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
@@ -877,7 +883,7 @@ export class Sessions extends Context.Service<
           const helped = kind?.kind === 'step' ? yield* helperThreadOf(threadId) : undefined
           if (helped !== undefined) return helped
           // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
-          if (kind !== undefined && kind.kind !== 'coordinator') {
+          if (restoreFolders && kind !== undefined && kind.kind !== 'coordinator') {
             const back = yield* bringBackFor(threadId, instance.systemId)
             if (back !== null) yield* setups.begin(back)
           }
@@ -1015,7 +1021,7 @@ export class Sessions extends Context.Service<
               name: helper.name,
               brief: helper.brief,
               change: first.change ?? null,
-              ...(helper.copyPath === null ? {} : { copy: true, writes: helper.writes === 1 }),
+              ...(helper.copyPath === null ? {} : { copy: true, copyOf: found.worktree, writes: helper.writes === 1 }),
             },
           } satisfies ThreadContext as ThreadContext
         })
@@ -1153,26 +1159,6 @@ export class Sessions extends Context.Service<
             for (const itemId of itemsOf(input))
               yield* moveToEnd(thread.projectId, thread.threadId, itemId, fresh.slice(index + 1).flatMap(itemsOf))
           }
-        })
-
-      /**
-       * Whether a session is handed to a fresh one before its next turn: a
-       * coordinator whose context is filling up (ADR-031); a task's lead whose
-       * context is past its mark, or past a smaller one at a break in its work
-       * (a step done, the task made a change, or idle past its cache's life),
-       * unless something it left running still runs, which closing its
-       * session would stop (ADR-038).
-       */
-      const dueToHandOver = (running: Running) =>
-        Effect.gen(function* () {
-          const { thread } = running
-          if (thread.role === 'coordinator') return dueForHandover(running.context)
-          if (thread.role !== 'task' || thread.review !== null) return false
-          if ([...running.background.values()].some((left) => left.ended === null)) return false
-          // Still at work though its turn ended, or within the moment an agent takes to say what it left running (Codex says so
-          // after its turn): not yet.
-          if (yield* busyNow(thread.threadId)) return false
-          return dueForLeadHandover(running.context)
         })
 
       /** Whether anything waits in the thread's queue. */
@@ -1446,7 +1432,9 @@ export class Sessions extends Context.Service<
         },
         betweenAgents,
         changeHeads,
-        dueToHandOver,
+        get afterCompaction(): SessionTurnsDependencies['afterCompaction'] {
+          return afterCompaction
+        },
         // Callbacks can be registered after the layer starts. Turns use the current callback.
         get gate(): SessionTurnsDependencies['gate'] {
           return gate
@@ -1551,6 +1539,7 @@ export class Sessions extends Context.Service<
         sessionFact,
         sessionsScope,
         sessionsSql,
+        setups,
         skillsConfig,
         stopGrace,
         stopTrees,
@@ -1614,11 +1603,22 @@ export class Sessions extends Context.Service<
                   'An interrupted chat undo needs recovery. Keep or move later file edits, then retry Undo from here before starting the agent.',
               })
             const entry = yield* (yield* Agents).get(input.agentId)
+            const [slept] =
+              thread.role === 'coordinator' && input.accountId === undefined
+                ? yield* sql<{ accountId: string | null }>`
+                  SELECT s.account_id FROM provider_sessions s
+                  WHERE s.id = (SELECT id FROM provider_sessions WHERE thread_id = ${input.threadId}
+                    ORDER BY started_at DESC, rowid DESC LIMIT 1)
+                    AND s.agent_id = ${entry.definition.id}
+                    AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+                      AND f.type = 'provider_session.stop_requested' AND json_extract(f.payload, '$.reason') = 'idle')`
+                : []
             const account = yield* limits.pick({
               agentId: entry.definition.id,
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(slept?.accountId == null ? {} : { preferAccountId: slept.accountId }),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
             const blocked =
@@ -1644,7 +1644,7 @@ export class Sessions extends Context.Service<
               Effect.tap(() => goalStillActive),
               beforeTakingOver(connected),
             )
-            return yield* activate(
+            const activated = yield* activate(
               connected,
               {
                 text: brief,
@@ -1653,6 +1653,8 @@ export class Sessions extends Context.Service<
               },
               blocked,
             )
+            retired.delete(input.threadId)
+            return activated
           }),
         )
 
@@ -1844,6 +1846,7 @@ export class Sessions extends Context.Service<
             }),
           })
           const running = threads.get(input.threadId)
+          if (running !== undefined) running.idleTouchedAt = yield* Clock.currentTimeMillis
           if (running !== undefined && input.quiet !== true && input.envelope.actorId === instance.personId) {
             running.blockedInputs = undefined
             if (running.deliveryHeld === 'transient' || running.deliveryHeld === 'recovery') running.deliveryHeld = null
@@ -1921,7 +1924,11 @@ export class Sessions extends Context.Service<
             title: `Effort changed to ${(named?.name ?? input.effort).toLowerCase()}.`,
           })
         })
-      const { asideState, briefFor, handoverBrief, reviewingOf, taskBrief } = makeSessionBriefs({ instance, policies, threads })
+      const { afterCompaction, asideState, briefFor, handoverBrief, reviewingOf, taskBrief } = makeSessionBriefs({
+        instance,
+        policies,
+        threads,
+      })
 
       /**
        * Hands the thread to another agent. The new agent is started first; only
@@ -2097,23 +2104,8 @@ export class Sessions extends Context.Service<
           }),
         )
 
-      /**
-       * Hands a coordinator's conversation, or a task lead's work, to a fresh
-       * session once its context is filling up, or for a lead, at a break in
-       * its work (ADR-031, ADR-038): the same agent, account, model and
-       * effort, briefed from Althar's records. It starts between turns: the
-       * old session takes no more, and what the person says meanwhile waits
-       * for the new one. The new session is started before the old one stops,
-       * so a handover that fails leaves the old one carrying on, its agent
-       * compacting its context itself as before.
-       *
-       * `lost`, what the agent said when it no longer had the session, as
-       * Claude Code's adapter drops one whose process died: it can't carry
-       * on, so it is handed over whatever its context, and a handover that
-       * fails, or a reviewer's, which isn't handed over, stops it, so Try again
-       * starts a fresh one.
-       */
-      const handOver = (previous: Running, lost?: string, moved = false): Effect.Effect<void, never, Store> => {
+      /** Starts a replacement between turns when the agent lost its session or its work moved to another folder. */
+      const handOver = (previous: Running, reason: { readonly lost: string } | 'moved'): Effect.Effect<void, never, Store> => {
         // Where it is handed to, once that begins.
         let holder: Handing | undefined
         return exclusive(
@@ -2123,21 +2115,11 @@ export class Sessions extends Context.Service<
             // Stopped or switched while it waited: nothing is left to hand over.
             if (threads.get(previous.thread.threadId) !== previous || previous.stopping) return
             if (previous.thread.role === 'reviewer') {
-              if (lost !== undefined) yield* cannotCarryOn(previous, lost)
+              if (reason !== 'moved') yield* cannotCarryOn(previous, reason.lost)
               return
             }
-            // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
+            // Read the task as it stands now, including any move, branch or pull request.
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
-            // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
-            if (
-              lost === undefined &&
-              !moved &&
-              thread.role === 'task' &&
-              [...previous.background.values()].some((left) => left.ended === null)
-            ) {
-              previous.handover = 'none'
-              return yield* Queue.offer(previous.wake, undefined)
-            }
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
             const model = session?.model ?? undefined
@@ -2146,21 +2128,7 @@ export class Sessions extends Context.Service<
             const brief =
               thread.role === 'coordinator'
                 ? yield* handoverBrief(thread)
-                : { text: yield* briefFor(thread, { kind: 'handover', ...(lost === undefined ? {} : { lost: true }) }), open: null }
-            // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
-            // worth its thread of thought: the old one carries on as it is. A lost one can't.
-            // Its folder moved, it can't carry on where it is: it is handed over whatever its context.
-            if (
-              lost === undefined &&
-              !moved &&
-              (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context)))
-            ) {
-              yield* Effect.logWarning(
-                `The ${thread.role === 'task' ? 'lead' : 'coordinator'} is left to compact by itself: its brief would fill a fresh session`,
-              )
-              previous.handover = 'left'
-              return yield* Queue.offer(previous.wake, undefined)
-            }
+                : yield* briefFor(thread, { kind: 'handover', lost: reason !== 'moved' })
             // Started afresh, a stand-in still stands in for the lead it was given.
             const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
             // A model or effort the person picks while it starts is the fresh session's, as is one picked as this began.
@@ -2179,19 +2147,15 @@ export class Sessions extends Context.Service<
                 source: 'runtime',
                 severity: 'info',
                 title:
-                  lost !== undefined
-                    ? startedAfreshWords(previous.entry.definition.name)
-                    : moved
-                      ? `Started ${previous.entry.definition.name} afresh in its new folder.`
-                      : brief.open === null
-                        ? `Started ${previous.entry.definition.name} afresh.`
-                        : 'Started a fresh session.',
+                  reason === 'moved'
+                    ? `Started ${previous.entry.definition.name} afresh in its new folder.`
+                    : startedAfreshWords(previous.entry.definition.name),
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(
               connected,
               {
-                text: brief.text,
+                text: brief,
                 closing:
                   thread.role === 'coordinator'
                     ? 'Carry the conversation on from where it stands.'
@@ -2211,13 +2175,12 @@ export class Sessions extends Context.Service<
                 if (holder !== undefined) handed(previous.thread.threadId, holder)
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
                 // Lost, it can't carry on: it stops, and the person is told.
-                if (lost !== undefined) return exclusive(previous.thread.threadId, cannotCarryOn(previous, lost))
-                // It carries on as it is, with what waited for it and what was picked for it meanwhile.
-                previous.handover = 'left'
-                return Effect.andThen(
-                  holder === undefined ? Effect.void : handedBack(previous, holder),
-                  Queue.offer(previous.wake, undefined),
-                )
+                if (reason !== 'moved') return exclusive(previous.thread.threadId, cannotCarryOn(previous, reason.lost))
+                // Startup failed and already said why. Keep the messages queued for a later attempt in the new folder, and what
+                // was picked for it meanwhile.
+                previous.moved = true
+                previous.handover = 'none'
+                return holder === undefined ? Effect.void : handedBack(previous, holder)
               }),
             ),
           ),
@@ -2268,7 +2231,8 @@ export class Sessions extends Context.Service<
             effort: string | null
             startedAt: string
           }>`
-            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at FROM provider_sessions s
+            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at
+            FROM provider_sessions s
             WHERE s.thread_id = ${threadId}
             ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
               s.started_at DESC, s.rowid DESC LIMIT 1`
@@ -2334,6 +2298,118 @@ export class Sessions extends Context.Service<
           })
           return true
         })
+
+      wakeRetired = (threadId) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            run(Effect.flatMap(inputWaiting(threadId), (waiting) => (waiting ? startLast(threadId) : Effect.succeed(false)))).pipe(
+              Effect.catchTag('SessionRunning', () => Effect.succeed(true)),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.andThen(
+                      Effect.logWarning('Could not wake an idle coordinator', { threadId, cause }),
+                      run(
+                        Effect.gen(function* () {
+                          if (threads.has(threadId) || !(yield* inputWaiting(threadId))) return
+                          const { projectId } = yield* loadThread(threadId)
+                          const failure = Option.getOrUndefined(Cause.findErrorOption(cause))
+                          const next = failure instanceof SessionFailed ? failure.summary : 'Send another message to try again.'
+                          yield* addItem({ projectId, threadId }, 'notice', {
+                            source: 'runtime',
+                            severity: 'error',
+                            title: 'The coordinator couldn’t start.',
+                            description: `${next} Your earlier message is still queued.`,
+                          })
+                        }),
+                      ).pipe(Effect.catchCause((error) => Effect.logWarning('Could not record the coordinator’s wake failure', error))),
+                    ),
+              ),
+            ),
+            sessionsScope,
+          ),
+        )
+
+      // The lock serializes retirement with starts and handovers. Mark it before the final queue check so a message
+      // accepted during shutdown arranges a fresh session as soon as its input burst is flushed.
+      const retire = (running: Running) =>
+        exclusive(
+          running.thread.threadId,
+          Effect.gen(function* () {
+            const threadId = running.thread.threadId
+            const now = yield* Clock.currentTimeMillis
+            // Another fiber can start a handover while the store or the busy check is read.
+            const handingOver = () => running.handover === 'under_way'
+            if (
+              threads.get(threadId) !== running ||
+              running.thread.role !== 'coordinator' ||
+              running.stopping ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              [...running.background.values()].some((left) => left.ended === null) ||
+              running.callsOpen.size > 0 ||
+              inputBatches.pending(threadId)
+            )
+              return
+            if ((yield* busyNow(threadId)) || (yield* inputWaiting(threadId))) return
+            if (
+              inputBatches.pending(threadId) ||
+              running.turnRunning ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.callsOpen.size > 0 ||
+              [...running.background.values()].some((left) => left.ended === null)
+            )
+              return
+            running.stopping = true
+            retired.add(threadId)
+            const waiting = yield* inputWaiting(threadId).pipe(
+              Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not check an idle coordinator’s queue', cause), true)),
+            )
+            if (
+              inputBatches.pending(threadId) ||
+              waiting ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.callsOpen.size > 0 ||
+              [...running.background.values()].some((left) => left.ended === null) ||
+              (yield* busyNow(threadId))
+            ) {
+              running.stopping = false
+              retired.delete(threadId)
+              yield* Queue.offer(running.wake, undefined)
+              return
+            }
+            if (runtimeConfig.idle?.beforeCoordinatorStop !== undefined) yield* runtimeConfig.idle.beforeCoordinatorStop(threadId)
+            yield* stopRunning(running, { state: 'completed', reason: 'idle' })
+          }),
+        )
+      yield* Effect.forkIn(
+        Effect.forever(
+          Effect.sleep(Duration.millis(Math.max(1, Math.min(coordinatorIdle, Duration.toMillis(Duration.minutes(1)))))).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                Effect.forEach(
+                  [...threads.values()].filter((one) => one.thread.role === 'coordinator'),
+                  (one) =>
+                    run(retire(one)).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not retire an idle coordinator', cause))),
+                  { concurrency: 'unbounded', discard: true },
+                ),
+              ),
+            ),
+          ),
+        ),
+        sessionsScope,
+      )
 
       const wakeGoal = (running: Running, revision: number, lead?: GoalLead) =>
         Effect.gen(function* () {
