@@ -33,7 +33,7 @@ describe('the app’s preferences kept in the profile', () => {
       accent: 'althar',
       openAtLogin: false,
       keepWorkingOnClose: false,
-      browserLinks: 'beside',
+      browserLinks: 'local',
       browserCookies: 'task',
     })
   })

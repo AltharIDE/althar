@@ -286,8 +286,13 @@ the board, where there is no room to share, it opens over the board.
 
 A task's run always opens beside its conversation, on the workbench: from its
 card in the thread, the Running pill, Run's list, and `p`, which also takes it
-away. Links in a thread open there too, unless Settings › Browser keeps them
-in the person's browser; a link pressed with a modifier opens a new tab. From
+away. A link in a thread opens there only where it is a local address (http or
+https on `localhost`, `*.localhost`, `127.0.0.1` or `[::1]`, any port): what
+Althar and its agents build and run here. The web, such as GitHub, Linear or
+docs, opens in the person's browser, where they are signed in. Settings ›
+Browser can keep every link beside or every link in their browser instead; a
+link pressed with a modifier opens a new tab. Agents' page tools drive the
+page beside the conversation whatever its address. From
 the coordinator's thread, a project's run opens beside the coordinator's
 conversation, and the board steps aside. A page starts at half the window.
 The person looks at a page *with* the lead, so it belongs beside the lead's

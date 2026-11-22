@@ -997,8 +997,8 @@ export function EdgeHere({ title, note, why, picture, className }: EdgeHereProps
 
 /* ---- browser --------------------------------------------------------------------- */
 
-/** Where a link in a thread opens: beside the conversation, or in the person's browser. */
-export type LinksOpen = 'beside' | 'outside'
+/** Where a link in a thread opens: beside the conversation for a local address and in the person's browser for the web, always beside, or always in their browser. */
+export type LinksOpen = 'local' | 'beside' | 'outside'
 
 /** How long pages keep cookies: until the page closes, until Althar quits, until the task is done, or as long as each site asks. */
 export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
@@ -1006,6 +1006,7 @@ export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
 export interface BrowserPreferencesText {
   links: string
   linksNote: string
+  local: string
   beside: string
   outside: string
   keep: string
@@ -1019,9 +1020,11 @@ export interface BrowserPreferencesText {
 
 export const browserPreferencesText: BrowserPreferencesText = {
   links: 'Links from threads',
-  linksNote: 'A task’s run opens beside its conversation either way.',
-  beside: 'Beside the conversation',
-  outside: 'In your browser',
+  linksNote:
+    'Local addresses are what Althar and its agents run on this computer. A task’s run opens beside its conversation in every case.',
+  local: 'Local beside, web in your browser',
+  beside: 'Always beside the conversation',
+  outside: 'Always in your browser',
   keep: 'Keep cookies',
   keepNote: 'Each task’s pages keep their own, apart from your browser’s and other tasks’.',
   keeps: {
@@ -1072,6 +1075,7 @@ export function BrowserPreferences({
             value={links}
             onChange={onLinks}
             options={[
+              { value: 'local', label: t.local },
               { value: 'beside', label: t.beside },
               { value: 'outside', label: t.outside },
             ]}

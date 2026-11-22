@@ -582,7 +582,10 @@ function Link({ href, title, newTab, children }: { href: string; title: string |
       }}
     >
       <InLink>{children}</InLink>
-      <VisuallyHidden> {openLink === undefined ? newTab : (linkNote ?? newTab)}</VisuallyHidden>
+      <VisuallyHidden>
+        {' '}
+        {openLink === undefined ? newTab : linkNote === undefined ? newTab : typeof linkNote === 'function' ? linkNote(href) : linkNote}
+      </VisuallyHidden>
     </a>
   )
 }

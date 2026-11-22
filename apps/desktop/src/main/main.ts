@@ -36,7 +36,7 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, isLocalAddress, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
@@ -904,8 +904,7 @@ const showChosenIcon = async () => {
 const openOutside = (url: string) => {
   try {
     const parsed = new URL(url)
-    const local = parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-    if (parsed.protocol === 'https:' || local) void shell.openExternal(parsed.toString())
+    if (parsed.protocol === 'https:' || isLocalAddress(url)) void shell.openExternal(parsed.toString())
   } catch {
     // Not a URL; nothing to open.
   }
