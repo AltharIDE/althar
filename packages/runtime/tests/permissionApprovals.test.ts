@@ -292,5 +292,5 @@ describe('protected permission approvals', () => {
         ),
       ),
     )
-  }, 15_000)
+  })
 })

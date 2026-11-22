@@ -116,6 +116,13 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
   const dist = join(destination, 'dist')
   await fs.mkdir(dist, { mode: 0o700 })
   await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
+  const assets = join(dirname(source.entry), 'assets')
+  try {
+    await fs.cp(assets, join(dist, 'assets'), { recursive: true, errorOnExist: true, force: false })
+  } catch (error) {
+    if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
+    // Builds with a single entry file have no separate assets.
+  }
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
     try {
       await fs.copyFile(join(dirname(source.entry), name), join(destination, name), constants.COPYFILE_EXCL)

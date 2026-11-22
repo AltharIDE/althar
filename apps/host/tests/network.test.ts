@@ -6,12 +6,14 @@ import { assert, describe, it } from '@effect/vitest'
 import { Agents } from '@althar/runtime'
 import { completeDevicePairing, createDeviceKey, decodePairingCode, openHttpsConnection, signDeviceMessage } from '@althar/transport-node'
 import { Deferred, Effect, Fiber, Layer, Schema } from 'effect'
+import { vi } from 'vitest'
 
 import { runCommand } from '../src/commands'
 import { serveHome, type HomeReady } from '../src/home'
 import { configureNetwork, disableNetwork, networkFiles, readNetworkConfiguration } from '../src/network'
 import { parseOptions } from '../src/options'
 import { temporary } from './support'
+import * as approvalKeys from '../src/approvalKeys'
 
 const fixture = () => {
   const root = temporary()
@@ -61,6 +63,29 @@ const freePort = Effect.promise(
 )
 
 describe('opt-in HTTPS home configuration', () => {
+  it.live('checks the administrator’s key file before saving HTTPS configuration', () =>
+    Effect.gen(function* () {
+      const { root, options } = fixture()
+      if (options.network === undefined) throw new Error('Missing HTTPS fixture')
+      const filename = join(root, 'approval-keys.json')
+      const guarded = { ...options, network: { ...options.network, approvalKeys: filename } }
+      assert.include((yield* Effect.flip(configureNetwork(guarded))).message, 'server administrator')
+      const read = vi.spyOn(approvalKeys, 'readApprovalKeys').mockResolvedValue({
+        version: 1,
+        homeId: `home_${'3'.repeat(32)}`,
+        origin: options.network.origin,
+        credentials: [],
+      })
+      try {
+        yield* configureNetwork(guarded)
+        assert.strictEqual((yield* readNetworkConfiguration(options.profile))?.approvalKeys, filename)
+        assert.deepStrictEqual(read.mock.calls, [[filename, options.network.origin]])
+      } finally {
+        read.mockRestore()
+      }
+    }),
+  )
+
   it.live('runs the operator pairing, inventory and revocation commands against a real configured home', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -160,6 +185,7 @@ describe('opt-in HTTPS home configuration', () => {
       ['configure-network'],
       ['configure-network', '--origin', 'https://host.test'],
       ['serve', '--origin', 'https://host.test'],
+      ['serve', '--approval-keys', '/trusted-keys.json'],
       ['revoke-device'],
       ['devices', '--device-id', `dev_${'1'.repeat(32)}`],
       ['serve', '--after', `dev_${'1'.repeat(32)}`],
