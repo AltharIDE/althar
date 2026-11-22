@@ -38,6 +38,7 @@ import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { CANVAS_SCHEME, emitterPort, type AttentionEvent } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
+import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { type Canvases, startCanvases } from './canvases/views'
@@ -1264,8 +1265,9 @@ void ready.then(() => {
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
   // The ground a canvas of boards is drawn on, read once it is first wanted.
   let groundScript: string | null = null
+  const artifacts = join(locations().profile, 'artifacts')
   canvases = startCanvases({
-    root: join(locations().profile, 'artifacts'),
+    root: artifacts,
     tokens: () => canvasTokens(),
     ground: () => (groundScript ??= readFileSync(join(here, '../overlay/ground.js'), 'utf8')),
     stills: join(locations().profile, 'canvas-stills'),
@@ -1278,7 +1280,7 @@ void ready.then(() => {
       if (out !== null) void shell.openExternal(out)
     },
   })
-  handleCanvases(canvases, mineLocal)
+  handleCanvases(canvases, mineLocal, downloadCanvas(artifacts, canvases))
   bridge = bridgeOf({
     pages,
     isRuntime: (from) => from !== undefined && from === runtime,

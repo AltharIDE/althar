@@ -136,14 +136,17 @@ export const canvasNavigation = (address: string, target: CanvasTarget): 'go' | 
 
 export const startCanvases = (options: CanvasesOptions) => {
   const views = new Map<string, View>()
+  const downloads = new Set<CanvasTarget>()
   const prepared = new Set<string>()
   /* The conversations whose canvas has something of the window's own over its place (ADR-100). Kept apart from the views, so a view made anew (another project's canvas) is still aside while it is. */
   const covered = new Set<string>()
 
-  /** The manifest a host's version is shown at, in any view: only what a window opened is served. */
-  const opened = (host: string, version: number) => {
-    for (const one of views.values())
-      if (canvasHost(one.target.canvasId) === host && one.target.version === version) return one.target.manifest
+  /** Only versions a window is showing or downloading are served in its project. */
+  const opened = (host: string, version: number, projectId?: string) => {
+    const matches = (target: CanvasTarget) =>
+      (projectId === undefined || target.projectId === projectId) && canvasHost(target.canvasId) === host && target.version === version
+    for (const one of views.values()) if (matches(one.target)) return one.target.manifest
+    for (const target of downloads) if (matches(target)) return target.manifest
     return null
   }
 
@@ -153,7 +156,10 @@ export const startCanvases = (options: CanvasesOptions) => {
     const made = sessions.fromPartition(partition)
     if (prepared.has(partition)) return made
     prepared.add(partition)
-    made.protocol.handle(CANVAS_SCHEME, serveCanvas(options.root, opened, options.tokens))
+    made.protocol.handle(
+      CANVAS_SCHEME,
+      serveCanvas(options.root, (host, version) => opened(host, version, projectId), options.tokens),
+    )
     made.setPermissionRequestHandler((_contents, permission, answer) => answer(allowed(permission)))
     made.setPermissionCheckHandler((_contents, permission) => allowed(permission))
     made.on('will-download', (event) => event.preventDefault())
@@ -421,7 +427,16 @@ export const startCanvases = (options: CanvasesOptions) => {
   /** Loads the shown version again, as it was published: for a canvas that drew itself into a corner. */
   const reload = (key: string) => views.get(key)?.view.webContents.reload()
 
-  return { show, close, reload, still, cover, opened, change, pins, find, clear, picture }
+  const serveDownload = (target: CanvasTarget) => {
+    const existing = opened(canvasHost(target.canvasId), target.version, target.projectId)
+    if (existing !== null && existing !== target.manifest) throw new Error('The version is already open with other files.')
+    const session = sessionOf(target.projectId)
+    const held = { ...target }
+    downloads.add(held)
+    return { session, release: () => void downloads.delete(held) }
+  }
+
+  return { show, close, reload, still, cover, opened, change, pins, find, clear, picture, serveDownload }
 }
 
 export type Canvases = ReturnType<typeof startCanvases>

@@ -5,6 +5,8 @@ import { BOARDS_GROUND, canvasAddressOf, CanvasManifest } from '@althar/contract
 import { artifactPath, isDigest } from '@althar/runtime/artifacts'
 import { Schema } from 'effect'
 
+import { BOARD_PRINT, boardPrintAt } from './downloadFiles'
+
 /*
  * An HTML canvas's files (ADR-104), served at its address: the canvas is the
  * origin (`althar-canvas://<id>/`), a version the path under it (`/v3/`), so
@@ -45,6 +47,7 @@ export const GROUND_PAGE =
 const manifests = new Map<string, CanvasManifest>()
 
 export const manifestAt = async (root: string, digest: string): Promise<CanvasManifest | null> => {
+  if (!isDigest(digest)) return null
   const known = manifests.get(digest)
   if (known !== undefined) return known
   const bytes = await readFile(artifactPath(root, digest)).catch(() => null)
@@ -89,6 +92,17 @@ export const serveCanvas =
       })
     const manifest = await manifestAt(root, digest)
     if (manifest === null) return missing()
+    if (asked.path === BOARD_PRINT) {
+      const html = await boardPrintAt(root, manifest, asked, request.url)
+      if (html === null) return missing()
+      return new Response(request.method === 'HEAD' ? null : html, {
+        headers: {
+          ...CANVAS_HEADERS,
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': `${CANVAS_HEADERS['content-security-policy']}; default-src 'none'; frame-src 'self'; img-src 'self'; style-src 'unsafe-inline'`,
+        },
+      })
+    }
     const file = fileIn(manifest, asked.path)
     if (file === null || !isDigest(file.sha256)) return missing()
     const bytes = await readFile(artifactPath(root, file.sha256)).catch(() => null)

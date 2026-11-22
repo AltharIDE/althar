@@ -1,5 +1,14 @@
 import { BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 
+import {
+  CANVAS_DOWNLOADS,
+  CanvasDownloadFormat,
+  CanvasKind,
+  isCanvasName,
+  type CanvasDownload,
+  type CanvasDownloaded,
+} from '@althar/contracts'
+
 import { rectOf } from '../browser/ipc'
 import { groundChangeOf, groundPartOf, groundPinsOf } from './boards'
 import type { CanvasTarget, Canvases } from './views'
@@ -19,16 +28,35 @@ export const targetOf = (value: unknown): CanvasTarget | null => {
   const { projectId, canvasId, version, manifest, boards } = value as Record<string, unknown>
   if (typeof projectId !== 'string' || !ID('proj').test(projectId)) return null
   if (typeof canvasId !== 'string' || !ID('cnv').test(canvasId)) return null
-  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return null
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1 || version > 999_999_999) return null
   if (typeof manifest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest)) return null
   if (boards !== undefined && typeof boards !== 'boolean') return null
   return { projectId, canvasId, version, manifest, ...(boards === true ? { boards } : {}) }
 }
 
+const MAX_SVG = 4 * 1024 * 1024
+
+export const downloadOf = (value: unknown): CanvasDownload | null => {
+  const target = targetOf(value)
+  if (target === null) return null
+  const { name, kind, format, svg } = value as Record<string, unknown>
+  if (typeof name !== 'string' || !isCanvasName(name)) return null
+  if (!CanvasKind.literals.includes(kind as CanvasKind) || !CanvasDownloadFormat.literals.includes(format as CanvasDownloadFormat))
+    return null
+  if (!CANVAS_DOWNLOADS[kind as CanvasKind].includes(format as CanvasDownloadFormat)) return null
+  if (svg !== undefined && (typeof svg !== 'string' || svg.length > MAX_SVG || Buffer.byteLength(svg) > MAX_SVG)) return null
+  if (kind === 'mermaid' && format !== 'source' && !svg) return null
+  return { ...target, name, kind: kind as CanvasKind, format: format as CanvasDownloadFormat, ...(svg === undefined ? {} : { svg }) }
+}
+
 /** The conversation a canvas view is beside, as the window keys it: a thread's id. */
 export const keyOf = (value: unknown): string | null => (typeof value === 'string' && ID('thr').test(value) ? value : null)
 
-export const handleCanvases = (canvases: Canvases, mine: (contents: WebContents) => boolean) => {
+export const handleCanvases = (
+  canvases: Pick<Canvases, 'show' | 'close' | 'still' | 'cover' | 'reload' | 'change' | 'pins' | 'find' | 'clear' | 'picture'>,
+  mine: (contents: WebContents) => boolean,
+  download: (window: BrowserWindow, request: CanvasDownload) => Promise<CanvasDownloaded>,
+) => {
   const from = (event: IpcMainEvent | IpcMainInvokeEvent) => {
     if (!mine(event.sender)) throw new Error('Only Althar’s own windows show its canvases.')
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -90,5 +118,15 @@ export const handleCanvases = (canvases: Canvases, mine: (contents: WebContents)
     from(event)
     const conversation = keyOf(key)
     if (conversation !== null) canvases.clear(conversation)
+  })
+  ipcMain.handle('althar:canvas-download', async (event, value: unknown): Promise<CanvasDownloaded> => {
+    try {
+      const window = from(event)
+      const request = downloadOf(value)
+      if (request === null) return { kind: 'failed', why: 'This canvas can’t be downloaded in that format.' }
+      return await download(window, request)
+    } catch {
+      return { kind: 'failed', why: 'Couldn’t download this canvas.' }
+    }
   })
 }

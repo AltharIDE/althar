@@ -410,6 +410,7 @@ describe('a page canvas', () => {
     reload: vi.fn(),
     still: vi.fn(async () => 'data:image/jpeg;base64,BBBB'),
     cover: vi.fn(async () => {}),
+    download: vi.fn(async () => ({ kind: 'cancelled' as const })),
   })
 
   it('is laid over the panel’s place at its version, moved as the place does, and loaded again when asked', async () => {

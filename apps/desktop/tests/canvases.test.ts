@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { canvasAddress, manifestBytes } from '@althar/contracts'
+import { canvasAddress, canvasPartitionOf, manifestBytes } from '@althar/contracts'
 import { artifactPath } from '@althar/runtime/artifacts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  */
 
 const channels = vi.hoisted(() => ({ listened: new Map<string, (...args: Array<unknown>) => unknown>() }))
+const sessions = vi.hoisted(() => ({ protocols: new Map<string, (request: Request) => Promise<Response>>() }))
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromWebContents: () => ({ id: 1 }) },
@@ -23,14 +24,24 @@ vi.mock('electron', () => ({
     on: (channel: string, listener: (...args: Array<unknown>) => unknown) => void channels.listened.set(channel, listener),
     handle: (channel: string, listener: (...args: Array<unknown>) => unknown) => void channels.listened.set(channel, listener),
   },
-  session: { fromPartition: () => ({}) },
+  session: {
+    fromPartition: (partition: string) => ({
+      protocol: {
+        handle: (_scheme: string, handler: (request: Request) => Promise<Response>) => sessions.protocols.set(partition, handler),
+      },
+      setPermissionRequestHandler: () => {},
+      setPermissionCheckHandler: () => {},
+      on: () => {},
+      webRequest: { onBeforeRequest: () => {} },
+    }),
+  },
   WebContentsView: class {},
 }))
 
 const { CANVAS_HEADERS, fileIn, forgetManifests, GROUND_PAGE, serveCanvas } = await import('../src/main/canvases/serve')
-const { canvasNavigation, loadAddress, reachesAlthar } = await import('../src/main/canvases/views')
+const { canvasNavigation, loadAddress, reachesAlthar, startCanvases } = await import('../src/main/canvases/views')
 const { boardsAt, groundChangeOf, groundPartOf, groundPinsOf } = await import('../src/main/canvases/boards')
-const { handleCanvases, keyOf, targetOf } = await import('../src/main/canvases/ipc')
+const { downloadOf, handleCanvases, keyOf, targetOf } = await import('../src/main/canvases/ipc')
 const { canvasTokens } = await import('../src/main/canvases/tokens')
 
 const CANVAS = `cnv_${'c3'.repeat(16)}`
@@ -124,6 +135,54 @@ describe('a canvas’s files', () => {
     expect(fileIn(manifest, 'x/')?.path).toBe('x/index.html')
     expect(fileIn(manifest, 'y')).toBeNull()
   })
+
+  it('serve Althar’s print document for a board version and can draw just one board', async () => {
+    const { root, put } = store()
+    const board = { name: 'First', file: 'index.html', width: 1440, height: 900 }
+    const words = JSON.stringify({ boards: [board, { ...board, name: 'Second', width: 390, height: 844 }] })
+    const manifest = put(
+      manifestBytes({
+        entry: 'canvas.json',
+        files: [
+          { path: 'canvas.json', sha256: put(words), size: words.length, type: 'application/json' },
+          { path: 'index.html', sha256: put('<p>board</p>'), size: 12, type: 'text/html' },
+        ],
+      }),
+    )
+    const serve = serveCanvas(
+      root,
+      (_host, version) => (version === 2 ? manifest : null),
+      () => '',
+    )
+    const print = canvasAddress(CANVAS, 2, '.althar/print.html')
+    const both = await serve(get(print))
+    expect(both.status).toBe(200)
+    expect((await both.text()).match(/<iframe /g)).toHaveLength(2)
+    const one = await serve(get(`${print}?board=1`))
+    expect(await one.text()).toContain('size: 390px 844px')
+    expect((await serve(get(`${print}?board=2`))).status).toBe(404)
+    expect((await serve(get(canvasAddress(CANVAS, 1, '.althar/print.html')))).status).toBe(404)
+  })
+
+  it('serve a version while a download holds it and only in its own project', async () => {
+    const { root, manifest } = store()
+    const canvases = startCanvases({ root, tokens: () => '', listening: () => new Set(), outside: () => {} })
+    const target = { projectId: PROJECT, canvasId: CANVAS, version: 2, manifest }
+    const first = canvases.serveDownload(target)
+    const second = canvases.serveDownload(target)
+    const other = `proj_${'d4'.repeat(16)}`
+    const elsewhere = canvases.serveDownload({ ...target, projectId: other, version: 3 })
+    const request = get(canvasAddress(CANVAS, 2, ''))
+    const serve = sessions.protocols.get(canvasPartitionOf(PROJECT))!
+    const otherProject = sessions.protocols.get(canvasPartitionOf(other))!
+    expect((await serve(request)).status).toBe(200)
+    expect((await otherProject(request)).status).toBe(404)
+    first.release()
+    expect((await serve(request)).status).toBe(200)
+    second.release()
+    expect((await serve(request)).status).toBe(404)
+    elsewhere.release()
+  })
 })
 
 describe('what a canvas may reach', () => {
@@ -180,6 +239,7 @@ describe('the window’s calls about canvases', () => {
     const found = vi.fn(async () => null)
     const cleared = vi.fn()
     const pictured = vi.fn(async () => 'data:image/jpeg;base64,DDDD')
+    const download = vi.fn(async () => ({ kind: 'saved' as const, path: '/download/login.png' }))
     handleCanvases(
       {
         show: shown,
@@ -187,7 +247,6 @@ describe('the window’s calls about canvases', () => {
         reload: reloaded,
         still: picture,
         cover: covered,
-        opened: () => null,
         change: changed,
         pins: pinned,
         find: found,
@@ -195,8 +254,10 @@ describe('the window’s calls about canvases', () => {
         picture: pictured,
       },
       (contents) => contents === (mine as never),
+      download,
     )
     const call = (channel: string, sender: unknown, ...args: Array<unknown>) => channels.listened.get(channel)?.({ sender }, ...args)
+    const invoke = (channel: string, sender: unknown, ...args: Array<unknown>) => Promise.resolve(call(channel, sender, ...args))
     const target = { projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64) }
     call('althar:canvas-show', mine, THREAD, target, { x: 1, y: 2, width: 300, height: 400 })
     expect(shown).toHaveBeenCalledWith({ id: 1 }, THREAD, target, { x: 1, y: 2, width: 300, height: 400 })
@@ -208,8 +269,8 @@ describe('the window’s calls about canvases', () => {
     call('althar:canvas-close', mine, THREAD)
     expect(reloaded).toHaveBeenCalledWith(THREAD)
     expect(closed).toHaveBeenCalledWith(THREAD)
-    expect(await call('althar:canvas-still', mine, THREAD)).toBe('data:image/jpeg;base64,AAAA')
-    expect(await call('althar:canvas-still', mine, 'nope')).toBeNull()
+    expect(await invoke('althar:canvas-still', mine, THREAD)).toBe('data:image/jpeg;base64,AAAA')
+    expect(await invoke('althar:canvas-still', mine, 'nope')).toBeNull()
     call('althar:canvas-cover', mine, THREAD, true)
     expect(covered).toHaveBeenLastCalledWith(THREAD, true)
     call('althar:canvas-cover', mine, THREAD, 'yes')
@@ -239,6 +300,49 @@ describe('the window’s calls about canvases', () => {
     expect(await call('althar:canvas-picture', mine, '../etc/passwd')).toBeNull()
     expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: true })?.boards).toBe(true)
     expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: 'yes' })).toBeNull()
+
+    const request = { ...target, name: 'login', kind: 'html', format: 'png' }
+    expect(await invoke('althar:canvas-download', mine, request)).toEqual({ kind: 'saved', path: '/download/login.png' })
+    expect(download).toHaveBeenCalledWith({ id: 1 }, request)
+    expect(await invoke('althar:canvas-download', {}, request)).toMatchObject({ kind: 'failed' })
+    expect(await invoke('althar:canvas-download', mine, { ...request, name: '../login' })).toMatchObject({ kind: 'failed' })
+    expect(download).toHaveBeenCalledTimes(1)
+    download.mockRejectedValueOnce(new Error('some detail from the operating system'))
+    expect(await invoke('althar:canvas-download', mine, request)).toEqual({ kind: 'failed', why: 'Couldn’t download this canvas.' })
+  })
+
+  it('accepts only download formats offered for the kind, and checks diagrams and every target field', () => {
+    const request = {
+      projectId: PROJECT,
+      canvasId: CANVAS,
+      version: 2,
+      manifest: 'f'.repeat(64),
+      name: 'sign-in',
+      kind: 'mermaid',
+      format: 'svg',
+      svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    }
+    expect(downloadOf(request)).toEqual(request)
+    expect(downloadOf({ ...request, kind: 'boards', format: 'pdf', svg: undefined })).toMatchObject({ kind: 'boards', format: 'pdf' })
+    expect(downloadOf({ ...request, format: 'source', svg: undefined })).toMatchObject({ format: 'source' })
+    for (const patch of [
+      { projectId: 'wrong' },
+      { canvasId: 'wrong' },
+      { version: 1.5 },
+      { version: 1e12 },
+      { manifest: '_' },
+      { name: 'Some Name' },
+      { name: 'a'.repeat(61) },
+      { kind: '__proto__' },
+      { format: 'jpeg' },
+      { format: 'pdf' },
+      { kind: 'html' },
+      { svg: 1 },
+      { svg: '' },
+      { svg: undefined },
+      { svg: '€'.repeat(1_400_000) },
+    ])
+      expect(downloadOf({ ...request, ...patch })).toBeNull()
   })
 })
 

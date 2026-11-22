@@ -12,6 +12,8 @@ import {
 } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
+
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
 import type { WindowAction } from '../renderer/data/services'
@@ -411,6 +413,7 @@ contextBridge.exposeInMainWorld('althar', {
       canvasGround.add(listener)
       return () => void canvasGround.delete(listener)
     },
+    download: (request: CanvasDownload): Promise<CanvasDownloaded> => ipcRenderer.invoke('althar:canvas-download', request),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

@@ -3,7 +3,7 @@ import type { HomesHost } from '../../homes'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
-import type { WatchEvent } from '@althar/contracts'
+import type { CanvasDownload, CanvasDownloaded, WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
@@ -342,6 +342,8 @@ export interface CanvasesHost {
   readonly picture?: (manifest: string) => Promise<string | null>
   /** Hears what a canvas of boards' ground says, for every thread's; returns how to stop. */
   readonly onGround?: (listener: (threadId: string, news: CanvasGroundNews) => void) => () => void
+  /** Saves the chosen version in the format the person picked. */
+  readonly download?: (request: CanvasDownload) => Promise<CanvasDownloaded>
 }
 
 /**
