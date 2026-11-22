@@ -152,6 +152,14 @@ ul.windows {
   line-height: 1.4;
   color: var(--t-2);
 }
+/* the last good reading, which a failed read didn't renew: its bars and figures quieter, whatever is left */
+.account[data-stale] .window .bar i {
+  background: var(--t-4);
+}
+.account[data-stale] .window .windowLeft {
+  color: var(--t-3);
+  font-weight: inherit;
+}
 .windows {
   display: flex;
   flex-direction: column;

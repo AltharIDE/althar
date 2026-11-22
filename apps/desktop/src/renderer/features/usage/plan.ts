@@ -98,8 +98,19 @@ const tightest = (account: AccountUsage): UsageWindow | undefined => {
   )
 }
 
-/** A read that failed for a moment (a rate limit, no answer, an error) and will pass on its own: nothing the person can do, so the peek keeps to the last numbers and how old they are. */
-const passing = (account: AccountUsage) => account.fault?.kind === 'unreachable'
+/** Why an account's numbers are missing or old, in the runtime's one short line (`usageSaid`), or why nothing reads them. */
+const faultOf = (account: AccountUsage) => account.fault?.message ?? null
+
+/**
+ * Accounts of one agent that all failed for the same reason say it once, for the agent, rather than under each: the
+ * line, and the accounts without it. One alone says it under itself, as it is the agent's anyway.
+ */
+const collapsed = (accounts: PlanAccount[]): { fault?: string; accounts: PlanAccount[] } => {
+  const [first] = accounts
+  const same = first?.fault ?? null
+  if (accounts.length < 2 || same === null || accounts.some((account) => account.fault !== same)) return { accounts }
+  return { fault: same, accounts: accounts.map((account) => ({ ...account, fault: null })) }
+}
 
 /**
  * How far through its window now is, 0 to 100, where the window's start is known: it ends at `resetsAt` and runs the length
@@ -141,29 +152,33 @@ const resetsOf = (window: UsageWindow, now: Date, reset: boolean): Pick<PlanWind
 }
 
 /** `account` has only the windows not reset since; `read` is as it was read, to show those that have, as not read since. */
-const accountOf = (account: AccountUsage, several: boolean, now: Date, read: AccountUsage = account): PlanAccount => ({
-  id: account.accountId,
-  name: several ? account.accountName : null,
-  // Old numbers say how old; so do any that a passing fault left unrefreshed, as the fault itself isn't shown.
-  age:
-    account.observedAt !== null && (passing(account) || now.getTime() - Date.parse(account.observedAt) > OLD)
-      ? text.read(ago(account.observedAt, now))
-      : null,
-  fault: passing(account) ? null : (account.fault?.message ?? null),
-  windows: [...read.windows, ...(read.resetWindows ?? [])].map((window): PlanWindow => {
-    // Reset by the runtime's clock (sent apart), or by this one, which has moved on since it was sent.
-    const reset = (read.resetWindows ?? []).includes(window) || past(window.resetsAt, now)
-    return {
-      id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
-      label: windowName(window),
-      left: reset ? 0 : leftOf(window),
-      until: window.resetsAt === null ? null : clock(window.resetsAt, now),
-      ...resetsOf(window, now, reset),
-      ...(reset || elapsedOf(window, now) === undefined ? {} : { elapsed: elapsedOf(window, now) }),
-      ...(reset ? { unread: true } : {}),
-    }
-  }),
-})
+const accountOf = (account: AccountUsage, several: boolean, now: Date, read: AccountUsage = account): PlanAccount => {
+  // Numbers a failed read left are the last good ones, not now's: they say how old, drawn quieter, with no tick for the time.
+  const stale = account.fault !== null
+  return {
+    id: account.accountId,
+    name: several ? account.accountName : null,
+    age:
+      account.observedAt !== null && (stale || now.getTime() - Date.parse(account.observedAt) > OLD)
+        ? text.read(ago(account.observedAt, now))
+        : null,
+    fault: faultOf(account),
+    ...(stale && read.windows.length > 0 ? { stale: true } : {}),
+    windows: [...read.windows, ...(read.resetWindows ?? [])].map((window): PlanWindow => {
+      // Reset by the runtime's clock (sent apart), or by this one, which has moved on since it was sent.
+      const reset = (read.resetWindows ?? []).includes(window) || past(window.resetsAt, now)
+      return {
+        id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
+        label: windowName(window),
+        left: reset ? 0 : leftOf(window),
+        until: window.resetsAt === null ? null : clock(window.resetsAt, now),
+        ...resetsOf(window, now, reset),
+        ...(reset || stale || elapsedOf(window, now) === undefined ? {} : { elapsed: elapsedOf(window, now) }),
+        ...(reset ? { unread: true } : {}),
+      }
+    }),
+  }
+}
 
 /** Every agent read, least room first. */
 export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[] } => {
@@ -204,10 +219,12 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         limit: '',
         until: null,
         account: null,
-        accounts: shown.map((account) => ({
-          ...accountOf(account, several, now, asRead.get(account.accountId)),
-          fault: account.fault?.message ?? account.noReading ?? null,
-        })),
+        ...collapsed(
+          shown.map((account) => ({
+            ...accountOf(account, several, now, asRead.get(account.accountId)),
+            fault: faultOf(account) ?? account.noReading,
+          })),
+        ),
         ...(out ? { stopped: text.signedOut, signIn: true } : reset.length > 0 ? { unread: text.unread } : { connected: text.connected }),
       })
       continue
@@ -220,9 +237,10 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         .map(({ account }) => accountOf(account, several, now, asRead.get(account.accountId))),
       ...named.map((account) => ({
         ...accountOf(account, several, now, asRead.get(account.accountId)),
-        fault: account.fault?.message ?? account.noReading ?? null,
+        fault: faultOf(account) ?? account.noReading,
       })),
     ]
+    const detail = collapsed(each)
     // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
     const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
     // None read can run, but one unread can: the runtime starts work there, so the plan is connected, with no figure.
@@ -235,7 +253,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         limit: '',
         until: null,
         account: null,
-        accounts: each,
+        ...detail,
         connected: text.connected,
       })
       continue
@@ -250,7 +268,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         limit: '',
         until: null,
         account: null,
-        accounts: each,
+        ...detail,
         stopped: text.signedOut,
         signIn: true,
       })
@@ -266,7 +284,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       until: route.window.resetsAt === null ? null : clock(route.window.resetsAt, now),
       ...(elapsedOf(route.window, now) === undefined ? {} : { elapsed: elapsedOf(route.window, now) }),
       account: several ? route.account.accountName : null,
-      accounts: each,
+      ...detail,
     })
   }
   // Least room first, an agent that can't run, or has no figure, after every one that can.

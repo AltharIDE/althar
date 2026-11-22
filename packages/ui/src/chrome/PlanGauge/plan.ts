@@ -38,8 +38,10 @@ export interface PlanAccount {
   name: string | null
   /** How old its numbers are, only where they are old: read 2 hours ago. */
   age: string | null
-  /** Why its numbers are missing or old, in a sentence. */
+  /** Why its numbers are missing or old, in one short line. */
   fault: string | null
+  /** Its windows are the last good reading, which a read since failed to renew: drawn quieter, its age beside its name. */
+  stale?: boolean
   windows: readonly PlanWindow[]
 }
 
@@ -59,6 +61,8 @@ export interface PlanAgent {
   account: string | null
   /** Every account read, tightest first. */
   accounts: readonly PlanAccount[]
+  /** Why every account's numbers are missing or old, where it is the same for all: said once, above them, and not under each. */
+  fault?: string
   /**
    * Why no work can start on it, though numbers of its accounts are saved:
    * Signed out. Its figure then counts for nothing: it is said in place of
