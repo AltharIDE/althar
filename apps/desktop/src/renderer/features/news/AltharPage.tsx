@@ -5,7 +5,7 @@ import { ComingNext, HostAndWorkers, WhatsNew, type WhatsNewFeature } from '@alt
 
 import { CHANGELOG, COMMUNITY, ISSUES } from '../../shared/links'
 import { useUpdate } from '../../shared/useUpdate'
-import { betterOf, featuresOf, FOLLOW, leadOf, RELEASES, roadmapOf, type Way } from './notes'
+import { alsoOf, betterOf, featuresOf, FOLLOW, leadOf, RELEASES, roadmapOf, type Way } from './notes'
 import s from './AltharPage.module.css'
 import { useNews } from './useNews'
 
@@ -111,6 +111,7 @@ function News({
       {...(from === undefined ? {} : { from })}
       lead={{ title: lead.title, why: lead.why, ...(picture === undefined ? {} : { picture }) }}
       features={features}
+      also={features.length > 0 ? [] : alsoOf(release, lead.covers)}
       better={betterOf(release)}
       follow={FOLLOW}
       releases={listed}

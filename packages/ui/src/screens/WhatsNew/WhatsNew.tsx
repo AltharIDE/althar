@@ -88,6 +88,8 @@ export type WhatsNewProps = RootProps<
     lead: WhatsNewLead
     /** The rest of what's new, the first two drawn large. */
     features: readonly WhatsNewFeature[]
+    /** Where there are no features to draw, the rest of what's new, a line each. */
+    also?: readonly string[]
     /** What feels better, a line each: the first few. */
     better: readonly string[]
     follow: readonly FollowLink[]
@@ -159,6 +161,7 @@ export function WhatsNew({
   from,
   lead,
   features,
+  also = [],
   better,
   follow,
   releases,
@@ -217,16 +220,26 @@ export function WhatsNew({
         </section>
       )}
 
-      {features.length > 0 && (
+      {(features.length > 0 || also.length > 0) && (
         <section className={l.band} aria-labelledby="whats-new-also">
           <Heading level={2} id="whats-new-also" className={l.sectionTitle}>
             {t.also(release.version)}
           </Heading>
-          <ul className={l.tiles}>
-            {features.map((one, i) => (
-              <Tile key={one.name} one={one} size={sizeOf(i, features.length)} />
-            ))}
-          </ul>
+          {features.length > 0 ? (
+            <ul className={l.tiles}>
+              {features.map((one, i) => (
+                <Tile key={one.name} one={one} size={sizeOf(i, features.length)} />
+              ))}
+            </ul>
+          ) : (
+            <ul className={l.alsoList}>
+              {also.map((line) => (
+                <li key={line}>
+                  <Words text={line} />
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 

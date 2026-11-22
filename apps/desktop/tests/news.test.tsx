@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Release } from '@althar/site/changelog'
 
 import { AltharPage } from '../src/renderer/features/news/AltharPage'
-import { betterOf, featuresOf, leadOf, RELEASES, releaseFor, roadmapOf, sayFor } from '../src/renderer/features/news/notes'
+import { alsoOf, betterOf, featuresOf, leadOf, RELEASES, releaseFor, roadmapOf, sayFor } from '../src/renderer/features/news/notes'
 import { newsFrom } from '../src/renderer/features/news/store'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
 import { whereOf } from '../src/renderer/features/tabs/tabs'
@@ -77,6 +77,16 @@ describe('the notes, as Althar’s page reads them', () => {
     const features = featuresOf(release([...lines, { kind: 'new', text: 'No name here.' }]), [0])
     expect(features.map((one) => one.name)).toEqual(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6'])
     expect(features[0]?.icon).toBeUndefined()
+  })
+
+  it('lists the rest of what’s new where nothing of it is drawn or named, past what the lead covers', () => {
+    const lines = release([
+      { kind: 'new', text: 'Undo from here. Files and all.' },
+      { kind: 'new', text: 'Markdown files open rendered. With what changed.' },
+      { kind: 'fixed', text: 'A fix.' },
+    ])
+    expect(featuresOf(lines, [0])).toEqual([])
+    expect(alsoOf(lines, [0])).toEqual(['Markdown files open rendered.'])
   })
 
   it('says what feels better in the first few improvements’ first sentences', () => {

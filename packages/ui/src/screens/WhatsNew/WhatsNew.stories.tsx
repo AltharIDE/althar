@@ -55,14 +55,22 @@ export const FromTwoBefore: Story = {
   },
 }
 
-/** A release whose lead has no picture, and no tiles: the lead, what feels better, and the releases. */
+/** A release whose lead has no picture and whose features are drawn by none: the rest of what's new a line each. */
 export const PlainRelease: Story = {
   args: {
     release: RELEASE_0_9,
     from: '0.8.0',
     lead: { title: 'Undo, files and all', why: 'Take back a message you sent a task in its own worktree.' },
     features: [],
+    also: [
+      'Markdown files open rendered, with what changed marked.',
+      'Steer or queue: choose what a message sent while an agent works does.',
+    ],
     releases: RELEASES.slice(1),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('heading', { name: 'Also in 0.9.0' })).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(/Markdown files open rendered/)).toBeInTheDocument()
   },
 }
 

@@ -101,6 +101,13 @@ export const featuresOf = (release: Release, covers: readonly number[] = []): re
     .map((change) => featureOf(change.text, undefined))
 }
 
+/** Where no feature is drawn or named, the rest of what's new, a line each: the first few, past what the lead covers. */
+export const alsoOf = (release: Release, covers: readonly number[] = []): readonly string[] =>
+  release.changes
+    .filter((change, i) => change.kind === 'new' && !covers.includes(i))
+    .slice(0, PLAIN_FEATURES)
+    .map((change) => firstSentence(change.text))
+
 /** What feels better, a line each. */
 export const betterOf = (release: Release): readonly string[] =>
   release.changes
