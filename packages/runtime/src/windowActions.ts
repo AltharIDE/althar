@@ -31,6 +31,7 @@ export const WINDOW_ACTIONS = {
   readFiles: { window: 'reads the changed files for the person to look at (read_task_diff)' },
   mergeStanding: { window: 'reads where a pressed merge stands, to show it in Merge’s place (read_task)' },
   mergeAwaits: { window: 'reads whether a pull request merges later in a press under way (read_task)' },
+  setGoal: { person: 'sets and controls the objective for automatic goal turns' },
   send: { tool: 'message_lead' },
   sendNow: { tool: 'message_lead' },
   takeBack: { person: 'takes back their own message before the lead reads it' },
