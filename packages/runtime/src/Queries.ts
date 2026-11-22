@@ -3,6 +3,7 @@ import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -3050,6 +3051,9 @@ export class Queries extends Context.Service<
                 : {
                     id: task.planId,
                     steps: teamSteps,
+                    ...(task.planState === 'proposed' && config.workers !== undefined
+                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
