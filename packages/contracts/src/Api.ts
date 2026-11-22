@@ -2448,7 +2448,12 @@ export const ArrivalItem = Schema.Struct({
 })
 
 /** A connected worker the home has granted access to this project. */
-export const ProjectWorker = Schema.Struct({ workerId: Schema.String, providers: Schema.Array(Schema.String), busy: Schema.Boolean })
+export const ProjectWorker = Schema.Struct({
+  workerId: Schema.String,
+  providers: Schema.Array(Schema.String),
+  busy: Schema.Boolean,
+  multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
+})
 export type ProjectWorker = typeof ProjectWorker.Type
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */

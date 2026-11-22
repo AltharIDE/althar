@@ -990,7 +990,7 @@ export class Sessions extends Context.Service<
               name: helper.name,
               brief: helper.brief,
               change: first.change ?? null,
-              ...(helper.copyPath === null ? {} : { copy: true, writes: helper.writes === 1 }),
+              ...(helper.copyPath === null ? {} : { copy: true, copyOf: found.worktree, writes: helper.writes === 1 }),
             },
           } satisfies ThreadContext as ThreadContext
         })

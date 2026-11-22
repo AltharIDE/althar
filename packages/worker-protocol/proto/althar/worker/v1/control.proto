@@ -43,6 +43,11 @@ message AgentHomeFrame {
     AgentManagedStart managed_start = 10;
     AgentManagedRef managed_stop = 11;
     AgentPreviewOpen preview_open = 12;
+    AgentHelperStart helper_start = 13;
+    AgentManagedInput helper_input = 14;
+    AgentRunBytes skills_chunk = 15;
+    AgentManagedInput helper_skills_chunk = 16;
+    AgentManagedInput helper_checkout_chunk = 17;
   }
 }
 
@@ -60,6 +65,11 @@ message AgentWorkerCapability {
   bool workspace_setup = 3;
   bool managed_commands = 4;
   bool managed_preview = 5;
+  bool workspace_sets = 6;
+  bool helper_agents = 7;
+  bool skill_files = 8;
+  bool helper_skill_files = 9;
+  bool helper_checkouts = 10;
 }
 
 message AgentHomeHello {
@@ -79,6 +89,16 @@ message AgentRunStart {
   bool tools = 6;
   // The home's saved project setup, run from the staged task checkout.
   AgentWorkspaceSetupSource setup = 7;
+  // Multi-repository tasks send the listed bundles in order. The primary
+  // repository's ID is workspace_id. A single source and a set are exclusive.
+  repeated AgentWorkspaceRepository repositories = 8;
+  AgentWorkspaceSetupSource skills = 9;
+}
+
+message AgentWorkspaceRepository {
+  string workspace_id = 1;
+  string directory = 2;
+  AgentWorkspaceSource source = 3;
 }
 
 message AgentWorkspaceSetupSource {
@@ -86,10 +106,27 @@ message AgentWorkspaceSetupSource {
   bytes sha256 = 2;
 }
 
+message AgentSkillFiles {
+  repeated AgentSkillFile files = 1;
+}
+
+message AgentSkillFile {
+  string path = 1;
+  bytes data = 2;
+  bool executable = 3;
+}
+
 message AgentWorkspaceSetup {
   // The repository's relative project folder, or empty for its root.
   string directory = 1;
   repeated string commands = 2;
+  repeated AgentRepositorySetup repositories = 3;
+}
+
+message AgentRepositorySetup {
+  string workspace_id = 1;
+  string directory = 2;
+  repeated string commands = 3;
 }
 
 // A single Git bundle with one scoped snapshot ref, staged before launch.
@@ -105,6 +142,15 @@ message AgentRunReady {
   string workspace_path = 2;
   uint32 tools_port = 3;
   AgentWorkspaceSetupResult setup = 4;
+  string skills_path = 5;
+  repeated AgentWorkerMcpCommand mcp_commands = 6;
+}
+
+// A tool registered by name on the execution worker for this project.
+// Command arguments and credentials are provisioned on that worker.
+message AgentWorkerMcpCommand {
+  string name = 1;
+  string executable = 2;
 }
 
 message AgentWorkspaceSetupResult {
@@ -112,6 +158,14 @@ message AgentWorkspaceSetupResult {
   bool timed_out = 2;
   // A bounded tail of the command output, kept with the home’s setup record.
   bytes output_tail = 3;
+  repeated AgentRepositorySetupResult repositories = 4;
+}
+
+message AgentRepositorySetupResult {
+  string workspace_id = 1;
+  uint32 exit_code = 2;
+  bool timed_out = 3;
+  bytes output_tail = 4;
 }
 
 // Managed commands share the assigned task checkout. They have their own
@@ -128,6 +182,19 @@ message AgentManagedStart {
 }
 
 message AgentManagedOutput {
+  AgentManagedRef managed = 1;
+  bytes data = 2;
+}
+
+message AgentHelperStart {
+  AgentManagedRef managed = 1;
+  string directory = 2;
+  string provider_id = 3;
+  AgentWorkspaceSetupSource skills = 4;
+  AgentWorkspaceSource checkout = 5;
+}
+
+message AgentManagedInput {
   AgentManagedRef managed = 1;
   bytes data = 2;
 }
@@ -192,6 +259,8 @@ message AgentSnapshotRequest {
   string run_id = 1;
   string base_tree = 2;
   string base_head = 3;
+  // Either the task repository ID or an active helper's scoped command ID.
+  string workspace_id = 4;
 }
 
 // A Git binary patch against the requested tree. The home verifies its own
@@ -205,6 +274,7 @@ message AgentSnapshotResult {
   string head = 6;
   uint32 commits_size = 7;
   bytes commits_sha256 = 8;
+  string workspace_id = 9;
 }
 
 // A connection to just the home tool server for this active run. Tool

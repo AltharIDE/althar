@@ -264,7 +264,8 @@ function PlanCard({
   const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
   const selection = workers.find((worker) => worker.workerId === selected)
   const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
-  const startProblem = selected === 'home' ? undefined : (planProblem ?? workerProblem(selection, steps))
+  const startProblem =
+    selected === 'home' ? undefined : (planProblem ?? workerProblem(selection, steps, plan.workerRequirements?.repositoryCount))
   const from = fromOf(card)
   const placementNote =
     startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
@@ -279,7 +280,7 @@ function PlanCard({
             options={[
               { value: 'home', label: 'This home' },
               ...workers.map((worker) => {
-                const problem = planProblem ?? workerProblem(worker, steps)
+                const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
                 const label = 'Linux worker ' + worker.workerId.slice(-6)
                 return {
                   value: worker.workerId,

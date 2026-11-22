@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs, io,
     os::{
@@ -27,11 +28,11 @@ use tonic::{Streaming, transport::Channel};
 use crate::{
     PROTOCOL_VERSION,
     agent_managed::ManagedCommands,
-    agent_setup::{
-        DESCRIPTOR_BYTES, OUTPUT_BYTES, WorkspaceSetup, run_workspace_setup, worker_environment,
-    },
+    agent_setup::{DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, WorkspaceSetup, worker_environment},
+    agent_skills::{MAX_BYTES as MAX_SKILL_BYTES, SkillDirectory},
     agent_tools::forward_tools,
     agent_workspace::{WorkspaceTransfer, workspace_patch},
+    agent_workspace_set::{AgentWorkspace, WorkspaceSet},
     diagnostic::{DiagnosticJournal, read_credentials},
     grpc::{WorkerEnrollment, control_client, endpoint},
     project::{cgroup_empty, cgroup_path, monotonic_ms},
@@ -39,14 +40,16 @@ use crate::{
     valid_id,
     wire::{
         AgentHomeFrame, AgentRunBytes, AgentRunExit, AgentRunOutcome, AgentRunReady, AgentRunStart,
-        AgentSnapshotRequest, AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame,
-        AgentWorkerHeartbeat, AgentWorkerHello, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
+        AgentSkillFiles, AgentSnapshotRequest, AgentSnapshotResult, AgentWorkerCapability,
+        AgentWorkerFrame, AgentWorkerHeartbeat, AgentWorkerHello, AgentWorkerMcpCommand,
+        AgentWorkspaceSetup, AgentWorkspaceSetupResult, AgentWorkspaceSetupSource,
         agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
 pub(crate) const CHUNK_BYTES: usize = 2048;
 const MAX_CAPABILITIES: usize = 32;
+const MAX_MCP_COMMANDS: usize = 16;
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(4);
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(1);
@@ -72,10 +75,10 @@ fn provider_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-struct Provider {
+pub(crate) struct Provider {
     capability: AgentWorkerCapability,
-    executable: PathBuf,
-    args: Vec<String>,
+    pub(crate) executable: PathBuf,
+    pub(crate) args: Vec<String>,
 }
 
 /// Agent executables, arguments and allowed projects are configured on the
@@ -83,6 +86,7 @@ struct Provider {
 pub struct AgentConfig {
     root: PathBuf,
     providers: Vec<Provider>,
+    mcp: HashMap<String, Vec<AgentWorkerMcpCommand>>,
 }
 
 impl AgentConfig {
@@ -112,9 +116,14 @@ impl AgentConfig {
             ));
         }
         let mut providers: Vec<Provider> = Vec::new();
+        let mut mcp = HashMap::new();
         for line in lines {
             let mut fields = line.split('\t');
             let project_id = fields.next().unwrap_or_default();
+            if project_id == "mcp" {
+                Self::register_mcp(&root, &mut mcp, fields)?;
+                continue;
+            }
             let provider_id = fields.next().filter(|id| self::provider_id(id));
             let executable = Path::new(fields.next().unwrap_or_default());
             let Some(provider_id) = provider_id else {
@@ -142,6 +151,11 @@ impl AgentConfig {
                     workspace_setup: true,
                     managed_commands: true,
                     managed_preview: true,
+                    workspace_sets: true,
+                    helper_agents: true,
+                    skill_files: true,
+                    helper_skill_files: true,
+                    helper_checkouts: true,
                 },
                 executable,
                 args: fields.map(str::to_owned).collect(),
@@ -152,7 +166,72 @@ impl AgentConfig {
                 "Configure at least one project and agent executable",
             ));
         }
-        Ok(Self { root, providers })
+        if mcp.keys().any(|project| {
+            !providers
+                .iter()
+                .any(|provider| &provider.capability.project_id == project)
+        }) {
+            return Err(invalid(
+                "Register MCP commands only for projects with an agent executable",
+            ));
+        }
+        Ok(Self {
+            root,
+            providers,
+            mcp,
+        })
+    }
+
+    fn register_mcp<'a>(
+        root: &Path,
+        mcp: &mut HashMap<String, Vec<AgentWorkerMcpCommand>>,
+        mut fields: impl Iterator<Item = &'a str>,
+    ) -> io::Result<()> {
+        let project = fields.next().unwrap_or_default();
+        let name = fields.next().unwrap_or_default();
+        let executable = Path::new(fields.next().unwrap_or_default());
+        if !valid_id(project, "proj_")
+            || name.is_empty()
+            || name.len() > 64
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
+            || !executable.is_absolute()
+            || !executable.is_file()
+            || executable.metadata()?.permissions().mode() & 0o111 == 0
+            || fields.next().is_some()
+        {
+            return Err(invalid(
+                "An MCP entry needs a project ID, a server name and an absolute executable",
+            ));
+        }
+        let executable = executable.canonicalize()?;
+        let path = executable
+            .to_str()
+            .ok_or_else(|| invalid("The MCP executable path must be UTF-8"))?;
+        if executable.starts_with(root) || path.len() > 1024 || path.chars().any(char::is_control) {
+            return Err(invalid("Keep MCP executables outside worker workspaces"));
+        }
+        let commands = mcp.entry(project.into()).or_default();
+        if commands.len() >= MAX_MCP_COMMANDS || commands.iter().any(|one| one.name == name) {
+            return Err(invalid(
+                "Too many or duplicate MCP commands for this project",
+            ));
+        }
+        commands.push(AgentWorkerMcpCommand {
+            name: name.into(),
+            executable: path.into(),
+        });
+        Ok(())
+    }
+
+    fn provider(&self, project: &str, provider: &str) -> io::Result<&Provider> {
+        self.providers
+            .iter()
+            .find(|one| {
+                one.capability.project_id == project && one.capability.provider_id == provider
+            })
+            .ok_or_else(|| invalid("This agent was not configured for this project"))
     }
 
     fn resolve(&self, run: &AgentRunStart) -> io::Result<(&Provider, PathBuf)> {
@@ -161,16 +240,10 @@ impl AgentConfig {
                 "The home sent an invalid agent run or workspace ID",
             ));
         }
-        let provider = self.providers.iter().find(|provider| {
-            provider.capability.project_id == run.project_id
-                && provider.capability.provider_id == run.provider_id
-        });
-        let Some(provider) = provider else {
-            return Err(invalid("This agent was not configured for this project"));
-        };
+        let provider = self.provider(&run.project_id, &run.provider_id)?;
         // A new attempt never replaces a checkout that might contain
         // unsynchronized changes from an interrupted agent.
-        let folder = if run.source.is_some() {
+        let folder = if run.source.is_some() || !run.repositories.is_empty() {
             format!("{}-{}", run.workspace_id, run.run_id)
         } else {
             run.workspace_id.clone()
@@ -238,13 +311,19 @@ pub async fn run_agent_unit_with_setup(
     let root = std::env::current_dir()?.canonicalize()?;
     let relative = folder.strip_prefix(&root).map_err(io::Error::other)?;
     let setup = WorkspaceSetup::new(&root, relative, commands.to_vec())?;
-    run_guardian(executable, args, Some(setup)).await
+    run_guardian(executable, args, Some(SetupPlan::Single(setup))).await
+}
+
+pub async fn run_agent_unit_with_repository_setup(args: &[OsString]) -> io::Result<ExitCode> {
+    let root = std::env::current_dir()?.canonicalize()?;
+    let (plan, executable, args) = SetupPlan::repository_args(&root, args)?;
+    run_guardian(Path::new(executable), args, Some(plan)).await
 }
 
 async fn run_guardian(
     executable: &Path,
     args: &[OsString],
-    setup: Option<WorkspaceSetup>,
+    setup: Option<SetupPlan>,
 ) -> io::Result<ExitCode> {
     let mut permit = Receiver::from_owned_fd(std::io::stdin().as_fd().try_clone_to_owned()?)?;
     {
@@ -270,12 +349,12 @@ async fn run_guardian(
 async fn prepared_provider(
     executable: &Path,
     args: &[OsString],
-    setup: Option<WorkspaceSetup>,
+    setup: Option<SetupPlan>,
     input: &mut (impl AsyncRead + Unpin),
 ) -> io::Result<ExitCode> {
     if let Some(setup) = setup {
         use std::io::Write as _;
-        let result = run_workspace_setup(&setup).await.encode_to_vec();
+        let result = setup.run().await.encode_to_vec();
         let size = u16::try_from(result.len()).map_err(io::Error::other)?;
         let mut stdout = std::io::stdout().lock();
         stdout.write_all(&size.to_le_bytes())?;
@@ -399,17 +478,9 @@ impl AgentUnit {
         provider: &Provider,
         cwd: &Path,
         journal: &DiagnosticJournal,
-        setup: Option<&WorkspaceSetup>,
+        setup: Option<&SetupPlan>,
     ) -> Result<Self, Failure> {
-        let mut args = Vec::new();
-        if let Some(setup) = setup {
-            args.push("--agent-unit-with-setup".into());
-            args.push(setup.folder.clone().into_os_string());
-            args.push(setup.commands.len().to_string().into());
-            args.extend(setup.commands.iter().cloned());
-        } else {
-            args.push("--agent-unit".into());
-        }
+        let mut args = setup.map_or_else(|| vec!["--agent-unit".into()], SetupPlan::guardian_args);
         args.push(provider.executable.clone().into_os_string());
         args.extend(provider.args.iter().map(OsString::from));
         let unit = Self::open(unit_name(&run.run_id), cwd, &args, None).await?;
@@ -525,7 +596,10 @@ pub(crate) fn local_deadline(until: Instant) -> u64 {
     monotonic_ms() + until.saturating_duration_since(Instant::now()).as_millis() as u64
 }
 
-async fn unit_write(input: &mut (impl AsyncWrite + Unpin), data: &[u8]) -> io::Result<()> {
+pub(crate) async fn unit_write(
+    input: &mut (impl AsyncWrite + Unpin),
+    data: &[u8],
+) -> io::Result<()> {
     let size = u16::try_from(data.len()).map_err(io::Error::other)?;
     input.write_u8(UNIT_INPUT).await?;
     input.write_u16_le(size).await?;
@@ -589,10 +663,13 @@ async fn serve_agent(
     slot: &mut Slot,
     unit: &mut AgentUnit,
     run: &AgentRunStart,
-    cwd: &Path,
+    config: &AgentConfig,
+    workspace: &AgentWorkspace,
     tools_port: u16,
+    skills_path: &str,
 ) -> Result<(AgentRunOutcome, Option<u32>), Failure> {
-    let workspace_path = cwd
+    let workspace_path = workspace
+        .root
         .to_str()
         .ok_or_else(|| invalid("The workspace path must be UTF-8"))?;
     timeout_at(
@@ -617,6 +694,8 @@ async fn serve_agent(
                 workspace_path: workspace_path.into(),
                 tools_port: u32::from(tools_port),
                 setup,
+                skills_path: skills_path.into(),
+                mcp_commands: config.mcp.get(&run.project_id).cloned().unwrap_or_default(),
             }),
         ),
     )
@@ -625,7 +704,7 @@ async fn serve_agent(
     let mut checkpoints = JoinSet::new();
     let mut managed = ManagedCommands::new(
         &run.run_id,
-        cwd,
+        &workspace.root,
         &unit.name,
         slot.outgoing.clone(),
         slot.until,
@@ -651,10 +730,19 @@ async fn serve_agent(
                 }
                 Some(HomeMessage::Stop(stop)) if stop.run_id == run.run_id => return Ok((AgentRunOutcome::Stopped, None)),
                 Some(HomeMessage::Snapshot(request)) if request.run_id == run.run_id && checkpoints.is_empty() => {
-                    checkpoints.spawn(send_snapshot(slot.outgoing.clone(), cwd.to_owned(), request));
+                    let path = workspace.checkout(&request.workspace_id)
+                        .or_else(|| managed.checkout(&request.workspace_id)).map(Path::to_owned);
+                    checkpoints.spawn(send_snapshot(slot.outgoing.clone(), path, request));
                 }
                 Some(HomeMessage::ManagedStart(request)) => managed.start(request)?,
-                Some(HomeMessage::ManagedStop(request)) => managed.stop(request)?,
+                Some(HomeMessage::HelperStart(request)) => {
+                    let provider = config.provider(&run.project_id, &request.provider_id)?;
+                    managed.helper(request, provider)?;
+                }
+                Some(HomeMessage::HelperInput(request)) => managed.input(request)?,
+                Some(HomeMessage::HelperSkillsChunk(frame)) => managed.receive_upload(frame, true).await?,
+                Some(HomeMessage::HelperCheckoutChunk(frame)) => managed.receive_upload(frame, false).await?,
+                Some(HomeMessage::ManagedStop(request)) => managed.stop(request).await?,
                 Some(HomeMessage::PreviewOpen(request)) => managed.preview(request, slot.channel.clone()),
                 _ => return Err(invalid("The home sent an invalid agent run message").into()),
             },
@@ -679,26 +767,33 @@ async fn serve_agent(
 
 async fn send_snapshot(
     outgoing: Sender,
-    cwd: PathBuf,
+    cwd: Option<PathBuf>,
     request: AgentSnapshotRequest,
 ) -> io::Result<()> {
     let run_id = request.run_id;
-    let checkpoint =
-        match workspace_patch(&cwd, &run_id, &request.base_tree, &request.base_head).await {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("Could not checkpoint agent files: {error}");
-                return send(
-                    &outgoing,
-                    WorkerMessage::Snapshot(AgentSnapshotResult {
-                        run_id,
-                        unavailable: true,
-                        ..Default::default()
-                    }),
-                )
-                .await;
-            }
-        };
+    let workspace_id = request.workspace_id;
+    let result = match cwd {
+        Some(cwd) => workspace_patch(&cwd, &run_id, &request.base_tree, &request.base_head).await,
+        None => Err(invalid(
+            "The requested repository is outside this worker workspace",
+        )),
+    };
+    let checkpoint = match result {
+        Ok(checkpoint) => checkpoint,
+        Err(error) => {
+            eprintln!("Could not checkpoint agent files: {error}");
+            return send(
+                &outgoing,
+                WorkerMessage::Snapshot(AgentSnapshotResult {
+                    run_id,
+                    workspace_id,
+                    unavailable: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        }
+    };
     let sha256 = |bytes: &[u8]| {
         ring::digest::digest(&ring::digest::SHA256, bytes)
             .as_ref()
@@ -708,6 +803,7 @@ async fn send_snapshot(
         &outgoing,
         WorkerMessage::Snapshot(AgentSnapshotResult {
             run_id: run_id.clone(),
+            workspace_id,
             tree: checkpoint.tree,
             size: checkpoint.patch.len() as u32,
             sha256: sha256(&checkpoint.patch),
@@ -875,8 +971,15 @@ async fn execute(
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
-    let descriptor = if run.setup.is_some() {
-        match receive_setup(slot, run).await {
+    let descriptor: Option<AgentWorkspaceSetup> = if let Some(source) = &run.setup {
+        match receive_descriptor(slot, &run.run_id, source, DESCRIPTOR_BYTES, |message| {
+            match message {
+                HomeMessage::SetupChunk(frame) => Some(frame),
+                _ => None,
+            }
+        })
+        .await
+        {
             Ok(Some(setup)) => Some(setup),
             Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
             Err(error) => {
@@ -887,7 +990,27 @@ async fn execute(
     } else {
         None
     };
-    let cwd = match stage_workspace(slot, run, path).await {
+    let skills: Option<AgentSkillFiles> =
+        if let Some(source) = &run.skills {
+            match receive_descriptor(slot, &run.run_id, source, MAX_SKILL_BYTES, |message| {
+                match message {
+                    HomeMessage::SkillsChunk(frame) => Some(frame),
+                    _ => None,
+                }
+            })
+            .await
+            {
+                Ok(Some(files)) => Some(files),
+                Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
+                Err(error) => {
+                    eprintln!("Could not receive the selected worker skills: {error}");
+                    return Ok((AgentRunOutcome::StartFailed, None));
+                }
+            }
+        } else {
+            None
+        };
+    let workspace = match stage_workspace(slot, run, path).await {
         Ok(Some(path)) => path,
         Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
         Err(error) => {
@@ -897,7 +1020,7 @@ async fn execute(
     };
     let setup = match descriptor
         .as_ref()
-        .map(|given| WorkspaceSetup::from_wire(&cwd, given))
+        .map(|given| SetupPlan::from_wire(&workspace, given))
         .transpose()
     {
         Ok(setup) => setup,
@@ -906,13 +1029,29 @@ async fn execute(
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
-    let mut unit = match AgentUnit::start(run, provider, &cwd, journal, setup.as_ref()).await {
-        Ok(unit) => unit,
+    let skill_directory = match skills
+        .map(|files| SkillDirectory::write(&workspace.root, &run.run_id, files))
+        .transpose()
+    {
+        Ok(directory) => directory,
         Err(error) => {
-            eprintln!("Could not prepare the agent unit: {error}");
+            eprintln!("Could not prepare the selected worker skills: {error}");
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
+    let skills_path = skill_directory
+        .as_ref()
+        .map(SkillDirectory::as_str)
+        .transpose()?
+        .unwrap_or_default();
+    let mut unit =
+        match AgentUnit::start(run, provider, &workspace.root, journal, setup.as_ref()).await {
+            Ok(unit) => unit,
+            Err(error) => {
+                eprintln!("Could not prepare the agent unit: {error}");
+                return Ok((AgentRunOutcome::StartFailed, None));
+            }
+        };
     let result = match run.tools {
         true => {
             // The listener stays on worker loopback. The home checks both
@@ -921,14 +1060,14 @@ async fn execute(
             let tools_port = listener.local_addr()?.port();
             let channel = slot.channel.clone();
             tokio::select! {
-                result = serve_agent(slot, &mut unit, run, &cwd, tools_port) => result,
+                result = serve_agent(slot, &mut unit, run, config, &workspace, tools_port, skills_path) => result,
                 bridge = forward_tools(listener, channel, &run.run_id) => {
                     bridge?;
                     Err(invalid("The worker tool bridge stopped").into())
                 }
             }
         }
-        false => serve_agent(slot, &mut unit, run, &cwd, 0).await,
+        false => serve_agent(slot, &mut unit, run, config, &workspace, 0, skills_path).await,
     };
     if !stop_group(&unit.name, &unit.group).await {
         return Ok((AgentRunOutcome::Unconfirmed, None));
@@ -936,49 +1075,55 @@ async fn execute(
     result
 }
 
-async fn receive_setup(
+async fn receive_descriptor<T: Message + Default>(
     slot: &mut Slot,
-    run: &AgentRunStart,
-) -> Result<Option<AgentWorkspaceSetup>, Failure> {
-    let source = run
-        .setup
-        .as_ref()
-        .ok_or_else(|| invalid("The home did not describe its setup"))?;
+    run_id: &str,
+    source: &AgentWorkspaceSetupSource,
+    maximum: usize,
+    select: impl Fn(HomeMessage) -> Option<AgentRunBytes>,
+) -> Result<Option<T>, Failure> {
     let size = source.size as usize;
-    if size == 0 || size > DESCRIPTOR_BYTES || source.sha256.len() != 32 {
-        return Err(invalid("The home described an invalid worker setup").into());
+    if size == 0 || size > maximum || source.sha256.len() != 32 {
+        return Err(invalid("The worker data exceeded its bounds").into());
     }
     let mut bytes = Vec::with_capacity(size);
     while bytes.len() < size {
-        match slot.message().await? {
-            HomeMessage::SetupChunk(chunk)
-                if chunk.run_id == run.run_id
+        let message = slot.message().await?;
+        if matches!(&message, HomeMessage::Stop(stop) if stop.run_id == run_id) {
+            return Ok(None);
+        }
+        let chunk = select(message)
+            .filter(|chunk| {
+                chunk.run_id == run_id
                     && !chunk.data.is_empty()
                     && chunk.data.len() <= CHUNK_BYTES
-                    && bytes.len() + chunk.data.len() <= size =>
-            {
-                bytes.extend_from_slice(&chunk.data)
-            }
-            HomeMessage::Stop(stop) if stop.run_id == run.run_id => return Ok(None),
-            _ => return Err(invalid("The home sent an invalid worker setup frame").into()),
-        }
+                    && bytes.len() + chunk.data.len() <= size
+            })
+            .ok_or_else(|| invalid("The home sent an invalid worker data frame"))?;
+        bytes.extend_from_slice(&chunk.data);
     }
     if ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref() != source.sha256.as_slice() {
-        return Err(invalid("The worker setup digest changed").into());
+        return Err(invalid("The worker data digest changed").into());
     }
-    Ok(Some(AgentWorkspaceSetup::decode(bytes.as_slice())?))
+    Ok(Some(T::decode(bytes.as_slice())?))
 }
 
 async fn stage_workspace(
     slot: &mut Slot,
     run: &AgentRunStart,
     path: PathBuf,
-) -> Result<Option<PathBuf>, Failure> {
+) -> Result<Option<AgentWorkspace>, Failure> {
+    if !run.repositories.is_empty() {
+        if run.source.is_some() {
+            return Err(invalid("Choose a single source or a repository set").into());
+        }
+        return stage_workspace_set(slot, run, path).await;
+    }
     let Some(source) = &run.source else {
         if path.canonicalize()? != path || !path.is_dir() {
             return Err(invalid("The assigned worker workspace is unavailable").into());
         }
-        return Ok(Some(path));
+        return Ok(Some(AgentWorkspace::single(path)));
     };
     let mut transfer = WorkspaceTransfer::create(path, &run.run_id, source)?;
     while !transfer.complete() {
@@ -993,10 +1138,90 @@ async fn stage_workspace(
         }
     }
     tokio::select! {
-        result = transfer.install(source) => Ok(Some(result?)),
+        result = transfer.install(source) => Ok(Some(AgentWorkspace::single(result?))),
         message = slot.message() => match message? {
             HomeMessage::Stop(stop) if stop.run_id == run.run_id => Ok(None),
             _ => Err(invalid("The home sent an unexpected frame during checkout").into()),
         }
+    }
+}
+
+async fn stage_workspace_set(
+    slot: &mut Slot,
+    run: &AgentRunStart,
+    path: PathBuf,
+) -> Result<Option<AgentWorkspace>, Failure> {
+    let group = WorkspaceSet::new(path, &run.run_id, &run.workspace_id, &run.repositories)?;
+    let mut uploads = group.uploads(&run.repositories)?;
+    for (transfer, _) in &mut uploads {
+        while !transfer.complete() {
+            match slot.message().await? {
+                HomeMessage::Checkout(frame)
+                    if frame.run_id == run.run_id && frame.data.len() <= CHUNK_BYTES =>
+                {
+                    transfer.put(&frame.data)?
+                }
+                HomeMessage::Stop(stop) if stop.run_id == run.run_id => return Ok(None),
+                _ => return Err(invalid("The home sent an invalid repository bundle frame").into()),
+            }
+        }
+    }
+    let install = async {
+        for (transfer, source) in uploads {
+            transfer.install(source).await?;
+        }
+        group.publish()
+    };
+    tokio::select! {
+        result = install => Ok(Some(result?)),
+        message = slot.message() => match message? {
+            HomeMessage::Stop(stop) if stop.run_id == run.run_id => Ok(None),
+            _ => Err(invalid("The home sent a frame while installing a repository set").into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn local_mcp_registration_is_project_scoped_and_never_uses_checkout_files() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().join("workspaces");
+        crate::agent_workspace::private_directory(&root)?;
+        let local = temp.path().join("server");
+        let project = format!("proj_{}", "1".repeat(32));
+        let unknown = format!("proj_{}", "2".repeat(32));
+        let binary = std::env::current_exe()?.canonicalize()?;
+        std::os::unix::fs::symlink(&binary, &local)?;
+        let config = temp.path().join("agents.conf");
+        let base = format!(
+            "{}\n{project}\tcodex\t{}\n",
+            root.display(),
+            binary.display()
+        );
+        let set_config = |extra| -> io::Result<()> {
+            fs::write(&config, format!("{base}{extra}"))?;
+            fs::set_permissions(&config, fs::Permissions::from_mode(0o600))
+        };
+        let entry = format!("mcp\t{project}\tprojectTools\t{}\n", local.display());
+        set_config(entry.clone())?;
+        let loaded = AgentConfig::read(&config)?;
+        let tools = loaded.mcp.get(&project).expect("registered project");
+        assert_eq!(tools[0].executable, binary.to_str().unwrap());
+        assert!(!loaded.mcp.contains_key(&unknown));
+        set_config(entry.repeat(2))?;
+        assert!(AgentConfig::read(&config).is_err());
+        set_config(entry.replace(&project, &unknown))?;
+        assert!(AgentConfig::read(&config).is_err());
+        let checked_out = root.join("tool");
+        fs::write(&checked_out, b"script")?;
+        fs::set_permissions(&checked_out, fs::Permissions::from_mode(0o700))?;
+        fs::remove_file(&local)?;
+        std::os::unix::fs::symlink(&checked_out, &local)?;
+        set_config(entry)?;
+        assert!(AgentConfig::read(&config).is_err());
+        Ok(())
     }
 }

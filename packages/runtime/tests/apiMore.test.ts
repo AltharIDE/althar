@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { Duplex, PassThrough, Readable, Writable } from 'node:stream'
 import { once } from 'node:events'
 import { MessageChannel } from 'node:worker_threads'
@@ -19,7 +19,9 @@ import { until } from '@althar/testing/effect'
 import { connection, services, text } from '../src/Api'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
 import { Folders } from '../src/Folders'
+import { Helpers } from '../src/Helpers'
 import { Secrets } from '../src/Secrets'
+import type { WorkerExecution } from '../src/workerExecution'
 
 import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
@@ -75,11 +77,29 @@ const connected = (
       })
     const client = yield* connect('window')
     const grant = (path: string) => Context.get(context, Folders).allow(path)
-    return { client, grant, connect }
+    return { client, grant, connect, helpers: Context.get(context, Helpers) }
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
   thread.session !== null && !thread.session.turnRunning && thread.session.turnEndedAt !== null
+
+const openFakeWorker = (cwd: string) =>
+  Effect.gen(function* () {
+    const child = spawn('bun', [fakeAgentMain], { cwd, stdio: ['pipe', 'pipe', 'ignore'] })
+    const exited = once(child, 'exit')
+    const stop = Effect.promise(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill()
+      await exited
+    })
+    yield* Effect.addFinalizer(() => stop)
+    return {
+      _tag: 'Remote',
+      stdin: Writable.toWeb(child.stdin),
+      stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      exited: Effect.promise(() => exited.then(([code, signal]) => ({ code: code as number | null, signal: signal as string | null }))),
+      stop,
+    } satisfies WorkerExecution['transport']
+  })
 
 /** A folder holding a repository for each name, as a project of several opens from. */
 const folderWith = (names: ReadonlyArray<string>) => {
@@ -261,6 +281,85 @@ describe('the coordinator’s question, through the API', () => {
 })
 
 describe('a normal task assigned to a worker', () => {
+  it.live('hands a grouped checkout to its worker and keeps a helper from copying a stale checkout', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '7'.repeat(32)
+        const homePath = folderWith(['api', 'web'])
+        const apiPath = join(homePath, 'api')
+        writeFileSync(join(apiPath, 'package.json'), JSON.stringify({ name: 'worker-api', dependencies: { fixture: 'file:./fixture' } }))
+        writeFileSync(join(apiPath, 'bun.lock'), '')
+        execFileSync('git', ['add', '.'], { cwd: apiPath })
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-qm', 'Keep API setup'], { cwd: apiPath })
+        const workerPath = folderWith(['api', 'web'])
+        let openings = 0
+        const { client, grant, helpers } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['codex'], busy: false, multiRepoProviders: ['codex'] }],
+            open: (request) =>
+              Effect.gen(function* () {
+                assert.strictEqual(request.workerId, workerId)
+                const bound = request.repositories ?? []
+                assert.deepEqual(bound.map((repository) => repository.directory).sort(), ['api', 'web'])
+                for (const repository of bound) {
+                  assert.strictEqual(basename(repository.worktree), repository.directory)
+                  assert.strictEqual(dirname(repository.worktree), dirname(request.worktree))
+                }
+                const api = bound.find((repository) => repository.directory === 'api') ?? assert.fail('The API worktree is missing.')
+                assert.deepStrictEqual(request.setup, {
+                  repositories: [{ workspaceId: api.workspaceId, directory: '', commands: ['bun install --frozen-lockfile'] }],
+                })
+                assert.strictEqual(bound.find((repository) => repository.worktree === request.worktree)?.workspaceId, request.workspaceId)
+                openings += 1
+                return {
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  transport: yield* openFakeWorker(join(workerPath, basename(request.worktree))),
+                  repositorySetup: { [api.workspaceId]: { code: 0, timedOut: false, output: 'Installed API dependencies on the worker.' } },
+                  checkpoint: Effect.void,
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          workerId,
+          repositories: ['api', 'web'],
+          title: 'Update both repositories on the worker',
+          description: '[lead:permission] [lead:finish]',
+          end: 'ready',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        })
+        const awaiting = yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
+          thread.attention.some((attention) => attention.kind === 'permission'),
+        )
+        assert.strictEqual(openings, 1)
+        assert.include(JSON.stringify(awaiting.items), 'Installed API dependencies on the worker.')
+        assert.strictEqual(
+          yield* helpers.start({
+            taskId: task.id,
+            name: 'Check the API',
+            brief: 'Read the task changes.',
+            agentId: 'codex',
+            model: null,
+            modelName: 'Codex',
+            inCopy: true,
+          }),
+          'This worker cannot make a separate helper checkout yet.',
+        )
+        assert.isEmpty(yield* helpers.working(task.id))
+        const approval = awaiting.attention.find((attention) => attention.kind === 'permission') ?? assert.fail('The lead did not ask.')
+        yield* client.Answer({ attentionId: approval.id, decision: 'allow', commandId: commandId() })
+        yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
+          thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+        )
+      }),
+    ),
+  )
+
   it.live('projects the held plan’s requirements and rechecks the selected worker at Start', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -409,23 +508,8 @@ describe('a normal task assigned to a worker', () => {
                 placed.push({ workspace: request.workspaceId, site: request.worktree })
                 assert.deepStrictEqual(request.setup, { directory: '', commands: ['bun install --frozen-lockfile'] })
                 writeFileSync(join(workerPath, 'staged'), 'from the worker setup')
-                const child = spawn('bun', [fakeAgentMain], { cwd: workerPath, stdio: ['pipe', 'pipe', 'ignore'] })
-                const exited = once(child, 'exit')
-                const stop = Effect.promise(async () => {
-                  if (child.exitCode === null && child.signalCode === null) child.kill()
-                  await exited
-                })
-                yield* Effect.addFinalizer(() => stop)
                 return {
-                  transport: {
-                    _tag: 'Remote' as const,
-                    stdin: Writable.toWeb(child.stdin),
-                    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-                    exited: Effect.promise(() =>
-                      exited.then(([code, signal]) => ({ code: code as number | null, signal: signal as string | null })),
-                    ),
-                    stop,
-                  },
+                  transport: yield* openFakeWorker(workerPath),
                   path: workerPath,
                   toolPort: request.toolPort,
                   setup: { code: 0, timedOut: false, output: 'Setup completed on the worker.' },

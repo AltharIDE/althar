@@ -1,15 +1,16 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 
-import { AgentRunOutcome, type AgentRunExit } from '@althar/worker-protocol'
+import { AgentRunOutcome, type AgentManagedExit, type AgentRunExit } from '@althar/worker-protocol'
 import type { AgentWorkerPool, WorkerAgentProcess } from '@althar/worker-protocol/agent-runs'
 import { assert, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { workerExecution } from '../src/workerHome/execution'
 import { workerTestDirectory as temporary } from './workerTestFiles'
+import { repository } from './support'
 
 const request = (worktree: string) => ({
   workerId: 'wrk_' + '1'.repeat(32),
@@ -19,6 +20,243 @@ const request = (worktree: string) => ({
   worktree,
   toolPort: 3200,
 })
+
+it.live('keeps each repository’s own baseline and sends commands to the selected checkout in a worker set', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const api = repository()
+      const web = repository()
+      const scratch = repository()
+      const fixture = repository()
+      writeFileSync(join(fixture, 'README.md'), 'From the scratch helper\n')
+      const scratchPatch = execFileSync('git', ['diff', 'HEAD'], { cwd: fixture })
+      execFileSync('git', ['add', 'README.md'], { cwd: fixture })
+      const scratchTree = execFileSync('git', ['write-tree'], { cwd: fixture }).toString().trim()
+      const input = request(api)
+      const webId = 'ws_' + '4'.repeat(32)
+      const repositories = [
+        { workspaceId: input.workspaceId, worktree: api, directory: 'api' },
+        { workspaceId: webId, worktree: web, directory: 'web' },
+      ]
+      const checkpoints: Array<string | undefined> = []
+      let launchedIn: string | undefined
+      let helperIn: string | undefined
+      let scratchId: string | undefined
+      let scratchOwns = true
+      let typed = ''
+      let helperMode: 'ready' | 'without-input' | 'without-checkout' | 'overflow' | 'refuses' = 'ready'
+      let managedAvailable = true
+      let stoppedHelpers = 0
+      let emitOutput: ((data: Uint8Array) => void) | undefined
+      let fenceAfterPatch = false
+      let fenceChecks = 0
+      const stopped: AgentRunExit = {
+        $typeName: 'althar.worker.v1.AgentRunExit',
+        runId: 'war_' + '5'.repeat(32),
+        outcome: AgentRunOutcome.STOPPED,
+      }
+      const service = workerExecution(() => ({
+        connect: () => assert.fail('No transport fixture needed'),
+        connectPreview: () => assert.fail('No transport fixture needed'),
+        openTools: () => undefined,
+        list: () => [
+          {
+            workerId: input.workerId,
+            busy: false,
+            capabilities: [{ projectId: input.projectId, providerId: input.providerId, workspaceSets: true }],
+          },
+        ],
+        start: async (_id, _placement, options) => {
+          assert.isUndefined(options?.checkout)
+          assert.deepStrictEqual(
+            options?.repositories?.map(({ workspaceId, directory }) => [workspaceId, directory]),
+            [
+              [input.workspaceId, 'api'],
+              [webId, 'web'],
+            ],
+          )
+          return {
+            workspacePath: '/worker/task',
+            toolPort: 4517,
+            skillsPath: '/private/lead-skills',
+            localMcp: [{ name: 'lint', executable: '/usr/bin/lint' }],
+            setup: {
+              $typeName: 'althar.worker.v1.AgentWorkspaceSetupResult',
+              exitCode: 0,
+              timedOut: false,
+              outputTail: new Uint8Array(),
+              repositories: [
+                {
+                  $typeName: 'althar.worker.v1.AgentRepositorySetupResult',
+                  workspaceId: input.workspaceId,
+                  exitCode: 0,
+                  timedOut: false,
+                  outputTail: Buffer.from('API ready'),
+                },
+                {
+                  $typeName: 'althar.worker.v1.AgentRepositorySetupResult',
+                  workspaceId: webId,
+                  exitCode: 124,
+                  timedOut: true,
+                  outputTail: Buffer.from('Web timed out'),
+                },
+              ],
+            },
+            output: new PassThrough(),
+            exit: Promise.resolve(stopped),
+            write: async () => undefined,
+            stop: async () => stopped,
+            ownsRun: () => !fenceAfterPatch || ++fenceChecks === 1,
+            readPatch: async (tree, head, id) => {
+              checkpoints.push(id)
+              if (scratchId !== undefined && scratchId === id) {
+                assert.strictEqual(head, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: scratch }).toString().trim())
+                return { tree: scratchTree, head, patch: scratchPatch, commits: Buffer.alloc(0) }
+              }
+              const at = repositories.find((entry) => entry.workspaceId === id)?.worktree
+              assert.isString(at)
+              const git = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: at }).toString().trim()
+              assert.strictEqual(head, git('HEAD'))
+              assert.strictEqual(tree, git('HEAD^{tree}'))
+              return { tree, head, patch: Buffer.alloc(0), commits: Buffer.alloc(0) }
+            },
+            startCommand: async ({ directory }) => {
+              if (!managedAvailable) throw { failure: 'connection lost' }
+              launchedIn = directory
+              return {
+                exit: Promise.resolve({ $typeName: 'althar.worker.v1.AgentManagedExit', outcome: AgentRunOutcome.STOPPED }),
+                stop: async () => undefined,
+              }
+            },
+            startHelper: async ({ id, directory, output, checkout, skills }) => {
+              emitOutput = output
+              if (helperMode === 'refuses') throw 'This helper is unavailable.'
+              if (helperMode === 'overflow') output(Buffer.alloc(129 * 1024))
+              if (checkout !== undefined) {
+                scratchId = id
+                assert.strictEqual(checkout.head, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: scratch }).toString().trim())
+              }
+              helperIn = directory
+              let ended!: (result: AgentManagedExit) => void
+              const exit = new Promise<AgentManagedExit>((resolve) => {
+                ended = resolve
+              })
+              return {
+                exit,
+                ...(skills === undefined ? {} : { skillsPath: '/private/helper-skills' }),
+                ...(checkout === undefined || helperMode === 'without-checkout'
+                  ? {}
+                  : { checkoutPath: '/worker/scratch', ownsProcess: () => scratchOwns }),
+                stop: async () => {
+                  stoppedHelpers++
+                  ended({ $typeName: 'althar.worker.v1.AgentManagedExit', outcome: AgentRunOutcome.STOPPED })
+                },
+                ...(helperMode === 'without-input'
+                  ? {}
+                  : {
+                      write: async (bytes: Uint8Array) => {
+                        typed = Buffer.from(bytes).toString()
+                        output(bytes)
+                      },
+                    }),
+              }
+            },
+          }
+        },
+      }))
+      assert.deepStrictEqual(service.list(input.projectId)[0]?.multiRepoProviders, ['codex'])
+      const running = yield* service.open({ ...input, repositories })
+      assert.strictEqual(running.skillsPath, '/private/lead-skills')
+      assert.deepStrictEqual(running.localMcp, [{ name: 'lint', executable: '/usr/bin/lint' }])
+      assert.deepStrictEqual(running.repositorySetup, {
+        [input.workspaceId]: { code: 0, timedOut: false, output: 'API ready' },
+        [webId]: { code: 124, timedOut: true, output: 'Web timed out' },
+      })
+      yield* running.checkpoint
+      assert.deepStrictEqual(checkpoints, [input.workspaceId, webId])
+      const start = service.startCommand
+      if (start === undefined) return assert.fail('The assigned worker supports managed commands')
+      const command = {
+        ...input,
+        worktree: web,
+        id: 'proc_' + '1'.repeat(32),
+        directory: 'client',
+        command: 'make test',
+        output: () => undefined,
+      }
+      yield* start(command)
+      assert.strictEqual(launchedIn, 'web/client')
+      for (const changed of [{ worktree: join(web, 'wrong') }, { projectId: 'another project' }, { workerId: 'another worker' }])
+        assert.include((yield* Effect.flip(start({ ...command, ...changed }))).reason, 'assigned worker')
+      managedAvailable = false
+      assert.strictEqual((yield* Effect.flip(start(command))).reason, 'The worker connection was lost.')
+      const openHelper = service.openHelper
+      if (openHelper === undefined) return assert.fail('The assigned worker supports helpers')
+      const helper = yield* openHelper({ ...input, worktree: web, directory: 'web-client' })
+      assert.strictEqual(helper.path, '/worker/task/web')
+      assert.strictEqual(helper.toolPort, 4517)
+      assert.strictEqual(helperIn, 'web/web-client')
+      assert.strictEqual(helper.checkpoint, running.checkpoint)
+      for (const changed of [
+        { worktree: join(web, 'wrong') },
+        { projectId: 'another project' },
+        { workerId: 'another worker' },
+        { toolPort: 3201 },
+      ])
+        assert.include((yield* Effect.flip(openHelper({ ...input, worktree: web, directory: '', ...changed }))).reason, 'Start the lead')
+      for (const [mode, message] of [
+        ['without-input', 'did not open the helper'],
+        ['overflow', 'did not open the helper'],
+        ['without-checkout', 'did not confirm its separate helper checkout'],
+        ['refuses', 'This helper is unavailable.'],
+      ] as const) {
+        helperMode = mode
+        const copy = mode === 'without-checkout' ? { copy: scratch } : {}
+        const failed = yield* Effect.scoped(Effect.flip(openHelper({ ...input, worktree: web, directory: '', ...copy })))
+        assert.include(failed.reason, message)
+      }
+      assert.strictEqual(stoppedHelpers, 3)
+      helperMode = 'ready'
+      yield* Effect.promise(() => helper.transport.stdin.getWriter().write(Buffer.from('helper ACP')))
+      assert.strictEqual(typed, 'helper ACP')
+      assert.strictEqual(
+        Buffer.from((yield* Effect.promise(() => helper.transport.stdout.getReader().read())).value ?? []).toString(),
+        'helper ACP',
+      )
+      const checkpoint = service.checkpointWorktree
+      if (checkpoint === undefined) return assert.fail('The worker service can checkpoint before making a helper copy')
+      yield* Effect.flip(checkpoint({ ...input, projectId: 'different' }))
+      yield* checkpoint({ ...input, worktree: web })
+      const copy = yield* openHelper({
+        ...input,
+        directory: '',
+        worktree: web,
+        copy: scratch,
+        skills: [{ path: 'notes/SKILL.md', executable: false, data: Buffer.from('Scratch instructions') }],
+      })
+      assert.strictEqual(copy.path, '/worker/scratch')
+      assert.strictEqual(copy.skillsPath, '/private/helper-skills')
+      assert.deepStrictEqual(copy.localMcp, running.localMcp)
+      assert.strictEqual(helperIn, '')
+      yield* copy.checkpoint
+      assert.strictEqual(checkpoints.at(-1), scratchId)
+      assert.strictEqual(readFileSync(join(web, 'README.md'), 'utf8'), '# Meridian\n')
+      assert.strictEqual(readFileSync(join(scratch, 'README.md'), 'utf8'), 'From the scratch helper\n')
+      scratchOwns = false
+      assert.include((yield* Effect.flip(copy.checkpoint)).message, 'no longer owns')
+      const sent = stoppedHelpers
+      emitOutput?.(Buffer.alloc(129 * 1024))
+      assert.strictEqual(stoppedHelpers, sent + 1)
+      emitOutput?.(Buffer.from('not read'))
+      assert.strictEqual(stoppedHelpers, sent + 1)
+      assert.deepStrictEqual(yield* copy.transport.exited, { code: null, signal: 'SIGTERM' })
+      fenceAfterPatch = true
+      assert.include((yield* Effect.flip(running.checkpoint)).message, 'no longer owns')
+      yield* helper.transport.stop
+      assert.deepStrictEqual(yield* helper.transport.exited, { code: null, signal: 'SIGTERM' })
+    }),
+  ),
+)
 
 it.live('prepares a real task checkout and keeps the worker process scoped to the Althar session', () =>
   Effect.gen(function* () {
@@ -45,6 +283,9 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     let stopping = 0
     let reachable = true
     let toolsAvailable = true
+    let losesConnection = false
+    let launchError: Error | undefined
+    let refusesClose = false
     const written: Uint8Array[] = []
     const worker: WorkerAgentProcess = {
       workspacePath: '/worker/project',
@@ -56,8 +297,14 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       write: async (chunk) => {
         written.push(chunk)
       },
-      startCommand: async () => assert.fail('No command expected'),
+      startCommand: async () => ({
+        exit: Promise.resolve({ $typeName: 'althar.worker.v1.AgentManagedExit', outcome: AgentRunOutcome.STOPPED }),
+        stop: async () => {
+          throw new Error('The lease has closed')
+        },
+      }),
       stop: async () => {
+        if (refusesClose) throw new Error('The worker no longer has a route')
         stopping += 1
         outcome(exit)
         return exit
@@ -80,6 +327,12 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         assert.deepStrictEqual(placement, { projectId: input.projectId, workspaceId: input.workspaceId, providerId: input.providerId })
         assert.strictEqual(options?.toolPort, input.toolPort)
         assert.strictEqual(options?.checkout?.head, head)
+        if (launchError !== undefined) throw launchError
+        if (losesConnection) {
+          const exit = Promise.reject<AgentRunExit>(new Error('The worker stream closed before an exit'))
+          void exit.catch(() => undefined)
+          return { ...worker, exit }
+        }
         if (toolsAvailable) return worker
         return {
           workspacePath: worker.workspacePath,
@@ -100,18 +353,46 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         const running = yield* service.open(input)
         assert.strictEqual(running.path, '/worker/project')
         assert.strictEqual(running.toolPort, 4517)
+        const openHelper = service.openHelper
+        if (openHelper === undefined) return assert.fail('No worker helper service')
+        assert.include((yield* Effect.flip(openHelper({ ...input, directory: '' }))).reason, 'Update this worker')
         yield* Effect.promise(() => running.transport.stdin.getWriter().write(Buffer.from('prompt')))
         assert.strictEqual(Buffer.from(written[0] ?? []).toString(), 'prompt')
         yield* running.checkpoint
+        const checkpoint = service.checkpointWorktree
+        const command = service.startCommand
+        if (checkpoint === undefined || command === undefined) return assert.fail('The worker should support commands and checkpoints')
+        assert.include((yield* Effect.flip(checkpoint({ ...input, workerId: 'another worker' }))).message, 'assigned worker')
+        assert.include((yield* Effect.flip(checkpoint({ ...input, worktree: 'missing' }))).message, 'assigned worker')
+        yield* Effect.scoped(command({ ...input, command: 'build', directory: '', id: 'proc_' + 'a'.repeat(32), output: () => undefined }))
         reachable = false
         assert.strictEqual((yield* Effect.flip(running.checkpoint)).message, 'Worker disconnected.')
+        outcome(exit)
+        assert.deepStrictEqual(yield* running.transport.exited, { code: null, signal: 'SIGTERM' })
       }),
     )
     assert.strictEqual(stopping, 1)
     toolsAvailable = false
     const missingTools = yield* Effect.scoped(Effect.flip(service.open(input)))
     assert.include(missingTools.reason, 'worker did not open the Althar tools connection')
+    assert.deepStrictEqual(
+      (yield* Effect.scoped(Effect.flip(service.open({ ...input, repositories: [] })))).reason,
+      'There are no task repositories to send to this worker.',
+    )
     assert.strictEqual(stopping, 2)
+    toolsAvailable = true
+    losesConnection = true
+    refusesClose = true
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* service.open(input)
+        assert.deepStrictEqual(yield* running.transport.exited, { code: null, signal: null })
+        yield* running.transport.stop
+      }),
+    )
+    assert.strictEqual(stopping, 2)
+    launchError = new Error('The enrolled worker is busy on another home')
+    assert.strictEqual((yield* Effect.scoped(Effect.flip(service.open(input)))).reason, launchError.message)
   }),
 )
 
