@@ -1006,6 +1006,8 @@ export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
 export interface BrowserPreferencesText {
   links: string
   linksNote: string
+  linksNoteBeside: string
+  linksNoteOutside: string
   local: string
   beside: string
   outside: string
@@ -1022,6 +1024,8 @@ export const browserPreferencesText: BrowserPreferencesText = {
   links: 'Links from threads',
   linksNote:
     'What runs on this computer opens beside; the web, where you’re signed in, opens in your browser. A task’s run always opens beside.',
+  linksNoteBeside: 'Every link opens beside the conversation, the web too. A task’s run always opens beside.',
+  linksNoteOutside: 'Every link opens in your browser. A task’s run still opens beside its conversation.',
   local: 'Local only',
   beside: 'All beside',
   outside: 'All in your browser',
@@ -1068,7 +1072,11 @@ export function BrowserPreferences({
   const keeps: ReadonlyArray<CookieKeep> = ['page', 'quit', 'task', 'site']
   return (
     <SettingList>
-      <SettingRow title={t.links} note={t.linksNote} glyph={<Icon name="globe" size={15} />}>
+      <SettingRow
+        title={t.links}
+        note={links === 'beside' ? t.linksNoteBeside : links === 'outside' ? t.linksNoteOutside : t.linksNote}
+        glyph={<Icon name="globe" size={15} />}
+      >
         {() => (
           <Segmented<LinksOpen>
             label={t.links}

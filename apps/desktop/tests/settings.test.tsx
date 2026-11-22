@@ -1136,6 +1136,7 @@ describe('Settings › Browser', () => {
     expect(within(links).getByRole('radio', { name: 'Local only' }).getAttribute('aria-checked')).toBe('true')
     await userEvent.click(within(links).getByRole('radio', { name: 'All beside' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenLastCalledWith('browserLinks', 'beside'))
+    expect(screen.getByText(/Every link opens beside the conversation/)).toBeTruthy()
     await userEvent.click(within(links).getByRole('radio', { name: 'All in your browser' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenLastCalledWith('browserLinks', 'outside'))
     await userEvent.click(screen.getByRole('combobox', { name: 'Keep cookies' }))

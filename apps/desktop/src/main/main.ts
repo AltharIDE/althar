@@ -7,6 +7,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
+import { outsideAddress } from './externalLink'
 import { locations as locationsOf } from './locations'
 import { NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
@@ -36,7 +37,7 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME, emitterPort, isLocalAddress, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
@@ -902,12 +903,8 @@ const showChosenIcon = async () => {
 
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
 const openOutside = (url: string) => {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === 'https:' || isLocalAddress(url)) void shell.openExternal(parsed.toString())
-  } catch {
-    // Not a URL; nothing to open.
-  }
+  const address = outsideAddress(url)
+  if (address !== null) void shell.openExternal(address)
 }
 
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
