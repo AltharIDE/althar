@@ -4789,10 +4789,19 @@ export const FOUND_MOST = 50
 export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
 export type FoundTasks = typeof FoundTasks.Type
 
-/** Local search documents, read in pages independently of what is typed. */
+const DocumentKind = Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note'])
+
+export const FinderQuery = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(500)),
+  projectId: Schema.optional(Schema.String),
+  kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+})
+export type FinderQuery = typeof FinderQuery.Type
+
+/** Local documents found by search. The original catalog is still paged. */
 export const SearchDocument = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note']),
+  kind: DocumentKind,
   projectId: Schema.String,
   threadId: Schema.NullOr(Schema.String),
   taskId: Schema.NullOr(Schema.String),
@@ -4805,7 +4814,12 @@ export const SearchDocument = Schema.Struct({
   state: Schema.String,
 })
 export type SearchDocument = typeof SearchDocument.Type
-export const SearchDocuments = Schema.Struct({ documents: Schema.Array(SearchDocument), next: Schema.NullOr(Schema.String) })
+export const SearchDocuments = Schema.Struct({
+  documents: Schema.Array(SearchDocument),
+  next: Schema.NullOr(Schema.String),
+  indexed: Schema.optional(Schema.Boolean),
+  indexing: Schema.optional(Schema.Boolean),
+})
 export type SearchDocuments = typeof SearchDocuments.Type
 
 /** A part of the whole, 0 to 1. */
@@ -5273,7 +5287,7 @@ const ProjectApi = RpcGroup.make(
     },
     FoundTasks,
   ),
-  call('GetSearchDocuments', { after: Schema.optional(Schema.String) }, SearchDocuments),
+  call('GetSearchDocuments', { after: Schema.optional(Schema.String), search: Schema.optional(FinderQuery) }, SearchDocuments),
   call('GetSearchFiles', { threadId: Schema.String }, Schema.Struct({ files: Schema.Array(Schema.String) })),
   command(
     'CreateTask',
@@ -5321,7 +5335,7 @@ const ProjectApi = RpcGroup.make(
    */
   call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
-  call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
+  call('GetBoard', { projectId: Schema.String, cached: Schema.optional(Schema.Boolean) }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
   call(
     'GetOlderSettled',
@@ -5329,7 +5343,7 @@ const ProjectApi = RpcGroup.make(
     Schema.Struct({ tasks: Schema.Array(BoardTask) }),
   ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
-  call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
+  call('GetHome', { since: Schema.optional(Schema.String), cached: Schema.optional(Schema.Boolean) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   /**

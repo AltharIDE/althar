@@ -46,6 +46,7 @@ import { Reviews } from './Reviews'
 import { Runs } from './Runs'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { fillIndex } from './Search'
+import { finderIndex } from './finderIndex'
 import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
@@ -230,6 +231,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         // A child that ended, and a call that waits while the person is away (Situations.ts).
         Situations.layer,
         startupLayer('search-index', fillIndex),
+        finderIndex,
         // The skills an older Althar shipped come out of the person's store on the first start after it stopped.
         startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
