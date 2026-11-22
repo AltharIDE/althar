@@ -229,6 +229,14 @@ describe('a file dropped on a terminal', () => {
     expect(drop(none, 'dragover', [file]).defaultPrevented).toBe(false)
     expect(drop(none, 'drop', [file]).defaultPrevented).toBe(false)
   })
+
+  it.each(['darwin', 'linux', 'win32'])('types a path with backslashes on %s', (platform) => {
+    const path = platform === 'win32' ? 'C:\\work\\notes.txt' : '/work/meeting\\notes.txt'
+    const { session } = make({ platform, pathOf: () => path })
+    const paste = vi.spyOn(session.term, 'paste').mockImplementation(() => {})
+    drop(session, 'drop', [new File([''], 'notes.txt')])
+    expect(paste).toHaveBeenCalledWith(platform === 'win32' ? `${path} ` : `'${path}' `)
+  })
 })
 
 describe('a terminal’s colours', () => {

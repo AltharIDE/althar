@@ -31,7 +31,7 @@ export const fillPattern = (pattern: string, values: Readonly<Record<string, str
 }
 
 /** A character git refuses in a branch name, or a run of them it refuses together. */
-const REFUSED = /[\s~^:?*[\\\p{Cc}]|\.\.|@\{|\/\/|^[/.-]|[/.]$|\.lock$|\/[.-]/u
+const REFUSED = /[\s~^:?*[\\\p{Cc}]|\.\.|@\{|\/\/|^[/.-]|[/.]$|\.lock(?:\/|$)|\/\./u
 
 /** Whether git takes a name as a branch's. */
 export const branchNameOk = (name: string) => name !== '' && name !== '@' && !REFUSED.test(name)
@@ -45,6 +45,6 @@ export const patternProblem = (kind: NameKind, pattern: string): string | null =
   if (/[{}]/.test(pattern.replace(/\{(\w+)\}/g, ''))) return `Braces go round a placeholder only: ${places}.`
   if (!pattern.includes(`{${NEEDED[kind]}}`)) return `It needs {${NEEDED[kind]}}, so each task's is its own.`
   if (kind === 'branch' && !branchNameOk(fillPattern(pattern, { key: 'KEY-1', slug: 'slug' })))
-    return 'Git doesn’t allow that in a branch name: no spaces, and none of ~ ^ : ? * [ \\ or “..”.'
+    return 'Git doesn’t allow that branch name. Avoid spaces, “..” and ~ ^ : ? * [ \\. No part can end in “.lock”.'
   return null
 }

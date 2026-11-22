@@ -69,6 +69,29 @@ describe('the search index', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.effect('finds related documents even when each matches only one question word', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const projectId = (yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })).projectId
+      const { taskId: first } = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'Receipt retries',
+      })
+      const { taskId: second } = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'Payment recovered',
+      })
+      yield* drain
+      const query = { text: 'receipt payments', projectId, matchAny: true }
+      const search = (input: typeof query) =>
+        findDocuments(input, new Set()).pipe(Effect.map((found) => found.documents.map((document) => document.taskId)))
+      assert.deepEqual(yield* search({ ...query, matchAny: false }), [])
+      assert.sameMembers(yield* search(query), [first, second])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.effect('retries a failed batch and keeps the linked result distinct from its task', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
