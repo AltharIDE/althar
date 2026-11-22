@@ -2492,13 +2492,14 @@ export type WorkerCapacity = typeof WorkerCapacity.Type
 export const HomeWorker = Schema.Struct({
   workerId: Schema.String,
   connected: Schema.Boolean,
+  /** Running a task; or, offline, still holding the workspace of the task it went offline during, until it says it stopped. */
   busy: Schema.Boolean,
   /** What it reported last, while that is current; none while it is offline or hasn't said. */
   capacity: Schema.optionalKey(WorkerCapacity),
   /** The agents it can run, by id; empty while it is offline. */
   providers: Schema.Array(Schema.String),
   projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
-  /** The home's task it runs now, where it runs one. */
+  /** The home's task it runs now, or went offline during, where it holds one. */
   task: Schema.NullOr(Schema.Struct({ taskId: Schema.String, threadId: Schema.String, title: Schema.String, project: Schema.String })),
 })
 export type HomeWorker = typeof HomeWorker.Type
@@ -2590,10 +2591,12 @@ export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
 export type PlacesWhy = typeof PlacesWhy.Type
 
 /**
- * The agents this computer runs at once (ADR-032) as they stand, for the
- * window's load popover and the Agents at once slider: how many are at work,
- * the person's number (or the default), how many may work for now, fewer
- * while the computer is under load, and why, and how many tasks wait for one.
+ * The agents the home runs at once (ADR-032) as they stand, for the window's
+ * load popover and the Agents at once slider: how many are at work, the
+ * person's number (or the default), how many may work for now, fewer while
+ * the home's computer is under load, and why, and how many tasks wait for
+ * one. The number counts every agent the home starts, wherever it runs:
+ * `onWorkers` says how many of those at work run on its workers.
  */
 export const Places = Schema.Struct({
   busy: Schema.Int,
@@ -2602,6 +2605,8 @@ export const Places = Schema.Struct({
   /** Null while as many may work as the number says. */
   why: Schema.NullOr(PlacesWhy),
   waiting: Schema.Int,
+  /** Of `busy`, those on the home's workers rather than its own computer; none where an older home doesn't say. */
+  onWorkers: Schema.optionalKey(Schema.Int),
 })
 export type Places = typeof Places.Type
 

@@ -37,11 +37,15 @@ export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT, agents: AGE
 /** The CPU busy for a while: fewer for now, for the CPU. */
 export const FewerForTheCpu: Story = { args: { load: LOAD_NEAR_MAX, agents: AGENTS_FEWER_CPU } }
 export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING, agents: AGENTS_IDLE } }
-/** A home with workers: each under the home's readings, where it stands; a row opens it in Settings › Computers. */
+/**
+ * A home with workers: each under the home's readings, where it stands; a row opens it in Settings › Computers. The
+ * agents' number counts those on its workers too, and says how many run there.
+ */
 export const WithWorkers: Story = {
-  args: { workers: LOAD_WORKERS, onWorker: fn() },
+  args: { workers: LOAD_WORKERS, onWorker: fn(), agents: { ...AGENTS_BUSY, onWorkers: 1 } },
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
+    await expect(c.getByText('1 of them on a worker')).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Workers' })).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Running on This Mac' })).toBeInTheDocument()
     await expect(c.getByText('Offline')).toBeInTheDocument()

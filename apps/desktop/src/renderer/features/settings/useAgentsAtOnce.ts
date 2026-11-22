@@ -13,7 +13,8 @@ import { placesAfter } from '../../shared/usePlaces'
  * worked out from this machine's memory and cores, with why. A change shows
  * at once and takes effect in the runtime without a restart; if it can't be
  * kept, and it is still the latest, the view reads again what the runtime
- * kept, and says so.
+ * kept, and says so. The load popover's agents move with it, and back with
+ * it: as they were before, fewer for now and why included, then read again.
  */
 
 export interface AgentsAtOnceModel {
@@ -41,6 +42,7 @@ export const useAgentsAtOnce = (): AgentsAtOnceModel | null => {
           : { ...was, agentsAtOnce: { ...was.agentsAtOnce, own: count, count: count ?? was.agentsAtOnce.machine.count } },
       )
       // The load popover's number moves with it.
+      const before = cache.getQueryData<Places>(keys.places)
       const number = cache.getQueryData<AppSettings>(keys.settings)?.agentsAtOnce.count
       if (number !== undefined) cache.setQueryData<Places>(keys.places, (was) => (was === undefined ? was : placesAfter(was, number)))
       setFailed(false)
@@ -49,6 +51,8 @@ export const useAgentsAtOnce = (): AgentsAtOnceModel | null => {
         () => {
           if (at !== made.current) return
           void cache.refetchQueries({ queryKey: keys.settings })
+          if (before !== undefined) cache.setQueryData<Places>(keys.places, before)
+          void cache.refetchQueries({ queryKey: keys.places })
           setFailed(true)
         },
       )

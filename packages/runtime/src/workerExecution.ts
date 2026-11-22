@@ -75,7 +75,7 @@ export interface CapturedWorkerCheckout {
 export interface EnrolledWorkerState {
   readonly workerId: string
   readonly connected: boolean
-  /** Running a task: a worker runs one at a time. */
+  /** Running a task, or holding one's workspace after dropping out mid-run: a worker runs one at a time. */
   readonly busy: boolean
   /** What it reported last, while that is current. */
   readonly capacity?: ProjectWorker['capacity']
@@ -83,6 +83,8 @@ export interface EnrolledWorkerState {
   readonly providers: ReadonlyArray<string>
   /** The projects it may work on. */
   readonly projectIds: ReadonlyArray<string>
+  /** The task workspace its run holds, connected or not, from its start until it says that run ended. */
+  readonly workspaceId?: string
 }
 
 export interface WorkerExecutionPlatform {

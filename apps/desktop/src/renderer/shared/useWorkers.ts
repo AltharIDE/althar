@@ -27,6 +27,7 @@ export const text = {
   runningATask: 'Running a task',
   outOfRoom: 'Out of memory or disk space',
   free: (memory: string) => `${memory} memory free`,
+  offlineDuring: (title: string) => `Went offline during ${title}`,
   cores: (n: number) => (n === 1 ? '1 core' : `${n} cores`),
   platform: { linux: 'Linux', macos: 'macOS', windows: 'Windows' } as const,
 }
@@ -111,6 +112,8 @@ export const computerWorkerOf = (worker: HomeWorker, agentName: (id: string) => 
       return { name: agentName(id), ...(mark === undefined ? {} : { mark }) }
     }),
     projects: worker.projects.map(({ name }) => name),
+    // Offline, yet holding a task's workspace: it went offline during that task, and keeps it until it says it stopped.
+    stranded: !worker.connected && worker.busy,
   }
 }
 
@@ -119,7 +122,9 @@ export const loadWorkerOf = (worker: HomeWorker): LoadWorker => {
   const state = workerStateOf(worker)
   const detail =
     state === 'offline'
-      ? text.notConnected
+      ? worker.busy && worker.task !== null
+        ? text.offlineDuring(worker.task.title)
+        : text.notConnected
       : state === 'full'
         ? text.outOfRoom
         : state === 'working'

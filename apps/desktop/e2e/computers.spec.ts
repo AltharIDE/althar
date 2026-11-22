@@ -60,6 +60,8 @@ test('lists the home with its readings, opens it to its Agents at once, and says
     const dialog = page.getByRole('dialog', { name: `Add a worker to ${THIS}` })
     await expect(dialog).toContainText('Let this home take workers, then restart Althar.')
     await expect(dialog).toContainText('althar workers enroll')
+    // The worker is left running, with its agents: a one-off check wouldn't connect it.
+    await expect(dialog).toContainText('--agent-config ~/althar-worker/agents.conf --watch')
     await still(page)
     await dialog.screenshot({ path: 'test-results/computers/add.png', scale: 'css', animations: 'disabled' })
     await dialog.getByRole('button', { name: 'Done' }).click()

@@ -22,7 +22,7 @@ import type { Destination } from '../../shared/dictation/sessions'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
-import { SLOTS, text as loadText, useLoad } from './useLoad'
+import { SLOTS, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
 
 const text = {
@@ -159,7 +159,7 @@ function TabsBar({
               slots={SLOTS}
               onOpen={load.open}
               onHide={load.hide}
-              text={loadText.meter}
+              text={load.text}
             />
           )}
           <PlanBar open={usage.open} onOpenChange={usage.set} />

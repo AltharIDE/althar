@@ -51,6 +51,8 @@ export interface LoadPeekText {
   fewer: (atOnce: number, why: AgentsWhy) => string
   /** Tasks waiting for an agent. */
   waiting: (n: number) => string
+  /** Of those at work, the ones on the home's workers rather than here. */
+  onWorkers: (n: number) => string
   running: string
   /** Over what runs here, where the home's workers are listed above it. */
   runningOn: (machine: string) => string
@@ -78,6 +80,7 @@ export const loadPeekText: LoadPeekText = {
   agentsFigure: (busy, configured) => `${busy} of ${configured}`,
   fewer: fewerWords,
   waiting: (n) => (n === 1 ? '1 task waiting' : `${n} tasks waiting`),
+  onWorkers: (n) => (n === 1 ? '1 of them on a worker' : `${n} of them on workers`),
   running: 'Running',
   runningOn: (machine) => `Running on ${machine}`,
   workers: 'Workers',
@@ -147,15 +150,20 @@ function Figure({ name, figure, total, ours, work }: { name: string; figure: str
   )
 }
 
-/** The agents beside CPU and memory, in their form: how many work of the number, all of them Althar's; under it, fewer for now and why, and what waits. */
+/**
+ * The agents beside CPU and memory, in their form: how many work of the number, all of them Althar's; under it, how many
+ * of them run on the home's workers (the number counts them all), fewer for now and why, and what waits.
+ */
 function Agents({ agents, t }: { agents: LoadAgents; t: LoadPeekText }) {
   const share = agents.busy / Math.max(1, agents.configured)
   const fewer = fewerOf(agents)
+  const away = agents.onWorkers ?? 0
   return (
     <div className={s.row}>
       <span className={s.name}>{t.agents}</span>
       <span className={s.figure}>{t.agentsFigure(agents.busy, agents.configured)}</span>
       <SplitBar total={share} ours={share} />
+      {away > 0 && <span className={s.work}>{t.onWorkers(away)}</span>}
       {fewer !== null && <span className={s.work}>{t.fewer(fewer.atOnce, fewer.why)}</span>}
       {agents.waiting > 0 && <span className={s.work}>{t.waiting(agents.waiting)}</span>}
     </div>

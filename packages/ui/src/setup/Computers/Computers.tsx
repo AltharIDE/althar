@@ -58,6 +58,11 @@ export interface ComputerWorker {
   agents: readonly { name: string; mark?: Brand | undefined }[]
   /** The projects it may work on, by name. */
   projects: readonly string[]
+  /**
+   * Gone offline during a task: it still holds that task's workspace, and keeps it until it reconnects and says the work
+   * stopped, so it can't be taken out before then.
+   */
+  stranded?: boolean | undefined
 }
 
 /** The home's workers: whether it takes any (it listens for them), and each it enrolled. */
@@ -97,14 +102,22 @@ export interface ComputersText {
   openTask: string
   remove: (name: string) => string
   removeLater: string
+  /** Under Remove, for one gone offline during a task. */
+  removeStranded: string
+  /** Where this connection can't take workers out, as a window on a home over SSH can't: who can. */
+  removeElsewhere: (home: string) => string
   removeTitle: (name: string) => string
   removeNote: (home: string) => string
   removeConfirm: string
   cancel: string
   addTitle: (home: string) => string
   addNote: string
-  steps: { listen: string; enroll: string; start: string }
-  commands: { listen: string; enroll: string; start: string }
+  steps: { listen: string; enroll: string; agents: string; start: string }
+  /** On a home in this app: its own command line. */
+  commands: { listen: string; enroll: string; agents: string; start: string }
+  /** On a Linux home of its own: what differs, run there with althar-host. */
+  hostSteps: { listen: string }
+  hostCommands: { listen: string; enroll: string }
   addWaiting: string
   done: string
 }
@@ -129,7 +142,7 @@ export const computersText: ComputersText = {
       case 'full':
         return 'Out of memory or disk space'
       case 'offline':
-        return 'Not connected to this home'
+        return worker.stranded === true && worker.task !== null ? `Went offline during ${worker.task.title}` : 'Not connected to this home'
     }
   },
   memoryFree: 'Memory free',
@@ -143,6 +156,8 @@ export const computersText: ComputersText = {
   openTask: 'Open its task',
   remove: (name) => `Remove ${name}`,
   removeLater: 'You can remove it once its task finishes.',
+  removeStranded: 'It went offline during a task. Start it again so it can stop that work, then remove it.',
+  removeElsewhere: (home) => `Over SSH, this window can’t remove workers. A device paired with ${home} can.`,
   removeTitle: (name) => `Remove ${name}?`,
   removeNote: (home) =>
     `It gets no more tasks from ${home}, and its certificate isn’t accepted again. To bring it back, enroll a new certificate.`,
@@ -154,12 +169,22 @@ export const computersText: ComputersText = {
   steps: {
     listen: 'Let this home take workers, then restart Althar.',
     enroll: 'Enroll the worker’s certificate for each project it may work on.',
-    start: 'On the worker, start it with the home and worker IDs enrolling printed.',
+    agents: 'On the worker, sign in to the agent, install its ACP adapter, and say which project it works on.',
+    start: 'Start the worker with the home and worker IDs enrolling printed, and leave it running.',
   },
   commands: {
     listen: 'althar workers configure --address <private-ip> --ca home-ca.pem --certificate home.pem --key home.key',
     enroll: 'althar workers enroll --certificate worker.pem --project <project-id>',
-    start: './althar-worker https://<home>:6770 <home-id> <worker-id> ca.pem client.pem client.key ~/althar-worker-journal',
+    agents:
+      "umask 077; mkdir -p ~/althar-worker/workspaces && printf '%s\\n%s\\t%s\\t%s\\n' ~/althar-worker/workspaces <project-id> codex </path/to/acp-adapter> > ~/althar-worker/agents.conf",
+    start:
+      './althar-worker https://<home>:6770 <home-id> <worker-id> ca.pem client.pem client.key ~/althar-worker/journal --agent-config ~/althar-worker/agents.conf --watch',
+  },
+  hostSteps: { listen: 'On the home, let it take workers, then restart it.' },
+  hostCommands: {
+    listen:
+      'althar-host configure-workers --worker-ca ca.pem --tls-certificate home.pem --tls-key home.key && systemctl --user restart althar-host.service',
+    enroll: 'althar-host enroll-worker --worker-certificate client.pem --project-id <project-id> --json',
   },
   addWaiting: 'It shows here once it connects.',
   done: 'Done',
@@ -250,6 +275,8 @@ export interface ComputersProps {
   onAdd: () => void
   /** Takes a worker out of the home, once the person says so. */
   onRemove: (id: string) => void
+  /** Whether this connection may take workers out: a window on a home over SSH may not. */
+  canRemove?: boolean | undefined
   /** Opens the task a worker runs. */
   onTask?: ((id: string) => void) | undefined
   /** The home's own settings, opened out: its Agents at once. */
@@ -269,6 +296,7 @@ export function Computers({
   onOpen,
   onAdd,
   onRemove,
+  canRemove = true,
   onTask,
   homeSettings,
   slots,
@@ -290,7 +318,7 @@ export function Computers({
           worker={worker}
           home={home.name}
           onBack={() => onOpen(null)}
-          onRemove={() => onRemove(worker.id)}
+          onRemove={canRemove ? () => onRemove(worker.id) : null}
           onTask={onTask}
           t={t}
         />
@@ -409,14 +437,18 @@ function WorkerSheet({
   worker: ComputerWorker
   home: string
   onBack: () => void
-  onRemove: () => void
+  /** Null where this connection can't take workers out. */
+  onRemove: (() => void) | null
   onTask: ((id: string) => void) | undefined
   t: ComputersText
 }) {
   const [asking, setAsking] = useState(false)
   const { task } = worker
-  // A worker at work keeps its task: taking it out under it would leave the task without its checkout.
+  // A worker at work keeps its task: taking it out under it would leave the task without its checkout. So does one gone
+  // offline during a task, until it says that work stopped.
   const working = worker.state === 'working'
+  const stranded = !working && worker.stranded === true
+  const why = onRemove === null ? t.removeElsewhere(home) : working ? t.removeLater : stranded ? t.removeStranded : null
   return (
     <div className={tt.opened}>
       <ControlDetail title={worker.name} onBack={onBack} text={{ back: t.computers }} aside={t.worker}>
@@ -457,8 +489,8 @@ function WorkerSheet({
             </div>
           </div>
           <div className={cx(tt.foot, s.foot)}>
-            {working && <span className={s.line}>{t.removeLater}</span>}
-            <LinkButton className={tt.danger} disabled={working} onClick={() => setAsking(true)}>
+            {why !== null && <span className={s.line}>{why}</span>}
+            <LinkButton className={tt.danger} disabled={why !== null} onClick={() => setAsking(true)}>
               {t.remove(worker.name)}
             </LinkButton>
           </div>
@@ -476,7 +508,7 @@ function WorkerSheet({
                 variant="danger"
                 onClick={() => {
                   setAsking(false)
-                  onRemove()
+                  onRemove?.()
                 }}
               >
                 {t.removeConfirm}
@@ -510,16 +542,22 @@ export interface AddWorkerDialogProps {
   home: string
   /** Whether the home takes workers already: without, the first step lets it. */
   enabled: boolean
+  /** A Linux home of its own, set up there with althar-host, rather than the home in this app. */
+  standalone?: boolean | undefined
   onClose: () => void
   text?: Partial<ComputersText> | undefined
 }
 
 /** Add a worker: what it takes, a step a line to run, and that it shows in Computers once it connects. */
-export function AddWorkerDialog({ home, enabled, onClose, text }: AddWorkerDialogProps) {
+export function AddWorkerDialog({ home, enabled, standalone = false, onClose, text }: AddWorkerDialogProps) {
   const t = { ...computersText, ...text }
+  const listen = standalone
+    ? { words: t.hostSteps.listen, command: t.hostCommands.listen }
+    : { words: t.steps.listen, command: t.commands.listen }
   const steps = [
-    ...(enabled ? [] : [{ words: t.steps.listen, command: t.commands.listen }]),
-    { words: t.steps.enroll, command: t.commands.enroll },
+    ...(enabled ? [] : [listen]),
+    { words: t.steps.enroll, command: standalone ? t.hostCommands.enroll : t.commands.enroll },
+    { words: t.steps.agents, command: t.commands.agents },
     { words: t.steps.start, command: t.commands.start },
   ]
   return (

@@ -6,10 +6,10 @@ import { type LoadAgents, type LoadGlance, type LoadMeterText, type LoadRow, typ
 
 import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
-import { device } from '../../shared/device'
 import { usePlaces } from '../../shared/usePlaces'
 import { loadWorkerOf, useWorkers } from '../../shared/useWorkers'
 import { usePreferences } from '../../shared/usePreferences'
+import { useWindowHome } from '../homes/windowHome'
 
 /*
  * How hard this computer works, for the meter in the window's bar: the
@@ -24,7 +24,9 @@ import { usePreferences } from '../../shared/usePreferences'
  * Turned off, in Settings or the peek's switch, for every window, nothing is
  * read. A row of the peek opens its work: a task's thread, a project's
  * conversation for its coordinator, its front for its default branch
- * running; a worker's row opens it in Settings › Computers.
+ * running; a worker's row opens it in Settings › Computers. It is the
+ * window's home it reads, so it goes by that home's name: This Mac, or
+ * studio in a window on that home.
  */
 
 /** How often the meter reads again while it shows. */
@@ -37,7 +39,8 @@ export const text = {
   althar: 'Althar',
   coordinator: 'Coordinator',
   defaultBranch: 'Default branch',
-  meter: { machine: device.This, peek: `${device.This}’s load` } satisfies Partial<LoadMeterText>,
+  /** The meter's words for the home it reads, by its name. */
+  meter: (machine: string) => ({ machine, peek: `${machine}’s load` }) satisfies Partial<LoadMeterText>,
 }
 
 const GB = 1024 ** 3
@@ -119,6 +122,8 @@ export interface LoadModel {
   readonly open: (id: string) => void
   /** Takes the meter out of the bar, as Settings would. */
   readonly hide: () => void
+  /** Its words for the window's home, by its name. */
+  readonly text: Partial<LoadMeterText>
 }
 
 /**
@@ -144,6 +149,7 @@ export const useLoad = (projects: boolean): LoadModel => {
   const load = on ? reading.data : undefined
   const agents = usePlaces(on)
   const workers = useWorkers(on)
+  const home = useWindowHome()
 
   const open = (id: string) => {
     const share = load?.shares?.find((one) => idOf(one) === id)
@@ -161,5 +167,6 @@ export const useLoad = (projects: boolean): LoadModel => {
     openWorker: (id) => void navigate({ to: '/settings/$section', params: { section: 'computers' }, search: { worker: id } }),
     open,
     hide: () => set('showLoad', false),
+    text: text.meter(home.name),
   }
 }

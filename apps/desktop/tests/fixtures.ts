@@ -47,6 +47,7 @@ import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPrefere
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host, PagesHost } from '../src/renderer/data/services'
+import type { HomeState, HomesHost } from '../src/homes'
 
 /* What the runtime would say, as plain values, and a client that says it. */
 
@@ -1628,3 +1629,44 @@ export const streamed = (
   agentId,
   text,
 })
+
+/**
+ * A window on a Linux home of its own, reached over SSH (studio): main's word for the window's home, and the
+ * connection the window has to it, whose role can't take workers out.
+ */
+export const onLinuxHome = (name = 'studio') => {
+  const home = { id: `remote_${'5'.repeat(32)}`, name, homeId: `home_${'6'.repeat(32)}`, ssh: { target: name } }
+  const identity = { homeId: home.homeId, actorId: `act_${'7'.repeat(32)}`, deviceId: `dev_${'8'.repeat(32)}`, role: 'socket' as const }
+  const state: HomeState = { current: { kind: 'ssh', home }, connection: 'connected', identity }
+  const off = () => () => undefined
+  const homes: HomesHost = {
+    state: vi.fn(async () => state),
+    list: vi.fn(async () => [home]),
+    overview: vi.fn(async () => ({ homes: [home], windows: { [home.homeId]: 'connected' as const }, projects: {}, opened: {} })),
+    inspect: vi.fn(async () => Promise.reject(new Error('Not in this test'))),
+    connect: vi.fn(async () => undefined),
+    save: vi.fn(async () => undefined),
+    open: vi.fn(async () => undefined),
+    rename: vi.fn(async () => undefined),
+    change: vi.fn(async () => undefined),
+    forget: vi.fn(async () => undefined),
+    restore: vi.fn(async () => undefined),
+    cancelCheck: vi.fn(async () => undefined),
+    reconnect: vi.fn(async () => undefined),
+    report: vi.fn(),
+    onState: vi.fn(off),
+    onOverview: vi.fn(off),
+    onOpen: vi.fn(off),
+    onProject: vi.fn(off),
+  }
+  return {
+    homes,
+    connection: {
+      identity,
+      hostDeviceId: identity.deviceId,
+      apiVersion: 1,
+      appVersion: 'test',
+      position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+    },
+  }
+}

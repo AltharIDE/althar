@@ -75,6 +75,8 @@ export interface LoadAgents {
   /** Why fewer, while it is. */
   why: AgentsWhy | null
   waiting: number
+  /** Of `busy`, those on the home's workers: the number counts every agent the home starts, wherever it runs. */
+  onWorkers?: number | undefined
 }
 
 /**

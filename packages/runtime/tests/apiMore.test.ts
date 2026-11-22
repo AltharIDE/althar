@@ -443,6 +443,65 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('names the task whose workspace a worker’s run holds, its run settled or the worker gone', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '5'.repeat(32)
+        const workerPath = repository()
+        let projectId = ''
+        // The workspace the worker's run holds, as its ledger keeps it: a follow-up to a settled task holds it the same.
+        let held: string | undefined
+        let online = true
+        const { client, grant } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['codex'], busy: false }],
+            enrolled: () => [
+              {
+                workerId,
+                connected: online,
+                busy: held !== undefined,
+                providers: online ? ['codex'] : [],
+                projectIds: [projectId],
+                ...(held === undefined ? {} : { workspaceId: held }),
+              },
+            ],
+            open: (request) =>
+              Effect.gen(function* () {
+                held = request.workspaceId
+                return {
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  transport: yield* openFakeWorker(workerPath),
+                  checkpoint: Effect.void,
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        projectId = project.id
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          workerId,
+          title: 'Follow up on the worker',
+          description: '[lead:finish]',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        })
+        // Its run has ended: nothing of the task runs, yet the worker's run holds its workspace.
+        yield* until(client.GetBoard({ projectId: project.id }), (board) =>
+          board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
+        )
+        assert.isDefined(held)
+        const named = { taskId: task.id, threadId: task.threadId, title: 'Follow up on the worker', project: project.name }
+        assert.deepStrictEqual((yield* client.GetWorkers({})).workers[0]?.task, named)
+        // Gone offline during it, the worker still names it.
+        online = false
+        const [gone] = (yield* client.GetWorkers({})).workers
+        assert.deepInclude(gone, { connected: false, busy: true, task: named })
+      }),
+    ),
+  )
+
   it.live('says a home that isn’t listening for workers takes none', () =>
     Effect.scoped(
       Effect.gen(function* () {

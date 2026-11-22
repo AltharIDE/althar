@@ -294,8 +294,20 @@ describe('Agents at once', () => {
           ['Second', false],
         ],
       )
-      // The window hears the same: both places in use of two, nothing lowered, the third waiting for one.
-      assert.deepStrictEqual(yield* (yield* Busy).places, { busy: 2, configured: 2, atOnce: 2, why: null, waiting: 1 })
+      // The window hears the same: both places in use of two, nothing lowered, the third waiting for one, none on a worker.
+      assert.deepStrictEqual(yield* (yield* Busy).places, { busy: 2, configured: 2, atOnce: 2, why: null, waiting: 1, onWorkers: 0 })
+      // Placed on the home's workers by their plans, they still count against the number, and it says they run there:
+      // none of the agents at work runs on the home's own computer.
+      const sql = yield* SqlClient.SqlClient
+      for (const [taskId, worker] of [
+        [first.taskId, 'wrk_' + '7'.repeat(32)],
+        [second.taskId, 'wrk_' + '8'.repeat(32)],
+      ] as const)
+        yield* sql`UPDATE task_plans SET parameters = json_set(coalesce(parameters, '{}'), '$.workerId', ${worker})
+          WHERE task_id = ${taskId} AND state = 'accepted'`
+      assert.deepInclude(yield* (yield* Busy).places, { busy: 2, configured: 2, onWorkers: 2 })
+      for (const taskId of [first.taskId, second.taskId])
+        yield* sql`UPDATE task_plans SET parameters = json_remove(parameters, '$.workerId') WHERE task_id = ${taskId} AND state = 'accepted'`
       assert.isNull(card?.waits)
       assert.deepStrictEqual(countsOf((yield* onHome(third.taskId))?.queued), { busy: 2, atOnce: 2 })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)

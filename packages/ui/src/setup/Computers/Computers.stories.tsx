@@ -111,7 +111,40 @@ export const AtWorkKeepsItsTask: Story = {
   },
 }
 
-/** Add a worker: what it takes, and each line to run for it; the first step only where the home takes none yet. */
+/**
+ * Gone offline during a task: it holds that task's workspace until it reconnects and says the work stopped, so Remove
+ * waits for that, and says how to get there.
+ */
+export const OfflineDuringATask: Story = {
+  args: {
+    opened: WORKER_AT_WORK.id,
+    workers: {
+      enabled: true,
+      list: [{ ...WORKER_AT_WORK, state: 'offline', stranded: true, memoryFree: null, diskFree: null, kind: null }],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Went offline during Repair token refresh on privilege change')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Remove Linux worker 3c3f9a' })).toBeDisabled()
+    await expect(c.getByText(/Start it again so it can stop that work/)).toBeInTheDocument()
+  },
+}
+
+/** A window on a Linux home over SSH can't take workers out: Remove says who can. */
+export const OverSsh: Story = {
+  args: { opened: WORKER_FREE.id, canRemove: false, home: { name: 'studio', load: LOAD_BUSY, agents: AGENTS_BUSY } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Remove Linux worker 98b21d' })).toBeDisabled()
+    await expect(c.getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeInTheDocument()
+  },
+}
+
+/**
+ * Add a worker: what it takes, and each line to run for it, the worker left running with its agents; the first step
+ * only where the home takes none yet.
+ */
 export const AddAWorker: Story = {
   render: () => <AddWorkerDialog home="This Mac" enabled={false} onClose={fn()} />,
   play: async ({ canvasElement }) => {
@@ -119,5 +152,18 @@ export const AddAWorker: Story = {
     await expect(page.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeInTheDocument()
     await expect(page.getByText('Let this home take workers, then restart Althar.')).toBeInTheDocument()
     await expect(page.getByText(/althar workers enroll/)).toBeInTheDocument()
+    await expect(page.getByText(/agents\.conf --watch$/)).toBeInTheDocument()
+  },
+}
+
+/** On a Linux home of its own: set up there with althar-host. */
+export const AddAWorkerToALinuxHome: Story = {
+  render: () => <AddWorkerDialog home="studio" enabled={false} standalone onClose={fn()} />,
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await expect(page.getByRole('dialog', { name: 'Add a worker to studio' })).toBeInTheDocument()
+    await expect(page.getByText(/althar-host configure-workers/)).toBeInTheDocument()
+    await expect(page.getByText(/althar-host enroll-worker/)).toBeInTheDocument()
+    await expect(page.queryByText(/althar workers/)).toBeNull()
   },
 }

@@ -22,7 +22,7 @@ import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Client } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
-import { card, changed, fakeClient, fakeHost, home, load, project } from './fixtures'
+import { card, changed, fakeClient, fakeHost, home, load, onLinuxHome, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, yours: 0 }
@@ -547,6 +547,30 @@ describe('how hard the Mac works, in the bar', () => {
     await waitFor(() => expect(where()).toBe('/settings/computers'))
     expect(router.state.location.search).toEqual({ worker: workers[1]?.workerId })
     expect(screen.queryByRole('dialog', { name: 'This Mac’s load' })).toBeNull()
+  })
+
+  it('in a window on a Linux home, goes by that home’s name, says which agents run on its workers, and opens one in Computers there', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = {
+      workerId: `wrk_${'2'.repeat(32)}`,
+      connected: true,
+      busy: true,
+      providers: ['codex'],
+      projects: [],
+      task: { taskId: 't1', threadId: 'th1', title: 'Fix the login redirect', project: 'meridian' },
+    }
+    const { router } = windowAt('/projects/p2', undefined, fakeHost({ homes: studio.homes }), undefined, {
+      connection: studio.connection,
+      getPlaces: vi.fn(async () => ({ busy: 1, configured: 4, atOnce: 4, why: null, waiting: 0, onWorkers: 1 })),
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+    })
+    await userEvent.click(await meter())
+    const load = within(await screen.findByRole('dialog', { name: 'studio’s load' }))
+    expect(await load.findByText('1 of them on a worker')).toBeTruthy()
+    expect(load.getByRole('heading', { name: 'Running on studio' })).toBeTruthy()
+    await userEvent.click(load.getByRole('button', { name: /^Linux worker 222222/ }))
+    await waitFor(() => expect(where()).toBe('/settings/computers'))
+    expect(router.state.location.search).toEqual({ worker: worker.workerId })
   })
 
   it('lists no workers where the home takes none', async () => {

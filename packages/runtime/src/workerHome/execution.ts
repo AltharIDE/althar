@@ -30,6 +30,11 @@ const setupOutcome = (report: { exitCode: number; timedOut: boolean; outputTail:
 export interface WorkerLedger {
   readonly workers: () => ReadonlyArray<EnrolledWorker>
   readonly revoke: (workerId: string) => void
+  /**
+   * The run a worker's reservation still holds, by the workspace it holds: kept from its start until the worker says it
+   * ended, through a dropped connection, so it holds the workspace while it may still be at work there.
+   */
+  readonly outstanding?: (workerId: string) => { readonly workspaceId: string } | undefined
 }
 
 /**
@@ -77,14 +82,19 @@ export const workerExecution = (
       const live = new Map((active()?.connected() ?? []).map((worker) => [worker.workerId, worker]))
       return listing.workers().map(({ workerId, projectIds }) => {
         const worker = live.get(workerId)
-        if (worker === undefined) return { workerId, connected: false, busy: false, providers: [], projectIds }
+        // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
+        const workspaceId = listing.outstanding?.(workerId)?.workspaceId
+        const holding = workspaceId === undefined ? {} : { workspaceId }
+        if (worker === undefined)
+          return { workerId, connected: false, busy: workspaceId !== undefined, providers: [], projectIds, ...holding }
         return {
           workerId,
           connected: true,
-          busy: worker.busy || preparing.has(workerId),
+          busy: worker.busy || preparing.has(workerId) || workspaceId !== undefined,
           ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
           providers: [...new Set(worker.capabilities.map(({ providerId }) => providerId))],
           projectIds,
+          ...holding,
         }
       })
     },
@@ -94,6 +104,10 @@ export const workerExecution = (
           const listing = ledger?.()
           if (listing === undefined) throw new Error('This home takes no workers.')
           if (working(workerId)) throw new Error('It runs a task. Remove it once that finishes.')
+          // Gone mid-run, it holds its task's workspace until it reconnects and says that run stopped. Taken out now, it
+          // couldn't, and the workspace would stay held for good.
+          if (listing.outstanding?.(workerId) !== undefined)
+            throw new Error('It went offline during a task. Start it again so it can stop that work, then remove it.')
           listing.revoke(workerId)
         },
         catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),

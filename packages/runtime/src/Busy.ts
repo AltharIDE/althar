@@ -1231,15 +1231,31 @@ export class Busy extends Context.Service<
           return { busy: at.size, atOnce: capacity(settings), configured: settings.count, offline: !(yield* connectivity.online), holders }
         }),
         places: Effect.gen(function* () {
-          const { at } = yield* atWork
+          const { at, holders } = yield* atWork
           const settings = yield* atOnce
           const waiters = yield* waiting
+          // Agents at once counts every agent the home starts, wherever it runs: a lead placed on a worker by its task's
+          // accepted plan, and its helpers there with it, run on that worker; reviews run on the home.
+          const placed = [...new Set(holders.flatMap((holder) => (holder.review ? [] : [holder.taskId])))]
+          const remote =
+            placed.length === 0
+              ? new Set<string>()
+              : new Set(
+                  (yield* sql<{ taskId: string }>`
+                    SELECT k.id AS task_id FROM tasks k WHERE k.id IN ${sql.in(placed)} AND (
+                      SELECT json_extract(tp.parameters, '$.workerId') FROM task_plans tp WHERE tp.task_id = k.id
+                        AND tp.state = 'accepted' ORDER BY tp.decided_at DESC, tp.rowid DESC LIMIT 1
+                    ) IS NOT NULL`.pipe(
+                    Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read which agents run on workers', cause), [])),
+                  )).map((row) => row.taskId),
+                )
           return {
             busy: at.size,
             configured: settings.count,
             atOnce: capacity(settings),
             why: pressure.why(settings.count),
             waiting: new Set(waiters.map(({ waiter }) => waiter.taskId)).size,
+            onWorkers: holders.filter((holder) => !holder.review && remote.has(holder.taskId)).length,
           }
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),

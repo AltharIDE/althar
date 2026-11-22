@@ -22,6 +22,7 @@ import {
   connectionList,
   fakeClient,
   fakeHost,
+  onLinuxHome,
   fakePagesHost,
   githubConnection,
   models,
@@ -205,6 +206,24 @@ describe('the quick settings', () => {
     await userEvent.keyboard('{Home}')
     expect(within(panel).queryByText(/at a time until/)).toBeNull()
     expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 1, atOnce: 1, why: null })
+  })
+
+  it('put the load popover’s agents back as they were, fewer for now and why, when a change can’t be kept', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    // Hold the runtime's next reading back, so what shows is what the change put back, not a fresh read.
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{Home}')
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual(lowered)
+    expect(within(panel).getByText('1 at a time until memory frees up')).toBeTruthy()
   })
 
   it('take another number of agents at once, step by step, and say when it can’t be kept', async () => {
@@ -640,6 +659,34 @@ describe('the Settings tab', () => {
     // One at work keeps its task: its Remove waits for it.
     await userEvent.click(within(page).getByRole('button', { name: /Linux worker 222222/ }))
     expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('in a window on a Linux home over SSH, name that home, give its own commands, and leave Remove to a paired device', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = {
+      workerId: `wrk_${'6'.repeat(32)}`,
+      connected: true,
+      busy: false,
+      capacity: { platform: 'linux', architecture: 'x64', cpuCores: 4, freeMemoryMib: 8_000, freeDiskMib: 50_000 },
+      providers: ['codex'],
+      projects: [],
+      task: null,
+    } as const
+    const { client } = fakeClient({ connection: studio.connection, getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    // Its load, agents and workers are studio's: it goes by that name, never This Mac.
+    expect(await within(page).findByRole('button', { name: /^studio/ })).toBeTruthy()
+    expect(within(page).queryByText('This Mac')).toBeNull()
+    await userEvent.click(within(page).getByRole('button', { name: /Linux worker 666666/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(page).getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeTruthy()
+    await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })
+    expect(within(adding).getByText(/althar-host enroll-worker/)).toBeTruthy()
+    expect(within(adding).queryByText(/althar workers enroll/)).toBeNull()
+    expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
   })
 
   it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
