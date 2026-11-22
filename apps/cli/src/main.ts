@@ -16,16 +16,28 @@ import { terminalWrite } from './terminalWrite'
 
 if (process.argv[2] === 'workers') {
   const { runWorkers, WORKER_USAGE } = await import('./workers')
+  const stop = new AbortController()
+  const disconnect = () => stop.abort()
+  process.once('SIGINT', disconnect)
+  process.once('SIGTERM', disconnect)
   try {
     const command = runWorkers(process.argv.slice(3), {
       profile: defaultProfile(process.env, process.platform),
       worktrees: defaultWorktrees(process.env),
     })
-    const output = await Effect.runPromise(command)
-    process.stdout.write(output + '\n')
+    const exit = await Effect.runPromiseExit(command, { signal: stop.signal })
+    if (Exit.isSuccess(exit)) process.stdout.write(exit.value + '\n')
+    else if (Cause.hasInterruptsOnly(exit.cause)) process.exitCode = 130
+    else {
+      process.stderr.write(attachmentFailure(Cause.squash(exit.cause)) + '\n')
+      process.exitCode = 1
+    }
   } catch (error) {
     process.stderr.write(`${attachmentFailure(error)}\n\n${WORKER_USAGE}\n`)
-    process.exitCode = 1
+    process.exitCode = 2
+  } finally {
+    process.off('SIGINT', disconnect)
+    process.off('SIGTERM', disconnect)
   }
   await new Promise<void>((resolve) => process.stdout.write('', () => resolve()))
   await new Promise<void>((resolve) => process.stderr.write('', () => resolve()))

@@ -10,6 +10,9 @@ import {
   type WorksIn as Where,
   workerPlanProblem,
   workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerName,
 } from '@althar/contracts'
 import {
   AsideCard,
@@ -262,10 +265,17 @@ function PlanCard({
   const workers = actions.workers ?? []
   const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
   const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
-  const selection = workers.find((worker) => worker.workerId === selected)
+  const best = automaticWorker(workers, steps, plan.workerRequirements?.repositoryCount)
+  const selection = selected === 'auto' ? best : workers.find((worker) => worker.workerId === selected)
+  const hasCapacity = selected === 'auto' || workers.some((worker) => worker.capacity !== undefined)
   const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
   const startProblem =
-    selected === 'home' ? undefined : (planProblem ?? workerProblem(selection, steps, plan.workerRequirements?.repositoryCount))
+    selected === 'home'
+      ? undefined
+      : (planProblem ??
+        (selected === 'auto' && selection === undefined
+          ? automaticWorkerUnavailable
+          : workerProblem(selection, steps, plan.workerRequirements?.repositoryCount)))
   const from = fromOf(card)
   const placementNote =
     startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
@@ -279,16 +289,21 @@ function PlanCard({
             value={selected}
             options={[
               { value: 'home', label: 'This home' },
+              ...(hasCapacity
+                ? [{ value: 'auto', label: 'Best available worker', disabled: best === undefined || planProblem !== undefined }]
+                : []),
               ...workers.map((worker) => {
                 const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
-                const label = 'Linux worker ' + worker.workerId.slice(-6)
+                const label = workerName(worker)
                 return {
                   value: worker.workerId,
                   label: problem === undefined ? label : `${label} · ${problem}`,
                   disabled: problem !== undefined,
                 }
               }),
-              ...(selected !== 'home' && selection === undefined ? [{ value: selected, label: 'Worker unavailable', disabled: true }] : []),
+              ...(selected !== 'home' && selected !== 'auto' && selection === undefined
+                ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
+                : []),
             ]}
             onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
           />

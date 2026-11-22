@@ -21,8 +21,11 @@ import {
   AgentHomeFrameSchema,
   AgentFileResultSchema,
   AgentFileChunkSchema,
+  AgentWorkerCapacitySchema,
+  AgentWorkerHeartbeatSchema,
   AgentPreviewRequestSchema,
   AgentPreviewResponseSchema,
+  AgentRunExitSchema,
   AgentRunOutcome,
   AgentSkillFilesSchema,
   AgentSnapshotResultSchema,
@@ -43,7 +46,7 @@ const journalId = 'wjn_' + '5'.repeat(32)
 const providerId = 'codex'
 const placement = { projectId, workspaceId, providerId }
 
-const fixture = async (t: TestContext) => {
+const fixture = async (t: TestContext, id = homeId) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-agent-worker-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const path = workerCertificates(root, true)
@@ -70,7 +73,7 @@ const fixture = async (t: TestContext) => {
     finish: (id, result) => outstanding.get(id)?.runId === result.runId && outstanding.delete(id),
   })
   const home = await bindWorkerHandshake('127.0.0.1:0', {
-    homeId,
+    homeId: id,
     certificateAuthorityPem: read('home-ca.pem'),
     certificatePem: read('home.pem'),
     privateKeyPem: read('home.key'),
@@ -152,6 +155,7 @@ const hello = (
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
+    reserveBeforeTransfer: false,
     workerId: id,
     version: 1,
     journalId: journal,
@@ -235,7 +239,10 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   const stop = await worker.read()
   ok(stop?.case === 'stop')
   equal(stop.value.runId, runId)
-  worker.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+  worker.send({
+    case: 'exit',
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+  })
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
@@ -352,6 +359,74 @@ void test('verifies the staged-file digest independently of the working checkout
   deepEqual(captured.patch, Buffer.alloc(0))
   await rejects(checkpoint(false), /wrong workspace transfer digest/)
   equal(agent.ownsRun(), false)
+})
+
+void test('waits for a negotiated worker reservation before reading project bytes', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  const helloPayload = hello()
+  ok(helloPayload.case === 'hello')
+  worker.send({ case: 'hello', value: { ...helloPayload.value, reserveBeforeTransfer: true } })
+  const greeting = await worker.read()
+  ok(greeting?.case === 'hello')
+  equal(greeting.value.reserveBeforeTransfer, true)
+  let readWorkspace = false
+  const bytes = Buffer.from('private project checkout')
+  const pending = pool.start(workerId, placement, {
+    checkout: {
+      size: bytes.length,
+      head: '1'.repeat(40),
+      sha256: createHash('sha256').update(bytes).digest(),
+      contents: async function* () {
+        readWorkspace = true
+        yield bytes
+      },
+    },
+  })
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  worker.send({
+    case: 'exit',
+    value: create(AgentRunExitSchema, { runId: start.value.runId, outcome: AgentRunOutcome.START_FAILED, workerBusy: true }),
+  })
+  await rejects(pending, /worker account is busy/i)
+  equal(readWorkspace, false)
+})
+
+void test('uses the associated worker’s latest authenticated capacity report', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  const greeting = hello()
+  ok(greeting?.case === 'hello')
+  const capacity = create(AgentWorkerCapacitySchema, {
+    platform: 'linux',
+    architecture: 'arm64',
+    cpuCores: 4,
+    freeMemoryMib: 4096,
+    freeDiskMib: 10240,
+  })
+  worker.send({ case: 'hello', value: { ...greeting.value, capacity } })
+  equal((await worker.read())?.case, 'hello')
+  equal(pool.list(projectId)[0]?.capacity?.freeMemoryMib, 4096)
+  const report = (sequence: number, amount: number) =>
+    worker.send({
+      case: 'heartbeat',
+      value: create(AgentWorkerHeartbeatSchema, { sequence, capacity: { ...capacity, freeMemoryMib: amount, accountReserved: true } }),
+    })
+  report(1, 3072)
+  const reply = await worker.read()
+  ok(reply?.case === 'heartbeat')
+  equal(reply.value.capacity, undefined)
+  equal(pool.list(projectId)[0]?.capacity?.freeMemoryMib, 3072)
+  equal(pool.list(projectId)[0]?.busy, true)
+  equal(pool.list('proj_' + 'b'.repeat(32)).length, 0)
+  worker.send({
+    case: 'heartbeat',
+    value: create(AgentWorkerHeartbeatSchema, { sequence: 2, capacity: { ...capacity, cpuCores: 0 } }),
+  })
+  equal((await worker.read())?.case, 'heartbeat')
+  equal(pool.list(projectId)[0]?.capacity, undefined)
+  equal(pool.list(projectId)[0]?.busy, false)
 })
 
 void test('rejects worker command registrations inside a task checkout', { timeout: 15_000 }, async (t) => {
@@ -555,7 +630,10 @@ void test('managed output and stop stay attached to the selected task lease', { 
   )
   worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
   equal((await worker.read())?.case, 'stop')
-  worker.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+  worker.send({
+    case: 'exit',
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+  })
   equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
 
@@ -651,7 +729,10 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
   deepEqual(received, ['granted'])
   worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
   equal((await worker.read())?.case, 'stop')
-  worker.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+  worker.send({
+    case: 'exit',
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+  })
   equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
 
@@ -813,36 +894,40 @@ void test(
       ].join('\n'),
       { mode: 0o600 },
     )
-    const child = spawn(
-      native,
-      [
-        'https://localhost:' + home.port,
-        homeId,
-        workerId,
-        path('home-ca.pem'),
-        path('enrolled.pem'),
-        path('enrolled.key'),
-        join(root, 'journal'),
-        '--agent-config',
-        config,
-        '--watch',
-      ],
-      { env: { ...process.env, HOME: root }, stdio: ['ignore', 'ignore', 'pipe'] },
-    )
-    let stderr = ''
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-4096)
-    })
-    t.after(async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return
-      const done = once(child, 'exit')
-      child.kill('SIGTERM')
-      await done
-    })
+    const watch = (given: Pick<Awaited<ReturnType<typeof fixture>>, 'root' | 'path' | 'home'>, expectedHome = homeId) => {
+      const child = spawn(
+        native,
+        [
+          'https://localhost:' + given.home.port,
+          expectedHome,
+          workerId,
+          given.path('home-ca.pem'),
+          given.path('enrolled.pem'),
+          given.path('enrolled.key'),
+          join(given.root, 'journal'),
+          '--agent-config',
+          config,
+          '--watch',
+        ],
+        { env: { ...process.env, HOME: root }, stdio: ['ignore', 'ignore', 'pipe'] },
+      )
+      let stderr = ''
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-4096)
+      })
+      t.after(async () => {
+        if (child.exitCode !== null || child.signalCode !== null) return
+        const done = once(child, 'exit')
+        child.kill('SIGTERM')
+        await done
+      })
+      return { child, stderr: () => stderr }
+    }
+    const { child, stderr } = watch({ home, root, path })
     const webId = 'ws_' + '7'.repeat(32)
     const open = async (grouped: boolean) => {
       for await (const _ of setInterval(30, undefined, { signal: AbortSignal.timeout(8000) })) {
-        if (child.exitCode !== null) throw new Error(stderr)
+        if (child.exitCode !== null) throw new Error(stderr())
         if (pool.list(projectId).some((slot) => !slot.busy))
           return pool.start(workerId, placement, {
             ...(grouped
@@ -865,7 +950,7 @@ void test(
               : { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
           })
       }
-      throw new Error(stderr || 'The native worker did not connect')
+      throw new Error(stderr() || 'The native worker did not connect')
     }
 
     for (const [data, grouped] of [
@@ -889,6 +974,27 @@ void test(
       equal(Buffer.from(output.bytes).toString('utf8'), 'worker-setup')
       await rejects(agent.readFile('missing.txt', grouped ? workspaceId : undefined), /unavailable/)
       equal(existsSync(join(repo, 'setup.log')), false)
+      if (!grouped) {
+        const secondHome = 'home_' + '7'.repeat(32)
+        const competing = await fixture(t, secondHome)
+        const second = watch(competing, secondHome)
+        for await (const _ of setInterval(30, undefined, { signal: AbortSignal.timeout(5000) })) {
+          if (second.child.exitCode !== null) throw new Error(second.stderr())
+          if (competing.pool.list(projectId).length > 0) break
+        }
+        equal(competing.pool.list(projectId)[0]?.busy, true)
+        let sentWorkspace = false
+        const competed = {
+          ...checkout,
+          contents: async function* () {
+            sentWorkspace = true
+            yield bundle
+          },
+        }
+        await rejects(competing.pool.start(workerId, placement, { checkout: competed, toolPort }), /worker account is busy/i)
+        equal(sentWorkspace, false)
+        ok(agent.ownsRun())
+      }
       ok(agent.startHelper !== undefined)
       let echoedHelper!: (bytes: Uint8Array) => void
       const helperBytes = new Promise<Uint8Array>((resolve) => {
@@ -1011,7 +1117,10 @@ void test(
     equal(recovery.value.workspaceId, workspaceId)
     equal(recovery.value.runId, runId)
     await rejects(pool.start(workerId, placement), /already running/)
-    resumed.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+    resumed.send({
+      case: 'exit',
+      value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+    })
     equal(await resumed.read(), undefined)
     const reconnected = connect()
     reconnected.send(hello())

@@ -27,8 +27,10 @@ use tonic::{Streaming, transport::Channel};
 
 use crate::{
     PROTOCOL_VERSION,
+    agent_capacity::worker_capacity,
     agent_files::send_file,
     agent_managed::ManagedCommands,
+    agent_reservation::{agent_service, reserve},
     agent_setup::{DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, WorkspaceSetup, worker_environment},
     agent_skills::{MAX_BYTES as MAX_SKILL_BYTES, SkillDirectory},
     agent_tools::forward_tools,
@@ -40,10 +42,10 @@ use crate::{
     relay::{WorkerRelay, relay_channel},
     valid_id,
     wire::{
-        AgentHomeFrame, AgentRunBytes, AgentRunExit, AgentRunOutcome, AgentRunReady, AgentRunStart,
-        AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest, AgentSnapshotResult,
-        AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat, AgentWorkerHello,
-        AgentWorkerMcpCommand, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
+        AgentHomeFrame, AgentRunAccepted, AgentRunBytes, AgentRunExit, AgentRunOutcome,
+        AgentRunReady, AgentRunStart, AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest,
+        AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat,
+        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
         AgentWorkspaceSetupSource, agent_home_frame::Payload as HomeMessage,
         agent_worker_frame::Payload as WorkerMessage,
     },
@@ -416,6 +418,8 @@ struct Slot {
     awaiting: Option<Instant>,
     lease: Duration,
     until: Instant,
+    workspace_root: PathBuf,
+    reserve_before_transfer: bool,
 }
 
 impl Slot {
@@ -434,6 +438,9 @@ impl Slot {
                 &self.outgoing,
                 WorkerMessage::Heartbeat(AgentWorkerHeartbeat {
                     sequence: self.sequence,
+                    capacity: (self.sequence.is_multiple_of(4))
+                        .then(|| worker_capacity(&self.workspace_root))
+                        .flatten(),
                 }),
             ),
         )
@@ -487,7 +494,7 @@ impl AgentUnit {
         let mut args = setup.map_or_else(|| vec!["--agent-unit".into()], SetupPlan::guardian_args);
         args.push(provider.executable.clone().into_os_string());
         args.extend(provider.args.iter().map(OsString::from));
-        let unit = Self::open(unit_name(&run.run_id), cwd, &args, None).await?;
+        let unit = Self::open(agent_service(&run.run_id), cwd, &args, None).await?;
         let recorded = unit
             .group
             .strip_prefix("/sys/fs/cgroup")
@@ -574,10 +581,6 @@ impl AgentUnit {
             group,
         })
     }
-}
-
-fn unit_name(run_id: &str) -> String {
-    format!("althar-agent-{run_id}.service")
 }
 
 pub(crate) async fn stop_group(name: &str, group: &Path) -> bool {
@@ -907,6 +910,8 @@ pub async fn watch_agent_slot(
                 worker_id: enrollment.worker_id.into(),
                 version: PROTOCOL_VERSION,
                 journal_id,
+                capacity: worker_capacity(&config.root),
+                reserve_before_transfer: true,
                 capabilities: config
                     .providers
                     .iter()
@@ -944,17 +949,27 @@ pub async fn watch_agent_slot(
             awaiting: None,
             lease,
             until: Instant::now() + lease,
+            workspace_root: config.root.clone(),
+            reserve_before_transfer: hello.reserve_before_transfer,
         })
     })
     .await??;
 
     let reply = match slot.message().await? {
         HomeMessage::Start(run) => {
-            let (outcome, exit_code) = execute(&mut slot, config, journal, &run).await?;
+            let (outcome, exit_code, worker_busy) =
+                match execute(&mut slot, config, journal, &run).await {
+                    Ok((outcome, exit_code)) => (outcome, exit_code, false),
+                    Err(error) if error.downcast_ref::<WorkerBusy>().is_some() => {
+                        (AgentRunOutcome::StartFailed, None, true)
+                    }
+                    Err(error) => return Err(error),
+                };
             AgentRunExit {
                 run_id: run.run_id,
                 outcome: outcome.into(),
                 exit_code,
+                worker_busy,
             }
         }
         HomeMessage::Reconcile(run) => {
@@ -963,7 +978,7 @@ pub async fn watch_agent_slot(
             }
             let stopped = match journal.agent_group(&run.run_id)? {
                 Some(group) => {
-                    let name = unit_name(&run.run_id);
+                    let name = agent_service(&run.run_id);
                     stop_group(&name, &cgroup_path(&name, &group)?).await
                 }
                 // The guardian only grants a launch after its group was recorded.
@@ -978,11 +993,13 @@ pub async fn watch_agent_slot(
                 }
                 .into(),
                 exit_code: None,
+                worker_busy: false,
             }
         }
         _ => return Err(invalid("Expected an agent run or reconciliation from the home").into()),
     };
     let run_id = reply.run_id.clone();
+    let start_failed = reply.outcome() == AgentRunOutcome::StartFailed;
     let confirmed = reply.outcome() != AgentRunOutcome::Unconfirmed;
     timeout(
         REPLY_TIMEOUT,
@@ -992,10 +1009,21 @@ pub async fn watch_agent_slot(
     // A successful end follows the home recording the outcome.
     timeout(REPLY_TIMEOUT, async {
         while let Some(frame) = slot.incoming.message().await? {
-            if !matches!(frame.payload, Some(HomeMessage::Heartbeat(_))) {
-                return Err(
-                    invalid("The home sent an unexpected frame after the agent outcome").into(),
-                );
+            match frame.payload {
+                Some(HomeMessage::Heartbeat(_)) => {}
+                Some(HomeMessage::Stop(stop)) if stop.run_id == run_id => {}
+                // Older homes can have already sent workspace bytes when a start fails.
+                Some(
+                    HomeMessage::Checkout(data)
+                    | HomeMessage::SetupChunk(data)
+                    | HomeMessage::SkillsChunk(data),
+                ) if start_failed && data.run_id == run_id && data.data.len() <= CHUNK_BYTES => {}
+                _ => {
+                    return Err(invalid(
+                        "The home sent an unexpected frame after the agent outcome",
+                    )
+                    .into());
+                }
             }
         }
         Ok::<(), Failure>(())
@@ -1006,6 +1034,17 @@ pub async fn watch_agent_slot(
     }
     Ok(())
 }
+
+#[derive(Debug)]
+struct WorkerBusy;
+
+impl std::fmt::Display for WorkerBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("The worker account already has an active task")
+    }
+}
+
+impl std::error::Error for WorkerBusy {}
 
 async fn execute(
     slot: &mut Slot,
@@ -1020,6 +1059,28 @@ async fn execute(
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
+    let _reservation = match reserve(&run.run_id).await {
+        Ok(reserved) => reserved,
+        Err(error) => {
+            eprintln!("Could not reserve this worker: {error}");
+            if error.kind() == io::ErrorKind::ResourceBusy {
+                return Err(Box::new(WorkerBusy));
+            }
+            return Ok((AgentRunOutcome::StartFailed, None));
+        }
+    };
+    if slot.reserve_before_transfer {
+        timeout(
+            REPLY_TIMEOUT,
+            send(
+                &slot.outgoing,
+                WorkerMessage::Accepted(AgentRunAccepted {
+                    run_id: run.run_id.clone(),
+                }),
+            ),
+        )
+        .await??;
+    }
     let descriptor: Option<AgentWorkspaceSetup> = if let Some(source) = &run.setup {
         match receive_descriptor(slot, &run.run_id, source, DESCRIPTOR_BYTES, |message| {
             match message {

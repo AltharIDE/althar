@@ -106,14 +106,36 @@ See the [CLI architecture](ARCHITECTURE.md) for where the pieces live.
 
 While a worker task is running, you can bring back a build output or log by
 giving its path inside the task checkout. This works even for ignored or
-untracked files. Use the running Desktop profile and the project's and task's
-IDs. For a secondary repository, add `--workspace` with that checkout's ID.
+untracked files. Use the running Desktop profile and the thread ID printed by
+`attach`. You can also give `--project` and `--task`. For a secondary
+repository, add `--workspace` with that checkout's ID.
 
 ```sh
-node dist/althar.js workers fetch-file --project "$PROJECT_ID" --task "$TASK_ID" \
+node dist/althar.js workers fetch-file --thread "$THREAD_ID" \
   --path dist/report.json --out "$PWD/report.json"
 ```
+
+For a Linux home, add `--ssh my-vps --home "$HOME_ID"` with the home ID
+from `inspect`. Use any SSH options from [Attach to a running home](#attach-to-a-running-home).
+The output is saved on the computer that runs the CLI.
 
 The runner accepts regular files up to 16 MiB inside the checkout. It verifies
 the file before saving it under the name you choose. If that name already
 exists, choose another one.
+
+
+### Run a check on this computer
+
+`workers test-copy` saves a fresh Git copy and runs the command you put
+after `--` in it. The copy includes staged and unstaged edits and untracked
+files. Use `--workspace` to choose a different repository in the task.
+
+```sh
+node dist/althar.js workers test-copy --thread "$THREAD_ID" \
+  --into "$PWD" -- node --test
+```
+
+Use a project you trust when running its code on this computer. The command
+uses your local toolchain. The CLI prints the copy’s path and keeps it even
+if the command fails or you stop it. It leaves the original checkouts alone.
+Use the same SSH flags as `fetch-file` when your home is on another computer.

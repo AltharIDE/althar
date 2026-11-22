@@ -2462,12 +2462,23 @@ export const ArrivalItem = Schema.Struct({
   }),
 })
 
+export const WorkerCapacity = Schema.Struct({
+  platform: Schema.Literals(['linux', 'macos', 'windows']),
+  architecture: Schema.Literals(['x64', 'arm64']),
+  cpuCores: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
+  freeMemoryMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+  freeDiskMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+})
+
+export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
   providers: Schema.Array(Schema.String),
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
+  capacity: Schema.optionalKey(WorkerCapacity),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
 
@@ -5488,7 +5499,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
-      workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
+      workerId: Schema.optional(WorkerSelection),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5512,11 +5523,7 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command(
-    'StartPlan',
-    { planId: Schema.String, workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))) },
-    Schema.Void,
-  ),
+  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */

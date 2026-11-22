@@ -14,6 +14,8 @@ import {
   AgentPreviewOpenSchema,
   AgentSnapshotRequestSchema,
   AgentWorkerFrameSchema,
+  AgentWorkerHeartbeatSchema,
+  type AgentWorkerCapacity,
   AgentWorkspaceSetupSchema,
   WorkerControlService,
   type AgentHomeFrame,
@@ -136,8 +138,30 @@ export interface WorkerAgentProcess {
   readonly readPatch: (baseTree: string, baseHead: string, workspaceId?: string, captureIndex?: boolean) => Promise<WorkerPatch>
 }
 
+export interface WorkerCapacity {
+  readonly platform: 'linux' | 'macos' | 'windows'
+  readonly architecture: 'x64' | 'arm64'
+  readonly cpuCores: number
+  readonly freeMemoryMib: number
+  readonly freeDiskMib: number
+}
+
+const capacityOf = (reported: AgentWorkerCapacity | undefined): WorkerCapacity | undefined => {
+  if (reported === undefined) return undefined
+  const { platform, architecture, cpuCores, freeMemoryMib, freeDiskMib } = reported
+  if (
+    (platform !== 'linux' && platform !== 'macos' && platform !== 'windows') ||
+    (architecture !== 'x64' && architecture !== 'arm64') ||
+    cpuCores < 1 ||
+    cpuCores > 65_535
+  )
+    return undefined
+  return { platform, architecture, cpuCores, freeMemoryMib, freeDiskMib }
+}
+
 export interface AvailableAgentWorker {
   readonly workerId: string
+  readonly capacity?: WorkerCapacity
   readonly capabilities: ReadonlyArray<
     Pick<AgentWorkerCapability, 'projectId' | 'providerId'> & Partial<Pick<AgentWorkerCapability, 'workspaceSets'>>
   >
@@ -146,6 +170,7 @@ export interface AvailableAgentWorker {
 
 interface Slot {
   readonly workerId: string
+  readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
   readonly openTools: (runId: string, invalidate: () => void) => { port: number; active: () => boolean; release: () => void } | undefined
@@ -187,6 +212,7 @@ interface Run {
   readonly tunnels: Set<() => void>
   stopping?: NodeJS.Timeout
   snapshot?: PendingSnapshot
+  accept?: Deferred<boolean>
   phase: 'starting' | 'running' | 'stopping'
 }
 
@@ -223,12 +249,14 @@ const validPath = (path: string): boolean =>
     .every((part) => part !== '' && part !== '.' && part !== '..')
 
 const validOutcome = (exit: AgentRunExit): boolean =>
-  exit.outcome === AgentRunOutcome.EXITED
-    ? exit.exitCode !== undefined && exit.exitCode <= 255
-    : exit.exitCode === undefined &&
-      (exit.outcome === AgentRunOutcome.STOPPED ||
-        exit.outcome === AgentRunOutcome.START_FAILED ||
-        exit.outcome === AgentRunOutcome.UNCONFIRMED)
+  exit.workerBusy
+    ? exit.outcome === AgentRunOutcome.START_FAILED && exit.exitCode === undefined
+    : exit.outcome === AgentRunOutcome.EXITED
+      ? exit.exitCode !== undefined && exit.exitCode <= 255
+      : exit.exitCode === undefined &&
+        (exit.outcome === AgentRunOutcome.STOPPED ||
+          exit.outcome === AgentRunOutcome.START_FAILED ||
+          exit.outcome === AgentRunOutcome.UNCONFIRMED)
 
 const validSetupResult = (current: Run, result: AgentWorkspaceSetupResult | undefined): boolean => {
   if (result === undefined) return !current.requiresSetup
@@ -253,6 +281,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
 
   const connect = (call: ServerDuplexStream<Buffer, Buffer>, homeId: string, enrolledWorker: () => string | undefined): void => {
     let slot: Slot | undefined
+    let capacity: WorkerCapacity | undefined
+    let sampledAt = 0
+    let accountReserved = false
+    let reserveBeforeTransfer = false
     let run: Run | undefined
     let recovering: AgentRunAssignment | undefined
     let closed = false
@@ -424,6 +456,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       )
       starting.unref()
       const transfer = new AbortController()
+      const accept = reserveBeforeTransfer ? deferred<boolean>() : undefined
       const abort = (): void => {
         if (run?.id !== id) return
         run.ready.reject(new Error('The agent start was cancelled.'))
@@ -432,6 +465,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       const cleanup = (): void => {
         signal?.removeEventListener('abort', abort)
         transfer.abort()
+        accept?.resolve(false)
       }
       const capability = slot.capabilities.find((cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId)
       const workerId = slot.workerId
@@ -493,6 +527,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         fileReads: capability?.fileReads === true,
         tunnels: new Set(),
         phase: 'starting',
+        ...(accept === undefined ? {} : { accept }),
       }
       signal?.addEventListener('abort', abort, { once: true })
       const current = run
@@ -515,6 +550,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         }),
       })
         .then(async () => {
+          if (accept !== undefined && !(await accept.promise)) return
           for (const [kind, descriptor] of [
             ['setupChunk', plan],
             ['skillsChunk', assets],
@@ -588,12 +624,30 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           if (!validWorkerProtocolId(payload.value.journalId, 'wjn_') || !ledger.bind(workerId, payload.value.journalId))
             return fail(status.PERMISSION_DENIED, 'The worker does not have its enrolled execution journal.')
           recovering = ledger.outstanding(workerId)
-          slot = { workerId, capabilities, start, openTools, busy: () => run !== undefined || recovering !== undefined }
+          capacity = capacityOf(payload.value.capacity)
+          accountReserved = payload.value.capacity?.accountReserved ?? false
+          reserveBeforeTransfer = payload.value.reserveBeforeTransfer
+          sampledAt = performance.now()
+          slot = {
+            workerId,
+            capabilities,
+            start,
+            openTools,
+            busy: () =>
+              run !== undefined || recovering !== undefined || (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
+            capacity: () => (performance.now() - sampledAt > AGENT_WORKER_LEASE_MS ? undefined : capacity),
+          }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
           sendControl({
             case: 'hello',
-            value: create(AgentHomeHelloSchema, { homeId, workerId, version: WORKER_PROTOCOL_VERSION, leaseMs: AGENT_WORKER_LEASE_MS }),
+            value: create(AgentHomeHelloSchema, {
+              homeId,
+              workerId,
+              version: WORKER_PROTOCOL_VERSION,
+              leaseMs: AGENT_WORKER_LEASE_MS,
+              reserveBeforeTransfer,
+            }),
           })
           if (recovering !== undefined) sendControl({ case: 'reconcile', value: create(AgentRunReconcileSchema, recovering) })
           return
@@ -607,8 +661,13 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         if (payload.case === 'heartbeat') {
           if (payload.value.sequence !== sequence + 1) return fail(status.INVALID_ARGUMENT, 'The worker heartbeat was out of order.')
           sequence = payload.value.sequence
+          if (payload.value.capacity !== undefined) {
+            capacity = capacityOf(payload.value.capacity)
+            accountReserved = payload.value.capacity.accountReserved
+            sampledAt = performance.now()
+          }
           renew(AGENT_WORKER_LEASE_MS)
-          sendControl(payload)
+          sendControl({ case: 'heartbeat', value: create(AgentWorkerHeartbeatSchema, { sequence }) })
           return
         }
         if (recovering !== undefined) {
@@ -637,7 +696,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         }
         if (
           current === undefined ||
-          (payload.case !== 'ready' &&
+          (payload.case !== 'accepted' &&
+            payload.case !== 'ready' &&
             payload.case !== 'output' &&
             payload.case !== 'exit' &&
             payload.case !== 'snapshot' &&
@@ -647,6 +707,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           payload.value.runId !== current.id
         )
           return fail(status.PERMISSION_DENIED, 'This stream does not own that agent run.')
+        if (payload.case === 'accepted') {
+          if (current.phase === 'stopping') return
+          if (current.phase !== 'starting' || current.accept === undefined)
+            return fail(status.INVALID_ARGUMENT, 'The worker sent an unexpected run reservation.')
+          current.accept.resolve(true)
+          delete current.accept
+          return
+        }
         if (payload.case === 'ready') {
           if (current.phase === 'stopping' && validPath(payload.value.workspacePath)) return
           const hasPort = payload.value.toolsPort > 0 && payload.value.toolsPort <= 65_535
@@ -663,6 +731,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           const expectedSkills = workspacePath.slice(0, workspacePath.lastIndexOf('/')) + `/.${current.id}.skills`
           if (
             current.phase !== 'starting' ||
+            current.accept !== undefined ||
             !validPath(workspacePath) ||
             !validSetupResult(current, setup) ||
             invalidMcp ||
@@ -789,7 +858,13 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         clearTimeout(current.starting)
         clearTimeout(current.stopping)
         current.cleanup()
-        current.ready.reject(new Error('The worker could not start the agent. Check the worker log and provider setup.'))
+        current.ready.reject(
+          new Error(
+            payload.value.workerBusy
+              ? 'This worker account is busy. Wait for its current task to finish.'
+              : 'The worker could not start the agent. Check the worker log and provider setup.',
+          ),
+        )
         current.files.close(new Error('The worker workspace ended.'))
         current.managed.close(new Error('The worker workspace ended.'))
         closeTools(current)
@@ -811,11 +886,15 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
     list: (projectId: string): ReadonlyArray<AvailableAgentWorker> =>
       [...slots.values()]
         .filter(({ workerId }) => ledger.permits(workerId, projectId))
-        .map(({ workerId, capabilities, busy }) => ({
-          workerId,
-          capabilities: capabilities.filter((item) => item.projectId === projectId),
-          busy: busy(),
-        }))
+        .map(({ workerId, capabilities, busy, capacity }) => {
+          const reported = capacity()
+          return {
+            workerId,
+            capabilities: capabilities.filter((item) => item.projectId === projectId),
+            busy: busy(),
+            ...(reported === undefined ? {} : { capacity: reported }),
+          }
+        })
         .filter((item) => item.capabilities.length > 0),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {

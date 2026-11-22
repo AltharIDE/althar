@@ -111,7 +111,12 @@ describe('the private worker ledger', () => {
       expect(reopened.agents.bind(worker, journal)).toBe(true)
       const replaced = { ...run, runId: `war_${'9'.repeat(32)}` }
       expect(reopened.agents.begin(other, replaced)).toBe(false)
-      const stopped: AgentRunExit = { $typeName: 'althar.worker.v1.AgentRunExit', runId: run.runId, outcome: AgentRunOutcome.STOPPED }
+      const stopped: AgentRunExit = {
+        $typeName: 'althar.worker.v1.AgentRunExit',
+        workerBusy: false,
+        runId: run.runId,
+        outcome: AgentRunOutcome.STOPPED,
+      }
       expect(reopened.agents.finish(other, stopped)).toBe(false)
       expect(reopened.agents.finish(worker, { ...stopped, outcome: AgentRunOutcome.UNCONFIRMED })).toBe(false)
       expect(reopened.agents.finish(worker, stopped)).toBe(true)

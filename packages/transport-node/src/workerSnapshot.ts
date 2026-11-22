@@ -11,6 +11,9 @@ const SNAPSHOT_REF = 'refs/althar/worker-snapshot'
 const INDEX_REF = 'refs/althar/worker-index'
 const MAX_SET_BYTES = 256 * 1024 * 1024
 
+/** The prefix makes a repository name safe as a Windows directory too. */
+export const workerCopyFolder = (name: string) => 'repo-' + name.replace(/\.+$/, '')
+
 const beneath = (folder: string, file: string) => {
   const path = relative(folder, file)
   return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('..' + sep))
@@ -96,8 +99,7 @@ export const installWorkerSnapshot = async (
       } finally {
         await file.close()
       }
-      // The prefix makes a Git repository's display name safe as a Windows directory too.
-      const folder = join(staging, 'repo-' + repo.name.replace(/\.+$/, ''))
+      const folder = join(staging, workerCopyFolder(repo.name))
       await mkdir(folder, { mode: 0o700 })
       await git(folder, 'init', '--quiet', '--template=', repo.head.length === 64 ? '--object-format=sha256' : '--object-format=sha1')
       await git(

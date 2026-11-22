@@ -447,6 +447,12 @@ describe('a normal task assigned to a worker', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const workerId = 'wrk_' + '4'.repeat(32)
+        const capacity = { platform: 'linux' as const, architecture: 'x64' as const, cpuCores: 4, freeMemoryMib: 8192, freeDiskMib: 16384 }
+        const candidates = [
+          { workerId: 'wrk_' + '1'.repeat(32), providers: ['codex'], busy: false, capacity: { ...capacity, freeMemoryMib: 1024 } },
+          { workerId: 'wrk_' + '2'.repeat(32), providers: ['codex'], busy: true, capacity: { ...capacity, freeMemoryMib: 32768 } },
+          { workerId, providers: ['codex'], busy: false, capacity },
+        ]
         const homePath = repository()
         writeFileSync(join(homePath, 'package.json'), JSON.stringify({ name: 'worker-task', dependencies: { fixture: 'file:./fixture' } }))
         writeFileSync(join(homePath, 'bun.lock'), '')
@@ -492,7 +498,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant, connect, separateDevice } = yield* connected({
           agents: homeAgents,
           workers: {
-            list: (projectId) => (projectId === expectedProject ? [{ workerId, providers: ['codex'], busy: false }] : []),
+            list: (projectId) => (projectId === expectedProject ? candidates : []),
             readFile: (input) =>
               Effect.gen(function* () {
                 assert.deepStrictEqual(input, { workerId, projectId: expectedProject, worktree: placed[0]?.site, path: 'staged' })
@@ -564,6 +570,7 @@ describe('a normal task assigned to a worker', () => {
               }),
             open: (request) =>
               Effect.gen(function* () {
+                assert.strictEqual(request.workerId, workerId)
                 placed.push({ workspace: request.workspaceId, site: request.worktree })
                 assert.deepStrictEqual(request.setup, { directory: '', commands: ['bun install --frozen-lockfile'] })
                 writeFileSync(join(workerPath, 'staged'), 'from the worker setup')
@@ -589,13 +596,11 @@ describe('a normal task assigned to a worker', () => {
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
         expectedProject = project.id
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
-        assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), [
-          { workerId, providers: ['codex'], busy: false },
-        ])
+        assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), candidates)
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,
-          workerId,
+          workerId: 'auto',
           title: 'Work on the worker',
           description: '[lead:permission] [lead:edit] [lead:finish]',
           end: 'ready',
@@ -685,6 +690,7 @@ describe('a normal task assigned to a worker', () => {
         assert.lengthOf(placed, 1)
         assert.strictEqual(homeSandboxProbes, 0)
         assert.strictEqual(snapshot.task.worktree, placed[0]?.site)
+        assert.strictEqual(snapshot.task.workerId, workerId)
         assert.isTrue(existsSync(join(workerPath, 'change.txt')))
         assert.isFalse(existsSync(join(placed[0]!.site, 'node_modules')))
         const setup = snapshot.items.filter((item) => item.kind === 'setup')

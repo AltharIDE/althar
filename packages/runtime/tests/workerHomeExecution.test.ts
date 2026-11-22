@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { AgentRunOutcome, type AgentManagedExit, type AgentRunExit } from '@althar/worker-protocol'
 import type { AgentWorkerPool, WorkerAgentProcess } from '@althar/worker-protocol/agent-runs'
 import { assert, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber } from 'effect'
 
 import { workerExecution } from '../src/workerHome/execution'
 import { workerTestDirectory as temporary } from './workerTestFiles'
@@ -52,6 +52,7 @@ it.live('keeps each repository’s own baseline and sends commands to the select
       let fenceChecks = 0
       const stopped: AgentRunExit = {
         $typeName: 'althar.worker.v1.AgentRunExit',
+        workerBusy: false,
         runId: 'war_' + '5'.repeat(32),
         outcome: AgentRunOutcome.STOPPED,
       }
@@ -276,6 +277,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     const input = request(worktree)
     const exit: AgentRunExit = {
       $typeName: 'althar.worker.v1.AgentRunExit',
+      workerBusy: false,
       runId: 'war_' + '4'.repeat(32),
       outcome: AgentRunOutcome.STOPPED,
     }
@@ -287,6 +289,8 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     let losesConnection = false
     let launchError: Error | undefined
     let refusesClose = false
+    const copying = yield* Deferred.make<void>()
+    const finishCopy = yield* Deferred.make<void>()
     const written: Uint8Array[] = []
     const worker: WorkerAgentProcess = {
       workspacePath: '/worker/project',
@@ -340,7 +344,11 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
           void exit.catch(() => undefined)
           return { ...worker, exit }
         }
-        if (toolsAvailable) return worker
+        if (toolsAvailable) {
+          await Effect.runPromise(Deferred.succeed(copying, undefined))
+          await Effect.runPromise(Deferred.await(finishCopy))
+          return worker
+        }
         return {
           workspacePath: worker.workspacePath,
           output: worker.output,
@@ -357,7 +365,13 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     assert.deepStrictEqual(service.list(input.projectId), [{ workerId: input.workerId, providers: ['codex'], busy: false }])
     yield* Effect.scoped(
       Effect.gen(function* () {
-        const running = yield* service.open(input)
+        const opening = yield* Effect.forkScoped(service.open(input))
+        yield* Deferred.await(copying)
+        assert.isTrue(service.list(input.projectId)[0]?.busy)
+        const concurrent = yield* Effect.flip(service.open(input))
+        assert.include(concurrent.reason, 'preparing another task')
+        yield* Deferred.succeed(finishCopy, undefined)
+        const running = yield* Fiber.join(opening)
         assert.strictEqual(running.path, '/worker/project')
         assert.strictEqual(running.toolPort, 4517)
         const openHelper = service.openHelper

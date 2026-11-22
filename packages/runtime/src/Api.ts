@@ -36,6 +36,8 @@ import {
   type SentImage,
   type LineComment,
   workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
   workerRepositoryLimit,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
@@ -1936,10 +1938,23 @@ export const handlers = apiLayer(
               const aside = chat === true
               let repositoryLimit: number | undefined
               if (workerId !== undefined) {
-                const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
-                const message = aside ? 'This task stays on its home.' : workerProblem(worker, steps)
+                const available = config.workers?.list(projectId) ?? []
+                const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
+                const message = aside
+                  ? 'This task stays on its home.'
+                  : workerId === 'auto' && worker === undefined
+                    ? automaticWorkerUnavailable
+                    : workerProblem(worker, steps)
                 if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
-                repositoryLimit = workerRepositoryLimit(worker, steps)
+                repositoryLimit =
+                  workerId === 'auto'
+                    ? Math.max(
+                        1,
+                        ...available
+                          .filter((one) => workerProblem(one, steps) === undefined)
+                          .map((one) => workerRepositoryLimit(one, steps)),
+                      )
+                    : workerRepositoryLimit(worker, steps)
               }
 
               const created = yield* projects.createTask({

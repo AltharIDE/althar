@@ -40,15 +40,17 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
       readonly homeToolPort: number
     }
   >()
+  const preparing = new Set<string>()
   return {
     list: (projectId) =>
-      (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities }) => {
+      (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {
         const multiRepoProviders = capabilities.filter((one) => one.workspaceSets === true).map(({ providerId }) => providerId)
         return {
           workerId,
           providers: capabilities.map(({ providerId }) => providerId),
           ...(multiRepoProviders.length === 0 ? {} : { multiRepoProviders }),
-          busy,
+          busy: busy || preparing.has(workerId),
+          ...(capacity === undefined ? {} : { capacity }),
         }
       }),
     startCommand: (input) =>
@@ -222,6 +224,14 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
         if (pool === undefined) return yield* failed(new Error('The home’s worker listener is unavailable.'))
         const made = Effect.scoped(
           Effect.gen(function* () {
+            yield* Effect.acquireRelease(
+              Effect.suspend(() => {
+                if (preparing.has(workerId)) return Effect.fail(new Error('This worker is preparing another task.'))
+                preparing.add(workerId)
+                return Effect.void
+              }),
+              () => Effect.sync(() => void preparing.delete(workerId)),
+            )
             const entries = yield* Effect.forEach(
               repositories ?? [{ workspaceId, directory: '', worktree }],
               (entry) =>
