@@ -22,9 +22,10 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { keys } from '../src/renderer/data/reads'
 import { arrived, useCanvasArrivals } from '../src/renderer/features/canvases/arrivals'
 import { ArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
+import { useDraftCanvasVersions } from '../src/renderer/features/canvases/draftVersions'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
-import { commentsOf, forgetComments } from '../src/renderer/shared/comments'
+import { commentsOf, forgetComments, gather, type GatheredComment } from '../src/renderer/shared/comments'
 import { coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
 import { useSettingsOf, servicesFor, withServices } from './render'
 
@@ -90,6 +91,51 @@ const canvasClient = (overrides: Parameters<typeof fakeClient>[0] = {}) =>
     }),
     ...overrides,
   })
+
+it('marks drafts on pruned or deleted canvas versions and preserves drafts when a read is unavailable', async () => {
+  const unavailable = 'unavailable-canvas'
+  const { client } = canvasClient({
+    getCanvas: vi.fn(async (id) => {
+      if (id === OTHER) throw new ApiError({ reason: 'NotFound', message: 'Canvas was removed' })
+      if (id === unavailable) throw new ApiError({ reason: 'Unavailable', message: 'Could not reach the home' })
+      return { ...held, versions: [version(2), version(3)] }
+    }),
+  })
+  const draft = (id: string, canvasId: string, number: number): GatheredComment => ({
+    id,
+    crop: null,
+    note: `Review ${id}`,
+    on: {
+      kind: 'canvas',
+      canvasId,
+      name: 'sign-in-flow',
+      title: 'Sign-in flow',
+      version: number,
+      anchor: { kind: 'passage', text: 'Continue', heading: null },
+    },
+  })
+  gather(DRAFT, draft('pruned', CANVAS, 1))
+  gather(DRAFT, { ...draft('still there', CANVAS, 2), earlier: true })
+  gather(DRAFT, draft('removed', OTHER, 2))
+  gather(DRAFT, draft('unavailable', unavailable, 2))
+  const drafts = commentsOf(DRAFT)
+  const ReadDrafts = () => {
+    useDraftCanvasVersions(DRAFT, drafts)
+    return null
+  }
+  withServices(<ReadDrafts />, client)
+
+  expect(commentsOf(DRAFT)).toBe(drafts)
+  await waitFor(() =>
+    expect(commentsOf(DRAFT).map((one) => [one.id, one.earlier])).toEqual([
+      ['pruned', true],
+      ['still there', false],
+      ['removed', true],
+      ['unavailable', undefined],
+    ]),
+  )
+  expect(client.getCanvas).toHaveBeenCalledTimes(3)
+})
 
 let sequence = 0
 /** A canvas item in the thread: a version its agent published, or opened beside its conversation. */

@@ -7,7 +7,18 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 /** A protocol peer that really calls the supplied MCP server and attempts the refused writes. */
 export const compatibilityPeer = (
-  bad: 'command' | 'reader' | 'reader-shell' | 'no-request' | 'no-mcp' | 'no-cancel' | 'no-version' | null,
+  bad:
+    | 'command'
+    | 'reader'
+    | 'reader-shell'
+    | 'no-request'
+    | 'no-mcp'
+    | 'no-reader-mcp'
+    | 'no-read'
+    | 'no-http'
+    | 'no-cancel'
+    | 'no-version'
+    | null,
 ) => {
   const sessions = new Map<string, { cwd: string; url: string; cancel: (() => void) | null; cancelled: boolean }>()
   const app = acp
@@ -15,7 +26,7 @@ export const compatibilityPeer = (
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       ...(bad === 'no-version' ? {} : { agentInfo: { name: 'peer', version: '1.2.3' } }),
-      agentCapabilities: { mcpCapabilities: { http: true } },
+      agentCapabilities: { mcpCapabilities: { http: bad !== 'no-http' } },
       authMethods: [],
     }))
     .onRequest(acp.methods.agent.session.new, ({ params }) => {
@@ -43,7 +54,7 @@ export const compatibilityPeer = (
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessions.get(params.sessionId)!
       const text = params.prompt.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
-      if (text.includes('compatibility_ping') && bad !== 'no-mcp') {
+      if (text.includes('compatibility_ping') && bad !== 'no-mcp' && !(bad === 'no-reader-mcp' && text.includes('althar-reader-check'))) {
         const mcp = new Client({ name: 'peer', version: '1' })
         try {
           await mcp.connect(new StreamableHTTPClientTransport(new URL(session.url)))
@@ -68,11 +79,13 @@ export const compatibilityPeer = (
         }
         if (bad === 'command') await writeFile(join(session.cwd, 'althar-command-check'), 'ran')
       } else if (text.includes('althar-reader-check')) {
-        const nonce = await readFile(join(session.cwd, 'read-check.txt'), 'utf8')
-        await client.notify(acp.methods.client.session.update, {
-          sessionId: params.sessionId,
-          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: nonce } },
-        })
+        if (bad !== 'no-read') {
+          const nonce = await readFile(join(session.cwd, 'read-check.txt'), 'utf8')
+          await client.notify(acp.methods.client.session.update, {
+            sessionId: params.sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: nonce } },
+          })
+        }
         await ask('althar-reader-check', 'edit')
         await ask('althar-reader-shell-check', 'execute')
         if (bad === 'reader') await writeFile(join(session.cwd, 'althar-reader-check'), 'ran')
