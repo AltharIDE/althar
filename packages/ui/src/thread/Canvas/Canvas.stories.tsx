@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Markdown } from '../Markdown/Markdown'
 import { ThreadShellProvider } from '../Shell/Shell'
+import { BoardsControls } from './BoardsControls'
 import { CanvasLine } from './CanvasLine'
 import { CanvasPanel } from './CanvasPanel'
 import s from './Canvas.module.css'
@@ -19,11 +20,8 @@ const meta = {
   args: {
     name: 'sign-in',
     title: 'Sign-in, three directions',
-    kind: 'markdown',
     version: 3,
     latest: 3,
-    by: 'The lead of Sign-in redesign · 4 min ago',
-    note: 'Tighter spacing, as asked',
     onVersion: fn(),
     onComment: fn(),
     onClose: fn(),
@@ -66,7 +64,7 @@ export const ADocument: Story = {
 
 /** An older version: the bar says a newer one is out, with Show. */
 export const AnOlderVersion: Story = {
-  args: { version: 2, latest: 3, newer: 3, note: 'Providers under the field', children: <Markdown source={plan} size="panel" /> },
+  args: { version: 2, latest: 3, newer: 3, children: <Markdown source={plan} size="panel" /> },
   decorators: [beside],
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
@@ -88,7 +86,6 @@ const page = `<!doctype html><html><head><style>
 /** A page: drawn edge to edge, by a view of its own the window lays over its place; here, a frame stands in. */
 export const APage: Story = {
   args: {
-    kind: 'html',
     title: 'Sign-in page',
     fill: true,
     onReload: fn(),
@@ -100,12 +97,10 @@ export const APage: Story = {
 /** A picture, at its own size on the page's ground. */
 export const APicture: Story = {
   args: {
-    kind: 'svg',
     title: 'Checkout funnel',
     name: 'checkout-funnel',
     version: 1,
     latest: 1,
-    note: null,
     fill: true,
     children: (
       <div className={s.picture}>
@@ -189,4 +184,81 @@ export const InTheThread: StoryObj<typeof CanvasLine> = {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Open Sign-in page beside the conversation' })).toHaveAttribute('aria-pressed', 'true')
   },
+}
+
+const BOARDS = [
+  { name: 'Directions', boards: [{ name: 'A present first' }, { name: 'The card leads' }, { name: 'Pick the class' }, { name: 'Phone' }] },
+  { name: 'Receipt', boards: [{ name: 'Desktop' }, { name: 'Email' }] },
+]
+
+/** A canvas of boards: drawn on Althar's ground by a view of its own (here, a frame stands in), its controls floating over its boards, and its comments numbered as their pins. */
+export const ABoardsCanvas: Story = {
+  args: {
+    title: 'Gift a class',
+    name: 'gift-a-class',
+    fill: true,
+    onReload: fn(),
+    onCommentPick: fn(),
+    comments: [
+      { id: 'c1', version: 3, body: 'Say what happens: Send Ana her class.', place: 'button.go on A present first', answered: false, n: 1 },
+      {
+        id: 'c2',
+        version: 2,
+        body: 'The card should lead.',
+        place: 'div.card on The card leads',
+        answered: true,
+        answer: 'Moved it first, in v3.',
+        n: 2,
+      },
+    ],
+    children: (
+      <div className={s.page} style={{ background: 'var(--n-1)' }}>
+        <BoardsControls
+          pages={BOARDS}
+          view="every"
+          page={0}
+          board={{ page: 0, board: 0 }}
+          zoom={0.18}
+          tool="point"
+          onView={fn()}
+          onPage={fn()}
+          onStep={fn()}
+          onZoom={fn()}
+          onTool={fn()}
+        />
+      </div>
+    ),
+  },
+  decorators: [beside],
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('toolbar', { name: 'Tools' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Pin 1' })).toBeInTheDocument()
+  },
+}
+
+/** One board at a time, stepped through every page's boards. */
+export const OneBoardAtATime: Story = {
+  args: {
+    ...ABoardsCanvas.args,
+    comments: [],
+    children: (
+      <div className={s.page} style={{ background: 'var(--n-1)' }}>
+        <BoardsControls
+          pages={BOARDS}
+          view="one"
+          page={0}
+          board={{ page: 0, board: 1 }}
+          zoom={0.62}
+          tool="hand"
+          onView={fn()}
+          onPage={fn()}
+          onStep={fn()}
+          onZoom={fn()}
+          onTool={fn()}
+        />
+      </div>
+    ),
+  },
+  decorators: [beside],
 }

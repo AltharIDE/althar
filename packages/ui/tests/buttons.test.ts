@@ -25,6 +25,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Markdown/Markdown.tsx': 'a link in a document to a file, set in its prose as a link, which opens that file',
   'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
   'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
+  'thread/Canvas/CanvasChip.tsx': 'a canvas’s chip, its mark and title, the whole of which opens it',
   'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
@@ -79,6 +80,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/ProjectSetup/ProjectSetup.tsx':
     'a new project’s ways in, and where its code lives, as large options; a repository’s row, the whole of which chooses it',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
+  'thread/Canvas/SaveToRepo.tsx': 'a folder’s row in the tree of where to save, which chooses it, and its caret, which folds it',
   /* a shape of its own */
   'outputs/ShipButton/ShipButton.tsx':
     'a stop’s round mark on How Ship works’ path, joined to the next by its line, which turns that stop on or off',
@@ -117,6 +119,8 @@ const PLAIN: Readonly<Record<string, string>> = {
     'a pill over the coordinator’s conversation, a tab with its mark or a live dot, the × inside an aside’s pill that clears it, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   'chrome/ProjectHeader/ProjectHeader.tsx': 'the project’s mark and name, the whole of which goes to its board',
+  'thread/Canvas/ArtifactHead.tsx': 'the artifact’s title in its head, in the head’s own type, which opens the others',
+  'thread/Canvas/CanvasPanel.tsx': 'a comment’s numbered pin, the mark it has on the page, which shows it there',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

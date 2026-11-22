@@ -15,7 +15,17 @@ import {
   ClientPage,
 } from './identities'
 
-import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
+import {
+  ArtifactDrawing,
+  ArtifactsHow,
+  ArtifactsPlace,
+  CanvasDetail,
+  CanvasKind,
+  CanvasSummary,
+  CanvasText,
+  RepositoryFolders,
+  SentCanvasComment,
+} from './canvases'
 import { BroughtIn, Elsewhere } from './elsewhere'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
@@ -4342,6 +4352,11 @@ export const ThreadSnapshot = Schema.Struct({
     /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
     scratch: Schema.optional(Schema.Boolean),
     /**
+     * An artifact's own chat (ADR-104, "Talking to an artifact"): the canvas it is about, or null while it draws its first
+     * version. It opens as the artifact, never as a task. Absent for any other task.
+     */
+    artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
+    /**
      * Its changes, where it holds several (a task is a conversation plus parts, "The header lists every change"): each by
      * name and branch, the change it is stacked on or waits for, its pull request's link, whether commits wait for Ship on
      * it, and the helper at work on it. Absent with one change, whose row is the worktree's and its pull request's.
@@ -5182,6 +5197,7 @@ const socketCalls = new Set<string>([
   'ReadOutput',
   'ReadDocument',
   'ListCanvases',
+  'ListArtifactsDrawing',
   'GetCanvas',
   'ReadCanvasText',
   'FindCode',
@@ -5587,10 +5603,16 @@ const ProjectApi = RpcGroup.make(
   call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
   /** A project's canvases (ADR-104), each with its latest version, newest first; archived ones only where asked. */
   call('ListCanvases', { projectId: Schema.String, archived: Schema.optional(Schema.Boolean) }, Schema.Array(CanvasSummary)),
+  /** A project's artifacts whose own chat is drawing their first version, newest first: each shows among its artifacts at once. */
+  call('ListArtifactsDrawing', { projectId: Schema.String }, Schema.Array(ArtifactDrawing)),
   /** One of a project's canvases whole: its versions, and the comments sent on it. */
   call('GetCanvas', { canvasId: Schema.String }, CanvasDetail),
   /** A version's entry as the window draws it, for a document, a diagram or an SVG: its words, read from the artifact store. */
   call('ReadCanvasText', { canvasId: Schema.String, version: Schema.Number }, CanvasText),
+  /** Where a project's artifacts go when saved to a repository: its place for them, or Althar's pick for the first save. */
+  call('GetArtifactsPlace', { projectId: Schema.String }, ArtifactsPlace),
+  /** One of a project's repositories' folders at the head of its default branch: where an artifact could be saved. */
+  call('ListRepositoryFolders', { projectId: Schema.String, repositoryId: Schema.String }, RepositoryFolders),
   /**
    * What the names in a thread's messages name, where its agent works
    * (CodePlace): for each message, by the item it is where it has one, so
@@ -5654,6 +5676,12 @@ const ProjectApi = RpcGroup.make(
       chat: Schema.optional(Schema.Boolean),
       /** The id the window made for it, as a project's may be: an aside's pill is keyed by it from the moment + is pressed. */
       taskId: Schema.optional(Schema.String),
+      /**
+       * With `chat`, an artifact's own chat (ADR-104, "Talking to an artifact") rather than an aside: about the canvas by its
+       * id, or a new artifact it draws first with null. It is never listed as a task or an aside, nor waits on the person. An
+       * artifact has one: asked again for a canvas that has one open, the runtime answers with that one.
+       */
+      artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
     },
     TaskSummary,
   ),
@@ -6203,6 +6231,35 @@ const WorkApi = RpcGroup.make(
   command('StopHelper', { taskId: Schema.String, helper: Schema.String }, Schema.Void),
   /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
   command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
+  /** Sets the project's place for artifacts, or clears it with null: where Save to repo puts one unless someone picks elsewhere. */
+  command(
+    'SetArtifactsHome',
+    {
+      projectId: Schema.String,
+      home: Schema.NullOr(Schema.Struct({ repositoryId: Schema.String, folder: Schema.String, how: ArtifactsHow, follow: Schema.Boolean })),
+    },
+    Schema.Void,
+  ),
+  /**
+   * Saves a canvas's latest version to a folder of its own in one of the project's repositories (`path`, with a trailing
+   * slash), in a pull request of its own or straight to the default branch, or moves it there where it was saved elsewhere.
+   * It answers at once, the canvas saying it is saving; the commit follows, and the canvas says how it went. `makeHome`
+   * makes the folder it is in the project's place for artifacts from now on.
+   */
+  command(
+    'SaveCanvas',
+    {
+      canvasId: Schema.String,
+      repositoryId: Schema.String,
+      path: Schema.String,
+      how: ArtifactsHow,
+      follow: Schema.Boolean,
+      makeHome: Schema.optional(Schema.Boolean),
+    },
+    Schema.Void,
+  ),
+  /** Stops saving a canvas to its repository: what was committed stays there, and new versions stay in Althar. */
+  command('StopSavingCanvas', { canvasId: Schema.String }, Schema.Void),
   /**
    * Points a running task at another branch to work toward, or its default with null (a task is a conversation plus parts):
    * rebased where nothing is pushed, else onto a fresh branch whose pull request opens into it. What it did, in words.

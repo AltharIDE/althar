@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { type ReactNode, type Ref, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
@@ -10,6 +11,7 @@ import { Problem } from '../../primitives/Problem/Problem'
 import { SidePanel, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { type CanvasKind, canvasKindWords } from './canvas'
+import { CanvasChip } from './CanvasChip'
 import s from './Canvas.module.css'
 
 /*
@@ -21,7 +23,10 @@ import s from './Canvas.module.css'
  * page does; and the comments already sent on it. What is on it (a
  * document, a diagram, a picture or a page) is the host's to draw, as wide
  * as the panel. A version the person reads stays while a newer one is
- * published: the bar says so, with Show.
+ * published: the bar says so, with Show. Its host adds what the artifact
+ * offers beside Comment (saving it to a repository, downloading it), a bar of
+ * its own under what is on it (a canvas of boards'), and a way back to where
+ * it was opened from.
  */
 
 export interface CanvasPanelText extends SidePanelText {
@@ -39,6 +44,8 @@ export interface CanvasPanelText extends SidePanelText {
   add: string
   sent: (n: number) => string
   answered: string
+  /** A comment's pin on a board, by its number. */
+  pin: (n: number) => string
   onVersion: (n: number) => string
   reload: string
   kinds: Readonly<Record<CanvasKind, string>>
@@ -61,6 +68,7 @@ export const canvasPanelText: CanvasPanelText = {
   add: 'Add to message',
   sent: (n) => (n === 1 ? '1 comment' : `${n} comments`),
   answered: 'Answered',
+  pin: (n) => `Pin ${n}`,
   onVersion: (n) => `on v${n}`,
   reload: 'Load again',
   kinds: canvasKindWords,
@@ -77,18 +85,16 @@ export interface CanvasPanelComment {
   readonly answered: boolean
   /** What the agent that answered it said, where it said something. */
   readonly answer?: string | null
+  /** Its pin's number, where it is pinned to a part of a board. */
+  readonly n?: number | null
 }
 
 export interface CanvasPanelProps {
   name: string
   title: string
-  kind: CanvasKind
   /** The version shown, and the latest there is. */
   version: number
   latest: number
-  /** Who published the version shown, and when, in words: “The lead of Sign-in redesign · 4 min ago”. */
-  by: string
-  note?: string | null
   /** Shows another version; without it, the versions don't step. */
   onVersion?: (version: number) => void
   /**
@@ -101,12 +107,32 @@ export interface CanvasPanelProps {
    * canvas. The words are kept as it opens, so typing the comment, which moves the selection, doesn't change what it is on.
    */
   onComment?: (body: string, on: string | null) => void
+  /** Asks for a comment on it from outside the panel (a chip its own view draws): each new count opens the comment. */
+  commentAsked?: number
   /** The words selected in the canvas, which a comment would be on; null for none. */
   selected?: string | null
   /** Comments already sent on the canvas, any version. */
   comments?: ReadonlyArray<CanvasPanelComment>
   /** Loads the page again, for a page canvas. */
   onReload?: () => void
+  /** What else the artifact offers, before Comment: saving it to a repository, downloading it. */
+  extra?: ReactNode
+  /** A bar of its own under what is on it: a canvas of boards' pages, view, tools and zoom. */
+  bar?: ReactNode
+  /** Back to where it was opened from, such as every artifact of the project. */
+  onBack?: () => void
+  /**
+   * Where its head is someone else's, as in an artifact's room, whose one top row is the artifact's: the panel draws no
+   * head of its own, and its versions and actions go in this element (null while it is being laid out).
+   */
+  actionsIn?: Element | null
+  /**
+   * Beside a conversation, never in its header: no head of its own, and what it is floats on it (its name, which opens the
+   * artifact itself, a comment on the whole of it, and its close), drawn here unless the canvas's own view draws it.
+   */
+  chip?: { readonly onOpen?: () => void; readonly drawnByView?: boolean }
+  /** A comment in the list pressed: its pin shows on its part. */
+  onCommentPick?: (id: string) => void
   onClose: () => void
   /** What is on it: the host draws it, as wide as the panel. */
   children?: ReactNode
@@ -120,17 +146,21 @@ export interface CanvasPanelProps {
 export function CanvasPanel({
   name,
   title,
-  kind,
   version,
   latest,
-  by,
-  note,
   onVersion,
   newer = null,
   onComment,
+  commentAsked = 0,
   selected = null,
   comments = [],
   onReload,
+  extra,
+  bar,
+  onBack,
+  actionsIn,
+  chip,
+  onCommentPick,
   onClose,
   children,
   fill = false,
@@ -142,62 +172,52 @@ export function CanvasPanel({
   const [writing, setWriting] = useState(false)
   // What the comment is on, as Comment was pressed.
   const [aimed, setAimed] = useState<string | null>(null)
+  // Asked from outside (a chip the canvas's own view draws): the comment opens, as Comment opens it.
+  const [askedSeen, setAskedSeen] = useState(commentAsked)
+  if (askedSeen !== commentAsked) {
+    setAskedSeen(commentAsked)
+    setAimed(selected)
+    setWriting(true)
+  }
   const older = version > 1
   const later = version < latest
-  return (
-    <SidePanel
-      label={title}
-      onClose={onClose}
-      text={t}
-      className={s.panel}
-      head={
-        <>
-          <span className={s.panelTile} aria-hidden="true">
-            <Icon name="canvas" size={14} />
-          </span>
-          <span className={s.panelHead}>
-            <SidePanelTitle>{title}</SidePanelTitle>
-            <span className={s.panelName}>{name}</span>
-          </span>
-        </>
-      }
-      actions={
-        <>
-          {onVersion !== undefined && latest > 1 && (
-            <span className={s.versions}>
-              <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
-              <span className={s.versionWord}>{t.version(version, latest)}</span>
-              <IconButton icon="chevron" label={t.newer} kbd="]" size="small" disabled={!later} onClick={() => onVersion(version + 1)} />
-            </span>
-          )}
-          {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
-          {onComment !== undefined && error === undefined && (
-            <ActionButton
-              icon="comment"
-              aria-pressed={writing}
-              onClick={() => {
-                setAimed(selected)
-                setWriting((was) => !was)
-              }}
-            >
-              {t.comment}
-            </ActionButton>
-          )}
-        </>
-      }
-    >
-      <div className={s.facts}>
-        <span className={s.fact}>
-          {t.kinds[kind]} · {by}
+  const actions = (
+    <>
+      {/* Its versions step only in its own room: beside a conversation, the artifact itself is a press away. */}
+      {onVersion !== undefined && latest > 1 && actionsIn !== undefined && (
+        <span className={s.versions}>
+          <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
+          <span className={s.versionWord}>{t.version(version, latest)}</span>
+          <IconButton icon="chevron" label={t.newer} kbd="]" size="small" disabled={!later} onClick={() => onVersion(version + 1)} />
         </span>
-        {note !== undefined && note !== null && note !== '' && <span className={s.note}>{note}</span>}
-        {later && onVersion !== undefined && (
+      )}
+      {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
+      {extra}
+      {onComment !== undefined && error === undefined ? (
+        <ActionButton
+          icon="comment"
+          aria-pressed={writing}
+          onClick={() => {
+            setAimed(selected)
+            setWriting((was) => !was)
+          }}
+        >
+          {t.comment}
+        </ActionButton>
+      ) : null}
+    </>
+  )
+  const content = (
+    <>
+      {/* Only what the person can act on: a newer version than the one shown. */}
+      {later && onVersion !== undefined && (
+        <div className={s.facts}>
           <span className={s.behind}>
             {newer !== null ? t.newerOut(newer) : t.notLatest}
             <LinkButton onClick={() => onVersion(newer ?? latest)}>{newer !== null ? t.show : t.latest}</LinkButton>
           </span>
-        )}
-      </div>
+        </div>
+      )}
       {/* what stands in for it, still being read or unreadable, sits at reading width even where it would fill */}
       <div className={cx(s.body, fill && !loading && error === undefined ? s.fill : s.reading)} data-canvas-body="">
         {loading ? (
@@ -214,6 +234,7 @@ export function CanvasPanel({
           children
         )}
       </div>
+      {bar}
       {(writing || comments.length > 0) && (
         <div className={s.foot}>
           {writing && onComment !== undefined && error === undefined && (
@@ -230,7 +251,21 @@ export function CanvasPanel({
           {comments.length > 0 && (
             <ol className={s.comments} aria-label={t.sent(comments.length)}>
               {comments.map((comment) => (
-                <li key={comment.id} className={cx(s.comment, comment.answered && s.answered)}>
+                <li
+                  key={comment.id}
+                  data-comment={comment.id}
+                  className={cx(s.comment, comment.answered && s.answered, comment.n != null && s.pinned)}
+                >
+                  {comment.n != null &&
+                    (onCommentPick === undefined ? (
+                      <span className={s.pinMark} aria-label={t.pin(comment.n)}>
+                        {comment.n}
+                      </span>
+                    ) : (
+                      <button type="button" className={s.pinMark} aria-label={t.pin(comment.n)} onClick={() => onCommentPick(comment.id)}>
+                        {comment.n}
+                      </button>
+                    ))}
                   <span className={s.commentBody}>{comment.body}</span>
                   <span className={s.commentFacts}>
                     {comment.place} · {t.onVersion(comment.version)}
@@ -245,6 +280,63 @@ export function CanvasPanel({
           )}
         </div>
       )}
+    </>
+  )
+  // Beside a conversation: no head of its own, and what it is floating on it.
+  if (chip !== undefined)
+    return (
+      <aside className={cx(s.panel, s.bare)} aria-label={title}>
+        {chip.drawnByView !== true && (
+          <CanvasChip
+            title={title}
+            {...(chip.onOpen === undefined ? {} : { onOpen: chip.onOpen })}
+            onClose={onClose}
+            {...(onComment !== undefined && error === undefined
+              ? {
+                  comment: {
+                    pressed: writing,
+                    onPress: () => {
+                      setAimed(selected)
+                      setWriting((was) => !was)
+                    },
+                  },
+                }
+              : {})}
+            text={{ close: t.close }}
+          />
+        )}
+        {content}
+      </aside>
+    )
+  // In a room whose top row is the artifact's: no head of its own, its versions and actions there.
+  if (actionsIn !== undefined)
+    return (
+      <aside className={cx(s.panel, s.bare)} aria-label={title}>
+        {actionsIn !== null && createPortal(<span className={s.inRow}>{actions}</span>, actionsIn)}
+        {content}
+      </aside>
+    )
+  return (
+    <SidePanel
+      label={title}
+      onClose={onClose}
+      {...(onBack === undefined ? {} : { onBack })}
+      text={t}
+      className={s.panel}
+      head={
+        <>
+          <span className={s.panelTile} aria-hidden="true">
+            <Icon name="canvas" size={14} />
+          </span>
+          <span className={s.panelHead}>
+            <SidePanelTitle>{title}</SidePanelTitle>
+            <span className={s.panelName}>{name}</span>
+          </span>
+        </>
+      }
+      actions={actions}
+    >
+      {content}
     </SidePanel>
   )
 }
@@ -264,16 +356,20 @@ export function CanvasPagePlace({
   canvas,
   still = null,
   onStill,
+  children,
 }: {
   ref?: Ref<HTMLDivElement>
   canvas: string
   /** A picture of the canvas, drawn in its place while its view is aside for something over it. */
   still?: string | null
   onStill?: () => void
+  /** What the host draws over it, such as a comment being written on a part of it. */
+  children?: ReactNode
 }) {
   return (
     <div ref={ref} className={s.page} data-canvas-page={canvas}>
       {still !== null && <img className={s.pageStill} src={still} alt="" draggable={false} onLoad={onStill} />}
+      {children}
     </div>
   )
 }

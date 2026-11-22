@@ -184,6 +184,17 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     ? [
         { key: keys.canvases(event.projectId), offScreen: false },
         { key: keys.canvas(event.aggregateId), offScreen: false },
+        // A chat drawing a new artifact takes the first canvas it publishes.
+        { key: keys.artifactsDrawing(event.projectId), offScreen: false },
+        // A first save makes the project's place for artifacts.
+        { key: keys.artifactsPlace(event.projectId), offScreen: false },
+      ]
+    : []),
+  // An artifact's own chat starts or settles as a task does: one drawing a new artifact shows among the project's artifacts.
+  ...(event.projectId !== null && event.aggregateType === 'task'
+    ? [
+        { key: keys.artifactsDrawing(event.projectId), offScreen: false },
+        { key: keys.canvases(event.projectId), offScreen: false },
       ]
     : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).

@@ -27,7 +27,8 @@ const homeTaskRows = (projectId: string, deviceId: string, settledShown: number,
     }>`
       SELECT found.*, ${cached ? sql`v.view` : sql`NULL`} AS view FROM (
       SELECT id, project_id, state, created_at, settled_at, 1 AS candidate
-        FROM tasks WHERE project_id = ${projectId} AND state IN ('open', 'draft')
+        -- An artifact's own chat is never a task (ADR-104, "Talking to an artifact"): Home has none of them.
+        FROM tasks WHERE project_id = ${projectId} AND state IN ('open', 'draft') AND artifact_chat = 0
       UNION ALL
       SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at,
         -- A settled task only returns to Home for work, a call, a review, a reply or changes to ship.
@@ -53,7 +54,7 @@ const homeTaskRows = (projectId: string, deviceId: string, settledShown: number,
         AS candidate
       FROM (
         SELECT id, project_id, state, created_at, settled_at FROM tasks WHERE project_id = ${projectId}
-          AND state IN ('done', 'abandoned') ORDER BY settled_at DESC, id DESC LIMIT ${settledShown}
+          AND state IN ('done', 'abandoned') AND artifact_chat = 0 ORDER BY settled_at DESC, id DESC LIMIT ${settledShown}
       ) k WHERE k.state = 'done') found
       ${cached ? sql`LEFT JOIN board_card_views v ON v.task_id = found.id` : sql``}`
     return yield* cached ? (yield* Database.ReadLane).read(read) : read

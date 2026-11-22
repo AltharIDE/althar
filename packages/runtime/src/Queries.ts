@@ -873,7 +873,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           name: text(content, 'name'),
           title: text(content, 'title'),
           canvasKind:
-            canvasKind === 'markdown' || canvasKind === 'mermaid' || canvasKind === 'svg' || canvasKind === 'picture' ? canvasKind : 'html',
+            canvasKind === 'markdown' ||
+            canvasKind === 'mermaid' ||
+            canvasKind === 'svg' ||
+            canvasKind === 'picture' ||
+            canvasKind === 'boards'
+              ? canvasKind
+              : 'html',
           version: typeof version === 'number' ? version : 1,
           note: note === '' ? null : note,
           action: text(content, 'action') === 'opened' ? 'opened' : 'published',
@@ -4442,6 +4448,9 @@ export class Queries extends Context.Service<
               SELECT max(x.rowid) FROM record_events x
               WHERE x.aggregate_type = 'workspace' AND x.aggregate_id = w.id AND x.type = 'workspace.move_waits')
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
+          // An artifact's own chat opens as the artifact (ADR-104, "Talking to an artifact"): the canvas it is about.
+          const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+            SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${head.taskId}`
           return {
             threadId,
             accepting,
@@ -4463,6 +4472,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(artifact?.artifactChat === 1 ? { artifact: { canvasId: artifact.artifactCanvasId } } : {}),
               ...(!severalChanges
                 ? {}
                 : {

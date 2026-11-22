@@ -1164,10 +1164,16 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       lines: 3,
     })),
     listCanvases: vi.fn(async () => []),
+    listArtifactsDrawing: vi.fn(async () => []),
     getCanvas: vi.fn(async () => {
       throw new Error('No canvas')
     }),
     readCanvasText: vi.fn(async () => ({ path: 'README.md', text: '# Canvas', bytes: 8 })),
+    getArtifactsPlace: vi.fn(async () => ({ home: null, guess: null })),
+    listRepositoryFolders: vi.fn(async () => ({ folders: [], truncated: false })),
+    setArtifactsHome: vi.fn(async () => {}),
+    saveCanvas: vi.fn(async () => {}),
+    stopSavingCanvas: vi.fn(async () => {}),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),

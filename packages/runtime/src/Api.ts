@@ -196,6 +196,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
@@ -336,6 +337,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const canvasSaves = yield* CanvasSaves
     const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
@@ -1373,7 +1375,23 @@ export const handlers = apiLayer(
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
+      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"), newest first: each shows among
+      // the project's artifacts from the moment it starts, until its first canvas.
+      ListArtifactsDrawing: ({ projectId }) =>
+        api(
+          Effect.map(
+            sql<{ taskId: string; threadId: string; projectId: string; title: string; startedAt: string }>`
+              SELECT k.id AS task_id, t.id AS thread_id, k.project_id, k.title, k.created_at AS started_at
+              FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              WHERE k.project_id = ${projectId} AND k.artifact_chat = 1 AND k.artifact_canvas_id IS NULL
+                AND k.state IN ('open', 'draft')
+              ORDER BY k.created_at DESC, k.id DESC`,
+            (rows) => rows.map((row) => ({ ...row })),
+          ),
+        ),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
+      GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
+      ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),
       ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
       ReadCode: ({ threadId, path, commit, line, image }) =>
@@ -1916,6 +1934,7 @@ export const handlers = apiLayer(
         chat,
         taskId,
         workerId,
+        artifact,
       }) =>
         once(
           commandId,
@@ -1926,6 +1945,14 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              // An artifact has one chat of its own (ADR-104, "Talking to an artifact"): asked again, it is the one open.
+              if (aside && artifact !== undefined && artifact.canvasId !== null) {
+                const [open] = yield* sql<{ id: string }>`
+                  SELECT id FROM tasks WHERE artifact_chat = 1 AND artifact_canvas_id = ${artifact.canvasId}
+                    AND project_id = ${projectId} AND state IN ('open', 'draft')
+                  ORDER BY created_at DESC LIMIT 1`
+                if (open !== undefined) return yield* queries.task(open.id)
+              }
               let repositoryLimit: number | undefined
               if (workerId !== undefined) {
                 const available = config.workers?.list(projectId) ?? []
@@ -1960,7 +1987,12 @@ export const handlers = apiLayer(
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
                 ...(aside
-                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  ? {
+                      plain: true,
+                      shelf: 'scratch' as const,
+                      ...(artifact === undefined ? {} : { artifact }),
+                      ...(description?.trim() ? { request: description } : {}),
+                    }
                   : requestOf(title, description, issue)),
               })
               for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
@@ -2209,6 +2241,9 @@ export const handlers = apiLayer(
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
+      SetArtifactsHome: ({ commandId, projectId, home }) => once(commandId, api(canvasSaves.setHome(projectId, home))),
+      SaveCanvas: ({ commandId, ...asked }) => once(commandId, api(canvasSaves.save(asked))),
+      StopSavingCanvas: ({ commandId, canvasId }) => once(commandId, api(canvasSaves.stop(canvasId))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,

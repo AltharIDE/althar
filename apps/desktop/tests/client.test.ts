@@ -302,6 +302,7 @@ describe('the client', () => {
           ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
           ListCanvases: () => Effect.die('unused'),
+          ListArtifactsDrawing: () => Effect.die('unused'),
           GetCanvas: () => Effect.die('unused'),
           ReadCanvasText: () => Effect.die('unused'),
           FindCode: () => Effect.die('unused'),
@@ -395,6 +396,11 @@ describe('the client', () => {
           SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
+          GetArtifactsPlace: () => Effect.die('unused'),
+          ListRepositoryFolders: () => Effect.die('unused'),
+          SetArtifactsHome: () => Effect.die('unused'),
+          SaveCanvas: () => Effect.die('unused'),
+          StopSavingCanvas: () => Effect.die('unused'),
           SetThreadGoal: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
@@ -640,6 +646,7 @@ describe('the client’s calls', () => {
   it('preserves explicit query filters and leaves omitted ones to the runtime', async () => {
     const { client, sent } = await recording({
       ListCanvases: [],
+      ListArtifactsDrawing: [],
       ListPresets: [],
       GetTaskFindings: { findings: [], review: null },
       ReadCode: { path: 'src/retry.ts', text: 'const tries = 3', from: 1, total: 1, cut: false },
@@ -654,6 +661,7 @@ describe('the client’s calls', () => {
     })
     expect(await client.listCanvases('p1')).toEqual([])
     await client.listCanvases('p1', true)
+    expect(await client.listArtifactsDrawing('p1')).toEqual([])
     await client.listPresets()
     await client.listPresets('p1')
     await client.getTaskFindings('t1')
@@ -672,6 +680,7 @@ describe('the client’s calls', () => {
     expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
       ['ListCanvases', { projectId: 'p1' }],
       ['ListCanvases', { projectId: 'p1', archived: true }],
+      ['ListArtifactsDrawing', { projectId: 'p1' }],
       ['ListPresets', {}],
       ['ListPresets', { projectId: 'p1' }],
       ['GetTaskFindings', { taskId: 't1' }],

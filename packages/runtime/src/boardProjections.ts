@@ -77,8 +77,8 @@ export const boardRows = (projectId: string, deviceId: string, settled: number, 
           WHERE f.task_id = k.id AND f.device_id = ${deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)`
     const read = sql<BoardRow>`
       SELECT k.id, k.state, k.created_at, k.settled_at, ${columns} FROM tasks k ${joins}
-      WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
-        SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
+      WHERE k.project_id = ${projectId} AND k.artifact_chat = 0 AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
+        SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned') AND artifact_chat = 0
         ORDER BY settled_at DESC, id DESC LIMIT ${settled}))
       ORDER BY k.created_at, k.id`
     return yield* cached ? (yield* Database.ReadLane).read(read) : read

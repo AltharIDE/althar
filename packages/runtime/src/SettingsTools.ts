@@ -1,5 +1,6 @@
 import {
   AccountStrategy,
+  ArtifactsHow,
   AtOnceCount,
   CommandRule,
   FolderWait,
@@ -32,6 +33,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Automations } from './Automations'
 import { Busy } from './Busy'
+import { CanvasSaves } from './CanvasSaves'
 import { Changes } from './Changes'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
@@ -144,6 +146,7 @@ type Needs =
   | Connections
   | Agents
   | RuntimeConfig
+  | CanvasSaves
 
 const stable = (value: unknown): string =>
   JSON.stringify(value, (_key, inner: unknown) =>
@@ -473,16 +476,30 @@ export class SettingsTools extends Context.Service<
               'the connection its issues are on, by its id as althar/code-hosts lists it, and where on it ({ id, name }), or null to learn it from its issues',
               Schema.NullOr(ProjectTracker),
             ),
+            artifacts: field(
+              'Artifacts',
+              'where Save to repo puts an artifact unless someone picks somewhere else: { repository (by name), folder (in it, ending in /, or "" for its root), how (pr: a pull request of its own; main: straight to its default branch), follow (true: each new version committed as it is published) }, naming only what changes; null until the first save sets it',
+              Schema.NullOr(
+                Schema.Struct({
+                  repository: Schema.optional(Schema.String),
+                  folder: Schema.optional(Schema.String),
+                  how: Schema.optional(ArtifactsHow),
+                  follow: Schema.optional(Schema.Boolean),
+                }),
+              ),
+            ),
           },
           read: (projectId) =>
             Effect.gen(function* () {
               const repositories = yield* repositoriesOf(projectId)
               const bound = yield* projectTracker(projectId)
+              const home = yield* (yield* CanvasSaves).home(projectId)
               return {
                 repositories: Object.fromEntries(
                   repositories.map((one) => [one.name, { role: one.role, changeTarget: one.fork?.target ?? null }]),
                 ),
                 tracker: bound === null ? null : { connectionId: bound.connectionId, container: bound.container },
+                artifacts: home === null ? null : { repository: home.repository, folder: home.folder, how: home.how, follow: home.follow },
               }
             }),
           write: (projectId, change) =>
@@ -508,6 +525,27 @@ export class SettingsTools extends Context.Service<
                   projectId,
                   change['tracker'] as { connectionId: string; container: { id: string; name: string } | null } | null,
                 )
+              if (change['artifacts'] !== undefined) {
+                const saves = yield* CanvasSaves
+                const asked = change['artifacts'] as { repository?: string; folder?: string; how?: ArtifactsHow; follow?: boolean } | null
+                if (asked === null) yield* saves.setHome(projectId, null)
+                else {
+                  // What the change leaves out stays as it is; with no place yet, it starts as the first save's would.
+                  const kept = yield* saves.home(projectId)
+                  const name = asked.repository ?? kept?.repository
+                  if (name === undefined)
+                    return yield* new ToolRefused({
+                      message: 'The project has no place for artifacts yet: name the repository they go in.',
+                    })
+                  const [named] = yield* byName(projectId, { [name]: null })
+                  yield* saves.setHome(projectId, {
+                    repositoryId: named!.repository.id,
+                    folder: asked.folder ?? kept?.folder ?? 'design/',
+                    how: asked.how ?? kept?.how ?? 'pr',
+                    follow: asked.follow ?? kept?.follow ?? true,
+                  })
+                }
+              }
             }),
         },
         {
@@ -1520,6 +1558,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // project/code
   setProjectTracker: 'project/code.tracker',
   setRepository: 'project/code.repositories',
+  setArtifactsHome: 'project/code.artifacts',
   addRepositories: 'person: adding a repository is the person’s (project/code says so)',
   cloneRepository: 'person: cloning a repository into the project is adding one, the person’s (project/code says so)',
   prepareFolder: 'person: gives a repository cloned into the project its first commit, as part of adding it, the person’s',

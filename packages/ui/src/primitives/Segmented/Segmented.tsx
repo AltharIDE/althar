@@ -1,6 +1,8 @@
 import { RadioGroup } from 'radix-ui'
 import { useCallback, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 
+import { Icon } from '../../foundations/Icon/Icon'
+import type { IconName } from '../../foundations/Icon/icons'
 import { cx } from '../../lib/cx'
 import { useControlName } from '../FormRow/FormRow'
 import { Tooltip } from '../HoverCard/HoverCard'
@@ -11,6 +13,8 @@ import s from './Segmented.module.css'
 export interface SegmentedOption<V extends string> {
   value: V
   label: string
+  /** Drawn in place of the label, which stays its name to assistive technology; give it a tooltip saying the same. */
+  icon?: IconName
   disabled?: boolean
   /** Its shortcut, shown after the label; the consumer binds it. */
   kbd?: string
@@ -68,8 +72,15 @@ export function Segmented<V extends string>({ label, options, value, onChange, i
       )}
       {options.map((o) => (
         <Tip key={o.value} tip={o.tooltip}>
-          <RadioGroup.Item value={o.value} disabled={o.disabled} className={s.option}>
-            {o.label}
+          <RadioGroup.Item value={o.value} disabled={o.disabled} className={cx(s.option, o.icon !== undefined && s.iconOption)}>
+            {o.icon === undefined ? (
+              o.label
+            ) : (
+              <>
+                <Icon name={o.icon} size={14} />
+                <VisuallyHidden>{o.label}</VisuallyHidden>
+              </>
+            )}
             {o.dot && <span className={cx(s.dot, s[o.dot])} aria-hidden="true" />}
             {o.dotLabel && <VisuallyHidden>, {o.dotLabel}</VisuallyHidden>}
             {o.kbd && <Kbd className={s.kbd}>{o.kbd}</Kbd>}
