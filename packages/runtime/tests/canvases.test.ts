@@ -14,7 +14,8 @@ import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
-import { asideFor, canvasesIn, holdsOnly, isCopyPath, manifestOf, readCopy } from '../src/canvasFiles'
+import type { Artifacts } from '../src/Artifacts'
+import { asideFor, canvasesIn, holdsOnly, isCopyPath, manifestOf, readCopy, readVersionFiles } from '../src/canvasFiles'
 import { entryAmong, titleFromName } from '../src/Canvases'
 import { Connections } from '../src/Connections'
 import { Folders } from '../src/Folders'
@@ -167,7 +168,34 @@ describe('a canvas’s files', () => {
     assert.isTrue(isCopyPath('flow@3-2'))
     assert.isFalse(isCopyPath('../flow'))
     assert.isFalse(isCopyPath('flow@0'))
+    // A copy that isn't there, or a file where a copy's folder would be, holds nothing of a version.
+    assert.isFalse(holdsOnly(join(root, 'gone'), manifest))
+    writeFileSync(join(root, 'file'), '# Flow')
+    assert.deepStrictEqual(readCopy(join(root, 'file')), {
+      ok: false,
+      why: 'It is not a folder of its own: a link or a file is in its place.',
+    })
   })
+
+  it.effect('are read from the store whole, or not at all where it lost the manifest, can’t read it, or lost a file', () =>
+    Effect.gen(function* () {
+      const bytes = (text: string) => new TextEncoder().encode(text)
+      const kept = new Map<string, Uint8Array>()
+      const store = { read: (digest: string) => Effect.succeed(kept.get(digest) ?? null) } as unknown as typeof Artifacts.Service
+      const file = { path: 'index.md', bytes: bytes('# Flow') }
+      const manifest = manifestOf('index.md', [file])
+      assert.isNull(yield* readVersionFiles(store, 'gone'))
+      kept.set('garbled', bytes('not a manifest'))
+      assert.isNull(yield* readVersionFiles(store, 'garbled'))
+      kept.set('kept', bytes(JSON.stringify(manifest)))
+      assert.isNull(yield* readVersionFiles(store, 'kept'))
+      kept.set(manifest.files[0]!.sha256, file.bytes)
+      assert.deepStrictEqual(
+        (yield* readVersionFiles(store, 'kept'))?.files.map((one) => one.path),
+        ['index.md'],
+      )
+    }),
+  )
 
   it('are drawn from an index, a README or the one file where the agent names none, and titled from their name', () => {
     const file = (path: string) => ({ path, bytes: new Uint8Array() })
