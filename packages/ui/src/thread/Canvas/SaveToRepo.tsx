@@ -210,9 +210,9 @@ export function SaveToRepo({
           )}
         </span>
         {saved !== null && (
-          <button type="button" className={s.stop} onClick={onStop}>
+          <LinkButton className={s.stop} onClick={onStop}>
             {t.stop}
-          </button>
+          </LinkButton>
         )}
       </div>
       {elsewhere ? (
