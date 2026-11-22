@@ -16,6 +16,8 @@ export interface SettingsSearch {
   readonly agent?: string
   /** A setting to bring into view and light for a moment: the task folders' row, from About's Free up space. */
   readonly focus?: SettingsFocus
+  /** A computer opened out in Computers: the home, or a worker by its id, as the load popover's row opens one. */
+  readonly worker?: string
 }
 
 const given = (value: unknown): value is string => typeof value === 'string' && value !== ''
@@ -27,11 +29,13 @@ const settingsSearchOf = (search: Record<string, unknown>): SettingsSearch =>
       ? { agent: search.agent }
       : search.focus === 'task-folders'
         ? { focus: 'task-folders' }
-        : {}
+        : given(search.worker)
+          ? { worker: search.worker }
+          : {}
 
 function Settings() {
   const { section } = settingsRoute.useParams()
-  const { signIn, account, agent, focus } = settingsRoute.useSearch()
+  const { signIn, account, agent, focus, worker } = settingsRoute.useSearch()
   const navigate = useNavigate()
   // The agents are signed in here, so each is asked again as the tab opens.
   const start = useStart({ recheck: true })
@@ -43,6 +47,10 @@ function Settings() {
       {...(account === undefined ? {} : { account })}
       {...(agent === undefined ? {} : { agent })}
       {...(focus === undefined ? {} : { focus })}
+      {...(worker === undefined ? {} : { worker })}
+      onComputer={(id) =>
+        void navigate({ to: '/settings/$section', params: { section: 'computers' }, search: id === null ? {} : { worker: id } })
+      }
       onSection={(next, to) =>
         void navigate({ to: '/settings/$section', params: { section: next }, search: to === undefined ? {} : { focus: to } })
       }

@@ -13,6 +13,7 @@ import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
   AgentsAtOnce,
+  type AgentsAtOnceProps,
   BrowserPreferences,
   type CookieKeep,
   CrashReports,
@@ -99,11 +100,12 @@ const menuMark = (
 )
 
 /* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
-function AtOnce({ compact = false }: { compact?: boolean }) {
+function AtOnce({ compact = false, fewer = null }: { compact?: boolean; fewer?: AgentsAtOnceProps['fewer'] }) {
   const [own, setOwn] = useState<number | null>(null)
   return (
     <AgentsAtOnce
       compact={compact}
+      fewer={fewer}
       count={own ?? MACHINE.count}
       machine={MACHINE}
       onChange={(count) => {
@@ -354,6 +356,30 @@ export const AgentsAtOnceCompact: Story = {
     await expect(c.getByText('The rest wait their turn')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
     await expect(count).toHaveAttribute('aria-valuenow', '4')
+  },
+}
+
+/** This Mac under load: fewer work for now than the number, and the note says so at it, the same in the quick settings; moved under it, the note is the number's again. */
+export const AgentsAtOnceFewerForNow: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gap: 16, width: 416 }}>
+      <SettingList>
+        <AtOnce fewer={{ atOnce: 2, why: 'memory' }} />
+      </SettingList>
+      <ControlSheet>
+        <AtOnce compact fewer={{ atOnce: 2, why: 'cpu' }} />
+      </ControlSheet>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('2 at a time until memory frees up')).toBeInTheDocument()
+    await expect(c.getByText('2 at a time until the CPU frees up')).toBeInTheDocument()
+    const [count] = c.getAllByRole('slider', { name: 'Agents at once' })
+    count?.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    await expect(count).toHaveAttribute('aria-valuenow', '2')
+    await expect(c.getByText('Below the default')).toBeInTheDocument()
   },
 }
 

@@ -50,9 +50,12 @@ describe('pressure-aware admission', () => {
     const policy = new PressureAdmission()
     const read = samples()
     policy.observe(read(0), 4, 3)
+    assert.isNull(policy.why(4))
     for (const at of [1, PRESSURE_BACKOFF + 1, 2 * PRESSURE_BACKOFF + 1]) policy.observe(read(at, { cpu: 1, contention: 2 }), 4, 3)
     assert.strictEqual(policy.capacity(4), 2)
+    assert.strictEqual(policy.why(4), 'cpu', 'the window says it is the CPU')
     assert.strictEqual(policy.capacity(1), 1, 'the configured cap is always an upper bound')
+    assert.isNull(policy.why(2), 'at or under the lowered number, nothing is lowered to say')
   })
 
   it('responds immediately to critical memory, then restores capacity gradually after sustained recovery', () => {
@@ -60,12 +63,15 @@ describe('pressure-aware admission', () => {
     const read = samples()
     assert.isTrue(policy.observe(read(0, { pressure: 'critical' }), 4, 3))
     assert.strictEqual(policy.capacity(4), 1)
+    assert.strictEqual(policy.why(4), 'memory')
     policy.observe(read(1), 4, 1)
     for (let n = 1; n <= 3; n++) {
       policy.observe(read(n * PRESSURE_RECOVERY + 1), 4, 1)
       assert.strictEqual(policy.capacity(4), n + 1)
+      assert.strictEqual(policy.why(4), n < 3 ? 'memory' : null, 'it says memory until all the places are back')
     }
     assert.strictEqual(policy.capacity(8), 8, 'no temporary reduction remains after full recovery')
+    assert.isNull(policy.why(8))
   })
 
   it('uses native memory pressure in preference to cache-heavy memory utilization', () => {
@@ -77,6 +83,7 @@ describe('pressure-aware admission', () => {
     policy.observe(read(PRESSURE_BACKOFF + 1, { pressure: 'warning' }), 4, 2)
     policy.observe(read(2 * PRESSURE_BACKOFF + 1, { pressure: 'warning' }), 4, 2)
     assert.strictEqual(policy.capacity(4), 3)
+    assert.strictEqual(policy.why(4), 'memory', 'memory warns, though the CPU is calm')
   })
 
   it('uses available-memory pressure when no native pressure level exists', () => {

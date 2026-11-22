@@ -552,6 +552,13 @@ describe('the API', () => {
                   althar: null,
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
+              GetPlaces: () => Effect.succeed({ busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }),
+              GetWorkers: () =>
+                Effect.succeed({
+                  enabled: true,
+                  workers: [{ workerId: 'wrk_' + '1'.repeat(32), connected: false, busy: false, providers: [], projects: [], task: null }],
+                }),
+              RemoveWorker: () => Effect.void,
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
               DismissSignInEnding: () => Effect.void,
               GetModelRooms: () => Effect.succeed([]),
@@ -818,6 +825,10 @@ describe('the API', () => {
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         // Where Althar's processes can't be read, its work's part is unknown, not none.
         assert.strictEqual((yield* client.GetLoad({})).shares, null)
+        assert.deepStrictEqual(yield* client.GetPlaces({}), { busy: 1, configured: 4, atOnce: 1, why: 'memory', waiting: 2 })
+        // A worker offline says nothing of what it is.
+        assert.notProperty((yield* client.GetWorkers({})).workers[0], 'capacity')
+        yield* client.RemoveWorker({ commandId, workerId: 'wrk_' + '1'.repeat(32) })
         // A search crosses with what matched; one asking for too many, or for pages of text, never leaves.
         const [found] = (yield* client.SearchTasks({ text: 'retr', projectId: 'p2' })).tasks
         assert.deepStrictEqual([found?.projectId, found?.matched?.[1]], ['p2', { text: 'retr', hit: true }])
