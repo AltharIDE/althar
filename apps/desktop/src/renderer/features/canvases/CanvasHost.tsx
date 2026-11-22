@@ -56,6 +56,8 @@ export interface CanvasHostProps {
    * of its own (null while the row is laid out).
    */
   readonly actionsIn?: Element | null
+  /** With `actionsIn`, a row that isn't the artifact's own (a task's): its name and its close go there too. */
+  readonly titled?: boolean
 }
 
 const LONGEST_SELECTION = 240
@@ -106,7 +108,7 @@ export const svgAddress = (svg: string) => {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn }: CanvasHostProps) {
+export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn, titled }: CanvasHostProps) {
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
   const version = detail.data === undefined ? null : shownVersion(detail.data, open)
@@ -238,13 +240,13 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
       comments={comments}
       onClose={onClose}
       {...(onBack === undefined ? {} : { onBack })}
-      {...(actionsIn === undefined ? {} : { actionsIn })}
+      {...(actionsIn === undefined ? {} : { actionsIn, ...(titled === true ? { titled } : {}) })}
       {...(summary === undefined || version === null || error !== undefined
         ? {}
         : {
             extra: (
               <>
-                <SaveCanvas summary={summary} version={latest} />
+                <SaveCanvas summary={summary} version={latest} {...(titled === true ? { compact: true } : {})} />
                 <DownloadCanvas
                   projectId={summary.projectId}
                   canvasId={summary.id}

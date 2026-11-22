@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import type { ArtifactsHome, ArtifactsHow, CanvasDetail, CanvasSaved, CanvasSummary } from '@althar/contracts'
-import { Button, Popover, Room, SaveToRepo, Skeleton } from '@althar/ui'
+import { Button, IconButton, Popover, Room, SaveToRepo, Skeleton } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -50,7 +50,16 @@ export const savingOf = (
   },
 })
 
-export function SaveCanvas({ summary, version }: { summary: CanvasSummary; version: number }) {
+export function SaveCanvas({
+  summary,
+  version,
+  compact = false,
+}: {
+  summary: CanvasSummary
+  version: number
+  /** In a task's own top row, where room is short: an icon, its words in its tooltip. */
+  compact?: boolean
+}) {
   const { client } = useServices()
   const cache = useQueryClient()
   const navigate = useNavigate()
@@ -83,24 +92,38 @@ export function SaveCanvas({ summary, version }: { summary: CanvasSummary; versi
       void cache.invalidateQueries({ queryKey: keys.canvases(projectId) })
     })
 
-  const trigger =
-    saved === null ? (
-      <Button variant="quiet" size="small" icon="branch">
-        {text.save}
-      </Button>
-    ) : saved.state === 'saving' ? (
-      <Button variant="quiet" size="small" busy>
-        {text.saving}
-      </Button>
-    ) : saved.state === 'failed' ? (
-      <Button variant="quiet" size="small" icon="problem" title={saved.problem ?? undefined}>
-        {text.failed}
-      </Button>
-    ) : (
-      <Button variant="quiet" size="small" icon="commit" title={`${saved.repository}/${saved.path}`}>
-        {text.inGit}
-      </Button>
-    )
+  const trigger = compact ? (
+    <IconButton
+      icon={saved === null ? 'branch' : saved.state === 'failed' ? 'problem' : 'commit'}
+      label={
+        saved === null
+          ? text.save
+          : saved.state === 'saving'
+            ? text.saving
+            : saved.state === 'failed'
+              ? text.failed
+              : `${text.inGit} ${saved.repository}/${saved.path}`
+      }
+      tooltip="below"
+      size="small"
+    />
+  ) : saved === null ? (
+    <Button variant="quiet" size="small" icon="branch">
+      {text.save}
+    </Button>
+  ) : saved.state === 'saving' ? (
+    <Button variant="quiet" size="small" busy>
+      {text.saving}
+    </Button>
+  ) : saved.state === 'failed' ? (
+    <Button variant="quiet" size="small" icon="problem" title={saved.problem ?? undefined}>
+      {text.failed}
+    </Button>
+  ) : (
+    <Button variant="quiet" size="small" icon="commit" title={`${saved.repository}/${saved.path}`}>
+      {text.inGit}
+    </Button>
+  )
   return (
     <Popover label={text.label} trigger={trigger} open={open} onOpenChange={setOpen} align="end" padded={false}>
       {open && !ready && <Skeleton width="70%" className={s.waiting} />}

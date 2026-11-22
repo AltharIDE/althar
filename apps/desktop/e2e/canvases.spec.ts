@@ -48,7 +48,9 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' })).toBeVisible()
     const panel = page.getByRole('complementary', { name: 'Sign-in page' })
     await expect(panel).toBeVisible()
-    await expect(panel.getByText('sign-in-page')).toBeVisible()
+    // Its name and close are in the task's own row, not in a head of its own.
+    await expect(page.getByRole('button', { name: 'Close the panel' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
 
     // It is a view of its own at its version's address, in the project's canvas partition, its style from a file beside it.
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/^althar-canvas:\/\/[0-9a-f]{32}\/v1\/$/)
@@ -89,7 +91,8 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
       selection?.removeAllRanges()
       selection?.addRange(range)
     })
-    await doc.getByRole('button', { name: 'Comment' }).click()
+    // Its actions are in the task's own row, after its header: the canvas has no head of its own.
+    await page.getByRole('button', { name: 'Comment', exact: true }).click()
     const field = doc.getByPlaceholder('Comment on “B, split:”')
     await field.fill('Put the picture on the left, so the field is read first.')
     await shoot(page, electronApp, doc, 'test-results/canvas-comment.png')
@@ -110,15 +113,15 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // Its line for v2: the reply streams in before the window has read the line, so it is waited for, not taken as the last.
     await directions.filter({ hasText: 'v2' }).click()
     const again = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(again.getByText('v2', { exact: true })).toBeVisible()
+    await expect(page.getByText('v2', { exact: true })).toBeVisible()
     await expect(again.getByText(/on v1 · Answered/)).toBeVisible()
     await expect(again.getByText('Moved the picture to the left in v2.')).toBeVisible()
     await shoot(page, electronApp, again, 'test-results/canvas-v2.png')
 
     // A step back shows v1 as it was, and says v2 is out.
-    await again.getByRole('button', { name: 'Older version' }).click()
+    await page.getByRole('button', { name: 'Older version' }).click()
     await expect(again.getByText('v2 is out')).toBeVisible()
-    await expect(again.getByText('v1 of 2')).toBeVisible()
+    await expect(page.getByText('v1 of 2')).toBeVisible()
     await shoot(page, electronApp, again, 'test-results/canvas-older.png')
     await page.screenshot({ path: 'test-results/canvas-thread.png', scale: 'css' })
 

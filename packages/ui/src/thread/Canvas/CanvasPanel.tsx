@@ -123,6 +123,8 @@ export interface CanvasPanelProps {
    * head of its own, and its versions and actions go in this element (null while it is being laid out).
    */
   actionsIn?: Element | null
+  /** With `actionsIn`, where the row isn't the artifact's own (a task's): its name before its actions, and its close after. */
+  titled?: boolean
   /** A comment in the list pressed: its pin shows on its part. */
   onCommentPick?: (id: string) => void
   onClose: () => void
@@ -150,6 +152,7 @@ export function CanvasPanel({
   bar,
   onBack,
   actionsIn,
+  titled = false,
   onCommentPick,
   onClose,
   children,
@@ -175,7 +178,19 @@ export function CanvasPanel({
       )}
       {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
       {extra}
-      {onComment !== undefined && error === undefined && (
+      {onComment !== undefined && error === undefined && titled ? (
+        <IconButton
+          icon="comment"
+          label={t.comment}
+          tooltip="below"
+          size="small"
+          aria-pressed={writing}
+          onClick={() => {
+            setAimed(selected)
+            setWriting((was) => !was)
+          }}
+        />
+      ) : onComment !== undefined && error === undefined ? (
         <ActionButton
           icon="comment"
           aria-pressed={writing}
@@ -186,7 +201,7 @@ export function CanvasPanel({
         >
           {t.comment}
         </ActionButton>
-      )}
+      ) : null}
     </>
   )
   const content = (
@@ -268,7 +283,25 @@ export function CanvasPanel({
   if (actionsIn !== undefined)
     return (
       <aside className={cx(s.panel, s.bare)} aria-label={title}>
-        {actionsIn !== null && createPortal(<span className={s.inRow}>{actions}</span>, actionsIn)}
+        {actionsIn !== null &&
+          createPortal(
+            <span className={s.inRow}>
+              {titled && (
+                <>
+                  <span className={s.rowRule} aria-hidden="true" />
+                  <span className={s.panelTile} aria-hidden="true">
+                    <Icon name="canvas" size={14} />
+                  </span>
+                  <span className={s.rowTitle} title={title}>
+                    {title}
+                  </span>
+                </>
+              )}
+              {actions}
+              {titled && <IconButton icon="close" label={t.close} tooltip="below" tooltipAlign="end" size="small" onClick={onClose} />}
+            </span>,
+            actionsIn,
+          )}
         {content}
       </aside>
     )

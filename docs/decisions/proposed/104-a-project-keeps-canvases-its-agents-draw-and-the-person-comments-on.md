@@ -652,7 +652,12 @@ design tool lays out frames.
   runs in; nothing of it is in Althar's window.
 - **It shows every board of a page, every page at once, or one board at a
   time.** A page's boards wrap into as many lines as shows them largest in
-  the view. Its controls float over the boards, as a design tool's do
+  the view. Nothing stacks over a canvas but one row: opened as itself,
+  the artifact's own (in the project's place); beside a task's
+  conversation, the task's, with the canvas's name, versions and actions
+  at its end. The canvas has no head of its own and no line of facts;
+  only a newer version than the one shown is said over it, with Show.
+  Its controls float over the boards, as a design tool's do
   (the kit's `BoardsControls`): at the top left the page, and every board
   or one at a time with a step through every page's boards; at the top
   right the zoom; along the bottom the tools. Nothing of Althar's window

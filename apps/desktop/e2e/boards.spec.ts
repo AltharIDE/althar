@@ -167,7 +167,9 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await shoot(page, electronApp, page, 'test-results/boards-pinned.png')
 
     // Save to repo opens on the project's place for artifacts, the canvas's folder named in place; the canvas steps aside for it.
-    await panel.getByRole('button', { name: 'Save to repo' }).click()
+    // What is for the whole artifact is in the task's own row, after its header: the canvas has no head of its own.
+    await expect(panel.getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Save to repo' }).click()
     const save = page.getByRole('dialog', { name: 'Save to repo' })
     await expect(save.getByRole('textbox', { name: 'Its folder’s name' })).toHaveValue('gift-a-class')
     await expect.poll(() => canvasView(electronApp)).toBeNull()
@@ -175,7 +177,7 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.keyboard.press('Escape')
     await expect(save).toBeHidden()
     // Download offers what a canvas of boards downloads as.
-    await panel.getByRole('button', { name: 'Download' }).click()
+    await page.getByRole('button', { name: 'Download' }).click()
     await expect(page.getByRole('menuitem', { name: /PNG, a board each/ })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: /PDF, a page a board/ })).toBeVisible()
     await expect.poll(() => canvasView(electronApp)).toBeNull()

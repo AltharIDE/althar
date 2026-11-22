@@ -367,9 +367,27 @@ button.pinMark:hover {
   flex-direction: column;
   background: var(--paper);
 }
-/* its versions and actions, at the end of the artifact's row */
+/* its versions and actions, at the end of the artifact's row, or after a task's own */
 .inRow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+.rowRule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line);
+}
+.rowTitle {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
 }

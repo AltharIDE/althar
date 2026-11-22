@@ -134,6 +134,11 @@ export const useThreadHost = (
   code: { readonly threadId: string | null; readonly taskId: string | null } | null = null,
   page: ThreadPage | null = null,
   conversation = true,
+  /**
+   * The conversation's own top row, where a canvas beside it puts its name, versions and actions rather than a head of its
+   * own (a task's); undefined where there is none to put them in.
+   */
+  canvasRow?: Element | null,
 ): ThreadHost => {
   const [pictures, setPictures] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [doc, setDoc] = useState<DocRef | null>(null)
@@ -234,6 +239,7 @@ export const useThreadHost = (
           draft={page?.draft ?? null}
           onVersion={(version) => setCanvas({ ...shownCanvas, version, follow: false })}
           onClose={() => setCanvas(null)}
+          {...(canvasRow === undefined ? {} : { actionsIn: canvasRow, titled: true })}
         />
       ) : null
     if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null && shown === null) return undefined
