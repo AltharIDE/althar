@@ -41,6 +41,11 @@ import { watchRuntimeAttention } from './runtimeAttention'
 import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
+import { computerChannel, handleComputerWindow } from './computer/ipc'
+import { displayInputSafe } from './computer/display'
+import { computerSessions } from './computer/sessions'
+import { computerWorker } from './computer/worker'
+import { testComputerWorker } from './computer/testNative'
 import { type Canvases, startCanvases } from './canvases/views'
 import { type Resize, servePicture } from './pictures'
 import type { Shot } from '@althar/runtime'
@@ -78,6 +83,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  globalShortcut,
   nativeTheme,
   net,
   Notification,
@@ -85,6 +91,7 @@ import {
   powerSaveBlocker,
   protocol,
   safeStorage,
+  screen,
   shell,
   systemPreferences,
   type UtilityProcess,
@@ -611,6 +618,30 @@ const openThread = (threadId: string) => {
   else send()
 }
 
+const computers = computerSessions({
+  worker: () => (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1' ? testComputerWorker() : computerWorker(here)),
+  available: () =>
+    process.platform === 'darwin' ||
+    process.platform === 'win32' ||
+    (process.platform === 'linux' && Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)),
+  canAsk: () => !quitting && localWindows().size > 0,
+  // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
+  canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
+  desktopInputSafe: (action, frame) => {
+    const focused = BrowserWindow.getFocusedWindow()
+    if (focused !== null && mine(focused.webContents)) return false
+    const protectedWindows = BrowserWindow.getAllWindows()
+      .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
+      .map((window) => window.getBounds())
+    return displayInputSafe(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows)
+  },
+  changed: (state) => {
+    for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
+    if (state.phase === 'asking') openThread(state.threadId)
+  },
+})
+const computerConnection = computerChannel(computers)
+
 /**
  * What the runtime says needs the person: a notification of each kind they
  * want told, unless they are looking at the window, where it shows already;
@@ -764,7 +795,11 @@ const startRuntime = () => {
       for (const port of Array.isArray(message.ports) ? message.ports : []) if (Number.isInteger(port)) listening.add(port as number)
       return
     }
-    if (message.type === 'settled') return void pages?.moment('settled', ownersIn(message.owners)).catch(() => undefined)
+    if (message.type === 'settled') {
+      const owners = ownersIn(message.owners)
+      for (const owner of owners) computers.stop(owner, 'The task ended.')
+      return void pages?.moment('settled', owners).catch(() => undefined)
+    }
     if (message.type === 'settled-among') {
       if (message.requestId !== undefined) settling.get(message.requestId)?.(ownersIn(message.value))
       if (message.requestId !== undefined) settling.delete(message.requestId)
@@ -773,6 +808,10 @@ const startRuntime = () => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'page' || message.type === 'page-cancel') return pageCall(child, message)
+    if ((message.type === 'computer' || message.type === 'computer-cancel' || message.type === 'computer-turn-ended') && runtime === child)
+      return computerConnection.handle(message, (requestId, done) => {
+        if (runtime === child) child.postMessage({ type: 'computer-done', requestId, ...done })
+      })
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
@@ -800,6 +839,7 @@ const startRuntime = () => {
     stopAttention()
     stopWatchingOnline()
     runtime = undefined
+    computerConnection.stop('The task runtime stopped.')
     if (quitting) logs.info('Runtime exited', { code })
     else logs.error('Runtime exited', { code })
     // Nothing runs without the runtime; a new one says again.
@@ -1344,6 +1384,14 @@ void ready.then(() => {
     quitting: () => quitting,
   })
   handlePages(pages, mineLocal)
+  handleComputerWindow(computers, mineLocal)
+  powerMonitor.on('lock-screen', () => computerConnection.stop('The screen locked.'))
+  powerMonitor.on('suspend', () => computerConnection.stop('The computer went to sleep.'))
+  powerMonitor.on('user-did-resign-active', () => computerConnection.stop('The graphical session changed.'))
+  screen.on('display-added', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-removed', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-metrics-changed', () => computerConnection.stop('The screen layout changed.'))
+  globalShortcut.register('CommandOrControl+Shift+Escape', () => computerConnection.stop('Computer access stopped by you.'))
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
   // The ground a canvas of boards is drawn on, read once it is first wanted.
   let groundScript: string | null = null
@@ -1485,6 +1533,7 @@ app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
+  computerConnection.stop('The Althar window closed.')
   // With no window left to draw, macOS still carries on with its background work.
   firstScreenDrawn = true
   releaseBackground()
@@ -1602,6 +1651,7 @@ app.on('before-quit', (event) => {
   }
   event.preventDefault()
   quitting = true
+  computerConnection.stop('Althar is quitting.')
   dictation?.stop()
   // Pages whose cookies are kept only until Althar quits clear them as it goes, a few seconds at most.
   const cleared = Promise.race([pages?.moment('quit'), new Promise((resolve) => setTimeout(resolve, 4_000))]).catch(() => undefined)

@@ -109,6 +109,7 @@ import { coordinatorSigned } from '../../shared/signed'
 import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
 import { outcomeOf } from '../../shared/outcome'
 import { TaskThread, workStepText } from './TaskThread'
+import { ComputerUse } from './ComputerUse'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
@@ -2042,6 +2043,8 @@ export function TaskView({
                             )}
                           />
                         </ThreadWaysContext.Provider>
+                        {/* What the turn at work uses on this computer, under it, where the person is reading; its picture opens as the thread's do. */}
+                        <ComputerUse taskId={snapshot.task.id} />
                       </ThreadShellProvider>
                       {closing}
                     </Thread>

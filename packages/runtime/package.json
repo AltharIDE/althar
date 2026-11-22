@@ -13,6 +13,7 @@
     "./attachments": "./src/attachments.ts",
     "./screenshots": "./src/screenshots.ts",
     "./pageBridge": "./src/pageBridge.ts",
+    "./computerBridge": "./src/computerBridge.ts",
     "./pullRequestReview": "./src/pullRequestReview.ts",
     "./privateFiles": "./src/privateFiles.ts",
     "./workerHome": "./src/workerHome/index.ts",

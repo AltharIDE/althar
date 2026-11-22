@@ -13,6 +13,7 @@ import {
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
+import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
 
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
@@ -123,6 +124,10 @@ ipcRenderer.on('althar:quit-ask', (_event, question: unknown) => {
 
 /* How each page beside a conversation stands, and what the person pressed in one that the window acts on, as main says. */
 const paging = new Set<(state: PageState) => void>()
+const computerStates = new Set<(state: ComputerState) => void>()
+ipcRenderer.on('althar:computer-state', (_event, state: ComputerState) => {
+  for (const listener of computerStates) listener(state)
+})
 ipcRenderer.on('althar:page', (_event, state: PageState) => {
   for (const listener of paging) listener(state)
 })
@@ -359,6 +364,16 @@ contextBridge.exposeInMainWorld('althar', {
     answer: (answer: string): void => ipcRenderer.send('althar:quit-answer', answer),
   },
   // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-100).
+  computer: {
+    states: (): Promise<ReadonlyArray<ComputerState>> => ipcRenderer.invoke('althar:computer-states'),
+    allow: (task: string, decision: ComputerDecision): Promise<boolean> => ipcRenderer.invoke('althar:computer-allow', task, decision),
+    control: (task: string, action: 'pause' | 'resume' | 'stop'): Promise<boolean> =>
+      ipcRenderer.invoke('althar:computer-control', task, action),
+    subscribe: (listener: (state: ComputerState) => void): (() => void) => {
+      computerStates.add(listener)
+      return () => void computerStates.delete(listener)
+    },
+  },
   pages: {
     open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
     states: (): Promise<unknown> => ipcRenderer.invoke('althar:pages-states'),

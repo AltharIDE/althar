@@ -1231,6 +1231,64 @@ const playRole = async (
         await told('canvas_publish', { name: 'sign-in-page', title: 'Sign-in page', note: 'Direction A, as a page' })
         return said.join('\n\n')
       }
+      // The two native test apps pass a file using their own UI.
+      if (text.includes('[lead:computer]') && available.has('computer')) {
+        const ask = (args: Record<string, unknown>) => call('computer', args)
+        const visual = text.includes('[computer:visual-fixture]')
+        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.' })
+        let windows: ReadonlyArray<{ readonly id: string; readonly title: string }>
+        try {
+          windows = (JSON.parse(approved) as { readonly windows: typeof windows }).windows
+        } catch {
+          return approved
+        }
+        const writer = windows.find((one) => one.title === 'Computer Writer fixture')
+        const reader = windows.find((one) => one.title === 'Computer Reader fixture')
+        if (writer === undefined || reader === undefined) return 'Writer and Reader need approval.'
+        const input = async (target: string, label: string, args: Record<string, unknown>) => {
+          const snapshot = await ask({ op: 'observe', target, screenshot: visual })
+          const observation = /Observation ([0-9a-f-]{36})/.exec(snapshot)?.[1]
+          const element = snapshot
+            .split('\n')
+            .find((line) => line.includes(` "${label}"`))
+            ?.match(/^(e[0-9]+) /)?.[1]
+          const dimensions = /Screenshot ([0-9]+)x([0-9]+)/.exec(snapshot)
+          // The Electron fixture needs renderer keyboard input. UIA can report a value that its renderer hasn't received.
+          const usePixels = visual && (args.op === 'type' || element === undefined)
+          const at =
+            usePixels && dimensions !== null
+              ? { x: Math.floor(Number(dimensions[1]) * 0.5), y: Math.floor(Number(dimensions[2]) * (label === 'Note' ? 0.3 : 0.64)) }
+              : element === undefined
+                ? null
+                : { element }
+          if (observation === undefined || at === null) return snapshot
+          return ask({ ...args, target, observation, at, foreground: usePixels })
+        }
+        const written = await input(writer.id, 'Note', { op: 'type', text: 'Reviewed report' })
+        const observed = await ask({ op: 'observe', target: writer.id })
+        if (!visual && !observed.includes('Reviewed report')) return `Writer did not confirm the note. ${written} ${observed}`
+        const exported = await input(writer.id, 'Export note', { op: 'click' })
+        const transfer = await input(reader.id, 'Import note', { op: 'click' })
+        const verified = await ask({ op: 'observe', target: reader.id })
+        if (!visual && !verified.includes('Reviewed report')) return `Reader did not confirm the note. ${exported} ${transfer} ${verified}`
+        const evidence = await ask({ op: 'evidence', target: reader.id, caption: 'Reader shows the transferred note.' })
+        await ask({ op: 'release' })
+        // It hands that capture as its evidence too, as a lead does, where it has a step to hand it to.
+        const capture = /computer_capture: (\S+?)\.?$/.exec(evidence)?.[1]
+        if (capture !== undefined && available.has('finish_step')) {
+          const report = {
+            summary: 'Transferred the note from Writer to Reader.',
+            built: 'The reviewed note passes from Writer to Reader through their own Export and Import, and Reader shows it.',
+            evidence: [{ kind: 'screenshot', caption: 'Reader shows the transferred note', computer_capture: capture, view: 'Reader' }],
+          }
+          const answer = await call('finish_step', report)
+          if (answer.startsWith("Write the description of the task's pull request"))
+            await call('finish_step', { ...report, descriptions: [{ text: DESCRIBED }] })
+        }
+        return visual
+          ? `Opened the handoff in Reader. ${written} ${exported} ${transfer} ${evidence}`
+          : `Writer and Reader both show Reviewed report. ${evidence}`
+      }
       // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
       // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
       // what each of Althar's tools answered.
