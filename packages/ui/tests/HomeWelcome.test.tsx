@@ -157,7 +157,7 @@ describe('a home’s welcome, every time after', () => {
 
   it('says under the update command where it can’t be sure that’s how the home was installed', () => {
     welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'unknown' } })
-    expect(screen.getByText(/That’s for a home Althar installed. If runner-1 was installed another way/)).not.toBeNull()
+    expect(screen.getByText(/That’s for a home Althar installed. If you set runner-1 up another way, update it that way/)).not.toBeNull()
     cleanup()
     welcome({ toured: true, update: { command: "sh '/opt/althar/launcher' update --apply --wait", installed: 'custom' } })
     expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()

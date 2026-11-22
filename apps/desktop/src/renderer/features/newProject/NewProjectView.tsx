@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { Button, keys, LinkButton, modKey, OtherTools, Problem, RepositoryPick } from '@althar/ui'
-import { homeWelcomeText, NewProject } from '@althar/ui/screens'
+import { CommandText, homeWelcomeText, NewProject } from '@althar/ui/screens'
 
 import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -135,7 +135,7 @@ export function NewProjectView({
           >
             {homeWelcomeText.older(home.name)}
           </Problem>
-          <code className={s.olderCommand}>{update.command}</code>
+          <CommandText command={update.command} className={s.olderCommand} />
           {update.installed !== 'known' && <p className={s.olderUnsure}>{homeWelcomeText.updateUnsure(home.name, update.installed)}</p>}
         </main>
       </div>

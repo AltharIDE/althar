@@ -714,7 +714,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  /* Wide enough for the whole update command on one line, scrolling only in a narrow window. */
   max-width: min(720px, 100%);
   padding: 8px 8px 8px 14px;
   border-radius: 12px;
@@ -739,13 +738,20 @@
   text-wrap: pretty;
   animation: blur-in 440ms linear 400ms backwards;
 }
-.updateCommand {
-  overflow-x: auto;
-  min-width: 0;
+.command {
   font-family: var(--mono);
   font-size: 12.5px;
+  line-height: 1.5;
   color: var(--t-1);
-  white-space: nowrap;
+}
+/* Each word whole, so a command wraps only at its spaces; one longer than the line breaks where it must. */
+.commandWord {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.updateCommand {
+  min-width: 0;
 }
 
 .strip {

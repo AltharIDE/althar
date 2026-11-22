@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 
 import type { Brand } from '../../foundations/brands/brands'
@@ -163,7 +163,7 @@ export const homeWelcomeText: HomeWelcomeText = {
   updateUnsure: (name, installed) =>
     installed === 'custom'
       ? `That’s the launcher this window connects with. If it runs ${name} from a source checkout, pull and rebuild there instead.`
-      : `That’s for a home Althar installed. If ${name} was installed another way, update it the way it was installed.`,
+      : `That’s for a home Althar installed. If you set ${name} up another way, update it that way.`,
   copyUpdate: 'Copy the update command',
 }
 
@@ -225,6 +225,24 @@ const gigabytes = (bytes: number, base: number) => Math.round(bytes / base ** 3)
 const sizeOf = (bytes: number) => {
   const gb = gigabytes(bytes, 1000)
   return gb >= 1000 ? `${(gb / 1000).toFixed(gb >= 10_000 ? 0 : 1).replace(/\.0$/, '')} TB` : String(gb)
+}
+
+/**
+ * A command to run, whole, wrapping only between its words where it's longer
+ * than the line: never inside one, as at a flag's dashes, unless a word is
+ * longer than the line itself. Copied as it is.
+ */
+export function CommandText({ command, className }: { readonly command: string; readonly className?: string }) {
+  return (
+    <code className={cx(s.command, className)}>
+      {command.split(' ').map((word, at) => (
+        <Fragment key={at}>
+          {at > 0 && ' '}
+          <span className={s.commandWord}>{word}</span>
+        </Fragment>
+      ))}
+    </code>
+  )
 }
 
 export function HomeWelcome({
@@ -768,7 +786,7 @@ function Arrival({
       ) : (
         <section className={s.updating} aria-label={t.updateLabel(name)}>
           <div className={s.update}>
-            <code className={s.updateCommand}>{update.command}</code>
+            <CommandText command={update.command} className={s.updateCommand} />
             <Button
               size="small"
               icon={copied === 'update' ? 'check' : 'copy'}
