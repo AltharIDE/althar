@@ -233,9 +233,11 @@ export const still = (page: Page) =>
 /** Reveal the current node without waiting on one that a streamed update can replace while it settles. */
 export const reveal = async (page: Page, what: Locator) => {
   await expect(what).toBeVisible()
-  await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
   await still(page)
-  await expect(what).toBeInViewport()
+  await expect(async () => {
+    await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }), undefined, { timeout: budget.small })
+    await expect(what).toBeInViewport({ timeout: budget.small })
+  }).toPass({ timeout: budget.medium })
 }
 
 /** Sizes Althar's window, and waits until its page is laid out at the new width. */
