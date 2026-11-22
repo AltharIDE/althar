@@ -27,6 +27,7 @@ export type PartTone = 'you' | 'bad' | 'live'
 export interface PartAction {
   label: string
   onClick: () => void
+  disabled?: boolean
   onBypassQueue?: () => void
   /** It is Merge: where its merge stands from the press on, said in its place, Merge answering the press. */
   standing?: MergeStanding | null
@@ -141,6 +142,7 @@ function Act({ action, sure, onSure }: { action: PartAction; sure: boolean; onSu
       {...(action.icon === undefined ? {} : { icon: action.icon })}
       {...(action.kbd === undefined ? {} : { kbd: action.kbd })}
       className={action.end === true ? s.end : undefined}
+      disabled={action.disabled ?? false}
       onClick={() => (action.confirm !== undefined && !sure ? onSure(true) : action.onClick())}
     >
       {action.label}

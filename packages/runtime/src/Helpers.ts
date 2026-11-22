@@ -9,7 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Accounts } from './Accounts'
 import { touchTask } from './cards'
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { Connectivity } from './Connectivity'
 import { Installs } from './Installs'
 import { Limits } from './Limits'
@@ -27,6 +27,7 @@ import { timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolServer } from './ToolServer'
+import { taskWorker } from './workerExecution'
 
 /*
  * Helpers (ADR-087, as "a task is a conversation plus parts" amends it). A
@@ -48,7 +49,7 @@ import { ToolServer } from './ToolServer'
  */
 
 type Models = Agents | ModelsService | ModelFacts | SignIns | Installs | Limits | Accounts | PlanUsage
-type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Live | ToolServer | Connectivity | Models
+type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Live | ToolServer | Connectivity | Models | RuntimeConfig
 
 /** How many of a task's helpers may be at work or waiting for a place (four at work at once: Busy.ts), and in its life. */
 export const HELPERS_AT_WORK_OR_WAITING = 10
@@ -116,6 +117,7 @@ export class Helpers extends Context.Service<
       const sessions = yield* Sessions
       const live = yield* Live
       const toolServer = yield* ToolServer
+      const workerPlatform = (yield* RuntimeConfig).workers
       // A failing service is tried again after each of a step's pauses (ADR-060): 15 s, 1 min, 4 min.
       const pauses = (yield* Connectivity).pauses
       // Only work present as this service starts can belong to the previous runtime. A new helper may still be starting
@@ -171,6 +173,16 @@ export class Helpers extends Context.Service<
             const id = `hlp_${(yield* newId(Ids.thread)).slice(4)}`
             const threadId = yield* newId(Ids.thread)
             // Its copy: the change's worktree as it stands, untracked files too, checked out apart.
+            if (copied) {
+              const workerId = yield* taskWorker(input.taskId)
+              if (workerId !== null) {
+                const checkpoint = workerPlatform?.checkpointWorktree
+                if (checkpoint === undefined) return 'This worker cannot make a separate helper checkout yet.'
+                const saved = yield* Effect.exit(checkpoint({ workerId, projectId: workspace.projectId, worktree: workspace.path }))
+                if (saved._tag === 'Failure')
+                  return `Althar couldn't save ${changeWords} from the worker before copying it. Try again once the worker has reconnected.`
+              }
+            }
             const made = copied ? yield* Effect.exit(copyFor(workspace.path, id)) : undefined
             if (made !== undefined && made._tag === 'Failure')
               return `Althar couldn't make a copy of ${changeWords} for the helper. Try again, or hand it the change itself.`

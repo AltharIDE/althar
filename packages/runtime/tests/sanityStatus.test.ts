@@ -143,6 +143,8 @@ describe('how many things wait, as the Dock, the menu bar and the notifications 
       })
       yield* sessions.startLast(task.threadId)
       yield* card((one) => one.phase === 'ready' && one.replied !== undefined)
+      const home = yield* queries.home()
+      assert.isDefined(home.tasks.find((one) => one.taskId === task.taskId)?.replied)
       // It waits on the person, with the two that finished elsewhere.
       assert.strictEqual(yield* countedNow(events), 3)
       yield* stop

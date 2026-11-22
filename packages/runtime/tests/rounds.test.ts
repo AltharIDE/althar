@@ -927,11 +927,13 @@ describe('a merged task with commits after its pull request', () => {
         const task = yield* merged(working, bare, github)
         const before = yield* taskRow(task.taskId)
         assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, [])
+        assert.isFalse((yield* queries.home()).tasks.some((card) => card.taskId === task.taskId))
 
         // As DEV-58's lead did: a commit after the pull request merged, in no round and no pull request.
         const slider = commitIn(task.path, 'slider.txt', 'Slider')
         const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
         assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
+        assert.deepStrictEqual((yield* queries.home()).tasks.find((card) => card.taskId === task.taskId)?.unshipped, ready?.unshipped)
         assert.deepStrictEqual(yield* taskRow(task.taskId), before)
         // In Needs you, it offers something to do about it: before, a merged task offered nothing at all.
         assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, ['leaveOut'])
@@ -970,6 +972,7 @@ describe('a merged task with commits after its pull request', () => {
         yield* say(task.threadId, 'Tidy it up, and push pls.')
         yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
         const queries = yield* Queries
+        assert.isDefined((yield* queries.home()).tasks.find((one) => one.taskId === task.taskId)?.held)
         yield* until(
           Effect.map(queries.thread(task.threadId), (header) => header.task.actions),
           (actions) => actions.includes('leaveOut'),

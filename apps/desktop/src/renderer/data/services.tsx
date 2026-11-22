@@ -192,6 +192,7 @@ export type WelcomeMilestone =
 
 export interface Host {
   readonly homes?: HomesHost
+  readonly saveWorkerSnapshot?: (request: { readonly projectId: string; readonly taskId: string }) => Promise<void>
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
   readonly welcomeUsage?: (...milestone: WelcomeMilestone) => void
