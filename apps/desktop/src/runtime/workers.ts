@@ -6,7 +6,7 @@ import type { listenWorkers, WorkerHomePaths } from '@althar/runtime/workerHome'
 import { Effect } from 'effect'
 
 /** A profile opts in by keeping a worker configuration. Loading the transport belongs to that profile only. */
-export const workersForProfile = (paths: WorkerHomePaths) =>
+export const workersForProfile = (paths: WorkerHomePaths, connectionChanged?: Parameters<typeof listenWorkers>[2]) =>
   Effect.gen(function* () {
     const exists = yield* Effect.tryPromise({
       try: async () => {
@@ -30,7 +30,7 @@ export const workersForProfile = (paths: WorkerHomePaths) =>
     return {
       execution: home.workerExecution(() => listener?.agentWorkers),
       listen: (homeId: string) =>
-        home.listenWorkers(paths, homeId).pipe(
+        home.listenWorkers(paths, homeId, connectionChanged).pipe(
           Effect.tap((listening) => {
             listener = listening
             return Effect.addFinalizer(() =>
