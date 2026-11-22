@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,6 +23,7 @@ import { keys } from '../src/renderer/data/reads'
 import { arrived, useCanvasArrivals } from '../src/renderer/features/canvases/arrivals'
 import { ArtifactsView, forgetArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
 import { useDraftCanvasVersions } from '../src/renderer/features/canvases/draftVersions'
+import { askToOpen } from '../src/renderer/features/canvases/opening'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
 import { commentsOf, forgetComments, gather, type GatheredComment } from '../src/renderer/shared/comments'
@@ -365,6 +366,12 @@ describe('a canvas as the Artifacts view lists it', () => {
     expect(rowOf(summary(OTHER, 'plan', version(1, { by: { role: 'lead', taskId: 'task_2', taskTitle: null } })), now).by).toBe(
       'Lead of a task',
     )
+    expect(rowOf(summary(OTHER, 'plan', version(1, { by: { role: 'chat', taskId: 'task_3', taskTitle: null } })), now).by).toBe('Its chat')
+  })
+
+  it('shows a picture as itself, smaller', () => {
+    const shot = rowOf(summary(OTHER, 'shot', version(1, { kind: 'picture', entry: 'shot.png' })))
+    expect(shot.picture).toMatch(new RegExp(`/shot/${'e'.repeat(64)}\\?w=\\d+$`))
   })
 })
 
@@ -577,6 +584,57 @@ describe('the project’s Artifacts view', () => {
     await userEvent.keyboard('{Escape}')
     expect(within(cards).queryByRole('button', { name: /^Sign-in flow/ })).toBeNull()
     expect(screen.getByText('1 of 3')).toBeTruthy()
+  })
+
+  it('opens one asked for beside a conversation, as the view shows and while it shows; Escape goes back to every artifact', async () => {
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
+    askToOpen(PROJECT, CANVAS)
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    expect(await panelOf('Sign-in flow, take 3')).toBeTruthy()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(await screen.findByRole('list', { name: 'The project’s artifacts' })).toBeTruthy()
+
+    act(() => askToOpen(PROJECT, OTHER))
+    expect(await screen.findByRole('button', { name: /^The plan/ })).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'The project’s artifacts' })).toBeNull()
+  })
+
+  it('opens one its own chat is still drawing, by that chat, with the canvas to come', async () => {
+    const drawing = { taskId: 'task_new', threadId: 'thr_new', projectId: PROJECT, title: 'Mood board', startedAt: NOW }
+    const { client } = canvasClient({
+      listCanvases: vi.fn(async () => listed),
+      listArtifactsDrawing: vi.fn(async () => [drawing]),
+    })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
+    await userEvent.click(await within(cards).findByRole('button', { name: /^Mood board/ }))
+    expect(await screen.findByRole('button', { name: /^Mood board/ })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Its chat' })).toBeTruthy()
+    expect(screen.queryByRole('complementary')).toBeNull()
+    expect(client.startTask).not.toHaveBeenCalled()
+  })
+
+  it('shows the picture kept of a page or a canvas of boards on its card, and a drawing of its kind until one is', async () => {
+    const page = summary(CANVAS, 'sign-in-flow', version(3, { kind: 'html', entry: 'index.html' }))
+    const boards = summary(OTHER, 'plan', version(1, { title: 'The plan', kind: 'boards', entry: 'canvas.json' }))
+    const kept = 'data:image/png;base64,iVBORw0KGgo='
+    const picture = vi.fn(async (manifest: string) => (manifest === page.latest.manifest ? kept : null))
+    const host = fakeHost({
+      canvases: { show: vi.fn(), close: vi.fn(), reload: vi.fn(), still: vi.fn(async () => null), cover: vi.fn(async () => {}), picture },
+    })
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => [page, boards]) })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client, host)
+    const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
+    const card = (name: RegExp) => within(cards).getByRole('button', { name })
+    await waitFor(() =>
+      expect(
+        card(/^Sign-in flow/)
+          .querySelector('img')
+          ?.getAttribute('src'),
+      ).toBe(kept),
+    )
+    expect(picture).toHaveBeenCalledWith(boards.latest.manifest)
+    expect(card(/^The plan/).querySelector('img')).toBeNull()
   })
 
   it('says why the list couldn’t be read', async () => {

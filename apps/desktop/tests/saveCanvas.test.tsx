@@ -195,6 +195,25 @@ describe('the project’s place for artifacts, in its settings', () => {
     expect(each).toHaveProperty('disabled', true)
     expect(await screen.findByText('Set by the first save')).toBeTruthy()
   })
+
+  it('makes Althar’s pick the place where the project has none yet, with how they go changed', async () => {
+    const guess = { ...HOME.home!, folder: 'docs/', why: 'Where meridian-api keeps its designs' }
+    const { client } = fakeClient({ getArtifactsPlace: vi.fn(async () => ({ home: null, guess })) })
+    withServices(<ArtifactsGroup projectId={PROJECT} />, client)
+    await userEvent.click(await screen.findByRole('combobox', { name: 'How they go in' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Straight to its default branch' }))
+    expect(client.setArtifactsHome).toHaveBeenCalledWith(PROJECT, { repositoryId: 'repo_api', folder: 'docs/', how: 'main', follow: true })
+    expect(await screen.findByText('Committed to the repository’s default branch')).toBeTruthy()
+  })
+
+  it('sets the place picked where the project has none and no pick, as the first save would', async () => {
+    const { client } = fakeClient({ listRepositoryFolders: vi.fn(async () => ({ folders: ['design/'], truncated: false })) })
+    withServices(<ArtifactsGroup projectId={PROJECT} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Saved in' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'meridian-api/design/' }))
+    expect(client.setArtifactsHome).toHaveBeenCalledWith(PROJECT, { repositoryId: 'repo_api', folder: 'design/', how: 'pr', follow: true })
+    await waitFor(() => expect(screen.getByRole('switch', { name: /Commit each new version/ })).toHaveProperty('disabled', false))
+  })
 })
 
 describe('a canvas of boards in the window', () => {
