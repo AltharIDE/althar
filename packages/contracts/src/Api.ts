@@ -2168,6 +2168,15 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
  * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
@@ -2186,6 +2195,8 @@ export const NoticeItem = Schema.Struct({
     details: Schema.optional(Schema.String),
     /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
     links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+    /** The failed checks the line names, such as the merge queue's: the end of each one's log, or why it couldn't be read, folded under it. */
+    logs: Schema.optional(Schema.Array(CheckLogShown)),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
@@ -2414,15 +2425,6 @@ export const CanvasItem = Schema.Struct({
     open: Schema.Boolean,
   }),
 })
-
-/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
-export const CheckLogShown = Schema.Struct({
-  name: Schema.String,
-  url: Schema.NullOr(Schema.String),
-  log: Schema.NullOr(Schema.String),
-  missing: Schema.NullOr(Schema.String),
-})
-export type CheckLogShown = typeof CheckLogShown.Type
 
 /**
  * Something heard from outside, written by someone else: a comment or a

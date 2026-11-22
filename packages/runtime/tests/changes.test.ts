@@ -594,23 +594,23 @@ describe('a task that ends in a pull request', () => {
       const number = ready?.change?.number ?? 0
       const changes = yield* Changes
       yield* changes.merge(taskId, ready?.change?.head ?? '')
-      // The queue takes it out, its checks failed there: its thread names the job, shows its log tail and page, and how main stands.
+      // The queue takes it out, its checks failed there: its thread's line names each job, linked to its page, with each log's
+      // end, or why it couldn't be read, folded under it. The lead's words (the logs as text, their framing, its tools) aren't in it.
       github.queueCommit(number, 'group-sha')
       github.dequeue(number, 'checks')
       yield* changes.refresh(taskId)
-      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
-        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
-      )
-      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
-      const text = taken?.['description'] ?? ''
+      const line = 'The merge queue took PR #1 out: test and verify failed.'
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((notice) => notice['title'] === line))
+      const taken = heard.find((notice) => notice['title'] === line) as Record<string, unknown> | undefined
       assert.isDefined(taken)
-      assert.include(text, 'Failed on the queue build (group-s): test, verify.')
-      assert.include(text, 'FAIL limit.test.ts')
-      assert.include(text, 'https://example.com/jobs/1')
-      assert.include(text, "Althar couldn't read verify's log: GitHub refused (403)")
-      assert.include(text, 'https://example.com/jobs/2')
-      assert.include(text, 'test passes on main (main-0).')
-      assert.include(text, 'read_checks (queue: true)')
+      assert.isUndefined(taken?.['description'])
+      assert.deepInclude(taken?.['links'], { label: 'test', url: 'https://example.com/jobs/1' })
+      assert.deepInclude(taken?.['links'], { label: 'verify', url: 'https://example.com/jobs/2' })
+      const logs = taken?.['logs'] as ReadonlyArray<{ name: string; log: string | null; missing: string | null }>
+      assert.include(logs.find((log) => log.name === 'test')?.log, 'FAIL limit.test.ts')
+      assert.include(logs.find((log) => log.name === 'verify')?.missing, 'GitHub refused (403)')
+      assert.notInclude(JSON.stringify(taken), 'untrusted')
+      assert.notInclude(JSON.stringify(taken), 'read_checks')
     }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
   })
 
@@ -638,14 +638,14 @@ describe('a task that ends in a pull request', () => {
       github.queueCommit(number, 'group-sha')
       github.dequeue(number, 'checks')
       yield* changes.refresh(taskId)
-      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
-        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
-      )
-      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
-      const text = taken?.['description'] ?? ''
+      const line = 'The merge queue took PR #1 out: test failed.'
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((notice) => notice['title'] === line))
+      const taken = heard.find((notice) => notice['title'] === line)
       assert.isDefined(taken)
-      assert.include(text, 'Failed on the queue build (group-s): test.')
-      assert.include(text, 'The same jobs also fail on main (main-0): test. Their failure causes may differ.')
+      assert.strictEqual(
+        taken?.['description'],
+        'Its lead wasn’t asked to fix anything: test fails on main too. Put it back in the queue when you want, or ask its lead to look.',
+      )
     }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
   })
 

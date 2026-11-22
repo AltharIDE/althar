@@ -35,7 +35,7 @@ import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type 
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
-import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { CanvasLines, logLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { FailedTurn } from '../../shared/WayOut'
 import { holdsItem, stopOf } from '../../shared/virtual'
 import { PublishedReport, reportText, ReviewReport } from './Reports'
@@ -515,7 +515,21 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
+          <AltharLine
+            key={block.id}
+            tone={block.tone}
+            {...(block.details === undefined ? {} : { details: block.details })}
+            {...(block.logs === undefined
+              ? {}
+              : {
+                  logs: block.logs.map((log) => ({
+                    name: log.name,
+                    url: log.url,
+                    lines: log.log === null ? null : logLines(log.log),
+                    missing: log.missing,
+                  })),
+                })}
+          >
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
