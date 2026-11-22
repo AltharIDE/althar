@@ -10,16 +10,14 @@ import { ago, running } from './time'
  * itself (ADR-022, ADR-023).
  */
 
-/**
- * Where one answers, as the pill says it: the address without its scheme or a bare trailing slash. A run on a worker
- * answers through the home at an address of Althar's own, which says nothing: it is named by its worker, or as its preview.
- */
-export const addressOf = (url: string, workerId?: string) =>
-  workerPreviewTarget(url) === null
-    ? url.replace(/^https?:\/\//, '').replace(/\/$/, '')
-    : workerId === undefined
-      ? 'Preview'
-      : workerNameOf(workerId)
+/** A run on a worker answers through the home, at an address of Althar's own that says nothing: its link says this. */
+export const PREVIEW = 'preview'
+
+/** Where one answers, as the pill says it: the address without its scheme or a bare trailing slash; or its preview, on a worker. */
+export const addressOf = (url: string) => (workerPreviewTarget(url) === null ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : PREVIEW)
+
+/** Where a run on one of the home's workers runs, by the worker's name. */
+export const onOf = (workerId: string | undefined) => (workerId === undefined ? {} : { on: workerNameOf(workerId) })
 
 /** What runs, each with how long it has run, or when it ended by itself and how; with `where`, where each runs. */
 export const runningOf = (
@@ -37,7 +35,8 @@ export const runningOf = (
     ...(where && command.where !== undefined ? { where: command.where } : {}),
     // A branch's run names it on the pill, alone or among others.
     ...(command.branch == null ? {} : { branch: command.branch }),
-    ...(command.url === null ? {} : { url: addressOf(command.url, command.workerId) }),
+    ...(command.url === null ? {} : { url: addressOf(command.url) }),
+    ...onOf(command.workerId),
     ...(command.ended === null
       ? { since: running(command.startedAt, now) }
       : { since: ago(command.ended.at, new Date(now)), exited: command.ended.code }),

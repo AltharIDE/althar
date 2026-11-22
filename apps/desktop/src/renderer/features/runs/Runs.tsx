@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from 'react'
 import { messageOf, type RunRef } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { addressOf } from '../../shared/running'
+import { addressOf, onOf } from '../../shared/running'
 import { useWorkToward } from '../../shared/useWorkToward'
 import { ago, running } from '../../shared/time'
 import { openCoordinator } from '../../shared/openCoordinator'
@@ -59,10 +59,10 @@ const runOf = (launch: Launch, now: string): RunTargetRun =>
   launch.ended !== null
     ? { state: 'ended', code: launch.ended.code, since: ago(launch.ended.at, new Date(now)) }
     : launch.url !== null
-      ? { state: 'running', url: addressOf(launch.url, launch.workerId), since: running(launch.startedAt, now) }
+      ? { state: 'running', url: addressOf(launch.url), ...onOf(launch.workerId), since: running(launch.startedAt, now) }
       : Date.parse(now) - Date.parse(launch.startedAt) < STARTING_FOR
         ? { state: 'starting' }
-        : { state: 'running', since: running(launch.startedAt, now) }
+        : { state: 'running', ...onOf(launch.workerId), since: running(launch.startedAt, now) }
 
 export const text = {
   /** At the foot of where Run runs: a branch picked there is the project's (ADR-093). */
