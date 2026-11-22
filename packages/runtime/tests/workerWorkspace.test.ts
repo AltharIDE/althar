@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { git, treeOf } from '../src/git'
-import { acceptWorkerPatch, prepareWorkerWorkspace } from '../src/workerWorkspace'
+import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '../src/workerWorkspace'
 import { repository } from './support'
 
 it.live('transfers a task checkout, imports the worker’s original commit and keeps later uncommitted files', () =>
@@ -68,6 +68,32 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
       )
       assert.include(conflict.reason, 'checkout changed on the home')
       assert.strictEqual(readFileSync(join(home, 'README.md'), 'utf8'), 'A change made on the home\n')
+    }),
+  ),
+)
+
+it.live('reconstructs a worker index in private Git objects and leaves the home’s staging area alone', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      const worker = repository()
+      const base = yield* git(home, 'write-tree')
+      const head = yield* git(home, 'rev-parse', 'HEAD')
+      assert.strictEqual(yield* verifyWorkerIndex(home, base, { tree: base, patch: Buffer.alloc(0) }), base)
+      writeFileSync(join(worker, 'README.md'), 'from the staging area\n')
+      yield* git(worker, 'add', 'README.md')
+      const staged = yield* git(worker, 'write-tree')
+      writeFileSync(join(worker, 'README.md'), 'different unstaged changes\n')
+      const patch = execFileSync('git', ['diff', '--binary', base, staged], { cwd: worker })
+      const index = yield* verifyWorkerIndex(home, base, { tree: staged, patch })
+      assert.strictEqual(index, staged)
+      assert.strictEqual(yield* git(home, 'write-tree'), base)
+      assert.strictEqual(readFileSync(join(home, 'README.md'), 'utf8'), '# Meridian\n')
+      const archive = yield* prepareWorkerWorkspace(home, 128 * 1024 * 1024, true, index)
+      assert.strictEqual(archive.index, index)
+      assert.strictEqual(archive.head, head)
+      assert.include((yield* Effect.flip(verifyWorkerIndex(home, base, { tree: staged, patch: Buffer.alloc(0) }))).reason, 'do not match')
+      assert.include((yield* Effect.flip(verifyWorkerIndex(home, base, { tree: base, patch }))).reason, 'do not match')
     }),
   ),
 )

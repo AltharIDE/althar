@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
-import { acceptWorkerPatch, prepareWorkerWorkspace } from '../workerWorkspace'
-import type { WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
+import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '../workerWorkspace'
+import type { CapturedWorkerCheckout, WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
 import { AgentRunOutcome } from '@althar/worker-protocol'
 import {
   MAX_WORKER_BUNDLE_BYTES,
@@ -32,7 +32,9 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
       readonly workerId: string
       readonly agent: WorkerAgentProcess
       readonly directory: string
+      readonly workspaceId: string | undefined
       readonly checkpoint: WorkerExecution['checkpoint']
+      readonly capture: Effect.Effect<ReadonlyMap<string, CapturedWorkerCheckout>, AgentRequestFailed>
       readonly writes: Semaphore.Semaphore
       readonly toolPort: number
       readonly homeToolPort: number
@@ -62,6 +64,28 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
             catch: (error) => failed(unavailable(error)),
           }),
           (process) => Effect.tryPromise(() => process.stop()).pipe(Effect.catch(() => Effect.void)),
+        )
+      }),
+    readFile: (input) =>
+      Effect.suspend(() => {
+        const workspace = workspaces.get(input.worktree)
+        const refused = (message: string) => new AgentRequestFailed({ method: 'workspace/file', failure: 'transient', message })
+        if (workspace?.projectId !== input.projectId || workspace.workerId !== input.workerId || !workspace.agent.ownsRun())
+          return Effect.fail(refused('This worker workspace is unavailable.'))
+        const read = workspace.agent.readFile
+        if (read === undefined) return Effect.fail(refused('Update this worker to retrieve its workspace files.'))
+        return Effect.tryPromise({ try: () => read(input.path, workspace.workspaceId), catch: (error) => refused(unavailable(error)) })
+      }),
+    captureCheckouts: (input) =>
+      Effect.suspend(() => {
+        const workspace = workspaces.get(input.worktree)
+        if (workspace?.projectId === input.projectId && workspace.workerId === input.workerId) return workspace.capture
+        return Effect.fail(
+          new AgentRequestFailed({
+            method: 'workspace/checkpoint',
+            failure: 'transient',
+            message: 'Start the lead on its assigned worker before copying its checkout.',
+          }),
         )
       }),
     checkpointWorktree: (input) =>
@@ -249,30 +273,42 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
           }),
         )
         const writes = yield* Semaphore.make(1)
-        const checkpoint = writes.withPermits(1)(
-          Effect.gen(function* () {
-            for (const entry of entries) {
-              const changed = yield* Effect.tryPromise({
-                try: () => agent.readPatch(entry.base.tree, entry.base.head, entry.workspaceId),
-                catch: unavailable,
-              })
-              yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
-              entry.base = { head: changed.head, tree: changed.tree }
-              if (!agent.ownsRun()) return yield* Effect.fail('The worker no longer owns this run.')
-            }
-          }).pipe(
-            Effect.mapError(
-              (error) => new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: unavailable(error) }),
+        const sync = (captureIndex: boolean) =>
+          writes.withPermits(1)(
+            Effect.gen(function* () {
+              const captured = new Map<string, CapturedWorkerCheckout>()
+              for (const entry of entries) {
+                const changed = yield* Effect.tryPromise({
+                  try: () => agent.readPatch(entry.base.tree, entry.base.head, entry.workspaceId, captureIndex),
+                  catch: unavailable,
+                })
+                if (captureIndex) {
+                  if (changed.index === undefined) return yield* Effect.fail('The worker did not return its staged files.')
+                  const index = yield* verifyWorkerIndex(entry.worktree, entry.base.tree, changed.index)
+                  captured.set(entry.worktree, { head: changed.head, tree: changed.tree, index })
+                }
+                yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
+                entry.base = { head: changed.head, tree: changed.tree }
+                if (!agent.ownsRun()) return yield* Effect.fail('The worker no longer owns this run.')
+              }
+              return captured
+            }).pipe(
+              Effect.mapError(
+                (error) => new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: unavailable(error) }),
+              ),
             ),
-          ),
-        )
+          )
+        const checkpoint = sync(false).pipe(Effect.asVoid)
+        const capture = sync(true)
         for (const entry of entries)
           workspaces.set(entry.worktree, {
             workerId,
             projectId,
             agent,
             directory: entry.directory,
+            workspaceId: entry.workspaceId,
             checkpoint,
+            capture,
             writes,
             toolPort: agent.toolPort,
             homeToolPort: toolPort,

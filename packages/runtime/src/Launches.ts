@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
+import type { Duplex } from 'node:stream'
 
-import { workerPreviewAddress, type WorkerPreviewRequest, type WorkerPreviewResponse } from '@althar/contracts'
+import { workerPreviewAddress, type WorkerPreviewRequest, type WorkerPreviewResponse, type WorkerPreviewRun } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
@@ -225,6 +226,7 @@ export class Launches extends Context.Service<
      */
     output(id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
     preview(input: WorkerPreviewRequest): Effect.Effect<WorkerPreviewResponse, LaunchRefused>
+    previewSocket(input: WorkerPreviewRun): Effect.Effect<Duplex, LaunchRefused>
     /**
      * Stops every run of the project, or only the task's, and clears those
      * that ended: the project is removed, or the task settled, and nothing is
@@ -1772,6 +1774,16 @@ export class Launches extends Context.Service<
         launchesScope,
       )
 
+      const previewOf = (input: WorkerPreviewRun) => {
+        const launch = launches.get(input.id)
+        const current = launch?.preview
+        const port = current?.port
+        return launch?.projectId !== input.projectId || launch.ended !== null || launch.stopped || current === undefined || port == null
+          ? null
+          : { ...current, port }
+      }
+      const previewUnavailable = () => new LaunchRefused({ why: 'elsewhere', message: 'This worker preview is unavailable.' })
+
       return Launches.of({
         start,
         stop,
@@ -1785,19 +1797,46 @@ export class Launches extends Context.Service<
           }),
         preview: (input) =>
           Effect.suspend(() => {
-            const launch = launches.get(input.id)
-            const current = launch?.preview
-            const port = current?.port
-            if (launch?.projectId !== input.projectId || launch.ended !== null || launch.stopped || current === undefined || port == null)
-              return Effect.fail(new LaunchRefused({ why: 'elsewhere', message: 'This worker preview is unavailable.' }))
+            const current = previewOf(input)
+            if (current === null) return Effect.fail(previewUnavailable())
             return current.requests.withPermits(1)(
               Effect.tryPromise({
-                try: (signal) => readWorkerPreview(current.open, port, input, signal),
+                try: (signal) => readWorkerPreview(current.open, current.port, input, signal),
                 catch: () =>
                   new LaunchRefused({
                     why: 'elsewhere',
                     message: 'The worker could not read this preview. Check that the app is listening on localhost.',
                   }),
+              }),
+            )
+          }),
+        previewSocket: (input) =>
+          Effect.suspend(() => {
+            const current = previewOf(input)
+            if (current === null) return Effect.fail(previewUnavailable())
+            return Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function* () {
+                yield* restore(current.requests.take(1))
+                const release = current.requests.release(1)
+                const opened = yield* Effect.exit(
+                  restore(
+                    Effect.tryPromise({
+                      try: (signal) => current.open(current.port, signal),
+                      catch: previewUnavailable,
+                    }),
+                  ),
+                )
+                if (Exit.isFailure(opened)) {
+                  yield* release
+                  return yield* Effect.failCause(opened.cause)
+                }
+                const socket = opened.value
+                if (socket.destroyed) yield* release
+                else
+                  socket.once('close', () => {
+                    Effect.runSync(release)
+                  })
+                return socket
               }),
             )
           }),
@@ -1813,6 +1852,11 @@ export class Launches extends Context.Service<
                   message: 'This command runs on a worker. Open its output from the Run menu.',
                 })
               if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
+              if (taskId !== null && (yield* taskWorker(taskId)) !== null)
+                return yield* new LaunchRefused({
+                  why: 'elsewhere',
+                  message: 'This task runs on a worker. Save a local copy to work on it here.',
+                })
               const [place] = yield* placesOf(projectId, taskId, undefined)
               if (place === undefined)
                 return yield* new LaunchRefused({

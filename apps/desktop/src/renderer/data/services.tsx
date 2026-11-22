@@ -185,6 +185,7 @@ export interface StorageHost {
 
 export interface Host {
   readonly homes?: HomesHost
+  readonly saveWorkerSnapshot?: (request: { readonly projectId: string; readonly taskId: string }) => Promise<void>
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */

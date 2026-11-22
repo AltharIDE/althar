@@ -274,7 +274,11 @@ printf 'mcp\t%s\t%s\t%s\n' "$PROJECT_ID" projectTools /opt/althar-tools/project-
 
 The executable can be a wrapper for a locally installed server. Keep it outside the worker’s workspaces. The thread names selected servers that are unavailable.
 
-Bind a dev server to `localhost`, `127.0.0.1` or `::1` on the worker and have it print its HTTP address. Choose **Worker preview** when the run shows it. The page opens in a private Althar window through the home. This preview reads HTTP pages and assets and closes its connection when the run stops.
+Bind a dev server to `localhost`, `127.0.0.1` or `::1` on the worker and have it print its HTTP address. Choose **Worker preview** when the run shows it. The page opens in a private Althar window through the home. The private window supports HTTP pages, form submissions and WebSocket live reload. It closes its connections when the run stops. A desktop connected to an older home can still read pages and assets.
+
+To bring the task to your computer, open its **Parts** menu, choose **Worktree**, and select **Save a local copy**. Althar verifies the download and saves a fresh Git checkout in the folder you choose. The copy keeps the worker’s commits, staged files, and edits that still need staging. If the worker is offline or needs an update, you can choose the home’s current copy. You need Git on your computer.
+
+If the worker is offline, Althar offers to save the home’s copy. Its files may be older than the files on the worker. Each copy carries an `althar-snapshot.json` record so you can see which version you opened.
 
 The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
 

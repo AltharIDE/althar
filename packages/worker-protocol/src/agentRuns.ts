@@ -23,11 +23,13 @@ import {
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId, WORKER_PROTOCOL_VERSION } from './handshake.ts'
 import { MAX_WORKER_BUNDLE_BYTES, gitObjectId as objectId, sourceOf, validCheckout, type WorkerCheckout } from './agentCheckout.ts'
+import { makeWorkerFiles, type WorkerFile } from './agentFiles.ts'
 import { makeManagedCommands, type WorkerHelperRequest, type WorkerManagedCommand, type WorkerManagedProcess } from './agentManaged.ts'
 import { makePreviewTunnels } from './agentPreviews.ts'
 import { workerSkillBundle, type WorkerSkillFile } from './agentSkillFiles.ts'
 import { deferred, type Deferred } from './deferred.ts'
 
+export type { WorkerFile } from './agentFiles.ts'
 export type { WorkerManagedCommand, WorkerManagedProcess } from './agentManaged.ts'
 export { MAX_WORKER_SKILL_BYTES, MAX_WORKER_SKILL_FILES, type WorkerSkillFile } from './agentSkillFiles.ts'
 
@@ -108,6 +110,7 @@ export interface WorkerPatch {
   readonly head: string
   readonly patch: Uint8Array
   readonly commits: Uint8Array
+  readonly index?: { readonly tree: string; readonly patch: Uint8Array }
 }
 
 export interface WorkerLocalMcpCommand {
@@ -129,7 +132,8 @@ export interface WorkerAgentProcess {
   readonly write: (chunk: Uint8Array) => Promise<void>
   readonly stop: () => Promise<AgentRunExit>
   readonly ownsRun: () => boolean
-  readonly readPatch: (baseTree: string, baseHead: string, workspaceId?: string) => Promise<WorkerPatch>
+  readonly readFile?: (relativePath: string, workspaceId?: string) => Promise<WorkerFile>
+  readonly readPatch: (baseTree: string, baseHead: string, workspaceId?: string, captureIndex?: boolean) => Promise<WorkerPatch>
 }
 
 export interface AvailableAgentWorker {
@@ -158,8 +162,10 @@ interface PendingSnapshot {
   readonly result: Deferred<WorkerPatch>
   readonly timer: NodeJS.Timeout
   readonly baseHead: string
+  readonly baseTree: string
   readonly workspaceId: string
-  transfer?: { tree: string; head: string; patch: SnapshotPart; commits: SnapshotPart }
+  readonly captureIndex: boolean
+  transfer?: { tree: string; head: string; patch: SnapshotPart; commits: SnapshotPart; index?: SnapshotPart & { readonly tree: string } }
 }
 
 interface Run {
@@ -172,9 +178,12 @@ interface Run {
   readonly toolPort: number | undefined
   readonly requiresSetup: boolean
   readonly requiresSkills: boolean
+  readonly workspaceIndex: boolean
   readonly setupRepositories: ReadonlySet<string>
   readonly repositories: ReadonlySet<string>
   readonly managed: ReturnType<typeof makeManagedCommands>
+  readonly files: ReturnType<typeof makeWorkerFiles>
+  readonly fileReads: boolean
   readonly tunnels: Set<() => void>
   stopping?: NodeJS.Timeout
   snapshot?: PendingSnapshot
@@ -287,6 +296,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         closeTools(run)
         run.ready.reject(error)
         run.managed.close(error)
+        run.files.close(error)
         interruptSnapshot(run, error)
         run.output.destroy(error)
         run.exit.reject(error)
@@ -336,7 +346,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       clearTimeout(pending.timer)
       pending.result.reject(error)
     }
-    const readPatch = (current: Run, baseTree: string, baseHead: string, workspaceId = ''): Promise<WorkerPatch> => {
+    const readPatch = (current: Run, baseTree: string, baseHead: string, workspaceId = '', captureIndex = false): Promise<WorkerPatch> => {
       if (!ownsRun(current) || current.snapshot !== undefined || !objectId.test(baseTree) || !objectId.test(baseHead))
         return Promise.reject(new Error('The worker cannot check that workspace now.'))
       const leasedHelper = current.managed.ownsCheckout(workspaceId)
@@ -348,20 +358,29 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         SNAPSHOT_TIMEOUT_MS,
       )
       timer.unref()
-      current.snapshot = { result, timer, baseHead, workspaceId }
-      sendControl({ case: 'snapshot', value: create(AgentSnapshotRequestSchema, { runId: current.id, baseTree, baseHead, workspaceId }) })
+      current.snapshot = { result, timer, baseHead, baseTree, workspaceId, captureIndex }
+      sendControl({
+        case: 'snapshot',
+        value: create(AgentSnapshotRequestSchema, { runId: current.id, baseTree, baseHead, workspaceId, captureIndex }),
+      })
       return result.promise
     }
     const finishSnapshot = (current: Run, pending: PendingSnapshot): void => {
       const transfer = pending.transfer
       if (transfer === undefined) return
-      const parts = [transfer.patch, transfer.commits]
+      const parts = transfer.index === undefined ? [transfer.patch, transfer.commits] : [transfer.patch, transfer.commits, transfer.index]
       if (parts.some((part) => part.written !== part.bytes.length)) return
       if (parts.some((part) => !createHash('sha256').update(part.bytes).digest().equals(part.hash)))
         return fail(status.INVALID_ARGUMENT, 'The worker returned the wrong workspace transfer digest.')
       clearTimeout(pending.timer)
       delete current.snapshot
-      pending.result.resolve({ tree: transfer.tree, head: transfer.head, patch: transfer.patch.bytes, commits: transfer.commits.bytes })
+      pending.result.resolve({
+        tree: transfer.tree,
+        head: transfer.head,
+        patch: transfer.patch.bytes,
+        commits: transfer.commits.bytes,
+        ...(transfer.index === undefined ? {} : { index: { tree: transfer.index.tree, patch: transfer.index.bytes } }),
+      })
     }
     const start: Slot['start'] = (placement, { checkout, repositories, signal, toolPort, setup, skills }) => {
       if (closed || run !== undefined || recovering !== undefined)
@@ -450,6 +469,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             }
           : undefined,
       )
+      const files = makeWorkerFiles(
+        id,
+        () => run?.id === id && ownsRun(run),
+        sendControl,
+        (message) => fail(status.INVALID_ARGUMENT, message),
+      )
       run = {
         id,
         starting,
@@ -460,9 +485,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         toolPort,
         requiresSetup: plan !== undefined,
         requiresSkills: assets !== undefined,
+        workspaceIndex: capability?.workspaceIndex === true,
         setupRepositories: new Set(group?.map((entry) => entry.workspaceId)),
         repositories: new Set(repositories?.map((entry) => entry.workspaceId)),
         managed,
+        files,
+        fileReads: capability?.fileReads === true,
         tunnels: new Set(),
         phase: 'starting',
       }
@@ -517,6 +545,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (run === current && current.phase !== 'stopping') {
         current.phase = 'stopping'
         closeTools(current)
+        current.files.close(new Error('The worker workspace is stopping.'))
         current.managed.close(new Error('The worker workspace is stopping.'))
         current.cleanup()
         clearTimeout(current.starting)
@@ -595,6 +624,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           return
         }
         const current = run
+        if (payload.case === 'fileResult' || payload.case === 'fileChunk') {
+          if (current === undefined || !current.fileReads)
+            return fail(status.PERMISSION_DENIED, 'There is no active workspace for this file.')
+          if (current.phase !== 'stopping') current.files.receive(payload)
+          return
+        }
         if (payload.case === 'managedReady' || payload.case === 'managedOutput' || payload.case === 'managedExit') {
           if (current === undefined) return fail(status.PERMISSION_DENIED, 'There is no active worker workspace for this command.')
           if (current.phase !== 'stopping') current.managed.receive(payload)
@@ -607,6 +642,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             payload.case !== 'exit' &&
             payload.case !== 'snapshot' &&
             payload.case !== 'patch' &&
+            payload.case !== 'indexPatch' &&
             payload.case !== 'commits') ||
           payload.value.runId !== current.id
         )
@@ -662,7 +698,19 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             write: (chunk) => write(current, chunk),
             stop: () => stop(current),
             ownsRun: () => ownsRun(current),
-            readPatch: (baseTree, baseHead, workspaceId) => readPatch(current, baseTree, baseHead, workspaceId),
+            ...(current.fileReads
+              ? {
+                  readFile: (path: string, workspaceId = '') => {
+                    if (current.repositories.size === 0 ? workspaceId !== '' : !current.repositories.has(workspaceId))
+                      return Promise.reject(new Error('This run does not own that repository.'))
+                    return current.files.read(workspaceId, path)
+                  },
+                }
+              : {}),
+            readPatch: (baseTree, baseHead, workspaceId, captureIndex) => {
+              if (captureIndex && !current.workspaceIndex) return Promise.reject(new Error('Update this worker to copy its staged files.'))
+              return readPatch(current, baseTree, baseHead, workspaceId, captureIndex)
+            },
           })
           return
         }
@@ -678,11 +726,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           }
           return
         }
-        if (payload.case === 'snapshot' || payload.case === 'patch' || payload.case === 'commits') {
+        if (payload.case === 'snapshot' || payload.case === 'patch' || payload.case === 'commits' || payload.case === 'indexPatch') {
           const pending = current.snapshot
           if (pending === undefined) return fail(status.FAILED_PRECONDITION, 'There is no request for workspace changes.')
           if (payload.case === 'snapshot') {
-            const { size, sha256, tree, head, commitsSize, commitsSha256, unavailable } = payload.value
+            const { size, sha256, tree, head, commitsSize, commitsSha256, unavailable, index } = payload.value
             if (pending.transfer !== undefined) return fail(status.INVALID_ARGUMENT, 'The worker already sent its patch metadata.')
             if (payload.value.workspaceId !== pending.workspaceId)
               return fail(status.INVALID_ARGUMENT, 'The worker returned changes for a different repository.')
@@ -694,7 +742,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
               !objectId.test(head) ||
               sha256.byteLength !== 32 ||
               commitsSha256.byteLength !== 32 ||
-              (head === pending.baseHead) !== (commitsSize === 0)
+              (head === pending.baseHead) !== (commitsSize === 0) ||
+              pending.captureIndex !== (index !== undefined) ||
+              (index !== undefined &&
+                (!objectId.test(index.tree) ||
+                  index.tree.length !== pending.baseTree.length ||
+                  index.size > MAX_PATCH_BYTES ||
+                  index.sha256.byteLength !== 32 ||
+                  (index.tree === pending.baseTree) !== (index.size === 0)))
             )
               return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer metadata.')
             pending.transfer = {
@@ -702,11 +757,19 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
               head,
               patch: { bytes: Buffer.alloc(size), hash: sha256, written: 0 },
               commits: { bytes: Buffer.alloc(commitsSize), hash: commitsSha256, written: 0 },
+              ...(index === undefined
+                ? {}
+                : { index: { tree: index.tree, bytes: Buffer.alloc(index.size), hash: index.sha256, written: 0 } }),
             }
             finishSnapshot(current, pending)
             return
           }
-          const part = payload.case === 'patch' ? pending.transfer?.patch : pending.transfer?.commits
+          const part =
+            payload.case === 'patch'
+              ? pending.transfer?.patch
+              : payload.case === 'indexPatch'
+                ? pending.transfer?.index
+                : pending.transfer?.commits
           const { data } = payload.value
           if (
             part === undefined ||
@@ -727,6 +790,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         clearTimeout(current.stopping)
         current.cleanup()
         current.ready.reject(new Error('The worker could not start the agent. Check the worker log and provider setup.'))
+        current.files.close(new Error('The worker workspace ended.'))
         current.managed.close(new Error('The worker workspace ended.'))
         closeTools(current)
         interruptSnapshot(current, new Error('The agent ended before its changes were received.'))

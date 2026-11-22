@@ -1,5 +1,8 @@
 import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
+import { taskWorker } from './workerExecution'
+import { WorkerSnapshots } from './WorkerSnapshots'
+import { workerPreviewSockets } from './workerPreviewSockets'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -304,6 +307,9 @@ export const handlers = apiLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const workerSnapshots = yield* WorkerSnapshots
+    const previews = workerPreviewSockets(yield* Effect.scope)
+    yield* Effect.addFinalizer(() => previews.close)
     const terminals = yield* Terminals
     const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
@@ -2616,7 +2622,7 @@ export const handlers = apiLayer(
         api(
           Effect.gen(function* () {
             const open = config.editors?.open
-            if (open === undefined) return false
+            if (open === undefined || (yield* taskWorker(taskId)) !== null) return false
             yield* openingFolder(taskId)
             // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
             const worktrees = yield* sql<{ path: string }>`
@@ -2637,7 +2643,10 @@ export const handlers = apiLayer(
             const open = config.editors?.open
             if (open === undefined) return false
             const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
-            if (thread?.taskId != null) yield* openingFolder(thread.taskId)
+            if (thread?.taskId != null) {
+              if ((yield* taskWorker(thread.taskId)) !== null) return false
+              yield* openingFolder(thread.taskId)
+            }
             const place = yield* queries.codeRoots(threadId)
             const found = codeRootOf(place, path)
             if (found === null) return false
@@ -2793,6 +2802,31 @@ export const handlers = apiLayer(
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       ReadLaunchPreview: (input) => api(launches.preview(input)),
+      OpenLaunchPreviewSocket: (input) => api(previews.open(launches.previewSocket(input))),
+      ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
+      WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
+      CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
+        api(
+          Effect.gen(function* () {
+            const [site] = yield* sql<{ path: string }>`SELECT path FROM workspaces
+            WHERE task_id = ${taskId} AND project_id = ${projectId} AND device_id = ${instance.deviceId}
+              AND access = 'write' AND state = 'ready'
+              AND (${workspaceId ?? null} IS NULL OR id = ${workspaceId ?? null})
+            ORDER BY created_at, rowid LIMIT 1`
+            const workerId = yield* taskWorker(taskId)
+            const read = config.workers?.readFile
+            if (site === undefined || workerId === null || read === undefined)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This worker file is unavailable.' })
+            const file = yield* read({ workerId, projectId, worktree: site.path, path: relativePath }).pipe(
+              Effect.mapError((error) => new ApiError({ reason: 'NotFound', message: error.message })),
+            )
+            return { sha256: file.sha256, size: file.bytes.byteLength, bodyBase64: Buffer.from(file.bytes).toString('base64') }
+          }),
+        ),
+      PrepareWorkerSnapshot: (input) => api(workerSnapshots.prepare(identity, input)),
+      ReadWorkerSnapshotChunk: (input) => workerSnapshots.read(identity, input),
+      ReleaseWorkerSnapshot: ({ id }) => workerSnapshots.release(identity, id),
       OpenTerminal: ({ commandId, ...input }) =>
         once(
           commandId,

@@ -68,6 +68,8 @@ it.live('opens the Desktop profile’s worker listener and exposes only workers 
                 skillFiles: false,
                 helperSkillFiles: false,
                 helperCheckouts: false,
+                fileReads: false,
+                workspaceIndex: false,
               },
             ],
           }),

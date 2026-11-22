@@ -22,7 +22,22 @@ import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSn
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
-import { WorkerPreviewRequest, WorkerPreviewResponse } from './workerPreview'
+import {
+  WorkerPreviewRequest,
+  WorkerPreviewResponse,
+  WorkerPreviewRun,
+  WorkerPreviewSocketData,
+  WorkerPreviewSocketId,
+} from './workerPreview'
+import {
+  WorkerFile,
+  WorkerFileRequest,
+  WorkerSnapshot,
+  WorkerSnapshotChunk,
+  WorkerSnapshotChunkRequest,
+  WorkerSnapshotId,
+  WorkerSnapshotRequest,
+} from './workerSnapshot'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -4342,6 +4357,8 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** The worker assigned to this task's accepted plan. */
+    workerId: Schema.optional(Schema.NullOr(Schema.String)),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -5075,6 +5092,13 @@ const socketCalls = new Set<string>([
   'SetEffort',
   'GetRepositoryScripts',
   'ReadLaunchPreview',
+  'OpenLaunchPreviewSocket',
+  'WriteLaunchPreviewSocket',
+  'CloseLaunchPreviewSocket',
+  'PrepareWorkerSnapshot',
+  'ReadWorkerSnapshotChunk',
+  'ReleaseWorkerSnapshot',
+  'ReadWorkerFile',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -6509,11 +6533,27 @@ export const AcpApi = RpcGroup.make(
   command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
 ).middleware(ClientAuthority)
 
-export const WorkerPreviewApi = RpcGroup.make(call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse)).middleware(
-  ClientAuthority,
-)
+export const WorkerPreviewApi = RpcGroup.make(
+  call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse),
+  call('OpenLaunchPreviewSocket', WorkerPreviewRun.fields, WorkerPreviewSocketId),
+  Rpc.make('ReadLaunchPreviewSocket', {
+    payload: { socket: WorkerPreviewSocketId },
+    success: WorkerPreviewSocketData,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
+  call('WriteLaunchPreviewSocket', { socket: WorkerPreviewSocketId, data: WorkerPreviewSocketData }, Schema.Void),
+  call('CloseLaunchPreviewSocket', { socket: WorkerPreviewSocketId }, Schema.Void),
+).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi)
+export const WorkerSnapshotApi = RpcGroup.make(
+  call('ReadWorkerFile', WorkerFileRequest.fields, WorkerFile),
+  call('PrepareWorkerSnapshot', WorkerSnapshotRequest.fields, WorkerSnapshot),
+  call('ReadWorkerSnapshotChunk', WorkerSnapshotChunkRequest.fields, WorkerSnapshotChunk),
+  call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
 export type Api = typeof Api
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
@@ -6529,6 +6569,9 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         WorkerPreviewApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerPreviewApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
+        WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
           handlers,
         ),
       ),

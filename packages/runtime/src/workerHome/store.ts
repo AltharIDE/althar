@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { Clock, Effect, Schedule } from 'effect'
 
 import {
   AgentRunOutcome,
@@ -400,3 +401,36 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
     throw error
   }
 }
+
+const ledgerBusy = (error: unknown): boolean =>
+  fileErrorCode(error) === 'ERR_SQLITE_ERROR' &&
+  typeof error === 'object' &&
+  error !== null &&
+  'errcode' in error &&
+  typeof error.errcode === 'number' &&
+  (error.errcode & 0xff) === 5 // SQLite's primary SQLITE_BUSY code.
+
+const operatorCall = <A>(run: () => Promise<A>) =>
+  Effect.tryPromise({ try: run, catch: (error) => error }).pipe(
+    Effect.retry({ times: 40, schedule: Schedule.spaced('25 millis'), while: ledgerBusy }),
+    Effect.mapError((error) =>
+      ledgerBusy(error) ? new WorkerHomeError('StorageUnavailable', 'The worker ledger is busy. Try the command again.') : error,
+    ),
+  )
+
+/** The operator's process can retry a ledger statement without blocking the live worker listener. */
+export const withWorkerStore = <A>(
+  profile: string,
+  homeId: string,
+  operation: (store: Awaited<ReturnType<typeof openWorkerStore>>) => A | Promise<A>,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const clock = yield* Clock.Clock
+      const store = yield* Effect.acquireRelease(
+        operatorCall(() => openWorkerStore(profile, homeId, () => clock.currentTimeMillisUnsafe())),
+        (ledger) => Effect.sync(() => ledger.close()),
+      )
+      return yield* operatorCall(async () => operation(store))
+    }),
+  )

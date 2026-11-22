@@ -63,6 +63,7 @@ import { type Bridge, bridgeOf } from './browser/bridge'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
 import { workerPreviews } from './browser/workerPreview'
+import { saveWorkerSnapshot } from './workerSnapshot'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -806,13 +807,21 @@ const connect = (window: BrowserWindow) => {
   startupMark('port-handed-over', undefined, window.webContents.id)
 }
 
-const showWorkerPreview = workerPreviews(async (window, signal) => {
+const workerHomePort = async (window: BrowserWindow, signal: AbortSignal) => {
   const id = window.webContents.id
   if (homes.state(id).current.kind !== 'local') return homes.previewPort(id, signal)
-  if (runtime === undefined) throw new Error('Start the local home before opening a worker preview.')
+  if (runtime === undefined) throw new Error('Start the local home before connecting to the worker.')
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
   return port2
+}
+const showWorkerPreview = workerPreviews(workerHomePort)
+const copyWorkerSnapshot = saveWorkerSnapshot(workerHomePort)
+ipcMain.handle('althar:save-worker-snapshot', async (event, value: unknown) => {
+  if (!mine(event.sender)) throw new Error('Select the task from the Althar window.')
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null) return
+  await copyWorkerSnapshot(window, value)
 })
 
 /**
