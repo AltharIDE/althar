@@ -2437,6 +2437,9 @@ export const ArrivalItem = Schema.Struct({
 })
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
+export const ProjectWorker = Schema.Struct({ workerId: Schema.String, providers: Schema.Array(Schema.String), busy: Schema.Boolean })
+export type ProjectWorker = typeof ProjectWorker.Type
+
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
@@ -4987,6 +4990,7 @@ const socketCalls = new Set<string>([
   'GetConnectionInfo',
   'Status',
   'ListProjects',
+  'ListProjectWorkers',
   'GetProject',
   'GetTask',
   'GetThread',
@@ -5017,6 +5021,8 @@ const socketCalls = new Set<string>([
   'SetThreadGoal',
   'TakeBack',
   'StartTask',
+  'StartPlan',
+  'HoldPlan',
   'CreateTask',
   'StopTask',
   'ResumeTask',
@@ -5251,6 +5257,7 @@ const ProjectApi = RpcGroup.make(
     },
     Schema.String,
   ),
+  call('ListProjectWorkers', { projectId: Schema.String }, Schema.Array(ProjectWorker)),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
    * Finds tasks by what they were about: their titles, what the person asked,
@@ -5415,6 +5422,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
+      workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5438,7 +5446,11 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String }, Schema.Void),
+  command(
+    'StartPlan',
+    { planId: Schema.String, workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))) },
+    Schema.Void,
+  ),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */

@@ -105,6 +105,7 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type ProjectWorker,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -169,6 +170,7 @@ export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
+  readonly listProjectWorkers: (projectId: string) => Promise<ReadonlyArray<ProjectWorker>>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
   /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
@@ -565,7 +567,7 @@ export interface Client {
     /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
     readonly taskId?: string
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string) => Promise<void>
+  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
@@ -1045,6 +1047,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
+    listProjectWorkers: (projectId) => settle(api.ListProjectWorkers({ projectId })),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     lookElsewhere: (at) => settle(api.LookElsewhere(at)),
     bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
@@ -1236,7 +1239,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
-    startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    startPlan: (planId, workerId) =>
+      command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),

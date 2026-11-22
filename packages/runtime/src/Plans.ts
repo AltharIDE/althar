@@ -1,3 +1,4 @@
+import { ApiError } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -102,7 +103,7 @@ export class Plans extends Context.Service<
      * null where it no longer stood to start. One accepted whose run was never
      * made, as when Althar stopped in between, runs now.
      */
-    start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
+    start(planId: string, actorId: ActorId, workerId?: string): Effect.Effect<'running' | 'waiting' | null, unknown>
     /**
      * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place or its
      * checkout, which leaves the line. Whether it was held; a plan under way isn't.
@@ -140,7 +141,8 @@ export class Plans extends Context.Service<
       const runs = yield* Runs
       const reviews = yield* Reviews
       // The person's setting (plansAndReviews.ts), read as each plan is proposed; a test's own takes its place.
-      const testCountdown = (yield* RuntimeConfig).countdown
+      const config = yield* RuntimeConfig
+      const testCountdown = config.countdown
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
       const wake = yield* Queue.sliding<void>(1)
@@ -168,6 +170,7 @@ export class Plans extends Context.Service<
         set: (plan: PlanRow) => Readonly<Record<string, unknown>>,
         type: string,
         actorId: ActorId,
+        before?: (plan: PlanRow) => Effect.Effect<Readonly<Record<string, unknown>>, unknown, SqlClient.SqlClient>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -175,7 +178,8 @@ export class Plans extends Context.Service<
             Effect.gen(function* () {
               const plan = yield* load(planId)
               if (!when(plan)) return undefined
-              const revision = yield* change('task_plans', planId, set(plan))
+              const placement = before === undefined ? {} : yield* before(plan)
+              const revision = yield* change('task_plans', planId, { ...set(plan), ...placement })
               yield* fact({ projectId: plan.projectId, aggregateType: 'task_plan', aggregateId: planId, revision, type, actorId })
               return plan
             }),
@@ -318,7 +322,32 @@ export class Plans extends Context.Service<
        * Starts a proposed plan: when the person says, or, `due`, when its countdown has ended, it isn't held, and nothing it
        * waits for is open (waits.ts). The person's own start doesn't wait.
        */
-      const start = (planId: string, actorId: ActorId, due = false) =>
+      const placeOn = (workerId: string) => (plan: PlanRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const parameters = parametersOf(plan)
+          const lead = parameters.steps.find((step) => step.key === 'implement' && !step.skipped)
+          const worker = config.workers?.list(plan.projectId).find((one) => one.workerId === workerId)
+          if (
+            parameters.reads === true ||
+            parameters.worksIn === 'checkout' ||
+            lead === undefined ||
+            worker?.busy !== false ||
+            !worker.providers.includes(lead.agentId)
+          )
+            return yield* new ApiError({
+              reason: 'Invalid',
+              message: 'Choose an available worker for the lead and a separate task worktree.',
+            })
+          const repositories = yield* sql.unsafe<{ id: string }>('SELECT id FROM task_repository_requirements WHERE task_id = ?', [
+            plan.taskId,
+          ])
+          if (repositories.length !== 1)
+            return yield* new ApiError({ reason: 'Invalid', message: 'Choose a task that works in one repository.' })
+          return { parameters: JSON.stringify({ ...parameters, workerId }) }
+        })
+
+      const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>
         Effect.gen(function* () {
           const at = yield* timestamp
           if (due) {
@@ -333,7 +362,10 @@ export class Plans extends Context.Service<
             () => ({ state: 'accepted', startsAt: null, decidedAt: at }),
             'task_plan.accepted',
             actorId,
+            workerId === undefined ? undefined : placeOn(workerId),
           )
+          if (!accepted && workerId !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: 'That task already started. Choose a worker before starting it.' })
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
           // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).
@@ -448,7 +480,7 @@ export class Plans extends Context.Service<
 
       return Plans.of({
         propose,
-        start: (planId, actorId) => provide(start(planId, actorId)),
+        start: (planId, actorId, workerId) => provide(start(planId, actorId, false, workerId)),
         hold: (planId, actorId) => provide(hold(planId, actorId)),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
