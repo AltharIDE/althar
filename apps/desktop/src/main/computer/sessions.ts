@@ -36,8 +36,10 @@ interface Session {
   readonly worker: ComputerWorker
   readonly windows: Map<string, NativeWindow>
   readonly apps: Map<string, NativeApp>
-  /** The apps it has used, by process: another task's turn leaves them to it until its own ends. */
-  readonly held: Set<number>
+  /** The apps it has used, their names by process: another task's turn leaves them to it until its own ends. */
+  readonly held: Map<number, string>
+  /** It has sent input to the whole display, which can reach any app: another task's turn leaves them all to it until its own ends. */
+  display: boolean
   pending?: Pending | undefined
   timer?: ReturnType<typeof setTimeout> | undefined
   /** The person let it use this computer for its turn: a later request only finds what opened since. */
@@ -93,7 +95,17 @@ export const computerSessions = (options: {
       : { request: { id: session.pending.id, primaryDisplay: options.canShareDisplay(), reason: session.pending.reason } }),
   })
   const changed = (session: Session) => options.changed(stateOf(session))
-  const heldElsewhere = (session: Session, pid: number) => [...sessions.values()].some((other) => other !== session && other.held.has(pid))
+  const others = (session: Session) => [...sessions.values()].filter((other) => other !== session)
+  /** The app of this process, where another task holds it. */
+  const appElsewhere = (session: Session, pid: number) =>
+    others(session)
+      .find((other) => other.held.has(pid))
+      ?.held.get(pid)
+  const displayElsewhere = (session: Session) => others(session).some((other) => other.display)
+  /** What another task holds that input to the whole display could reach, by name. */
+  const anyElsewhere = (session: Session) =>
+    displayElsewhere(session) ? 'the primary display' : others(session).flatMap((other) => [...other.held.values()])[0]
+  const using = (what: string) => error(`Another task is using ${what}. Wait for its turn to end.`)
   // What is open now, each window and app keeping the id the task already has for it, and what closed since gone.
   const take = (session: Session, found: Found) => {
     const windows = [...session.windows]
@@ -132,6 +144,7 @@ export const computerSessions = (options: {
     session.windows.clear()
     session.apps.clear()
     session.held.clear()
+    session.display = false
     session.desktop = false
     session.foreground = false
     session.action = reason
@@ -247,7 +260,8 @@ export const computerSessions = (options: {
         worker: options.worker(),
         windows: new Map(),
         apps: new Map(),
-        held: new Set(),
+        held: new Map(),
+        display: false,
         allowed: false,
         action: '',
         desktop: false,
@@ -277,11 +291,12 @@ export const computerSessions = (options: {
       if (command.op === 'launch') {
         const approved = active.apps.get(command.app)
         if (approved === undefined) return error('That app has not been approved.')
+        if (displayElsewhere(active)) return using('the primary display')
         const launched = await active.worker.run({ op: 'launch', app: approved })
         if (!still() || launched.kind !== 'launched') return error('App launch was interrupted. Check the desktop.')
         for (const window of launched.windows) {
-          if (heldElsewhere(active, window.pid)) continue
-          active.held.add(window.pid)
+          if (appElsewhere(active, window.pid) !== undefined) continue
+          active.held.set(window.pid, window.app)
           active.windows.set(randomUUID(), window)
         }
         active.action = `Opened ${approved.name}.`
@@ -292,8 +307,9 @@ export const computerSessions = (options: {
       if (target === undefined) return error('That window or display has not been approved.')
       if (target === 'desktop' && !options.canShareDisplay()) return error('The display layout no longer permits primary-display control.')
       if (target !== 'desktop') {
-        if (heldElsewhere(active, target.pid)) return error(`Another task is using ${target.app}. Wait for its turn to end.`)
-        active.held.add(target.pid)
+        if (appElsewhere(active, target.pid) !== undefined) return using(target.app)
+        if (displayElsewhere(active)) return using('the primary display')
+        active.held.set(target.pid, target.app)
       }
       const name = target === 'desktop' ? 'the primary display' : target.app
       if (command.op === 'observe' || command.op === 'evidence') {
@@ -315,6 +331,9 @@ export const computerSessions = (options: {
         }
         return { value }
       }
+      // Input to the whole display could reach any app: it waits while another task holds one, then holds them all for the turn.
+      const theirs = target === 'desktop' ? anyElsewhere(active) : undefined
+      if (theirs !== undefined) return using(theirs)
       const inForeground = target === 'desktop' || command.foreground === true
       if (target === 'desktop' && options.desktopInputSafe?.(command, active.frame) === false)
         return error('Move away from the Althar window and take a fresh observation before sending input to the display.')
@@ -325,6 +344,7 @@ export const computerSessions = (options: {
       )
         return error('Another task is using computer input. Wait before taking the foreground.')
       if (inForeground) foreground = active
+      if (target === 'desktop') active.display = true
       active.action = `Using ${name}${inForeground ? ' in the foreground' : ''}.`
       changed(active)
       const acted = await active.worker.run({ op: 'act', target, action: command, foreground: inForeground })

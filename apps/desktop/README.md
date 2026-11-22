@@ -106,8 +106,10 @@ this turn** lets it use any app or window, type and click in the
 foreground, and see the primary display, until the turn ends; a later
 request in the same turn finds what opened since without asking again.
 An app one task uses stays with it until its turn ends, so two tasks never
-drive the same app. The task can show the window it observed, and keep
-screenshots in its conversation and step evidence.
+drive the same app. Input to the whole display can reach any app, so it
+waits while another task holds one, and once sent, it keeps every app for
+that task until its turn ends. The task can show the window it observed,
+and keep screenshots in its conversation and step evidence.
 
 Use **Take over** to pause computer input and **Resume** to return it to
 the task. **Stop** ends that turn's computer session. The desktop shortcut

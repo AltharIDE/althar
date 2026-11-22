@@ -100,6 +100,32 @@ describe('desktop access for a task', () => {
     sessions.stopAll('Done.')
   })
 
+  it('keeps another task’s input to the whole display off an app it holds, and its apps off one that used the display', async () => {
+    const { sessions, allowed } = setup()
+    const mine = await allowed()
+    expect(await sessions.call(OWNER, { op: 'observe', target: mine.Writer! }, signal())).toHaveProperty('value')
+    const other = { ...OWNER, taskId: `task_${'b'.repeat(32)}` }
+    await allowed(other)
+    const click = { op: 'click' as const, target: 'desktop', observation: 'obs', at: { x: 40, y: 40 } }
+    // It may look at the display, but not reach into Writer through it.
+    expect(await sessions.call(other, { op: 'observe', target: 'desktop' }, signal())).toHaveProperty('value')
+    expect(await sessions.call(other, click, signal())).toEqual({ error: 'Another task is using Writer. Wait for its turn to end.' })
+    sessions.ended(OWNER)
+    await vi.waitFor(async () => expect(await sessions.call(other, click, signal())).toHaveProperty('value'))
+    // Having sent input to the whole display, it holds every app until its turn ends.
+    const next = { ...OWNER, turnId: 'next' }
+    const again = await allowed(next)
+    const refused = { error: 'Another task is using the primary display. Wait for its turn to end.' }
+    expect(await sessions.call(next, { op: 'observe', target: again.Reader! }, signal())).toEqual(refused)
+    expect(await sessions.call(next, { ...click, target: again.Reader! }, signal())).toEqual(refused)
+    expect(await sessions.call(next, click, signal())).toEqual(refused)
+    sessions.ended(other)
+    await vi.waitFor(async () =>
+      expect(await sessions.call(next, { op: 'observe', target: again.Reader! }, signal())).toHaveProperty('value'),
+    )
+    sessions.stopAll('Done.')
+  })
+
   it('stops a pending native call, then refuses input after taking over and stopping', async () => {
     const stopped = vi.fn(() => Promise.resolve())
     let finish: (() => void) | undefined
