@@ -104,7 +104,7 @@ The paired probe with normal locking and private caches answered the other-table
 
 ### Follow-up read results
 
-Home now seeks each active project's latest 30 settled tasks by index. It checks whether a task can return to Home before building its card. A live session, unread reply, call, review or work to ship still goes through the same card logic as the board. The lookup yields between projects and card reads. Search seeks through an index of recent public passages, opening at most 128 passage records between yields, including where the latest passages are hidden or empty. Both paths keep using the profile's exclusively held connection.
+Home now seeks each active project's latest 30 settled tasks by index. It checks whether a task can return to Home before building its card. A live session, unread reply, call, review or work to ship still goes through the same card logic as the board. The lookup yields between projects and card reads. Search seeks through an index of recent public passages, opening at most 128 passage records between yields, including where the latest passages are hidden or empty. Both paths used the profile's writer connection in these measurements.
 
 Building and committing both new indexes on a copy of the populated fixture took 2.3 seconds. Together they used 14.9 MiB on disk, nearly all for the passage index.
 
@@ -128,4 +128,4 @@ The final implementation seeks and formats a single passage batch in one stateme
 | Slowest page per run, concurrent writer | 578–891 ms | 83–149 ms |
 | Full traversal, concurrent writer | 4.98–8.06 s | 0.59–0.63 s |
 
-The warm traversals returned identical hashes for all 6,224 documents in order. The writer ran as above on the shared Mac. The high end reproduces the scale of the earlier slowdown on the original query path, with timing from the runtime RPC client through decoding. Finder still collects the full catalog in the renderer. Query-filtered runtime search and the renderer's end-to-end timings remain open. An individual synchronous SQLite statement can still pause the runtime.
+The warm traversals returned identical hashes for all 6,224 documents in order. The writer ran as above on the shared Mac. The high end reproduces the scale of the earlier slowdown on the original query path, with timing from the runtime RPC client through decoding. These measurements cover the full-catalog request. After #1124, Finder uses query-filtered runtime search. Cached Home reads and catalog pages use the read worker, with the same bounded queries. End-to-end Finder timings and synchronous reads through the writer were outside that integration check.

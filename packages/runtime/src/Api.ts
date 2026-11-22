@@ -32,7 +32,7 @@ import {
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
-import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -166,6 +166,7 @@ import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { searchDocuments } from './searchDocuments'
+import { findDocuments } from './finderIndex'
 import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
@@ -282,6 +283,7 @@ export const handlers = apiLayer(
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     type QueryServices =
       | SqlClient.SqlClient
+      | Database.ReadLane
       | RuntimeConfig
       | Accounts
       | Agents
@@ -496,7 +498,7 @@ export const handlers = apiLayer(
       : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
       Effect.provideContext(
-        Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
+        Effect.catchCause(timedCall(effect), (cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
           const error = Cause.findErrorOption(cause)
           // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -1285,12 +1287,13 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
-      GetSearchDocuments: ({ after }) =>
+      GetSearchDocuments: ({ after, search }) =>
         api(
           Effect.gen(function* () {
             const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
-            return yield* searchDocuments(after, working)
+            return yield* search === undefined ? searchDocuments(after, working) : findDocuments(search, working)
           }),
         ),
       GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
@@ -1354,10 +1357,10 @@ export const handlers = apiLayer(
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
       GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
-      GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetBoard: ({ projectId, cached }) => api(queries.board(projectId, cached)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
-      GetHome: ({ since }) => api(queries.home(since, identity.deviceId)),
+      GetHome: ({ since, cached }) => api(queries.home(since, identity.deviceId, cached)),
       LeftHome: () =>
         api(
           Effect.gen(function* () {
@@ -1634,7 +1637,7 @@ export const handlers = apiLayer(
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId, 'person')
+              yield* sessions.interrupt(threadId, 'person', true)
             }),
           ),
         ),
@@ -1839,7 +1842,20 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
+      StartTask: ({
+        commandId,
+        projectId,
+        title,
+        description,
+        steps,
+        issue: named,
+        issues: others,
+        end,
+        repositories,
+        chat,
+        taskId,
+        workerId,
+      }) =>
         once(
           commandId,
           api(
@@ -1849,8 +1865,14 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              if (workerId !== undefined) {
+                const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
+                if (worker === undefined || worker.busy)
+                  return yield* new ApiError({ reason: 'Invalid', message: 'Choose an available worker assigned to this project.' })
+              }
+
               const created = yield* projects.createTask({
-                envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
+                envelope: yield* envelope('task.create', { projectId, title, description, issue, workerId }, commandId),
                 projectId,
                 title,
                 ...(description === undefined ? {} : { description }),
@@ -1874,6 +1896,7 @@ export const handlers = apiLayer(
                 reason: null,
                 actorId: actorId,
                 startsIn: Duration.zero,
+                ...(workerId === undefined ? {} : { held: true }),
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
@@ -1884,12 +1907,12 @@ export const handlers = apiLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, actorId)
+              yield* plans.start(planId, actorId, workerId)
               return yield* queries.task(created.taskId)
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
+      StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
@@ -2849,7 +2872,12 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                   reason: 'PersonRequired',
                   message: 'This call needs the person in the window or on a paired device.',
                 })
-              const positioned = Effect.flatMap(effect, (value) => {
+              const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
+              const prioritized = effect.pipe(
+                Effect.provideService(Foreground, !background),
+                Effect.provideService(Database.ReadPriority, background ? 'background' : 'interactive'),
+              )
+              const positioned = Effect.flatMap(prioritized, (value) => {
                 if (typeof value !== 'object' || value === null || !('cursor' in value) || typeof value.cursor !== 'number')
                   return Effect.succeed(value)
                 const cursor = value.cursor
@@ -2870,9 +2898,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
                 // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
-                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
-                  ? behind.withPermits(1)(positioned)
-                  : positioned
+                return yield* background ? behind.withPermits(1)(positioned) : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
               const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
               const handle = Effect.andThen(identities.check(identity), positioned).pipe(

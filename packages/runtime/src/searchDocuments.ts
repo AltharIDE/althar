@@ -1,6 +1,7 @@
 import type { SearchDocument } from '@althar/contracts'
+import { Database } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type Statement } from 'effect/sql'
 import { phaseRead, phasesNow } from './Search'
 
 /* Read the local record, never a provider or a command per keystroke. Pages keep
@@ -18,10 +19,11 @@ export const searchDocuments = Effect.fn('Search.documents')(function* (
   kept = SAID_KEPT,
 ) {
   const sql = yield* SqlClient.SqlClient
+  const reader = yield* Database.ReadLane
   // IDs sort by kind, then by their original id. Read only the kinds that can still fit this page, and bound each
   // before constructing the next: the old UNION materialized and sorted the whole catalog on every page.
   const rows: SearchDocument[] = []
-  const read = <A, E, R>(query: Effect.Effect<ReadonlyArray<A>, E, R>) => Effect.andThen(Effect.yieldNow, query)
+  const read = <A>(query: Statement.Statement<A>) => Effect.andThen(Effect.yieldNow, reader.read(query, 'background'))
   const cursor = (prefix: string) => (after < prefix ? '' : after.startsWith(prefix) ? after.slice(prefix.length) : null)
   const room = () => 201 - rows.length
   const conversation = cursor('conversation:')

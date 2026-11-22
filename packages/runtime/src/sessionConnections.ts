@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { posix, relative } from 'node:path'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
   AgentRequestFailed,
+  AgentStartFailed,
   type Question,
   type SessionEvent,
   type SessionOptions,
@@ -58,6 +60,8 @@ import {
 import { type RunSkills, refusalOf, runSkills } from './Skills'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import type { WorkerExecution } from './workerExecution'
 import { folderGoneWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -293,8 +297,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       // Trusted fully, by the person's word or as the team's, it runs as the team's code does: no longer untrusted or offline.
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
-      // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
-      yield* accounts.prepare(account)
+      const selectedWorker =
+        thread.role !== 'task' || thread.helper !== undefined
+          ? null
+          : ((yield* sql<{ workerId: string | null }>`SELECT json_extract(parameters, '$.workerId') AS worker_id
+              FROM task_plans WHERE state = 'accepted' AND task_id = ${thread.taskId}
+              ORDER BY decided_at DESC, rowid DESC LIMIT 1`)[0]?.workerId ?? null)
+      // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
+      if (selectedWorker === null) yield* accounts.prepare(account)
       // The session's own scope, from here, so whatever it is given goes with it.
       const scope = yield* Scope.fork(sessionsScope, 'sequential')
       // Selected skills load in every ordinary role, on agents whose registry says how, in the session's own folder.
@@ -309,7 +319,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       )
       const heldSkills = turnedOff.agent.length === 0 ? {} : { heldSkills: turnedOff.agent }
       const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
-        !offline && skillsConfig !== undefined && definition.skills !== null
+        selectedWorker === null && !offline && skillsConfig !== undefined && definition.skills !== null
           ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread), turnedOff.names).pipe(
               Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
               Effect.map((run) => ({ skills: run })),
@@ -334,7 +344,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       })
       // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
       const guarded =
-        thread.role === 'task' && !reads && guardHolds
+        selectedWorker === null && thread.role === 'task' && !reads && guardHolds
           ? yield* guardEnv({
               sessionId,
               taskBranch: thread.branch,
@@ -421,7 +431,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         { ...accounts.env(account), [WORK]: work, ...guarded, ALTHAR_WORKER: sessionId },
         transportOptions,
       )
-      const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
+      const processId = selectedWorker === null && transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
       if (transport._tag === 'Process' && processId !== undefined) {
         // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
         yield* sql`INSERT INTO processes ${sql.insert({
@@ -478,7 +488,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                     ]),
                     taskBranch: thread.branch,
                     // Its git stops what can't be undone whatever runs it, so a Never of only that needn't read the rest (rules.ts).
-                    ...(guardHolds ? { guarded: true } : {}),
+                    ...(selectedWorker === null && guardHolds ? { guarded: true } : {}),
                   },
                 }
               : {
@@ -490,7 +500,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       }
       // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
       const upFront =
-        requestContext.rules.role === 'task' && definition.upFront === true && definition.sessionMeta !== undefined
+        selectedWorker === null &&
+        requestContext.rules.role === 'task' &&
+        definition.upFront === true &&
+        definition.sessionMeta !== undefined
           ? yield* permissions
               .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
               .pipe(Effect.orElseSucceed(() => undefined))
@@ -517,13 +530,23 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
       let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
       // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
-      const tools = yield* toolServer.grant({
-        role: toolRoleOf(thread),
-        projectId: thread.projectId,
-        threadId: thread.threadId,
-        sessionId,
-        taskId: thread.role === 'coordinator' ? null : thread.taskId,
-      })
+      let remote: WorkerExecution | undefined
+      const tools = yield* toolServer.grant(
+        {
+          role: toolRoleOf(thread),
+          projectId: thread.projectId,
+          threadId: thread.threadId,
+          sessionId,
+          taskId: thread.role === 'coordinator' ? null : thread.taskId,
+        },
+        selectedWorker === null
+          ? undefined
+          : Effect.suspend(() =>
+              remote === undefined
+                ? Effect.fail(new ToolRefused({ message: 'The worker is disconnected.' }))
+                : Effect.mapError(remote.checkpoint, (error) => new ToolRefused({ message: error.message })),
+            ),
+      )
       const started = yield* Effect.exit(
         Effect.gen(function* () {
           if (untrusted && definition.untrustedRepositories === false)
@@ -533,9 +556,54 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               message:
                 'This custom agent has not been configured to ignore untrusted repository hooks and settings. Choose another agent for this review.',
             })
+          let agentCwd = cwdOf(thread)
+          let homeWorktree: string | undefined
+          if (selectedWorker !== null) {
+            const refuse = (reason: string) => new AgentStartFailed({ command: definition.name, reason })
+            const platform = runtimeConfig.workers
+            if (
+              platform === undefined ||
+              thread.role !== 'task' ||
+              thread.review !== null ||
+              (transport._tag === 'InProcess' && definition.source !== 'bundled')
+            )
+              return yield* refuse('This agent or task cannot run on the selected worker.')
+            if (thread.repositories.length !== 1 || thread.repositories[0]?.local === 1)
+              return yield* refuse('A worker needs one repository in a separate task worktree.')
+            const [workspace] = yield* sql<{
+              id: string
+            }>`SELECT id FROM workspaces WHERE task_id = ${thread.taskId} AND path = ${thread.worktree}`
+            if (workspace === undefined) return yield* refuse('The task’s worker workspace is not ready.')
+            remote = yield* platform.open({
+              workerId: selectedWorker,
+              projectId: thread.projectId,
+              workspaceId: workspace.id,
+              providerId: definition.id,
+              worktree: thread.worktree,
+              toolPort: toolServer.port,
+            })
+            homeWorktree = thread.worktree
+            agentCwd = posix.join(remote.path, relative(thread.worktree, agentCwd))
+          }
+          const activeWorker = remote
+          const localRoot = homeWorktree
           const connection = yield* connect({
-            transport,
-            onPermission: (request) => permissions.decide(held, request),
+            transport: activeWorker?.transport ?? transport,
+            ...(activeWorker === undefined ? {} : { checkpoint: activeWorker.checkpoint }),
+            onPermission: (request) =>
+              permissions.decide(
+                held,
+                activeWorker === undefined || localRoot === undefined
+                  ? request
+                  : {
+                      ...request,
+                      paths: request.paths.map((path) =>
+                        path === activeWorker.path || path.startsWith(activeWorker.path + '/')
+                          ? localRoot + path.slice(activeWorker.path.length)
+                          : path,
+                      ),
+                    },
+              ),
             permissions: definition.permissions,
             ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
             // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
@@ -551,21 +619,31 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           })
           // The person's own servers ticked for this role, whichever of their agents' settings they were found in (ADR-097).
           // A repository's own `.mcp.json` is given only where the repository is the person's: an outside author's never loads its MCP config.
-          const persons = yield* serversFor(
-            toolRoleOf(thread),
-            thread.projectId,
-            connection.info.mcp.http,
-            !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
-          ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
+          const persons =
+            activeWorker !== undefined
+              ? []
+              : yield* serversFor(
+                  toolRoleOf(thread),
+                  thread.projectId,
+                  connection.info.mcp.http,
+                  !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
+                ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
+          const localTools = tools.server
+          if (activeWorker !== undefined && localTools.type !== 'http')
+            return yield* new AgentStartFailed({ command: definition.name, reason: 'The worker needs the home’s HTTP tool grant.' })
+          const mcp =
+            activeWorker === undefined || localTools.type !== 'http'
+              ? localTools
+              : { ...localTools, url: 'http://127.0.0.1:' + activeWorker.toolPort + '/mcp' }
           const agent = yield* connection.newSession({
-            cwd: cwdOf(thread),
+            cwd: agentCwd,
             // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
             // Althar's tools, offline where the agent lets Althar take its network away (the registry says what each is held to).
             mode: reads && thread.role !== 'coordinator' ? definition.modes.reader : definition.modes.ask,
             modeOptionId: definition.options.mode,
             // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
             ...heldFor(definition, reads && thread.role !== 'coordinator'),
-            mcpServers: [tools.server, ...persons],
+            mcpServers: [mcp, ...persons],
             ...(skills !== undefined && definition.skills?.via.kind === 'directory' ? { additionalDirectories: [skills.folder] } : {}),
             ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', sessionOptions) }),
           })

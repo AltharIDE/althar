@@ -1,3 +1,4 @@
+import { Database } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -10,12 +11,21 @@ export const readHomeCards = <A, B, E, R>(rows: ReadonlyArray<A>, size: number, 
   })
 
 /** Check the small board history window before working out any settled cards. */
-export const homeTaskRows = (projectId: string, deviceId: string, settledShown: number) =>
+export const homeTaskRows = (projectId: string, deviceId: string, settledShown: number, cached = false) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     // Keep the preflight in step with the done-task branches of Queries.standingFor. Live sessions
     // and a pull request opening are checked by the caller, since their state is in the runtime.
-    return yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null; candidate: number }>`
+    const read = sql<{
+      id: string
+      projectId: string
+      state: string
+      createdAt: string
+      settledAt: string | null
+      candidate: number
+      view: string | null
+    }>`
+      SELECT found.*, ${cached ? sql`v.view` : sql`NULL`} AS view FROM (
       SELECT id, project_id, state, created_at, settled_at, 1 AS candidate
         FROM tasks WHERE project_id = ${projectId} AND state IN ('open', 'draft')
       UNION ALL
@@ -44,5 +54,7 @@ export const homeTaskRows = (projectId: string, deviceId: string, settledShown: 
       FROM (
         SELECT id, project_id, state, created_at, settled_at FROM tasks WHERE project_id = ${projectId}
           AND state IN ('done', 'abandoned') ORDER BY settled_at DESC, id DESC LIMIT ${settledShown}
-      ) k WHERE k.state = 'done'`
+      ) k WHERE k.state = 'done') found
+      ${cached ? sql`LEFT JOIN board_card_views v ON v.task_id = found.id` : sql``}`
+    return yield* cached ? (yield* Database.ReadLane).read(read) : read
   })

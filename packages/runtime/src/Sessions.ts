@@ -290,7 +290,7 @@ export class Sessions extends Context.Service<
       readonly byPerson?: boolean
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
-    interrupt(threadId: string, by?: 'person'): Effect.Effect<void, NoSession>
+    interrupt(threadId: string, by?: 'person', background?: boolean): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
     /** Stops a command the thread's session left running; it goes from the list. Nothing, where the session or the command is gone already. */
@@ -2614,7 +2614,7 @@ export class Sessions extends Context.Service<
             const running = threads.get(threadId)
             if (running !== undefined) running.moved = true
           }),
-        interrupt: (threadId, by) =>
+        interrupt: (threadId, by, background = false) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
             if (running === undefined) return Effect.fail(new NoSession({ threadId }))
@@ -2623,11 +2623,22 @@ export class Sessions extends Context.Service<
             // Asked to stop before the prompt has reached the agent, there is nothing to cancel yet: the agent would take
             // the stop for the turn before this one, or lose it, while its prompt goes on. Wait until it has the prompt.
             const sent = running.promptSent
-            return (sent === null ? Effect.void : Deferred.await(sent)).pipe(
+            const wasRunning = running.turnRunning
+            const cancel = (sent === null ? Effect.void : Deferred.await(sent)).pipe(
               // A stop never waits longer than a turn's start would: a prompt that never went out has nothing to cancel.
               Effect.timeoutOption(Duration.seconds(5)),
-              Effect.andThen(Effect.ignore(running.agent.interrupt)),
+              Effect.flatMap((ready) =>
+                Effect.suspend(() =>
+                  Option.isSome(ready) &&
+                  threads.get(threadId) === running &&
+                  running.promptSent === sent &&
+                  running.turnRunning === wasRunning
+                    ? Effect.ignore(running.agent.interrupt)
+                    : Effect.void,
+                ),
+              ),
             )
+            return background ? Effect.asVoid(Effect.forkIn(cancel, running.scope)) : cancel
           }),
         stop: (threadId) =>
           exclusive(
