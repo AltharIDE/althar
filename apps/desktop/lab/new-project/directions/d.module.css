@@ -1,0 +1,57 @@
+/* D · an agent sets it up: a composer in the middle of the window, and what it reads in what's said. */
+
+.page {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--n-2);
+}
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(620px, 100% - 48px);
+  margin: 0 auto;
+  padding: 18vh 0 48px;
+}
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.lede {
+  margin: -6px 0 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.found {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+}
+.yours {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.reads {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font: 400 12px/16px var(--mono);
+  color: var(--t-2);
+}

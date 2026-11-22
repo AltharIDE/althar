@@ -1,0 +1,14 @@
+/* A · the New project page, on the home. */
+
+.emptyActions {
+  margin-top: 16px;
+}
+.plan {
+  display: grid;
+  gap: 6px;
+}
+.code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t-1);
+}
