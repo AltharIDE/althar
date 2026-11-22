@@ -663,7 +663,8 @@ design tool lays out frames.
   small script in an isolated world (src/overlay/chip.ts), in the page's
   top layer, put back at once where the page takes it out or rewrites its
   document, back over any popover or dialog the page opens after it, inside
-  the page's modal while one is open (all else is inert then), and shown
+  the topmost of the page's modals while one is open (all else is inert
+  then), the one opened last, as it heard them open, and shown
   again by the main process whenever things are quiet; its presses are
   heard as the ground's are. The window draws it over a
   document, a diagram or a picture. Comment on it, where the conversation
@@ -756,13 +757,16 @@ who never open Althar.
   committed, a publish commits again. Comments stay in Althar.
 - **Saving touches only what is the artifact's own.** A first save, and a
   move, need a folder that holds nothing in git yet. After that, its own
-  files are those its last saved version wrote, by their blobs: a save
-  replaces and removes only those, keeps what others added beside them,
-  and refuses where someone changed one of them or where a file of the new
-  version would land on one of theirs. Its pull requests come from a branch
-  of its own, named by the canvas's id; an open one is continued only where
-  its last save recorded it, or where Althar's own asking to open it lost
-  its answer and it is the one asked for (the account's, with its title).
+  files are those its last saved version wrote, each as git keeps it (its
+  bytes, its mode, its kind): a save replaces and removes only those, keeps
+  what others added beside them, submodules and links included, and refuses
+  where someone changed one of them, its mode too, or where a file of the
+  new version would land on one of theirs. Its pull requests come from a
+  branch of its own, named by the canvas's id; an open one is continued only
+  where its last save recorded it, or else by the latest asking to open one
+  from that save's commit: the one the host answered with, kept in its
+  receipt, or, where the answer was lost, the one carrying that asking's
+  mark, a fresh one hidden in its description each time it asks.
 
 ### Downloading one
 
