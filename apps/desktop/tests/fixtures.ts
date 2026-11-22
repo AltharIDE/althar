@@ -1221,6 +1221,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
     setEffort: vi.fn(async () => {}),
+    setAgent: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),

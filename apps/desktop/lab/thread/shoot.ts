@@ -16,7 +16,7 @@ import { chromium, type Page } from '@playwright/test'
  *     the live turn at each moment: thinking, at work on a thought, saying what it will do (the task's lead), its steps,
  *     answering, and over
  *
- * With the lab running (Thread lab, on port 6131). LAB_RAW=1 draws the busy scene's thread as the window got it before the
+ * With the lab running (Thread lab, on port 6131). LAB_PRESS=<a button's name> presses it before shooting (Logs, say). LAB_RAW=1 draws the busy scene's thread as the window got it before the
  * lines about other tasks and skills were kept out of it.
  */
 
@@ -36,7 +36,7 @@ const open = async (scene: string, theme: string, width: number, height: number)
   })
   page.on('pageerror', (error) => console.error('page error:', error.message))
   await page.goto(url(scene, theme))
-  await page.waitForSelector('section[aria-label="Thread"] > *')
+  await page.waitForSelector('section[aria-label="Thread"] > :not([data-virtual-gap])')
   await page.waitForTimeout(600)
   return page
 }
@@ -46,6 +46,11 @@ const scroller = (page: Page) => page.locator('section[aria-label="Thread"]').lo
 if (mode === 'shots') {
   const [scene = 'task', theme = 'light', width = '1000', height = '900'] = rest
   const page = await open(scene, theme, Number(width), Number(height))
+  // LAB_PRESS names a button to press first, such as a line's Logs, to shoot it open.
+  if (process.env.LAB_PRESS !== undefined) {
+    await page.getByRole('button', { name: process.env.LAB_PRESS, exact: true }).last().click()
+    await page.waitForTimeout(500)
+  }
   await page.screenshot({ path: join(out, `${name}-opening.png`) })
   // The whole thread: the window as tall as it is.
   const tall = await scroller(page).evaluate((el) => el.scrollHeight)

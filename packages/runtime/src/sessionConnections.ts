@@ -904,7 +904,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       Effect.onError(effect, (cause) => discard(connected, cause))
 
   /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-  const activate = (connected: Connected, brief: Brief, blockedInputs?: ReadonlySet<string>) => {
+  /**
+   * `adopt` is told of the session as it takes the thread, before anything else can reach it: a switch gives it the lead the
+   * person picked while it started, so its first turn runs on that.
+   */
+  const activate = (connected: Connected, brief: Brief, blockedInputs?: ReadonlySet<string>, adopt?: (running: Running) => void) => {
     // Once it is supervised, ending it is supervise's: before, a failure lets it go here.
     let supervised = false
     return Effect.gen(function* () {
@@ -990,6 +994,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         ...(asideNow.aside ? { aside: { sandbox: upFront === undefined ? null : upFrontSaid(upFront) } } : {}),
         ...(asideNow.unsaid ? { waitsForWords: true } : {}),
       }
+      adopt?.(running)
       threads.set(thread.threadId, running)
       // Stop descendants before the agent exits and they are reparented, including detached commands that never reported an output file.
       yield* Scope.addFinalizer(

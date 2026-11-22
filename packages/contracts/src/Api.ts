@@ -2221,6 +2221,15 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
  * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
@@ -2237,8 +2246,13 @@ export const NoticeItem = Schema.Struct({
     description: Schema.NullOr(Schema.String),
     /** What the line is built on, kept apart from it: a host's raw answer, pretty-printed, drawn folded under "Details". */
     details: Schema.optional(Schema.String),
-    /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
-    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+    /**
+     * Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. `at`, where
+     * given, is where the label starts in the title, for a label that also stands earlier in it ("test" in "test / linux").
+     */
+    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String, at: Schema.optional(Schema.Number) }))),
+    /** The failed checks the line names, such as the merge queue's: the end of each one's log, or why it couldn't be read, folded under it. */
+    logs: Schema.optional(Schema.Array(CheckLogShown)),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
@@ -2467,15 +2481,6 @@ export const CanvasItem = Schema.Struct({
     open: Schema.Boolean,
   }),
 })
-
-/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
-export const CheckLogShown = Schema.Struct({
-  name: Schema.String,
-  url: Schema.NullOr(Schema.String),
-  log: Schema.NullOr(Schema.String),
-  missing: Schema.NullOr(Schema.String),
-})
-export type CheckLogShown = typeof CheckLogShown.Type
 
 /**
  * Something heard from outside, written by someone else: a comment or a
@@ -3867,6 +3872,12 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /**
+   * A switch or a fresh session is taking the thread over, until it holds it, even after the one going out has let it go
+   * (`held` false then): a model or effort picked now is the incoming session's, sent as on a held thread, never as a start.
+   * `nextLead` is what that session leads as then.
+   */
+  handover: Schema.optional(Schema.Boolean),
   /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
@@ -5156,6 +5167,7 @@ const socketCalls = new Set<string>([
   'SwitchAgent',
   'SetModel',
   'SetEffort',
+  'SetAgent',
   'GetRepositoryScripts',
   'ReadLaunchPreview',
   'OpenLaunchPreviewSocket',
@@ -5704,11 +5716,17 @@ const ProjectApi = RpcGroup.make(
   /**
    * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
    * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
-   * said in the thread, and the lead stays as it was.
+   * said in the thread, and the lead stays as it was. `agentId` is the agent whose model it is, as the picker showed it: the
+   * one on the thread where left out; while another takes the thread over, the one going out takes it back.
    */
-  command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
+  command('SetModel', { threadId: Schema.String, agentId: Schema.optional(Schema.String), model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
-  command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
+  command('SetEffort', { threadId: Schema.String, agentId: Schema.optional(Schema.String), effort: Schema.String }, Schema.Void),
+  /**
+   * The thread's agent picked with nothing of its model or effort chosen, as `SetModel` is: the one on the thread picked back
+   * over another waiting to take over keeps the thread, as it is; the one going out, picked while another takes over, takes it back.
+   */
+  command('SetAgent', { threadId: Schema.String, agentId: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */

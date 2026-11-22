@@ -271,9 +271,9 @@ describe('a pull request, by the person and the lead', () => {
         if (news !== 'merged-comment') {
           // The person is told nothing names it, rather than its lead guessing.
           const heard = yield* until(notices(threadId), (all) =>
-            all.some((notice) => String(notice['description'] ?? '').includes('Nothing names PR #1 as why it was taken out')),
+            all.some((notice) => String(notice['description'] ?? '').startsWith('Its lead wasn’t asked to fix anything')),
           )
-          assert.isTrue(heard.some((notice) => String(notice['description'] ?? '').includes('wasn’t asked to change anything')))
+          assert.isTrue(heard.some((notice) => String(notice['description'] ?? '').includes('Put it back in the queue when you want')))
         }
       }).pipe(Effect.provide(runtimeWith({ github })))
     })
