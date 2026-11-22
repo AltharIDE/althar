@@ -1286,11 +1286,13 @@ void ready.then(() => {
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
   // The ground a canvas of boards is drawn on, read once it is first wanted.
   let groundScript: string | null = null
+  let chipScript: string | null = null
   const artifacts = join(locations().profile, 'artifacts')
   canvases = startCanvases({
     root: artifacts,
     tokens: () => canvasTokens(),
     ground: () => (groundScript ??= readFileSync(join(here, '../overlay/ground.js'), 'utf8')),
+    chip: () => (chipScript ??= readFileSync(join(here, '../overlay/chip.js'), 'utf8')),
     stills: join(locations().profile, 'canvas-stills'),
     tell: (window, key, news) => {
       if (!window.isDestroyed()) window.webContents.send('althar:canvas-ground', key, news)

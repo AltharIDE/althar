@@ -81,7 +81,8 @@ export type GroundEvent =
   | ({ readonly kind: 'pointed' } & GroundPart)
   | { readonly kind: 'pin'; readonly n: number }
   /** A key the window acts on, pressed while the canvas has the keyboard. */
-  | { readonly kind: 'key'; readonly key: 'escape' | 'older' | 'newer' }
+  /** Open and close are its chip's, beside a conversation: the artifact itself, and closing the canvas. */
+  | { readonly kind: 'key'; readonly key: 'escape' | 'older' | 'newer' | 'open' | 'close' }
 
 /** What has happened since the news last asked for: the state now, and what the person did. */
 export interface GroundNews {
@@ -98,6 +99,8 @@ export interface GroundChange {
   readonly step?: -1 | 1
   readonly zoom?: number | 'fit' | 'in' | 'out'
   readonly tool?: GroundTool
+  /** Beside a conversation, the canvas's name its chip shows beside the zoom (its Open and close told as keys); null for none. */
+  readonly chip?: string | null
 }
 
 export interface Ground {
@@ -260,6 +263,8 @@ const install = (): Ground => {
   const news = (): GroundNews => ({ seq, state, events: [] })
   /* Drawn again as the ground changes; made once `set` is. */
   let showControls = () => {}
+  /* Beside a conversation, the name its chip shows; null for none. */
+  let chipTitle: string | null = null
   const changed = () => {
     showControls()
     seq += 1
@@ -701,6 +706,7 @@ const install = (): Ground => {
 
   const set = (change: GroundChange): GroundNews => {
     mounted()
+    if (change.chip !== undefined) chipTitle = change.chip
     let relayout = false
     let refit = false
     if (change.tool !== undefined && change.tool !== state.tool) {
@@ -764,7 +770,14 @@ const install = (): Ground => {
     return news()
   }
   const controls = controlsIn(layer, (change) => void set(change))
-  showControls = () => controls.show(pages, state)
+  showControls = () =>
+    controls.show(
+      pages,
+      state,
+      chipTitle === null
+        ? null
+        : { title: chipTitle, onOpen: () => tell({ kind: 'key', key: 'open' }), onClose: () => tell({ kind: 'key', key: 'close' }) },
+    )
 
   return {
     start: (given, asked) => {

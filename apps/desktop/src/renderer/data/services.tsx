@@ -333,6 +333,11 @@ export interface CanvasesHost {
   readonly cover: (threadId: string, covered: boolean) => Promise<void>
   /** A canvas of boards: changes how it shows (its view, page, board, zoom or tool). */
   readonly ground?: (threadId: string, change: GroundChange) => void
+  /**
+   * Beside a conversation, what a canvas of boards or a page draws in its own view of what it is: its name (null for none);
+   * its Open and close come back as the ground's keys.
+   */
+  readonly chip?: (threadId: string, title: string | null) => void
   /** Draws the comments' pins on their parts; the numbers of those found, or null where it isn't shown. */
   readonly pins?: (threadId: string, pins: ReadonlyArray<GroundPin>) => Promise<ReadonlyArray<number> | null>
   /** A part found again, outlined, with a picture to write its comment over; null where it isn't there. */

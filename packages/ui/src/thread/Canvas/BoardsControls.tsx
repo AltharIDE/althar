@@ -3,6 +3,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { cx } from '../../lib/cx'
+import { CanvasChip } from './CanvasChip'
 import s from './Canvas.module.css'
 
 /*
@@ -80,6 +81,8 @@ export interface BoardsControlsProps {
   onStep: (step: -1 | 1) => void
   onZoom: (zoom: BoardsZoom) => void
   onTool: (tool: BoardsTool) => void
+  /** Beside a conversation: what it is, after the zoom; its name opens the artifact itself. */
+  chip?: { readonly title: string; readonly onOpen: () => void; readonly onClose: () => void } | null
   text?: Partial<BoardsControlsText>
 }
 
@@ -101,6 +104,7 @@ export function BoardsControls({
   onStep,
   onZoom,
   onTool,
+  chip = null,
   text,
 }: BoardsControlsProps) {
   const t = { ...boardsControlsText, ...text }
@@ -195,6 +199,7 @@ export function BoardsControls({
           </MenuItem>
           <MenuItem onSelect={() => onZoom(2)}>{t.percent(2)}</MenuItem>
         </Menu>
+        {chip !== null && <CanvasChip title={chip.title} onOpen={chip.onOpen} onClose={chip.onClose} bare />}
       </div>
       <div className={cx(s.float, s.floatTools)} role="toolbar" aria-label={t.tools}>
         {TOOLS.map((one) => (

@@ -661,8 +661,6 @@ export function TaskView({
   useDraftCanvasVersions(kept, comments)
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
-  // Where a canvas beside the conversation puts its name, versions and actions: the task's own top row, after its header.
-  const [canvasRow, setCanvasRow] = useState<HTMLSpanElement | null>(null)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
   const host = useThreadHost(
     true,
@@ -680,8 +678,6 @@ export function TaskView({
           },
         },
     conversation,
-    // An aside has no top row of its own: its canvas keeps its head.
-    aside === undefined ? canvasRow : undefined,
   )
   // A canvas its lead publishes or opens beside the conversation opens on the workbench as it arrives (ADR-104); an artifact's
   // chat's, beside it in its room.
@@ -1726,44 +1722,40 @@ export function TaskView({
             <TitleBar
               lights="none"
               end={
-                <>
-                  <Now ticking={clockRuns}>
-                    {(now) => {
-                      const took = tookOf(snapshot, now)
-                      const elapsed = elapsedOf(snapshot, now)
-                      return (
-                        <TaskHeader
-                          title={snapshot.task.title}
-                          status={status}
-                          state={state}
-                          {...(why === undefined ? {} : { why })}
-                          // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
-                          steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
-                          {...(took === null ? {} : { took })}
-                          {...(elapsed === null ? {} : { elapsed })}
-                          faces={(hasGraph ? (['talk', 'out', 'graph'] as const) : (['talk', 'out'] as const)).map((value) => ({
-                            value,
-                            label: text.faces[value],
-                            kbd: text.facesKbd[value],
-                          }))}
-                          face={shown}
-                          onFace={setFace}
-                          // Finished and the person's to settle: Done and Keep for later, inside where it stands; else who waits for it.
-                          {...(settle !== null
-                            ? { beside: settle }
-                            : waitsList === undefined && waitedBy.length > 0
-                              ? { beside: <TaskWaitedBy waitedBy={waitedBy} /> }
-                              : {})}
-                          {...(waitsList === undefined ? {} : { waits: waitsList })}
-                          parts={partsAt(now)}
-                          actions={actionsAt(now)}
-                        />
-                      )
-                    }}
-                  </Now>
-                  {/* A canvas beside the conversation: its name, versions and actions, in this row rather than one of its own. */}
-                  <span ref={setCanvasRow} className={s.canvasRow} />
-                </>
+                <Now ticking={clockRuns}>
+                  {(now) => {
+                    const took = tookOf(snapshot, now)
+                    const elapsed = elapsedOf(snapshot, now)
+                    return (
+                      <TaskHeader
+                        title={snapshot.task.title}
+                        status={status}
+                        state={state}
+                        {...(why === undefined ? {} : { why })}
+                        // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
+                        steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
+                        {...(took === null ? {} : { took })}
+                        {...(elapsed === null ? {} : { elapsed })}
+                        faces={(hasGraph ? (['talk', 'out', 'graph'] as const) : (['talk', 'out'] as const)).map((value) => ({
+                          value,
+                          label: text.faces[value],
+                          kbd: text.facesKbd[value],
+                        }))}
+                        face={shown}
+                        onFace={setFace}
+                        // Finished and the person's to settle: Done and Keep for later, inside where it stands; else who waits for it.
+                        {...(settle !== null
+                          ? { beside: settle }
+                          : waitsList === undefined && waitedBy.length > 0
+                            ? { beside: <TaskWaitedBy waitedBy={waitedBy} /> }
+                            : {})}
+                        {...(waitsList === undefined ? {} : { waits: waitsList })}
+                        parts={partsAt(now)}
+                        actions={actionsAt(now)}
+                      />
+                    )
+                  }}
+                </Now>
               }
             >
               <BackCrumb

@@ -47,7 +47,7 @@ export type CanvasGroundNews =
   | { readonly kind: 'state'; readonly state: GroundState }
   | { readonly kind: 'pointed'; readonly pointed: CanvasPointed }
   | { readonly kind: 'pin'; readonly n: number }
-  | { readonly kind: 'key'; readonly key: 'escape' | 'older' | 'newer' }
+  | { readonly kind: 'key'; readonly key: 'escape' | 'older' | 'newer' | 'open' | 'close' }
 
 const VIEWS: ReadonlyArray<GroundView> = ['every', 'one']
 const TOOLS: ReadonlyArray<GroundTool> = ['point', 'hand', 'use']

@@ -57,6 +57,8 @@ export interface CanvasesOptions {
   readonly listening: () => ReadonlySet<number>
   /** Opens a web address in the person's browser. */
   readonly outside: (address: string) => void
+  /** The chip's script (src/overlay/chip.ts), run in a page canvas's isolated world beside a conversation. */
+  readonly chip?: () => string
   /** The ground's script (src/overlay/ground.ts), run in a canvas of boards' isolated world. */
   readonly ground?: () => string
   /** Tells the window showing a canvas of boards what its ground said. */
@@ -82,6 +84,10 @@ interface View {
   wanted: Partial<GroundState>
   /** The pins the window last asked for. */
   pins: ReadonlyArray<GroundPin>
+  /** Beside a conversation, the name its chip shows (its ground's, or a page's own); null for none. */
+  chip: string | null
+  /** The load whose chip is heard, for a page: one loop a load. */
+  chipHeard: number
 }
 
 /** The isolated world the ground runs in: neither the page's (0) nor Electron's for a preload (999). */
@@ -187,6 +193,9 @@ export const startCanvases = (options: CanvasesOptions) => {
     })
   }
 
+  /* Each conversation's chip, as the window last asked: a view made after the ask, or made again, takes it. */
+  const chips = new Map<string, string | null>()
+
   const make = (key: string, window: BrowserWindow, target: CanvasTarget): View => {
     const view = new WebContentsView({
       webPreferences: {
@@ -205,13 +214,25 @@ export const startCanvases = (options: CanvasesOptions) => {
     })
     view.setBackgroundColor('#ffffff')
     view.setVisible(!covered.has(key))
-    const one: View = { key, window, view, target, shown: false, loads: 0, wanted: {}, pins: [] }
+    const one: View = {
+      key,
+      window,
+      view,
+      target,
+      shown: false,
+      loads: 0,
+      wanted: {},
+      pins: [],
+      chip: chips.get(key) ?? null,
+      chipHeard: 0,
+    }
     guard(one, view.webContents)
     views.set(key, one)
     // Each load of a canvas of boards starts its ground afresh, as a load starts its isolated world afresh.
     view.webContents.on('did-finish-load', () => {
       one.loads += 1
       if (one.target.boards === true) void ground(one, one.loads)
+      else if (one.chip !== null) void pageChip(one, one.loads)
       keepStill(one, one.loads)
     })
     void view.webContents.loadURL(loadAddress(target)).catch(() => undefined)
@@ -273,6 +294,7 @@ export const startCanvases = (options: CanvasesOptions) => {
     ).catch(() => null)
     if (started === null || !live(one, load)) return
     if (one.pins.length > 0) void run(one, `globalThis.__altharGround.pins(${JSON.stringify(one.pins)})`).catch(() => undefined)
+    if (one.chip !== null) void run(one, `globalThis.__altharGround.set(${JSON.stringify({ chip: one.chip })})`).catch(() => undefined)
     send(one, { kind: 'state', state: started.state })
     let seq = started.seq
     while (live(one, load)) {
@@ -334,6 +356,42 @@ export const startCanvases = (options: CanvasesOptions) => {
     const { zoom: _zoom, step: _step, ...kept } = asked
     one.wanted = { ...one.wanted, ...kept }
     void run(one, `globalThis.__altharGround?.set(${JSON.stringify(asked)})`).catch(() => undefined)
+  }
+
+  /**
+   * A page's chip beside a conversation (src/overlay/chip.ts): shown with its name, or taken away; its presses heard as
+   * the ground's keys are, until the next load.
+   */
+  const pageChip = async (one: View, load: number) => {
+    const script = options.chip?.()
+    if (script === undefined || !live(one, load)) return
+    const shown = await run<{ readonly seq: number }>(one, `${script}\n;globalThis.__altharChip.show(${JSON.stringify(one.chip)})`).catch(
+      () => null,
+    )
+    if (shown === null || !live(one, load) || one.chipHeard === load) return
+    one.chipHeard = load
+    let seq = shown.seq
+    while (live(one, load)) {
+      const news = await run<{ readonly seq: number; readonly events: ReadonlyArray<'open' | 'close'> }>(
+        one,
+        `globalThis.__altharChip.next(${seq})`,
+      ).catch(() => null)
+      if (news === null || !live(one, load)) return
+      seq = news.seq
+      for (const key of news.events) send(one, { kind: 'key', key })
+    }
+  }
+
+  /** Beside a conversation, what a canvas of boards or a page draws in its own view of what it is: its name, or none. */
+  const chip = (key: string, title: string | null) => {
+    if (title === null) chips.delete(key)
+    else chips.set(key, title)
+    const one = views.get(key)
+    if (one === undefined || one.view.webContents.isDestroyed() || one.chip === title) return
+    one.chip = title
+    if (one.target.boards === true)
+      void run(one, `globalThis.__altharGround?.set(${JSON.stringify({ chip: title })})`).catch(() => undefined)
+    else if (one.loads > 0) void pageChip(one, one.loads)
   }
 
   /** Draws the comments' pins on their parts, now and after every load. */
@@ -436,7 +494,7 @@ export const startCanvases = (options: CanvasesOptions) => {
     return { session, release: () => void downloads.delete(held) }
   }
 
-  return { show, close, reload, still, cover, opened, change, pins, find, clear, picture, serveDownload }
+  return { show, close, reload, still, cover, opened, change, chip, pins, find, clear, picture, serveDownload }
 }
 
 export type Canvases = ReturnType<typeof startCanvases>

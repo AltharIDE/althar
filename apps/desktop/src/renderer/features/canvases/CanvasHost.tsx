@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { CanvasAnchor, CanvasBoards, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
-import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, IconButton, Markdown, Room } from '@althar/ui'
+import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, Markdown, Room } from '@althar/ui'
 
 import { sized } from '../../../main/browser/elementWords'
 import type { CanvasPointed } from '../../../main/canvases/boards'
@@ -58,16 +58,9 @@ export interface CanvasHostProps {
    * of its own (null while the row is laid out).
    */
   readonly actionsIn?: Element | null
-  /** With `actionsIn`, a row that isn't the artifact's own (a task's): its name and its close go there too. */
-  readonly titled?: boolean
 }
 
 const LONGEST_SELECTION = 240
-
-export const hostText = {
-  /** A canvas beside a conversation: to the artifact itself, where it is saved, downloaded and its versions stepped through. */
-  open: 'Open the artifact',
-}
 
 /** The comments sent on a canvas, open first, as its panel lists them. */
 export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelComment & { readonly anchor: CanvasAnchor }> =>
@@ -115,7 +108,7 @@ export const svgAddress = (svg: string) => {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn, titled }: CanvasHostProps) {
+export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn }: CanvasHostProps) {
   const navigate = useNavigate()
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
@@ -166,12 +159,15 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
     () => (kind === 'boards' ? sent.map((one) => ({ ...one, n: pinned.numbers.get(one.id) ?? null })) : sent),
     [kind, sent, pinned],
   )
+  // Its chip's Open and close, beside a conversation, as the view that draws it says them.
+  const pressed = useRef<{ readonly open: (() => void) | undefined; readonly close: () => void }>({ open: undefined, close: onClose })
   const ground = useBoards({
     threadId,
     canvasId: open.canvasId,
     boards,
     draft,
     pinned,
+    onChip: (key) => (key === 'open' ? pressed.current.open?.() : pressed.current.close()),
     onVersion: (step) => {
       if (version === null) return
       const to = version.number + step
@@ -233,19 +229,48 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
   }, [kind, body, change])
 
   // Its words are only waited for once there is a version to read them from: a canvas that can't be read says why.
+  // To the artifact itself, opened as itself in its project's Artifacts.
+  const toArtifact = useMemo(
+    () =>
+      summary === undefined
+        ? undefined
+        : () => {
+            askToOpen(summary.projectId, summary.id)
+            void navigate({ to: '/projects/$projectId', params: { projectId: summary.projectId }, search: { room: Room.Artifacts } })
+          },
+    [summary, navigate],
+  )
+  // Beside a conversation, a canvas of boards or a page draws what it is in its own view: told its name, and heard back.
+  const chipTitle = actionsIn === undefined && (kind === 'boards' || kind === 'html') ? (version?.title ?? null) : null
+  useEffect(() => {
+    if (chipTitle === null) return
+    host.canvases?.chip?.(threadId, chipTitle)
+    return () => host.canvases?.chip?.(threadId, null)
+  }, [host.canvases, threadId, chipTitle])
+  useEffect(() => {
+    pressed.current = { open: toArtifact, close: onClose }
+  })
+  // A page's chip is heard here; a canvas of boards' through its ground's keys.
+  const page = kind === 'html'
+  useEffect(
+    () =>
+      page
+        ? host.canvases?.onGround?.((key, news) => {
+            if (key !== threadId || news.kind !== 'key') return
+            if (news.key === 'open') pressed.current.open?.()
+            if (news.key === 'close') pressed.current.close()
+          })
+        : undefined,
+    [host.canvases, threadId, page],
+  )
   const loading = detail.isPending || (drawsText && version !== null && text.isPending)
   const error = detail.isError ? messageOf(detail.error) : drawsText && text.isError ? messageOf(text.error) : undefined
   const fill = kind === 'html' || kind === 'boards' || kind === 'picture' || kind === 'svg'
   // In its own room, what is for the whole artifact is there: its versions, saving it, downloading it. Beside a conversation,
-  // the canvas is what it is, with a way to the artifact itself, where those are; never in a task's header.
-  const inRoom = actionsIn !== undefined && titled !== true
-  const toArtifact =
-    summary === undefined
-      ? undefined
-      : () => {
-          askToOpen(summary.projectId, summary.id)
-          void navigate({ to: '/projects/$projectId', params: { projectId: summary.projectId }, search: { room: Room.Artifacts } })
-        }
+  // the canvas is what it is, floating on it, with a way to the artifact itself, where those are; never in the conversation's
+  // header. A canvas of boards and a page draw that in their own view, which nothing of the window can be drawn over.
+  const inRoom = actionsIn !== undefined
+  const drawnByView = kind === 'boards' || kind === 'html'
   return (
     <CanvasPanel
       name={summary?.name ?? ''}
@@ -259,37 +284,31 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
       onClose={onClose}
       {...(onBack === undefined ? {} : { onBack })}
       {...(actionsIn === undefined
+        ? { chip: { ...(toArtifact === undefined ? {} : { onOpen: toArtifact }), drawnByView } }
+        : { actionsIn })}
+      {...(summary === undefined || version === null || error !== undefined || !inRoom
         ? {}
-        : { actionsIn, ...(titled === true ? { titled, ...(toArtifact === undefined ? {} : { onTitle: toArtifact }) } : {}) })}
-      {...(summary === undefined || version === null || error !== undefined
-        ? {}
-        : !inRoom
-          ? {
-              extra: (
-                <IconButton icon="expand" label={hostText.open} tooltip="below" tooltipAlign="end" size="small" onClick={toArtifact} />
-              ),
-            }
-          : {
-              extra: (
-                <>
-                  <SaveCanvas summary={summary} version={latest} />
-                  <DownloadCanvas
-                    projectId={summary.projectId}
-                    canvasId={summary.id}
-                    name={summary.name}
-                    kind={kind}
-                    version={version.number}
-                    manifest={version.manifest}
-                    body={body}
-                  />
-                </>
-              ),
-            })}
+        : {
+            extra: (
+              <>
+                <SaveCanvas summary={summary} version={latest} />
+                <DownloadCanvas
+                  projectId={summary.projectId}
+                  canvasId={summary.id}
+                  name={summary.name}
+                  kind={kind}
+                  version={version.number}
+                  manifest={version.manifest}
+                  body={body}
+                />
+              </>
+            ),
+          })}
       fill={fill}
       loading={loading}
       {...(comment === undefined ? {} : { onComment: comment })}
       {...(error === undefined ? {} : { error })}
-      {...((kind === 'html' || kind === 'boards') && host.canvases !== undefined
+      {...(inRoom && (kind === 'html' || kind === 'boards') && host.canvases !== undefined
         ? { onReload: () => host.canvases?.reload(threadId) }
         : {})}
       {...(kind === 'boards' && boards !== null && !loading && error === undefined
@@ -381,6 +400,7 @@ function useBoards({
   boards,
   draft,
   pinned,
+  onChip,
   onVersion,
 }: {
   threadId: string
@@ -388,6 +408,8 @@ function useBoards({
   boards: CanvasBoards | null
   draft: string | null
   pinned: ReturnType<typeof pinsOf>
+  /** Its chip's Open and close, beside a conversation, drawn by the ground beside its zoom. */
+  onChip: (key: 'open' | 'close') => void
   onVersion: (step: -1 | 1) => void
 }) {
   const views = useServices().host.canvases
@@ -414,6 +436,7 @@ function useBoards({
     },
     key: (key) => {
       if (key === 'escape') return setWriting(null)
+      if (key === 'open' || key === 'close') return onChip(key)
       onVersion(key === 'older' ? -1 : 1)
     },
   })

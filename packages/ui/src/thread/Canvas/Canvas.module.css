@@ -361,6 +361,7 @@ button.pinMark:hover {
 /* ---- In an artifact's room: no head of its own ------------------------ */
 /* the room's one top row is the artifact's; the panel is only what is on it, edge to edge */
 .bare {
+  position: relative;
   height: 100%;
   min-width: 0;
   display: flex;
@@ -374,36 +375,66 @@ button.pinMark:hover {
   gap: 6px;
   min-width: 0;
 }
-.rowRule {
-  flex: none;
-  width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--line);
+/* ---- A canvas beside a conversation: what it is, floating on it ------- */
+.chip {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  height: 38px;
+  padding: 0 4px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--float);
+  box-shadow: var(--lift-pop);
 }
-.rowLink {
-  padding: 0;
+/* inside a floating cluster already: no surface of its own, a rule before it */
+.chipBare {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+.chipName {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 6px;
   border: 0;
+  border-radius: 7px;
   background: none;
+  color: var(--t-1);
   font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.chipName svg {
+  flex: none;
+  color: var(--t-3);
+}
+button.chipName {
   cursor: pointer;
 }
-.rowLink:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+button.chipName:hover {
+  background: var(--sunk);
 }
-.rowLink:focus-visible {
+button.chipName:focus-visible {
   outline: 1.5px solid var(--signal);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: 1px;
 }
-.rowTitle {
+.chipWords {
   min-width: 0;
-  max-width: 160px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--t-1);
 }

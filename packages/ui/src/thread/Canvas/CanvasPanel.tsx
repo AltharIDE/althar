@@ -11,6 +11,7 @@ import { Problem } from '../../primitives/Problem/Problem'
 import { SidePanel, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { type CanvasKind, canvasKindWords } from './canvas'
+import { CanvasChip } from './CanvasChip'
 import s from './Canvas.module.css'
 
 /*
@@ -123,10 +124,11 @@ export interface CanvasPanelProps {
    * head of its own, and its versions and actions go in this element (null while it is being laid out).
    */
   actionsIn?: Element | null
-  /** With `actionsIn`, where the row isn't the artifact's own (a task's): its name before its actions, and its close after. */
-  titled?: boolean
-  /** With `titled`, its name opens the artifact itself. */
-  onTitle?: () => void
+  /**
+   * Beside a conversation, never in its header: no head of its own, and what it is floats on it (its name, which opens the
+   * artifact itself, a comment on the whole of it, and its close), drawn here unless the canvas's own view draws it.
+   */
+  chip?: { readonly onOpen?: () => void; readonly drawnByView?: boolean }
   /** A comment in the list pressed: its pin shows on its part. */
   onCommentPick?: (id: string) => void
   onClose: () => void
@@ -154,8 +156,7 @@ export function CanvasPanel({
   bar,
   onBack,
   actionsIn,
-  titled = false,
-  onTitle,
+  chip,
   onCommentPick,
   onClose,
   children,
@@ -173,7 +174,7 @@ export function CanvasPanel({
   const actions = (
     <>
       {/* Its versions step only in its own room: beside a conversation, the artifact itself is a press away. */}
-      {onVersion !== undefined && latest > 1 && actionsIn !== undefined && !titled && (
+      {onVersion !== undefined && latest > 1 && actionsIn !== undefined && (
         <span className={s.versions}>
           <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
           <span className={s.versionWord}>{t.version(version, latest)}</span>
@@ -182,19 +183,7 @@ export function CanvasPanel({
       )}
       {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
       {extra}
-      {onComment !== undefined && error === undefined && titled ? (
-        <IconButton
-          icon="comment"
-          label={t.comment}
-          tooltip="below"
-          size="small"
-          aria-pressed={writing}
-          onClick={() => {
-            setAimed(selected)
-            setWriting((was) => !was)
-          }}
-        />
-      ) : onComment !== undefined && error === undefined ? (
+      {onComment !== undefined && error === undefined ? (
         <ActionButton
           icon="comment"
           aria-pressed={writing}
@@ -283,35 +272,37 @@ export function CanvasPanel({
       )}
     </>
   )
+  // Beside a conversation: no head of its own, and what it is floating on it.
+  if (chip !== undefined)
+    return (
+      <aside className={cx(s.panel, s.bare)} aria-label={title}>
+        {chip.drawnByView !== true && (
+          <CanvasChip
+            title={title}
+            {...(chip.onOpen === undefined ? {} : { onOpen: chip.onOpen })}
+            onClose={onClose}
+            {...(onComment !== undefined && error === undefined
+              ? {
+                  comment: {
+                    pressed: writing,
+                    onPress: () => {
+                      setAimed(selected)
+                      setWriting((was) => !was)
+                    },
+                  },
+                }
+              : {})}
+            text={{ close: t.close }}
+          />
+        )}
+        {content}
+      </aside>
+    )
   // In a room whose top row is the artifact's: no head of its own, its versions and actions there.
   if (actionsIn !== undefined)
     return (
       <aside className={cx(s.panel, s.bare)} aria-label={title}>
-        {actionsIn !== null &&
-          createPortal(
-            <span className={s.inRow}>
-              {titled && (
-                <>
-                  <span className={s.rowRule} aria-hidden="true" />
-                  <span className={s.panelTile} aria-hidden="true">
-                    <Icon name="canvas" size={14} />
-                  </span>
-                  {onTitle === undefined ? (
-                    <span className={s.rowTitle} title={title}>
-                      {title}
-                    </span>
-                  ) : (
-                    <button type="button" className={cx(s.rowTitle, s.rowLink)} title={title} onClick={onTitle}>
-                      {title}
-                    </button>
-                  )}
-                </>
-              )}
-              {actions}
-              {titled && <IconButton icon="close" label={t.close} tooltip="below" tooltipAlign="end" size="small" onClick={onClose} />}
-            </span>,
-            actionsIn,
-          )}
+        {actionsIn !== null && createPortal(<span className={s.inRow}>{actions}</span>, actionsIn)}
         {content}
       </aside>
     )

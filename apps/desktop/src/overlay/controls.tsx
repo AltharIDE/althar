@@ -16,8 +16,12 @@ import type { GroundChange, GroundPage, GroundState } from './ground'
  */
 
 export interface Controls {
-  /** Draws them as the ground stands now. */
-  readonly show: (pages: ReadonlyArray<GroundPage>, state: GroundState) => void
+  /** Draws them as the ground stands now, with the canvas's chip beside a conversation. */
+  readonly show: (
+    pages: ReadonlyArray<GroundPage>,
+    state: GroundState,
+    chip: { readonly title: string; readonly onOpen: () => void; readonly onClose: () => void } | null,
+  ) => void
   /** Whether a key is theirs: every key in a menu of theirs, and those that press or move between them where one has the keyboard. */
   readonly owns: (event: KeyboardEvent) => boolean
 }
@@ -45,7 +49,7 @@ export const controlsIn = (layer: HTMLElement, set: (change: GroundChange) => vo
     })
   })
   return {
-    show: (pages, state) =>
+    show: (pages, state, chip) =>
       root.render(
         <BoardsControls
           pages={pages}
@@ -60,6 +64,7 @@ export const controlsIn = (layer: HTMLElement, set: (change: GroundChange) => vo
           onStep={(step) => set({ step })}
           onZoom={(zoom) => set({ zoom })}
           onTool={(tool) => set({ tool })}
+          chip={chip}
         />,
       ),
     owns: (event) => {

@@ -192,13 +192,3 @@
     padding-inline: 24px;
   }
 }
-
-/* where a canvas beside the conversation puts its name, versions and actions, after the task's own header */
-.canvasRow {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-}
-.canvasRow:empty {
-  display: none;
-}

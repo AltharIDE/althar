@@ -61,7 +61,7 @@ export const useGround = (
   on: {
     readonly pointed: (pointed: CanvasPointed) => void
     readonly pin: (n: number) => void
-    readonly key: (key: 'escape' | 'older' | 'newer') => void
+    readonly key: (key: 'escape' | 'older' | 'newer' | 'open' | 'close') => void
   },
 ) => {
   const views = useServices().host.canvases

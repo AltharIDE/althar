@@ -195,9 +195,8 @@ describe('a document beside the conversation', () => {
     show(client)
     const panel = await screen.findByRole('complementary', { name: 'Sign-in flow' })
     expect(await within(panel).findByRole('heading', { name: 'Errors' })).toBeTruthy()
-    expect(within(panel).getByText('sign-in-flow')).toBeTruthy()
     // Beside a conversation it is what it is, with a way to the artifact itself, where its versions are.
-    expect(within(panel).getByRole('button', { name: 'Open the artifact' })).toBeTruthy()
+    expect(within(panel).getByRole('button', { name: 'Open Sign-in flow' })).toBeTruthy()
     expect(within(panel).queryByRole('button', { name: /Older version/ })).toBeNull()
     const sent = within(panel).getByRole('list', { name: '1 comment' })
     expect(within(sent).getByText('Make it shorter')).toBeTruthy()
@@ -421,7 +420,8 @@ describe('a page canvas', () => {
     const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => place)
     const canvases = views()
     const { client } = canvasClient(page())
-    const { unmount } = show(client, { canvases })
+    // In its room, where loading it again is the artifact's.
+    const { unmount } = show(client, { canvases, room: true })
     const target = { projectId: PROJECT, canvasId: CANVAS, version: 1, manifest: '1'.repeat(64) }
     await waitFor(() => expect(canvases.show).toHaveBeenLastCalledWith(THREAD, target, { x: 640, y: 120, width: 640, height: 700 }))
     expect(document.querySelector(`[data-canvas-page="${CANVAS}"]`)).not.toBeNull()

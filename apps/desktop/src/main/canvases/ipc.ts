@@ -53,7 +53,7 @@ export const downloadOf = (value: unknown): CanvasDownload | null => {
 export const keyOf = (value: unknown): string | null => (typeof value === 'string' && ID('thr').test(value) ? value : null)
 
 export const handleCanvases = (
-  canvases: Pick<Canvases, 'show' | 'close' | 'still' | 'cover' | 'reload' | 'change' | 'pins' | 'find' | 'clear' | 'picture'>,
+  canvases: Pick<Canvases, 'show' | 'close' | 'still' | 'cover' | 'reload' | 'change' | 'chip' | 'pins' | 'find' | 'clear' | 'picture'>,
   mine: (contents: WebContents) => boolean,
   download: (window: BrowserWindow, request: CanvasDownload) => Promise<CanvasDownloaded>,
 ) => {
@@ -96,6 +96,12 @@ export const handleCanvases = (
     const conversation = keyOf(key)
     const asked = groundChangeOf(change)
     if (conversation !== null && asked !== null) canvases.change(conversation, asked)
+  })
+  ipcMain.on('althar:canvas-chip', (event, key: unknown, title: unknown) => {
+    from(event)
+    const conversation = keyOf(key)
+    if (conversation === null || (title !== null && typeof title !== 'string')) return
+    canvases.chip(conversation, title === null ? null : title.slice(0, 200))
   })
   ipcMain.handle('althar:canvas-pins', (event, key: unknown, pins: unknown) => {
     from(event)

@@ -407,6 +407,7 @@ contextBridge.exposeInMainWorld('althar', {
     still: (threadId: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-still', threadId),
     cover: (threadId: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:canvas-cover', threadId, covered),
     ground: (threadId: string, change: GroundChange): void => ipcRenderer.send('althar:canvas-ground', threadId, change),
+    chip: (threadId: string, title: string | null): void => ipcRenderer.send('althar:canvas-chip', threadId, title),
     pins: (threadId: string, pins: ReadonlyArray<GroundPin>): Promise<ReadonlyArray<number> | null> =>
       ipcRenderer.invoke('althar:canvas-pins', threadId, pins),
     find: (threadId: string, part: { page: string; board: string; selector: string }): Promise<CanvasPointed | null> =>

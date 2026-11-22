@@ -146,6 +146,30 @@ describe('a canvas’s panel', () => {
     expect(onBack).toHaveBeenCalled()
   })
 
+  it('beside a conversation, has no head of its own: what it is floats on it, its name opening the artifact', async () => {
+    const onOpen = vi.fn()
+    const onClose = vi.fn()
+    const { rerender } = render(
+      <CanvasPanel name="flow" title="Sign-in flow" version={1} latest={1} onClose={onClose} onComment={() => {}} chip={{ onOpen }}>
+        <p>The words</p>
+      </CanvasPanel>,
+    )
+    const panel = screen.getByRole('complementary', { name: 'Sign-in flow' })
+    expect(within(panel).queryByRole('heading')).toBeNull()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Open Sign-in flow' }))
+    expect(onOpen).toHaveBeenCalled()
+    expect(within(panel).getByRole('button', { name: 'Comment' })).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
+    expect(onClose).toHaveBeenCalled()
+    // A canvas whose own view draws it (a page, a canvas of boards) has none drawn over it here.
+    rerender(
+      <CanvasPanel name="flow" title="Sign-in flow" version={1} latest={1} onClose={onClose} chip={{ onOpen, drawnByView: true }} fill>
+        <CanvasPagePlace canvas="cnv_1" />
+      </CanvasPanel>,
+    )
+    expect(screen.queryByRole('button', { name: 'Open Sign-in flow' })).toBeNull()
+  })
+
   it('in an artifact’s room, has no head of its own: its versions and actions are in the row it is given', async () => {
     const row = document.createElement('div')
     document.body.append(row)

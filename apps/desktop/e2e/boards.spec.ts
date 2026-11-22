@@ -166,12 +166,14 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect.poll(async () => (await canvasView(electronApp)) !== null).toBe(true)
     await shoot(page, electronApp, page, 'test-results/boards-pinned.png')
 
-    // Beside the task, the canvas is what it is: its name, Comment and close in the task's row, and a way to the artifact
-    // itself, where it is saved and downloaded. None of that is in the task's header, and the canvas has no head of its own.
+    // Beside the task, the canvas is what it is, floating on it beside its zoom: its name, which opens the artifact itself,
+    // where it is saved and downloaded, and its close. Nothing of it is in the task's header, and it has no head of its own.
     await expect(panel.getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Save to repo' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Open the artifact' }).click()
+    await expect(page.getByRole('button', { name: 'Open Gift a class', exact: true })).toHaveCount(0)
+    await expect.poll(() => controlsSay(electronApp)).toContain('Gift a class')
+    await pressControl(electronApp, '^Open Gift a class')
 
     // It opens as itself, with its own chat: one row over it all, the artifact's, and the canvas with no head of its own.
     await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()

@@ -654,12 +654,18 @@ design tool lays out frames.
   time.** A page's boards wrap into as many lines as shows them largest in
   the view. Nothing stacks over a canvas but one row: opened as itself,
   the artifact's own (in the project's place), with its versions, Save to
-  repo, Download and Comment; beside a task's conversation, the task's,
-  with only the canvas's name and a way to the artifact itself (its name,
-  or Open), Comment and close at its end. Saving, downloading and stepping
-  through versions are the artifact's, done in its room, never in a task's
-  header. The canvas has no head of its own and no line of facts; only a
-  newer version than the one shown is said over it, with Show.
+  repo, Download and Comment; beside a conversation, the conversation's
+  own, untouched: nothing of the canvas goes in a task's header. There the
+  canvas has no head of its own; what it is floats on it as a chip (its
+  name, which opens the artifact itself, a comment on the whole of it
+  where it takes one, and its close). A canvas of boards draws the chip
+  beside its zoom, in its ground; a page draws it in its own view, from a
+  small script in an isolated world (src/overlay/chip.ts), whose presses
+  the main process hears as it hears the ground's; the window draws it
+  over a document, a diagram or a picture. Saving, downloading and
+  stepping through versions are the artifact's, done in its room. No line
+  of facts: only a newer version than the one shown is said over it, with
+  Show.
   Its controls float over the boards, as a design tool's do
   (the kit's `BoardsControls`): at the top left the page, and every board
   or one at a time with a step through every page's boards; at the top
