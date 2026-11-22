@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import type { AgentsAtOnce, AppSettings } from '@althar/contracts'
+import type { AgentsAtOnce, AppSettings, Places } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { placesAfter } from '../../shared/usePlaces'
 
 /*
  * How many agents work at once on this machine, as Settings shows and
@@ -39,6 +40,9 @@ export const useAgentsAtOnce = (): AgentsAtOnceModel | null => {
           ? was
           : { ...was, agentsAtOnce: { ...was.agentsAtOnce, own: count, count: count ?? was.agentsAtOnce.machine.count } },
       )
+      // The load popover's number moves with it.
+      const number = cache.getQueryData<AppSettings>(keys.settings)?.agentsAtOnce.count
+      if (number !== undefined) cache.setQueryData<Places>(keys.places, (was) => (was === undefined ? was : placesAfter(was, number)))
       setFailed(false)
       client.setAgentsAtOnce(count).then(
         () => undefined,

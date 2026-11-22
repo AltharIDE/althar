@@ -6,14 +6,16 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Switch } from '../../primitives/Switch/Switch'
-import { type LoadGlance, type LoadPoint, type LoadRow, percent } from './load'
+import { type AgentsWhy, fewerOf, fewerWords, type LoadAgents, type LoadGlance, type LoadPoint, type LoadRow, percent } from './load'
 import s from './LoadPeek.module.css'
 
 /*
  * What the load meter opens to: how hard this computer works, at more
  * length. Up to the last two minutes of CPU as a line, with Althar's work's
  * part under it, beginning where the readings do; CPU and memory as figures, each with Althar's part; what macOS
- * says of memory; each piece of Althar's work, most first, across every
+ * says of memory; its agents beside them, how many are at work of the number
+ * it runs at once, fewer for now and why while it is under load, and what
+ * waits; each piece of Althar's work, most first, across every
  * project, and what the rest of the computer's apps use; and a switch that
  * takes the meter out of the bar. Cobalt is always Althar's work, as it is
  * wherever work in motion shows; the rest is ink.
@@ -28,6 +30,13 @@ export interface LoadPeekText {
   memoryFigure: (used: string, total: string) => string
   /** Althar's work's part, under a bar. */
   work: (percent: number) => string
+  agents: string
+  /** How many are at work, of the number. */
+  agentsFigure: (busy: number, configured: number) => string
+  /** Fewer may work for now, and until when. */
+  fewer: (atOnce: number, why: AgentsWhy) => string
+  /** Tasks waiting for an agent. */
+  waiting: (n: number) => string
   running: string
   processes: (n: number) => string
   otherApps: string
@@ -46,6 +55,10 @@ export const loadPeekText: LoadPeekText = {
   percent: (p) => `${p}%`,
   memoryFigure: (used, total) => `${used} of ${total}`,
   work: (p) => `Althar’s work ${p}%`,
+  agents: 'Agents',
+  agentsFigure: (busy, configured) => `${busy} of ${configured}`,
+  fewer: fewerWords,
+  waiting: (n) => (n === 1 ? '1 task waiting' : `${n} tasks waiting`),
   running: 'Running',
   processes: (n) => (n === 1 ? '1 process' : `${n} processes`),
   otherApps: 'Other apps',
@@ -112,6 +125,21 @@ function Figure({ name, figure, total, ours, work }: { name: string; figure: str
   )
 }
 
+/** The agents beside CPU and memory, in their form: how many work of the number, all of them Althar's; under it, fewer for now and why, and what waits. */
+function Agents({ agents, t }: { agents: LoadAgents; t: LoadPeekText }) {
+  const share = agents.busy / Math.max(1, agents.configured)
+  const fewer = fewerOf(agents)
+  return (
+    <div className={s.row}>
+      <span className={s.name}>{t.agents}</span>
+      <span className={s.figure}>{t.agentsFigure(agents.busy, agents.configured)}</span>
+      <SplitBar total={share} ours={share} />
+      {fewer !== null && <span className={s.work}>{t.fewer(fewer.atOnce, fewer.why)}</span>}
+      {agents.waiting > 0 && <span className={s.work}>{t.waiting(agents.waiting)}</span>}
+    </div>
+  )
+}
+
 function Row({ row, t }: { row: LoadRow; t: LoadPeekText }) {
   return (
     <>
@@ -134,6 +162,8 @@ export type LoadPeekProps = RootProps<
   'div',
   {
     load: LoadGlance
+    /** Its agents, as they stand; without them, CPU and memory alone. */
+    agents?: LoadAgents | null
     /** Opens a piece of work from its row, by its id. Without it, the rows say, but aren't ways in. */
     onOpen?: (id: string) => void
     /** Takes the meter out of the bar. Without it, there is no switch. */
@@ -145,8 +175,8 @@ export type LoadPeekProps = RootProps<
   }
 >
 
-/** How hard this computer works, at length: the trace, the figures, each piece of Althar's work, and the switch. */
-export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, className, ...rest }: LoadPeekProps) {
+/** How hard this computer works, at length: the trace, the figures and its agents, each piece of Althar's work, and the switch. */
+export function LoadPeek({ load, agents, onOpen, onHide, slots, headingLevel = 2, text, className, ...rest }: LoadPeekProps) {
   const t = { ...loadPeekText, ...text }
   const id = useId()
   const { rows } = load
@@ -179,6 +209,7 @@ export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, 
           ours={load.workMemory}
           work={t.work(percent(load.workMemory ?? 0))}
         />
+        {agents != null && <Agents agents={agents} t={t} />}
       </div>
       {rows !== null && (
         <section className={s.rows}>

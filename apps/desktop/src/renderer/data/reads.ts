@@ -19,6 +19,8 @@ export const keys = {
   /** The agents on this Mac, as the runtime last checked them. */
   status: ['status'] as const,
   home: ['home'] as const,
+  /** The agents this computer runs at once, as they stand (`usePlaces`). */
+  places: ['places'] as const,
   board: (projectId: string) => ['board', projectId] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,

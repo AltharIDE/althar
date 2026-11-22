@@ -83,6 +83,8 @@ describe('pressure and the real admission queue', () => {
           yield* until(busy.now, (value) => value.atOnce === 1)
           assert.strictEqual((yield* busy.now).configured, 5)
           assert.strictEqual((yield* busy.atOnce).own, 5, 'pressure leaves the saved limit intact')
+          // The window hears how many may work for now, and why.
+          assert.deepInclude(yield* busy.places, { busy: 1, configured: 5, atOnce: 1, why: 'memory' })
           const second = yield* start(project.projectId as ProjectId, 'Second')
           const cancelled = yield* start(project.projectId as ProjectId, 'Cancelled')
           yield* queued(second.taskId)
@@ -107,6 +109,7 @@ describe('pressure and the real admission queue', () => {
           else yield* tick
           yield* running(second.taskId)
           assert.strictEqual((yield* busy.now).atOnce, recover === 'healthy' ? 2 : 5)
+          assert.strictEqual((yield* busy.places).why, recover === 'healthy' ? 'memory' : null, 'memory until every place is back')
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* sql`SELECT id FROM provider_sessions WHERE thread_id=${cancelled.threadId}`
           assert.strictEqual(sessions.length, 0, 'cancelled work never starts when capacity returns')

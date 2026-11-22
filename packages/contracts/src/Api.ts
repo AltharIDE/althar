@@ -2518,6 +2518,26 @@ export const WorkPlaces = Schema.Struct({
 export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
+export type PlacesWhy = typeof PlacesWhy.Type
+
+/**
+ * The agents this computer runs at once (ADR-032) as they stand, for the
+ * window's load popover and the Agents at once slider: how many are at work,
+ * the person's number (or the default), how many may work for now, fewer
+ * while the computer is under load, and why, and how many tasks wait for one.
+ */
+export const Places = Schema.Struct({
+  busy: Schema.Int,
+  configured: Schema.Int,
+  atOnce: Schema.Int,
+  /** Null while as many may work as the number says. */
+  why: Schema.NullOr(PlacesWhy),
+  waiting: Schema.Int,
+})
+export type Places = typeof Places.Type
+
 /**
  * Commits on a task's branch after its last pull request merged or closed,
  * in none yet: what Open a new pull request opens one with (ADR-034).
@@ -4465,8 +4485,6 @@ export const BoardSnapshot = Schema.Struct({
   position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
-  /** The machine-wide places while a task on this board waits for one. */
-  workPlaces: Schema.optional(WorkPlaces),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
 })
@@ -5037,6 +5055,7 @@ const socketCalls = new Set<string>([
   'GetModels',
   'GetSettings',
   'GetLoad',
+  'GetPlaces',
   'SearchTasks',
   'GetSearchDocuments',
   'GetSearchFiles',
@@ -6278,6 +6297,8 @@ const WorkApi = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
+  /** The agents this computer runs at once as they stand: at work, the number, fewer for now and why, what waits. */
+  call('GetPlaces', {}, Places),
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */

@@ -507,6 +507,14 @@ describe('how hard the Mac works, in the bar', () => {
     expect(client.getLoad).not.toHaveBeenCalled()
   })
 
+  it('has this Mac’s agents beside CPU and memory: how many work, of the number', async () => {
+    const { client } = windowAt('/projects/p2')
+    const load = await peek()
+    expect(await load.findByText('2 of 4')).toBeTruthy()
+    expect(load.getByText('Agents')).toBeTruthy()
+    expect(client.getPlaces).toHaveBeenCalled()
+  })
+
   it('is never read while it is off', async () => {
     const host = fakeHost()
     await host.setPreference('showLoad', false)
@@ -514,6 +522,7 @@ describe('how hard the Mac works, in the bar', () => {
     await screen.findByRole('navigation', { name: 'Projects' })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(client.getLoad).not.toHaveBeenCalled()
+    expect(client.getPlaces).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull()
   })
 

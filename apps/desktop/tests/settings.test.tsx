@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,8 @@ import { EdgeSpot } from '@althar/ui'
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
+import { keys } from '../src/renderer/data/reads'
+import { ServicesProvider } from '../src/renderer/data/services'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
 import { isSection, type Section, SECTIONS, sectionOf, type SettingsFocus } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
@@ -26,7 +28,7 @@ import {
   skillCard,
   withoutOpenCode,
 } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
 
 /*
  * Althar's settings: the quick settings, from the gear at the end of the
@@ -183,6 +185,24 @@ describe('the quick settings', () => {
     expect(soundToPutBack(null, ['Basso', 'Ping'], 'darwin')).toBe('Basso')
     expect(soundToPutBack(null, [], 'darwin')).toBe(SYSTEM_SOUND)
     expect(soundToPutBack(null, [], 'linux')).toBe(SYSTEM_SOUND)
+  })
+
+  it('say at the number when fewer agents may work for now, and why, and move the load popover’s number with it', async () => {
+    const { client } = fakeClient({
+      getPlaces: vi.fn(async () => ({ busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 })),
+    })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 5, atOnce: 1, why: 'memory' })
+    // At the lowered number, nothing is fewer: the note is the number's own again.
+    await userEvent.keyboard('{Home}')
+    expect(within(panel).queryByText(/at a time until/)).toBeNull()
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 1, atOnce: 1, why: null })
   })
 
   it('take another number of agents at once, step by step, and say when it can’t be kept', async () => {

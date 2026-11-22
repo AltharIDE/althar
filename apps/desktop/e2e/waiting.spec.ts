@@ -9,7 +9,7 @@ import { launch, openFirstProject, sizeWindow, startTask, still, toConversation,
 
 /* A finished preview leaves capacity free; real work names the place it holds. */
 
-test('says over the composer why the task waits, opens who holds the place, and moves it to the front and frees the place from there', async () => {
+test('says over the composer why the task waits, and in the load popover how many agents work and wait, and moves it to the front and frees the place from there', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -53,23 +53,26 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await page.screenshot({ path: 'test-results/slots-holders-narrow.png', scale: 'css', animations: 'disabled' })
     await sizeWindow(electronApp, page, 1440, 900)
 
-    // The second in line, opened from the board.
+    // Up next keeps no line of the places: the load popover has them beside CPU and memory, the one at work of one and
+    // the two that wait for it.
     await showPanes(page, { conversation: false, board: true })
     const next = page.getByRole('region', { name: 'The project’s work' }).getByRole('region', { name: 'Up next' })
-    const places = next.getByText('1 of 1 agent places in use', { exact: true })
-    await places.click()
-    const holders = next.getByRole('list', { name: 'Agents using a place' })
-    await expect(holders.getByText('Add a retry', { exact: true })).toBeVisible()
-    await expect(holders.getByText(/Lead.*In a turn/)).toBeVisible()
-    await expect(holders.getByRole('listitem')).toHaveCount(1)
+    await expect(next.getByText(/agent places/)).toHaveCount(0)
     await still(page)
-    await next.screenshot({ path: 'test-results/up-next-places-light.png', scale: 'css', animations: 'disabled' })
+    await next.screenshot({ path: 'test-results/up-next-light.png', scale: 'css', animations: 'disabled' })
+    await page.getByRole('button', { name: /^CPU \d+%, MEM \d+%$/ }).click()
+    const load = page.getByRole('dialog', { name: /’s load$/ })
+    await expect(load.getByText('Agents', { exact: true })).toBeVisible()
+    await expect(load.getByText('1 of 1', { exact: true })).toBeVisible()
+    await expect(load.getByText('2 tasks waiting', { exact: true })).toBeVisible()
+    await still(page)
+    await load.screenshot({ path: 'test-results/load-agents-light.png', scale: 'css', animations: 'disabled' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
-    await sizeWindow(electronApp, page, 880, 700)
     await still(page)
-    await next.screenshot({ path: 'test-results/up-next-places-dark.png', scale: 'css', animations: 'disabled' })
+    await load.screenshot({ path: 'test-results/load-agents-dark.png', scale: 'css', animations: 'disabled' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
-    await sizeWindow(electronApp, page, 1440, 900)
+    await page.keyboard.press('Escape')
+    // The second in line, opened from the board.
     await next.getByRole('button', { name: 'Tidy the docs', exact: true }).click()
     await toConversation(page)
 

@@ -2357,7 +2357,7 @@ export class Queries extends Context.Service<
         return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
       })
 
-      /** A task never waits behind itself. Its own places are shown in the board's machine-wide total. */
+      /** A task never waits behind itself: its own places aren't among those it waits for. */
       const queuedNow = (taskId: string) =>
         Effect.map(workPlaces, (now) => {
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
@@ -3655,7 +3655,6 @@ export class Queries extends Context.Service<
           return {
             cursor: at,
             tasks: cards,
-            ...(cards.some((task) => task.queued !== null) ? { workPlaces: yield* workPlaces } : {}),
             calls: calls.map((one) => one.call),
             settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot

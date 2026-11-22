@@ -1,5 +1,6 @@
 import { cpus, totalmem } from 'node:os'
 
+import type { Places } from '@althar/contracts'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -245,6 +246,11 @@ export class Busy extends Context.Service<
       },
       SqlError.SqlError
     >
+    /**
+     * The agents this machine runs at once as they stand, for the window (`GetPlaces`): how many are at work, the
+     * person's number, how many may work for now and why fewer, and how many tasks wait for a place.
+     */
+    readonly places: Effect.Effect<Places, SqlError.SqlError>
     /**
      * Decides, under the queue's lock, whether a task may start work now: one
      * at work already may; another only where a place is free and nothing
@@ -1223,6 +1229,18 @@ export class Busy extends Context.Service<
           const { at, holders } = yield* atWork
           const settings = yield* atOnce
           return { busy: at.size, atOnce: capacity(settings), configured: settings.count, offline: !(yield* connectivity.online), holders }
+        }),
+        places: Effect.gen(function* () {
+          const { at } = yield* atWork
+          const settings = yield* atOnce
+          const waiters = yield* waiting
+          return {
+            busy: at.size,
+            configured: settings.count,
+            atOnce: capacity(settings),
+            why: pressure.why(settings.count),
+            waiting: new Set(waiters.map(({ waiter }) => waiter.taskId)).size,
+          }
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>

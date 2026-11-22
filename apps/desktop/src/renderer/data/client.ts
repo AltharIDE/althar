@@ -96,6 +96,7 @@ import {
   type NewProjectDefaultsChange,
   type IssueList,
   type Load,
+  type Places,
   type MissedReports,
   type ModelRoom,
   type PlanUsage,
@@ -738,6 +739,8 @@ export interface Client {
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
   readonly getLoad: () => Promise<Load>
+  /** The agents this computer runs at once as they stand: at work, the number, fewer for now and why, what waits. */
+  readonly getPlaces: () => Promise<Places>
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
@@ -1350,6 +1353,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
+    getPlaces: () => settle(api.GetPlaces({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     dismissSignInEnding: (accountId, endsAt, stage) =>
       command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),

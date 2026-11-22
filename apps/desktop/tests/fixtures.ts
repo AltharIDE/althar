@@ -1178,6 +1178,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlaces: vi.fn(async () => ({ busy: 2, configured: 4, atOnce: 4, why: null, waiting: 0 })),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),

@@ -2586,6 +2586,7 @@ export const handlers = apiLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlaces: () => api(busy.places),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>

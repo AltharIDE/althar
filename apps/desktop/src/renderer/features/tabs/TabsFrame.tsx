@@ -151,7 +151,7 @@ function TabsBar({
         <>
           <HomeButton />
           {load.glance !== null && (
-            <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
+            <LoadMeter load={load.glance} agents={load.agents} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
           <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}

@@ -58,6 +58,33 @@ export interface LoadGlance {
   history: readonly LoadPoint[]
 }
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export type AgentsWhy = 'memory' | 'cpu'
+
+/**
+ * The agents this computer runs at once, as they stand: how many are at work
+ * of the person's number, how many may work for now, fewer while the computer
+ * is under load, and why, and how many tasks wait for one.
+ */
+export interface LoadAgents {
+  busy: number
+  /** The person's number, Agents at once, or the default. */
+  configured: number
+  /** How many may work for now: `configured`, or fewer while the computer is under load. */
+  atOnce: number
+  /** Why fewer, while it is. */
+  why: AgentsWhy | null
+  waiting: number
+}
+
+/** Fewer than the number may work for now, and why; null while as many may as it says. */
+export const fewerOf = ({ atOnce, configured, why }: Pick<LoadAgents, 'atOnce' | 'configured' | 'why'>) =>
+  why !== null && atOnce < configured ? { atOnce, why } : null
+
+/** Fewer for now, and until when, as the peek and the slider say it: “1 at a time until memory frees up”. */
+export const fewerWords = (atOnce: number, why: AgentsWhy) =>
+  `${atOnce} at a time until ${why === 'memory' ? 'memory' : 'the CPU'} frees up`
+
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
 
 /** Whether memory is short enough to say: a Mac compressing it or moving it to disk. */

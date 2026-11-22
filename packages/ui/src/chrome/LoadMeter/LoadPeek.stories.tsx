@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, within } from 'storybook/test'
 
 import {
+  AGENTS_BUSY,
+  AGENTS_FEWER,
+  AGENTS_FEWER_CPU,
+  AGENTS_IDLE,
   LOAD_BUSY,
   LOAD_FIRST_READING,
   LOAD_MEMORY_SHORT,
@@ -16,7 +20,7 @@ import { LoadPeek } from './LoadPeek'
 const meta = {
   title: 'Chrome/LoadPeek',
   component: LoadPeek,
-  args: { load: LOAD_BUSY, slots: LOAD_SLOTS, onOpen: fn(), onHide: fn() },
+  args: { load: LOAD_BUSY, agents: AGENTS_BUSY, slots: LOAD_SLOTS, onOpen: fn(), onHide: fn() },
   // As wide as the meter's popover.
   decorators: [(Story, { parameters }) => (parameters.pseudo ? Story() : <div style={{ width: 300 }}>{Story()}</div>)],
 } satisfies Meta<typeof LoadPeek>
@@ -27,8 +31,13 @@ type Story = StoryObj<typeof meta>
 export const Busy: Story = {}
 /** Every core busy and memory tight. */
 export const NearMax: Story = { args: { load: LOAD_NEAR_MAX } }
-export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT } }
-export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING } }
+/** Memory short: fewer agents may work for now than the person's number, until it frees up, and what waits says so. */
+export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT, agents: AGENTS_FEWER } }
+/** The CPU busy for a while: fewer for now, for the CPU. */
+export const FewerForTheCpu: Story = { args: { load: LOAD_NEAR_MAX, agents: AGENTS_FEWER_CPU } }
+export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING, agents: AGENTS_IDLE } }
+/** Where its agents can't be read, as from a home on an older Althar: CPU and memory alone. */
+export const AgentsUnknown: Story = { args: { agents: null } }
 /** Just opened: one reading. */
 export const FirstReading: Story = { args: { load: LOAD_FIRST_READING } }
 /** A trace that begins part way, after a gap: it starts at a dot, with nothing drawn before it. */
@@ -38,6 +47,17 @@ export const WorkUnknown: Story = { args: { load: LOAD_UNKNOWN_WORK } }
 /** Without ways in or out: the rows say, and there is no switch. */
 export const WithoutWays: Story = { args: { onOpen: undefined, onHide: undefined } }
 
+/** Fewer for now says how many, and until when; what waits for them is counted under it. */
+export const SaysFewerForNow: Story = {
+  args: { load: LOAD_MEMORY_SHORT, agents: AGENTS_FEWER },
+  play: async ({ canvasElement }) => {
+    const peek = within(canvasElement)
+    await expect(peek.getByText('2 of 5')).toBeInTheDocument()
+    await expect(peek.getByText('1 at a time until memory frees up')).toBeInTheDocument()
+    await expect(peek.getByText('2 tasks waiting')).toBeInTheDocument()
+  },
+}
+
 /** The figures are words, the bars and the trace decoration: every number is read out. */
 export const ReadsItsNumbers: Story = {
   play: async ({ canvasElement }) => {
@@ -45,6 +65,8 @@ export const ReadsItsNumbers: Story = {
     await expect(peek.getByText('63%')).toBeInTheDocument()
     await expect(peek.getByText('19.5 GB of 32 GB')).toBeInTheDocument()
     await expect(peek.getByText('Althar’s work 54%')).toBeInTheDocument()
+    await expect(peek.getByText('Agents')).toBeInTheDocument()
+    await expect(peek.getByText('3 of 4')).toBeInTheDocument()
     await expect(peek.getByRole('heading', { name: 'Running' })).toBeInTheDocument()
     await expect(peek.getByRole('button', { name: /Coordinator.*Meridian · Claude Code · 4 processes.*5%.*0\.8 GB/ })).toBeInTheDocument()
     // Althar itself, in its part, with nothing to open.
@@ -61,7 +83,10 @@ export const AllStates: Story = {
       cells={[
         { state: 'busy', node: <LoadPeek {...args} /> },
         { state: 'near max', node: <LoadPeek {...args} load={LOAD_NEAR_MAX} /> },
-        { state: 'nothing running', node: <LoadPeek {...args} load={LOAD_NOTHING_RUNNING} /> },
+        { state: 'fewer for now, memory', node: <LoadPeek {...args} load={LOAD_MEMORY_SHORT} agents={AGENTS_FEWER} /> },
+        { state: 'fewer for now, CPU', node: <LoadPeek {...args} load={LOAD_NEAR_MAX} agents={AGENTS_FEWER_CPU} /> },
+        { state: 'nothing running', node: <LoadPeek {...args} load={LOAD_NOTHING_RUNNING} agents={AGENTS_IDLE} /> },
+        { state: 'agents unknown', node: <LoadPeek {...args} agents={null} /> },
         { state: 'first reading', node: <LoadPeek {...args} load={LOAD_FIRST_READING} /> },
         { state: 'trace begins part way', node: <LoadPeek {...args} load={{ ...LOAD_BUSY, history: LOAD_BUSY.history.slice(-12) }} /> },
         { state: 'work unknown', node: <LoadPeek {...args} load={LOAD_UNKNOWN_WORK} /> },

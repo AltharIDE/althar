@@ -294,15 +294,8 @@ describe('Agents at once', () => {
           ['Second', false],
         ],
       )
-      const board = yield* (yield* Queries).board(projectId)
-      assert.deepStrictEqual(countsOf(board.workPlaces), { busy: 2, atOnce: 2 })
-      assert.deepStrictEqual(
-        board.workPlaces?.holders.map(({ title, role }) => [title, role]),
-        [
-          ['First', 'lead'],
-          ['Second', 'lead'],
-        ],
-      )
+      // The window hears the same: both places in use of two, nothing lowered, the third waiting for one.
+      assert.deepStrictEqual(yield* (yield* Busy).places, { busy: 2, configured: 2, atOnce: 2, why: null, waiting: 1 })
       assert.isNull(card?.waits)
       assert.deepStrictEqual(countsOf((yield* onHome(third.taskId))?.queued), { busy: 2, atOnce: 2 })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)

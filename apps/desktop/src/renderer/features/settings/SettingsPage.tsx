@@ -19,6 +19,7 @@ import {
   EdgeMini,
   EdgePlaces,
   EdgeSpot,
+  fewerOf,
   Icon,
   KeepAwake,
   LinkButton,
@@ -52,6 +53,7 @@ import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
+import { usePlaces } from '../../shared/usePlaces'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { CHANGELOG, COMMUNITY, WEBSITE } from '../../shared/links'
@@ -365,6 +367,7 @@ const opensAtLogin = platform === 'darwin' || platform === 'win32'
 function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const places = usePlaces(true)
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
   return (
@@ -384,6 +387,7 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
             machine={atOnce.atOnce.machine}
             most={MOST_AT_ONCE}
             onChange={atOnce.set}
+            fewer={places === null ? null : fewerOf(places)}
             text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
           />
         )}

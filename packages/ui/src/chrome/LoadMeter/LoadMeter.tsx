@@ -6,7 +6,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { Popover } from '../../primitives/Popover/Popover'
-import { heldSteps, type LoadGlance, percent, STEPS, strained } from './load'
+import { heldSteps, type LoadAgents, type LoadGlance, percent, STEPS, strained } from './load'
 import s from './LoadMeter.module.css'
 import { LoadPeek, loadPeekText, type LoadPeekText } from './LoadPeek'
 
@@ -65,6 +65,8 @@ export type LoadMeterProps = RootProps<
   'span',
   {
     load: LoadGlance
+    /** This computer's agents, as the peek shows them beside CPU and memory. */
+    agents?: LoadAgents | null
     /** Opens a piece of work from its row in the peek, by its id. Without it, the rows say, but aren't ways in. */
     onOpen?: (id: string) => void
     /** Takes the meter out of the bar, from the peek. Without it, the peek has no switch. */
@@ -83,6 +85,7 @@ export type LoadMeterProps = RootProps<
 
 export function LoadMeter({
   load,
+  agents,
   onOpen,
   onHide,
   slots,
@@ -120,6 +123,7 @@ export function LoadMeter({
       >
         <LoadPeek
           load={load}
+          agents={agents}
           onOpen={
             onOpen === undefined
               ? undefined

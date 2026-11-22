@@ -2,11 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import type { Load, LoadShare } from '@althar/contracts'
-import { type LoadGlance, type LoadMeterText, type LoadRow, MemoryPressure, Room } from '@althar/ui'
+import { type LoadAgents, type LoadGlance, type LoadMeterText, type LoadRow, MemoryPressure, Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
 import { device } from '../../shared/device'
+import { usePlaces } from '../../shared/usePlaces'
 import { usePreferences } from '../../shared/usePreferences'
 
 /*
@@ -16,7 +17,9 @@ import { usePreferences } from '../../shared/usePreferences'
  * The trace in its peek isn't made of these asks: while the meter is on, the
  * runtime reads the computer on its own every three seconds, a window in view
  * or not (the app tells it as `showLoad` changes), and keeps two minutes of
- * it, so the peek opens onto the time before it. Turned off, in Settings or
+ * it, so the peek opens onto the time before it. Beside CPU and memory the
+ * peek shows this computer's agents (`usePlaces`), read alongside, so they are
+ * there as it opens. Turned off, in Settings or
  * the peek's switch, for every window, nothing is read. A row of the peek
  * opens its work: a task's thread, a project's conversation for its
  * coordinator, its front for its default branch running.
@@ -104,6 +107,8 @@ export const glanceOf = (load: Load): LoadGlance => {
 export interface LoadModel {
   /** What the meter draws; null while it is off, or before the first reading. */
   readonly glance: LoadGlance | null
+  /** This computer's agents, beside CPU and memory in the peek; null where they can't be read. */
+  readonly agents: LoadAgents | null
   /** Opens a piece of work from its row, by its id. */
   readonly open: (id: string) => void
   /** Takes the meter out of the bar, as Settings would. */
@@ -131,6 +136,7 @@ export const useLoad = (projects: boolean): LoadModel => {
     retry: false,
   })
   const load = on ? reading.data : undefined
+  const agents = usePlaces(on)
 
   const open = (id: string) => {
     const share = load?.shares?.find((one) => idOf(one) === id)
@@ -141,5 +147,5 @@ export const useLoad = (projects: boolean): LoadModel => {
     else void navigate({ to: '/projects/$projectId', params: { projectId: share.projectId } })
   }
 
-  return { glance: load === undefined ? null : glanceOf(load), open, hide: () => set('showLoad', false) }
+  return { glance: load === undefined ? null : glanceOf(load), agents, open, hide: () => set('showLoad', false) }
 }

@@ -264,6 +264,7 @@ describe('the client', () => {
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
+          GetPlaces: () => Effect.die('unused'),
           GetPlanUsage: () => Effect.die('unused'),
           DismissSignInEnding: () => Effect.die('unused'),
           GetModelRooms: () => Effect.die('unused'),
