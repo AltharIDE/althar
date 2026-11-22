@@ -7,7 +7,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
-import { outsideAddress } from './externalLink'
+import { outsideAddress, threadLinkAddress } from './externalLink'
 import { locations as locationsOf } from './locations'
 import { NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
@@ -902,8 +902,7 @@ const showChosenIcon = async () => {
 }
 
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
-const openOutside = (url: string) => {
-  const address = outsideAddress(url)
+const openOutside = (url: string, address = outsideAddress(url)) => {
   if (address !== null) void shell.openExternal(address)
 }
 
@@ -1021,7 +1020,8 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
     if (showWorkerPreview(window, url)) return { action: 'deny' }
     const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
-    if (allowed !== null) openOutside(allowed)
+    // A thread's link to the web, which Settings › Browser sends out, may be plain http; a window's navigation keeps the narrower rule.
+    if (allowed !== null) openOutside(allowed, remote ? outsideAddress(allowed) : threadLinkAddress(allowed))
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
