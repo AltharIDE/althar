@@ -175,7 +175,7 @@ choose its place again.
 | Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in separate worktrees for up to eight repositories |
 | Other roles | Coordinator, helpers, reviewers and pull request reviews | Helpers can join the lead’s checkout or use a separate copy on the same worker. The home runs the coordinator and reviews. |
 | Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker’s installed toolchain, provider account and project setup. Built-in and selected HTTP MCP tools connect through the home. Selected command-based MCP tools use executables registered on the worker. Codex and Claude leads and helpers can load selected skills. |
-| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git changes, managed command output and private HTTP previews from the active task checkout |
+| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git changes, managed command output, private HTTP and WebSocket previews, and verified local Git copies |
 | Assignment | The task's own home | An available worker granted access to the project that advertises the lead's provider |
 
 The worker must eventually describe the OS, tools, workspace shapes and
@@ -210,6 +210,13 @@ trust boundary. A client's isolated pool never shares those with another
 client's general pool merely because both belong to the same person.
 
 ### Local, runs, files and the editor
+
+The first Desktop copy action downloads the home’s verified Git bundle for
+each task repository. The worker returns its commit, working files and
+staged files under one checkpoint. The home verifies all three before
+packaging them and keeps its own staging area separate. Desktop verifies
+each digest and keeps the copy in its own folder. If the worker cannot checkpoint, the
+person can deliberately choose the home’s current mirror.
 
 **Local keeps its meaning:** the person's existing checkout on a named
 computer, with its simulators and services. It pins execution to that

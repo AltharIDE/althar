@@ -29,6 +29,8 @@ import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 export const partsText = {
   worktree: 'Worktree',
+  copyWorker: 'Save a local copy',
+  copyingWorker: 'Saving local copy…',
   local: 'Local',
   /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
   toLocal: 'Move to Local',
@@ -140,6 +142,7 @@ export interface PartsActions {
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
+  readonly copyWorker?: { readonly pending: boolean; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
@@ -250,6 +253,16 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 onClick: act.openInEditor.open,
                 variant: 'quiet' as const,
                 icon: 'external' as const,
+              },
+            ]),
+        ...(act.copyWorker === undefined
+          ? []
+          : [
+              {
+                label: act.copyWorker.pending ? t.copyingWorker : t.copyWorker,
+                onClick: act.copyWorker.open,
+                disabled: act.copyWorker.pending,
+                variant: 'quiet' as const,
               },
             ]),
         ...(act.removeFolder === undefined

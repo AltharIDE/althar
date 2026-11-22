@@ -6,6 +6,8 @@ use std::{error::Error, fmt};
 #[cfg(target_os = "linux")]
 pub mod agent;
 #[cfg(target_os = "linux")]
+mod agent_files;
+#[cfg(target_os = "linux")]
 mod agent_managed;
 #[cfg(target_os = "linux")]
 mod agent_preview;

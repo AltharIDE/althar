@@ -26,6 +26,9 @@ message AgentWorkerFrame {
     AgentManagedRef managed_ready = 9;
     AgentManagedOutput managed_output = 10;
     AgentManagedExit managed_exit = 11;
+    AgentFileResult file_result = 12;
+    AgentFileChunk file_chunk = 13;
+    AgentRunBytes index_patch = 14;
   }
 }
 
@@ -48,6 +51,7 @@ message AgentHomeFrame {
     AgentRunBytes skills_chunk = 15;
     AgentManagedInput helper_skills_chunk = 16;
     AgentManagedInput helper_checkout_chunk = 17;
+    AgentFileRequest file_request = 18;
   }
 }
 
@@ -70,6 +74,8 @@ message AgentWorkerCapability {
   bool skill_files = 8;
   bool helper_skill_files = 9;
   bool helper_checkouts = 10;
+  bool file_reads = 11;
+  bool workspace_index = 12;
 }
 
 message AgentHomeHello {
@@ -255,12 +261,36 @@ message AgentWorkerHeartbeat {
   uint32 sequence = 1;
 }
 
+message AgentFileRef {
+  string run_id = 1;
+  string file_id = 2;
+}
+
+message AgentFileRequest {
+  AgentFileRef file = 1;
+  string workspace_id = 2;
+  string relative_path = 3;
+}
+
+message AgentFileResult {
+  AgentFileRef file = 1;
+  bool unavailable = 2;
+  uint32 size = 3;
+  bytes sha256 = 4;
+}
+
+message AgentFileChunk {
+  AgentFileRef file = 1;
+  bytes data = 2;
+}
+
 message AgentSnapshotRequest {
   string run_id = 1;
   string base_tree = 2;
   string base_head = 3;
   // Either the task repository ID or an active helper's scoped command ID.
   string workspace_id = 4;
+  bool capture_index = 5;
 }
 
 // A Git binary patch against the requested tree. The home verifies its own
@@ -275,6 +305,13 @@ message AgentSnapshotResult {
   uint32 commits_size = 7;
   bytes commits_sha256 = 8;
   string workspace_id = 9;
+  AgentSnapshotIndex index = 10;
+}
+
+message AgentSnapshotIndex {
+  string tree = 1;
+  uint32 size = 2;
+  bytes sha256 = 3;
 }
 
 // A connection to just the home tool server for this active run. Tool

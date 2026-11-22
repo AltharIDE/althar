@@ -26,3 +26,5 @@ export { createDeviceKey, signDeviceMessage, encodePairingCode, decodePairingCod
 export { untilPortCloses } from './lifetime'
 
 export type { HttpsHomeTarget } from '@althar/contracts'
+
+export { installWorkerSnapshot } from './workerSnapshot'

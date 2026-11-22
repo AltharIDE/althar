@@ -1,11 +1,13 @@
 import { chmod, link, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { setTimeout as pause } from 'node:timers/promises'
+import { Effect } from 'effect'
 
 import { AgentRunOutcome, DiagnosticOutcome, type AgentRunExit, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
 import { describe, expect, it } from 'vitest'
 
-import { openWorkerStore as open } from '../src/workerHome/store'
+import { openWorkerStore as open, withWorkerStore } from '../src/workerHome/store'
 import { workerTestDirectory as temporary } from './workerTestFiles'
 
 const homeId = `home_${'1'.repeat(32)}`
@@ -22,6 +24,53 @@ const result = (attemptId: string, fence: string, outcome: DiagnosticOutcome = D
 })
 
 describe('the private worker ledger', () => {
+  it('lets operator reads wait for a writer and reports a ledger that remains busy', async () => {
+    const profile = temporary()
+    const first = await openWorkerStore(profile, homeId)
+    let attempt: string
+    try {
+      attempt = first.enqueue(first.enroll(fingerprint))
+    } finally {
+      first.close()
+    }
+    const writer = new DatabaseSync(join(profile, 'workers', 'ledger.sqlite'))
+    const read = () => Effect.runPromise(withWorkerStore(profile, homeId, (store) => store.log(attempt, 0)))
+    try {
+      writer.exec('BEGIN EXCLUSIVE')
+      let returned = false
+      const reading = read().finally(() => {
+        returned = true
+      })
+      await pause(90)
+      expect(returned).toBe(false)
+      writer.exec('COMMIT')
+      await expect(reading).resolves.toMatchObject({ attemptId: attempt, state: 'queued', nextOffset: 0 })
+      writer.exec('BEGIN EXCLUSIVE')
+      await expect(read()).rejects.toThrow('The worker ledger is busy')
+      writer.exec('COMMIT')
+      let reads = 0
+      let released: Promise<void> | undefined
+      try {
+        const recovered = Effect.runPromise(
+          withWorkerStore(profile, homeId, (store) => {
+            if (++reads === 1) {
+              writer.exec('BEGIN EXCLUSIVE')
+              released = pause(75).then(() => writer.exec('COMMIT'))
+            }
+            return store.log(attempt, 0)
+          }),
+        )
+        await expect(recovered).resolves.toMatchObject({ attemptId: attempt, state: 'queued' })
+        expect(reads).toBeGreaterThan(1)
+      } finally {
+        await released
+      }
+      await expect(Effect.runPromise(withWorkerStore(profile, otherHome, () => undefined))).rejects.toThrow('belongs to another home')
+    } finally {
+      writer.close()
+    }
+  })
+
   it('fences agent placement across store restarts until the original worker confirms its stop', async () => {
     const profile = temporary()
     const first = await openWorkerStore(profile, homeId)

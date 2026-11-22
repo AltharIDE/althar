@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,18 +7,22 @@ import { Duplex, PassThrough, Readable, Writable } from 'node:stream'
 import { once } from 'node:events'
 import { MessageChannel } from 'node:worker_threads'
 
-import { Api, clientProtocol, emitterPort, type ThreadSnapshot } from '@althar/contracts'
-import { agents as registry } from '@althar/provider-adapters'
+import { Api, clientProtocol, emitterPort, type ClientIdentity, type ThreadSnapshot } from '@althar/contracts'
+import { AgentRequestFailed, agents as registry } from '@althar/provider-adapters'
 import { fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
+import { createDeviceKey } from '@althar/transport-node'
 import { AgentRunOutcome, type AgentManagedExit } from '@althar/worker-protocol'
 import { assert, describe, it } from '@effect/vitest'
-import { Context, Duration, Effect, Layer } from 'effect'
+import { Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
 import { connection, services, text } from '../src/Api'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
+import { ClientIdentities } from '../src/ClientIdentities'
+import { Instance } from '../src/Instance'
 import { Folders } from '../src/Folders'
+import { git as gitOf, treeOf, untouched } from '../src/git'
 import { Helpers } from '../src/Helpers'
 import { Secrets } from '../src/Secrets'
 import type { WorkerExecution } from '../src/workerExecution'
@@ -60,7 +64,7 @@ const connected = (
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
-    const connect = (kind: 'window' | 'socket') =>
+    const connect = (kind: 'window' | 'socket', identity?: ClientIdentity) =>
       Effect.gen(function* () {
         const channel = new MessageChannel()
         yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
@@ -69,6 +73,7 @@ const connected = (
             connection(
               emitterPort(channel.port1, (data) => data),
               { kind },
+              identity,
             ),
           ).pipe(Effect.provideContext(context)),
         )
@@ -77,7 +82,17 @@ const connected = (
       })
     const client = yield* connect('window')
     const grant = (path: string) => Context.get(context, Folders).allow(path)
-    return { client, grant, connect, helpers: Context.get(context, Helpers) }
+    const separateDevice = Effect.gen(function* () {
+      const keys = yield* createDeviceKey
+      const paired = yield* Context.get(context, ClientIdentities).register({
+        role: 'socket',
+        publicKey: keys.publicKey,
+        name: 'Another desktop',
+      })
+      const instance = Context.get(context, Instance)
+      return yield* connect('socket', { homeId: instance.homeId, actorId: instance.personId, deviceId: paired.deviceId, role: 'socket' })
+    })
+    return { client, grant, connect, separateDevice, helpers: Context.get(context, Helpers) }
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
@@ -446,6 +461,10 @@ describe('a normal task assigned to a worker', () => {
         const managed: string[] = []
         let managedStopped = 0
         let homeSandboxProbes = 0
+        let workerAvailable = true
+        let previewMode: 'live' | 'refuse' | 'closed' = 'live'
+        let announcesPort = true
+        let stageState: 'valid' | 'missing' | 'changed' = 'valid'
         const homeAgents = Layer.effect(
           Agents,
           Effect.gen(function* () {
@@ -470,10 +489,43 @@ describe('a normal task assigned to a worker', () => {
             return Agents.of({ list: fakes.list.map(withHomeSandbox), get: (id) => Effect.map(fakes.get(id), withHomeSandbox) })
           }),
         ).pipe(Layer.provide(fakeAgents()))
-        const { client, grant, connect } = yield* connected({
+        const { client, grant, connect, separateDevice } = yield* connected({
           agents: homeAgents,
           workers: {
             list: (projectId) => (projectId === expectedProject ? [{ workerId, providers: ['codex'], busy: false }] : []),
+            readFile: (input) =>
+              Effect.gen(function* () {
+                assert.deepStrictEqual(input, { workerId, projectId: expectedProject, worktree: placed[0]?.site, path: 'staged' })
+                if (!workerAvailable)
+                  return yield* new AgentRequestFailed({ method: 'workspace/file', failure: 'transient', message: 'Worker disconnected.' })
+                const bytes = Buffer.from('from the worker setup')
+                return { bytes, sha256: createHash('sha256').update(bytes).digest('hex') }
+              }),
+            captureCheckouts: (input) =>
+              Effect.gen(function* () {
+                assert.deepStrictEqual(input, { workerId, projectId: expectedProject, worktree: placed[0]?.site })
+                if (!workerAvailable)
+                  return yield* new AgentRequestFailed({
+                    method: 'workspace/checkpoint',
+                    failure: 'transient',
+                    message: 'Worker disconnected.',
+                  })
+                const tree = yield* treeOf(input.worktree).pipe(Effect.orDie)
+                const head = yield* gitOf(input.worktree, 'rev-parse', 'HEAD').pipe(Effect.orDie)
+                const index = yield* untouched(
+                  input.worktree,
+                  Effect.gen(function* () {
+                    yield* gitOf(input.worktree, 'read-tree', tree)
+                    yield* gitOf(input.worktree, 'update-index', '--force-remove', '--', 'change.txt')
+                    return yield* gitOf(input.worktree, 'write-tree')
+                  }),
+                ).pipe(Effect.orDie)
+                return new Map(
+                  stageState === 'missing'
+                    ? []
+                    : [[input.worktree, { head: stageState === 'changed' ? 'a'.repeat(40) : head, tree, index }]],
+                )
+              }),
             startCommand: (command) =>
               Effect.gen(function* () {
                 assert.strictEqual(command.workerId, workerId)
@@ -481,7 +533,8 @@ describe('a normal task assigned to a worker', () => {
                 assert.strictEqual(command.worktree, placed[0]?.site)
                 assert.strictEqual(command.directory, '')
                 managed.push(command.command)
-                command.output(Buffer.from('From the worker only.\nLocal: http://127.0.0.1:5173/\n'))
+                command.output(Buffer.from('From the worker only.\n'))
+                if (announcesPort) command.output(Buffer.from('Local: http://127.0.0.1:5173/\n'))
                 let outcome!: (result: AgentManagedExit) => void
                 const exit = new Promise<AgentManagedExit>((resolve) => {
                   outcome = resolve
@@ -493,6 +546,12 @@ describe('a normal task assigned to a worker', () => {
                 yield* Effect.addFinalizer(() => Effect.promise(stop))
                 const preview = async (port: number) => {
                   assert.strictEqual(port, 5173)
+                  if (previewMode === 'refuse') throw new Error('The application stopped listening')
+                  if (previewMode === 'closed') {
+                    const closed = new PassThrough()
+                    closed.destroy()
+                    return closed
+                  }
                   const request = new PassThrough()
                   const response = new PassThrough()
                   request.once('data', (bytes: Buffer) => {
@@ -572,9 +631,47 @@ describe('a normal task assigned to a worker', () => {
         const preview = yield* client.ReadLaunchPreview(readPreview)
         assert.strictEqual(Buffer.from(preview.bodyBase64, 'base64').toString(), 'worker')
         yield* Effect.flip(client.ReadLaunchPreview({ ...readPreview, projectId: 'proj_' + '0'.repeat(32) }))
+        const { projectId } = readPreview
+        const previewRun = { projectId, id: launch.id }
+        yield* Effect.flip(client.OpenLaunchPreviewSocket({ ...previewRun, projectId: 'proj_' + '0'.repeat(32) }))
+        const remoteRunShell = yield* Effect.flip(
+          client.OpenTerminal({
+            commandId: commandId(),
+            projectId: project.id,
+            taskId: task.id,
+            launchId: launch.id,
+            id: 'term_worker_run',
+            cols: 80,
+            rows: 24,
+          }),
+        )
+        assert.include(remoteRunShell.message, 'This command runs on a worker')
+        previewMode = 'refuse'
+        assert.include((yield* Effect.flip(client.ReadLaunchPreview(readPreview))).message, 'could not read this preview')
+        yield* Effect.flip(client.OpenLaunchPreviewSocket(previewRun))
+        previewMode = 'closed'
+        yield* Effect.flip(client.OpenLaunchPreviewSocket(previewRun))
+        previewMode = 'live'
+        const tunnel = yield* client.OpenLaunchPreviewSocket(previewRun)
+        const paired = yield* connect('socket')
+        const data = Buffer.from('GET /page HTTP/1.1\r\nHost: localhost\r\n\r\n').toString('base64')
+        yield* Effect.flip(paired.WriteLaunchPreviewSocket({ socket: tunnel, data }))
+        yield* Effect.flip(client.WriteLaunchPreviewSocket({ socket: tunnel, data: 'invalid=' }))
+        const received = yield* Effect.forkScoped(Stream.runCollect(client.ReadLaunchPreviewSocket({ socket: tunnel })))
+        yield* client.WriteLaunchPreviewSocket({ socket: tunnel, data })
+        const transferred = Buffer.concat((yield* Fiber.join(received)).map((chunk) => Buffer.from(chunk, 'base64')))
+        assert.match(transferred.toString(), /worker$/)
+        yield* Effect.flip(client.WriteLaunchPreviewSocket({ socket: tunnel, data }))
         yield* client.StopLaunch({ commandId: commandId(), id: launch.id })
         yield* Effect.flip(client.ReadLaunchPreview(readPreview))
+        yield* Effect.flip(client.OpenLaunchPreviewSocket(previewRun))
         assert.strictEqual(managedStopped, 1)
+        announcesPort = false
+        const quiet = yield* startRun()
+        const quietPreview = { projectId, id: quiet.id }
+        yield* Effect.flip(client.OpenLaunchPreviewSocket(quietPreview))
+        yield* Effect.flip(client.ReadLaunchPreview({ ...readPreview, id: quiet.id }))
+        yield* client.StopLaunch({ commandId: commandId(), id: quiet.id })
         const socket = yield* connect('socket')
         const refused = yield* Effect.flip(socket.Answer({ ...decision, commandId: commandId() }))
         assert.strictEqual(refused.reason, 'PersonRequired')
@@ -594,6 +691,80 @@ describe('a normal task assigned to a worker', () => {
         assert.lengthOf(setup, 1)
         assert.include(JSON.stringify(setup[0]?.content), 'Setup completed on the worker.')
         assert.isUndefined(permission(snapshot))
+        const shell = yield* Effect.flip(
+          client.OpenTerminal({
+            commandId: commandId(),
+            projectId: project.id,
+            taskId: task.id,
+            id: 'term_worker_copy',
+            cols: 80,
+            rows: 24,
+          }),
+        )
+        assert.include(shell.message, 'This task runs on a worker')
+        const requested = { projectId: project.id, taskId: task.id, source: 'worker' as const }
+        yield* Effect.flip(client.PrepareWorkerSnapshot({ ...requested, projectId: 'proj_' + '0'.repeat(32) }))
+        const copy = yield* client.PrepareWorkerSnapshot(requested)
+        const [repo] = copy.repositories
+        assert.isDefined(repo)
+        if (repo === undefined) return
+        assert.notStrictEqual(repo.index, repo.tree)
+        assert.notStrictEqual(repo.index, yield* gitOf(placed[0]!.site, 'write-tree'))
+        for (const state of ['missing', 'changed'] as const) {
+          stageState = state
+          const rejected = yield* Effect.flip(client.PrepareWorkerSnapshot(requested))
+          assert.include(rejected.message, state === 'missing' ? 'staged files for every repository' : 'changed while the snapshot')
+        }
+        stageState = 'valid'
+        const request = { id: copy.id, workspaceId: repo.workspaceId, offset: 0 }
+        const workerFile = { projectId: project.id, taskId: task.id, workspaceId: repo.workspaceId, relativePath: 'staged' }
+        const output = yield* client.ReadWorkerFile(workerFile)
+        assert.strictEqual(Buffer.from(output.bodyBase64, 'base64').toString('utf8'), 'from the worker setup')
+        const defaultOutput = yield* client.ReadWorkerFile({ projectId: project.id, taskId: task.id, relativePath: 'staged' })
+        assert.deepStrictEqual(defaultOutput, output)
+        yield* Effect.flip(client.ReadWorkerFile({ ...workerFile, workspaceId: 'ws_' + '0'.repeat(32) }))
+        workerAvailable = false
+        assert.strictEqual((yield* Effect.flip(client.ReadWorkerFile(workerFile))).message, 'Worker disconnected.')
+        const unavailable = yield* Effect.flip(client.PrepareWorkerSnapshot(requested))
+        assert.strictEqual(unavailable.reason, 'WorkerUnavailable')
+        assert.strictEqual(unavailable.message, 'Worker disconnected.')
+        const homeCopy = yield* client.PrepareWorkerSnapshot({ ...requested, source: 'home_copy' })
+        assert.strictEqual(homeCopy.source, 'home_copy')
+        assert.strictEqual((yield* Effect.flip(client.PrepareWorkerSnapshot(requested))).reason, 'WorkerUnavailable')
+        const other = yield* separateDevice
+        const anotherCopy = yield* other.PrepareWorkerSnapshot({ ...requested, source: 'home_copy' })
+        const extraCopy = yield* other.PrepareWorkerSnapshot({ ...requested, source: 'home_copy' })
+        const third = yield* separateDevice
+        assert.include(
+          (yield* Effect.flip(third.PrepareWorkerSnapshot({ ...requested, source: 'home_copy' }))).message,
+          'Finish downloading',
+        )
+        yield* other.ReleaseWorkerSnapshot({ id: anotherCopy.id })
+        const thirdCopy = yield* third.PrepareWorkerSnapshot({ ...requested, source: 'home_copy' })
+        yield* third.ReleaseWorkerSnapshot({ id: thirdCopy.id })
+        yield* other.ReleaseWorkerSnapshot({ id: extraCopy.id })
+        yield* client.ReleaseWorkerSnapshot({ id: homeCopy.id })
+        assert.strictEqual((yield* Effect.flip(other.ReadWorkerSnapshotChunk(request))).reason, 'NotFound')
+        const reconnect = yield* connect('window')
+        const read = yield* reconnect.ReadWorkerSnapshotChunk(request)
+        assert.isTrue(read.done)
+        assert.strictEqual(read.nextOffset, repo.bytes)
+        assert.strictEqual((yield* Effect.flip(reconnect.ReadWorkerSnapshotChunk({ ...request, offset: repo.bytes }))).reason, 'NotFound')
+        assert.strictEqual(
+          (yield* Effect.flip(reconnect.ReadWorkerSnapshotChunk({ ...request, workspaceId: 'ws_' + '0'.repeat(32) }))).reason,
+          'NotFound',
+        )
+        const bytes = Buffer.from(read.bodyBase64, 'base64')
+        assert.strictEqual(createHash('sha256').update(bytes).digest('hex'), repo.sha256)
+        const stored = join(workerPath, 'offered.bundle')
+        writeFileSync(stored, bytes)
+        assert.include(execFileSync('git', ['bundle', 'list-heads', stored]).toString(), 'refs/althar/worker-snapshot')
+        const fragment = yield* reconnect.ReadWorkerSnapshotChunk({ ...request, offset: 7 })
+        assert.deepStrictEqual(Buffer.from(fragment.bodyBase64, 'base64'), bytes.subarray(7))
+        yield* other.ReleaseWorkerSnapshot({ id: copy.id })
+        yield* client.ReadWorkerSnapshotChunk(request)
+        yield* reconnect.ReleaseWorkerSnapshot({ id: copy.id })
+        yield* Effect.flip(client.ReadWorkerSnapshotChunk(request))
       }),
     ),
   )

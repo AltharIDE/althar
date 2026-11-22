@@ -1,6 +1,7 @@
 import type { ProjectWorker } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
+  WorkerFile,
   WorkerLocalMcpCommand,
   WorkerManagedCommand,
   WorkerManagedProcess,
@@ -64,9 +65,21 @@ interface AssignedHelper {
 }
 
 /** The runtime owns a task and its permissions. The platform supplies an enrolled execution location. */
+export interface CapturedWorkerCheckout {
+  readonly head: string
+  readonly tree: string
+  readonly index: string
+}
+
 export interface WorkerExecutionPlatform {
   readonly list: (projectId: string) => ReadonlyArray<ProjectWorker>
   readonly startCommand?: (input: AssignedCommand) => Effect.Effect<WorkerManagedProcess, AgentStartFailed, Scope.Scope>
+  readonly readFile?: (
+    input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'> & { readonly path: string },
+  ) => Effect.Effect<WorkerFile, AgentRequestFailed>
+  readonly captureCheckouts?: (
+    input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'>,
+  ) => Effect.Effect<ReadonlyMap<string, CapturedWorkerCheckout>, AgentRequestFailed>
   readonly checkpointWorktree?: (
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'>,
   ) => Effect.Effect<void, AgentRequestFailed>

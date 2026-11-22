@@ -282,6 +282,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     let outcome: (exit: AgentRunExit) => void = () => undefined
     let stopping = 0
     let reachable = true
+    let canCapture = true
     let toolsAvailable = true
     let losesConnection = false
     let launchError: Error | undefined
@@ -310,11 +311,17 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         return exit
       },
       ownsRun: () => true,
-      readPatch: async (baseline, parent) => {
+      readPatch: async (baseline, parent, _workspaceId, capture) => {
         if (!reachable) throw new Error('Worker disconnected.')
         assert.strictEqual(baseline, tree)
         assert.strictEqual(parent, head)
-        return { tree, head, patch: Buffer.alloc(0), commits: Buffer.alloc(0) }
+        return {
+          tree,
+          head,
+          patch: Buffer.alloc(0),
+          commits: Buffer.alloc(0),
+          ...(capture && canCapture ? { index: { tree, patch: Buffer.alloc(0) } } : {}),
+        }
       },
     }
     const pool: AgentWorkerPool = {
@@ -365,6 +372,13 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         assert.include((yield* Effect.flip(checkpoint({ ...input, workerId: 'another worker' }))).message, 'assigned worker')
         assert.include((yield* Effect.flip(checkpoint({ ...input, worktree: 'missing' }))).message, 'assigned worker')
         yield* Effect.scoped(command({ ...input, command: 'build', directory: '', id: 'proc_' + 'a'.repeat(32), output: () => undefined }))
+        const capture = service.captureCheckouts
+        if (capture === undefined) return assert.fail('No worker checkout capture service')
+        for (const change of [{ workerId: 'another worker' }, { projectId: 'another project' }, { worktree: 'missing' }])
+          assert.include((yield* Effect.flip(capture({ ...input, ...change }))).message, 'assigned worker')
+        assert.deepStrictEqual(yield* capture(input), new Map([[worktree, { head, tree, index: tree }]]))
+        canCapture = false
+        assert.include((yield* Effect.flip(capture(input))).message, 'did not return its staged files')
         reachable = false
         assert.strictEqual((yield* Effect.flip(running.checkpoint)).message, 'Worker disconnected.')
         outcome(exit)

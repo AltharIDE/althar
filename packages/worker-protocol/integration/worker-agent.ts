@@ -19,10 +19,14 @@ import { agentPreviewMethod } from '../src/agentPreviews.ts'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
 import {
   AgentHomeFrameSchema,
+  AgentFileResultSchema,
+  AgentFileChunkSchema,
   AgentPreviewRequestSchema,
   AgentPreviewResponseSchema,
   AgentRunOutcome,
   AgentSkillFilesSchema,
+  AgentSnapshotResultSchema,
+  AgentRunBytesSchema,
   AgentWorkerFrameSchema,
   AgentWorkspaceSetupResultSchema,
   type AgentPreviewRequest,
@@ -137,7 +141,14 @@ const fixture = async (t: TestContext) => {
   }
 }
 
-const hello = (id = workerId, journal = journalId, managedCommands = false, helperSkillFiles = false): AgentWorkerFrame['payload'] => ({
+const hello = (
+  id = workerId,
+  journal = journalId,
+  managedCommands = false,
+  helperSkillFiles = false,
+  fileReads = false,
+  workspaceIndex = false,
+): AgentWorkerFrame['payload'] => ({
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
@@ -157,6 +168,8 @@ const hello = (id = workerId, journal = journalId, managedCommands = false, help
         skillFiles: false,
         helperSkillFiles,
         helperCheckouts: helperSkillFiles,
+        fileReads,
+        workspaceIndex,
       },
     ],
   },
@@ -199,6 +212,7 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   })
   const agent = await pending
   equal(agent.workspacePath, '/private/worker/workspace')
+  await rejects(agent.readPatch('a'.repeat(40), 'b'.repeat(40), undefined, true), /update this worker to copy its staged files/i)
   await rejects(
     agent.startCommand({ id: 'proc_' + '6'.repeat(32), directory: '', command: 'true', output: () => undefined }),
     /update this worker/i,
@@ -225,6 +239,119 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
+})
+
+void test('receives only verified files for the exact active checkout', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello(workerId, journalId, false, false, true))
+  equal((await worker.read())?.case, 'hello')
+  const pending = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const runId = start.value.runId
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await pending
+  ok(agent.readFile !== undefined)
+  await rejects(agent.readFile('../outside'), /unavailable/)
+  await rejects(agent.readFile('reports/output.bin', workspaceId), /does not own/)
+  const downloading = agent.readFile('reports/output.bin')
+  await rejects(agent.readFile('reports/busy.bin'), /unavailable/)
+  const read = await worker.read()
+  ok(read?.case === 'fileRequest' && read.value.file !== undefined)
+  deepEqual([read.value.relativePath, read.value.file.runId, read.value.workspaceId], ['reports/output.bin', runId, ''])
+  const bytes = Buffer.from([4, 7, 3, 2])
+  const sha256 = createHash('sha256').update(bytes).digest()
+  worker.send({ case: 'fileResult', value: create(AgentFileResultSchema, { file: read.value.file, size: bytes.length, sha256 }) })
+  for (const data of [bytes.subarray(0, 2), bytes.subarray(2)])
+    worker.send({ case: 'fileChunk', value: create(AgentFileChunkSchema, { file: read.value.file, data }) })
+  const file = await downloading
+  deepEqual(Buffer.from(file.bytes), bytes)
+  equal(file.sha256, sha256.toString('hex'))
+  const missing = rejects(agent.readFile('reports/missing'), /unavailable/)
+  const asked = await worker.read()
+  ok(asked?.case === 'fileRequest')
+  worker.send({ case: 'fileResult', value: create(AgentFileResultSchema, { file: asked.value.file, unavailable: true }) })
+  await missing
+
+  const corrupt = rejects(agent.readFile('reports/corrupt'), /checksum/)
+  const again = await worker.read()
+  ok(again?.case === 'fileRequest')
+  worker.send({
+    case: 'fileResult',
+    value: create(AgentFileResultSchema, {
+      file: again.value.file,
+      size: 0,
+      sha256: Buffer.alloc(32),
+    }),
+  })
+  await corrupt
+})
+
+void test('verifies the staged-file digest independently of the working checkout', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello(workerId, journalId, false, false, false, true))
+  equal((await worker.read())?.case, 'hello')
+  const opening = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const { runId } = start.value
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/worker/project',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await opening
+  const base = 'a'.repeat(40)
+  const head = 'b'.repeat(40)
+  const index = 'c'.repeat(40)
+  const bytes = Buffer.from('staged files')
+  const digest = (given: Uint8Array) => createHash('sha256').update(given).digest()
+  const empty = digest(Buffer.alloc(0))
+  const checkpoint = async (honest: boolean) => {
+    const pending = agent.readPatch(base, head, undefined, true)
+    const request = await worker.read()
+    ok(request?.case === 'snapshot')
+    equal(request.value.captureIndex, true)
+    worker.send({
+      case: 'snapshot',
+      value: create(AgentSnapshotResultSchema, {
+        runId,
+        head,
+        tree: base,
+        size: 0,
+        sha256: empty,
+        commitsSize: 0,
+        commitsSha256: empty,
+        index: { tree: index, size: bytes.length, sha256: honest ? digest(bytes) : Buffer.alloc(32) },
+      }),
+    })
+    worker.send({ case: 'indexPatch', value: create(AgentRunBytesSchema, { runId, data: bytes }) })
+    return pending
+  }
+  const captured = await checkpoint(true)
+  equal(captured.index?.tree, index)
+  deepEqual(captured.index?.patch, bytes)
+  deepEqual(captured.patch, Buffer.alloc(0))
+  await rejects(checkpoint(false), /wrong workspace transfer digest/)
+  equal(agent.ownsRun(), false)
 })
 
 void test('rejects worker command registrations inside a task checkout', { timeout: 15_000 }, async (t) => {
@@ -757,6 +884,10 @@ void test(
       equal(firstSetup?.exitCode, 0)
       equal(Buffer.from(firstSetup?.outputTail ?? []).toString(), 'ready')
       equal(readFileSync(join(leadCheckout, 'setup.log'), 'utf8'), 'worker-setup')
+      ok(agent.readFile !== undefined)
+      const output = await agent.readFile('setup.log', grouped ? workspaceId : undefined)
+      equal(Buffer.from(output.bytes).toString('utf8'), 'worker-setup')
+      await rejects(agent.readFile('missing.txt', grouped ? workspaceId : undefined), /unavailable/)
       equal(existsSync(join(repo, 'setup.log')), false)
       ok(agent.startHelper !== undefined)
       let echoedHelper!: (bytes: Uint8Array) => void
@@ -825,7 +956,15 @@ void test(
       const echoed = once(agent.output, 'data', { signal: AbortSignal.timeout(8000) })
       await agent.write(Buffer.from(data + '\n'))
       deepEqual(await echoed, [Buffer.from('Home source\n' + data + '\n')])
-      const change = await agent.readPatch(tree, head, grouped ? workspaceId : undefined)
+      writeFileSync(join(leadCheckout, 'stage.txt'), 'staged on the native worker\n')
+      execFileSync('git', ['add', 'stage.txt'], { cwd: leadCheckout })
+      const staged = execFileSync('git', ['write-tree'], { cwd: leadCheckout }).toString().trim()
+      writeFileSync(join(leadCheckout, 'stage.txt'), 'unstaged on the native worker\n')
+      const change = await agent.readPatch(tree, head, grouped ? workspaceId : undefined, true)
+      equal(change.index?.tree, staged)
+      ok(Buffer.from(change.index?.patch ?? []).includes('+staged on the native worker'))
+      ok(!Buffer.from(change.index?.patch ?? []).includes('unstaged on the native worker'))
+      ok(Buffer.from(change.patch).includes('+unstaged on the native worker'))
       ok(Buffer.from(change.patch).includes('+' + data))
       if (grouped) {
         equal(readFileSync(join(agent.workspacePath, 'web/README.md'), 'utf8'), 'Home source\n')

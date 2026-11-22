@@ -27,6 +27,7 @@ use tonic::{Streaming, transport::Channel};
 
 use crate::{
     PROTOCOL_VERSION,
+    agent_files::send_file,
     agent_managed::ManagedCommands,
     agent_setup::{DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, WorkspaceSetup, worker_environment},
     agent_skills::{MAX_BYTES as MAX_SKILL_BYTES, SkillDirectory},
@@ -40,10 +41,11 @@ use crate::{
     valid_id,
     wire::{
         AgentHomeFrame, AgentRunBytes, AgentRunExit, AgentRunOutcome, AgentRunReady, AgentRunStart,
-        AgentSkillFiles, AgentSnapshotRequest, AgentSnapshotResult, AgentWorkerCapability,
-        AgentWorkerFrame, AgentWorkerHeartbeat, AgentWorkerHello, AgentWorkerMcpCommand,
-        AgentWorkspaceSetup, AgentWorkspaceSetupResult, AgentWorkspaceSetupSource,
-        agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
+        AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest, AgentSnapshotResult,
+        AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat, AgentWorkerHello,
+        AgentWorkerMcpCommand, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
+        AgentWorkspaceSetupSource, agent_home_frame::Payload as HomeMessage,
+        agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
@@ -156,6 +158,8 @@ impl AgentConfig {
                     skill_files: true,
                     helper_skill_files: true,
                     helper_checkouts: true,
+                    file_reads: true,
+                    workspace_index: true,
                 },
                 executable,
                 args: fields.map(str::to_owned).collect(),
@@ -702,6 +706,7 @@ async fn serve_agent(
     .await??;
     let mut buffer = [0; CHUNK_BYTES];
     let mut checkpoints = JoinSet::new();
+    let mut files = JoinSet::new();
     let mut managed = ManagedCommands::new(
         &run.run_id,
         &workspace.root,
@@ -715,6 +720,11 @@ async fn serve_agent(
             _ = tokio::time::sleep_until(slot.until) => return Ok((AgentRunOutcome::Unconfirmed, None)),
             _ = slot.send_heartbeat.tick() => slot.heartbeat().await?,
             result = checkpoints.join_next(), if !checkpoints.is_empty() => {
+                if let Some(result) = result {
+                    result??;
+                }
+            }
+            result = files.join_next(), if !files.is_empty() => {
                 if let Some(result) = result {
                     result??;
                 }
@@ -733,6 +743,14 @@ async fn serve_agent(
                     let path = workspace.checkout(&request.workspace_id)
                         .or_else(|| managed.checkout(&request.workspace_id)).map(Path::to_owned);
                     checkpoints.spawn(send_snapshot(slot.outgoing.clone(), path, request));
+                }
+                Some(HomeMessage::FileRequest(request)) if files.len() < 2 => {
+                    let file = request.file.as_ref().ok_or_else(|| invalid("No worker file identity"))?;
+                    if file.run_id != run.run_id || !valid_id(&file.file_id, "wfl_") {
+                        return Err(invalid("This run does not own the requested file").into());
+                    }
+                    let root = workspace.checkout(&request.workspace_id).map(Path::to_owned);
+                    files.spawn(send_file(slot.outgoing.clone(), root, request));
                 }
                 Some(HomeMessage::ManagedStart(request)) => managed.start(request)?,
                 Some(HomeMessage::HelperStart(request)) => {
@@ -773,7 +791,16 @@ async fn send_snapshot(
     let run_id = request.run_id;
     let workspace_id = request.workspace_id;
     let result = match cwd {
-        Some(cwd) => workspace_patch(&cwd, &run_id, &request.base_tree, &request.base_head).await,
+        Some(cwd) => {
+            workspace_patch(
+                &cwd,
+                &run_id,
+                &request.base_tree,
+                &request.base_head,
+                request.capture_index,
+            )
+            .await
+        }
         None => Err(invalid(
             "The requested repository is outside this worker workspace",
         )),
@@ -810,6 +837,14 @@ async fn send_snapshot(
             head: checkpoint.head,
             commits_size: checkpoint.commits.len() as u32,
             commits_sha256: sha256(&checkpoint.commits),
+            index: checkpoint
+                .index
+                .as_ref()
+                .map(|(tree, bytes)| AgentSnapshotIndex {
+                    tree: tree.clone(),
+                    size: bytes.len() as u32,
+                    sha256: sha256(bytes),
+                }),
             unavailable: false,
         }),
     )
@@ -818,6 +853,20 @@ async fn send_snapshot(
         send(
             &outgoing,
             WorkerMessage::Patch(AgentRunBytes {
+                run_id: run_id.clone(),
+                data: chunk.to_vec(),
+            }),
+        )
+        .await?;
+    }
+    for chunk in checkpoint
+        .index
+        .iter()
+        .flat_map(|(_, bytes)| bytes.chunks(CHUNK_BYTES))
+    {
+        send(
+            &outgoing,
+            WorkerMessage::IndexPatch(AgentRunBytes {
                 run_id: run_id.clone(),
                 data: chunk.to_vec(),
             }),

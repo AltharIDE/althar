@@ -100,3 +100,20 @@ Run these from `apps/cli`.
 | `bun run verify` | Runs the checks and coverage, as CI does |
 
 See the [CLI architecture](ARCHITECTURE.md) for where the pieces live.
+
+
+### Save a file made on the worker
+
+While a worker task is running, you can bring back a build output or log by
+giving its path inside the task checkout. This works even for ignored or
+untracked files. Use the running Desktop profile and the project's and task's
+IDs. For a secondary repository, add `--workspace` with that checkout's ID.
+
+```sh
+node dist/althar.js workers fetch-file --project "$PROJECT_ID" --task "$TASK_ID" \
+  --path dist/report.json --out "$PWD/report.json"
+```
+
+The runner accepts regular files up to 16 MiB inside the checkout. It verifies
+the file before saving it under the name you choose. If that name already
+exists, choose another one.
