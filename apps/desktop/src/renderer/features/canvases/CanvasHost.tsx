@@ -167,6 +167,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
     boards,
     draft,
     pinned,
+    shown: version === null ? null : { version: version.number, title: version.title },
     onChip: (key) => (key === 'open' ? pressed.current.open?.() : pressed.current.close()),
     onVersion: (step) => {
       if (version === null) return
@@ -345,12 +346,13 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
                   onSubmit={(note) => {
                     const { pointed, comment: was } = ground.writing ?? { pointed: null, comment: null }
                     if (pointed === null) return
+                    const on = ground.writing?.on ?? { version: version.number, title: version.title }
                     const spot: CanvasSpot = {
                       kind: 'canvas',
                       canvasId: summary.id,
                       name: summary.name,
-                      title: version.title,
-                      version: version.number,
+                      title: on.title,
+                      version: on.version,
                       anchor: {
                         kind: 'element',
                         selector: pointed.picked.selector,
@@ -386,6 +388,8 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
 interface Writing {
   readonly pointed: CanvasPointed
   readonly comment: { readonly id: string; readonly note: string } | null
+  /** The version the part was pointed at on, as it showed then: the comment is on it, whatever is published while it is written. */
+  readonly on: { readonly version: number; readonly title: string }
 }
 
 /**
@@ -400,6 +404,7 @@ function useBoards({
   boards,
   draft,
   pinned,
+  shown,
   onChip,
   onVersion,
 }: {
@@ -408,6 +413,8 @@ function useBoards({
   boards: CanvasBoards | null
   draft: string | null
   pinned: ReturnType<typeof pinsOf>
+  /** The version showing now: what a part pointed at now is on. */
+  shown: { readonly version: number; readonly title: string } | null
   /** Its chip's Open and close, beside a conversation, drawn by the ground beside its zoom. */
   onChip: (key: 'open' | 'close') => void
   onVersion: (step: -1 | 1) => void
@@ -418,8 +425,9 @@ function useBoards({
   const drafts = useComments(draft ?? '')
   const ground = useGround(threadId, canvasId, boards, {
     // A part pointed at opens its comment, where there is a draft to keep it in.
+    // It is on the version showing as it is pointed at: one published while it is written doesn't move it.
     pointed: (pointed) => {
-      if (draft !== null) setWriting({ pointed, comment: null })
+      if (draft !== null && shown !== null) setWriting({ pointed, comment: null, on: shown })
       else views?.clear?.(threadId)
     },
     pin: (n) => {
@@ -430,8 +438,10 @@ function useBoards({
       if (mine.on.kind !== 'canvas' || mine.on.anchor.kind !== 'element') return
       const { page, board, selector } = mine.on.anchor
       if (page === undefined || board === undefined) return
+      // Opened again on the version it was made on.
+      const on = { version: mine.on.version, title: mine.on.title }
       void views?.find?.(threadId, { page, board, selector }).then((pointed) => {
-        if (pointed !== null) setWriting({ pointed, comment: { id: mine.id, note: mine.note } })
+        if (pointed !== null) setWriting({ pointed, comment: { id: mine.id, note: mine.note }, on })
       })
     },
     key: (key) => {

@@ -1,5 +1,5 @@
 import { type ComponentProps, useState } from 'react'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,7 +10,9 @@ import type { CanvasesHost } from '../src/renderer/data/services'
 import { CanvasHost, commentsShown, type OpenCanvas, shownVersion, svgAddress } from '../src/renderer/features/canvases/CanvasHost'
 import { commentsOf, forgetComments } from '../src/renderer/shared/comments'
 import { fakeClient, fakeHost } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
+import { keys } from '../src/renderer/data/reads'
+import { ServicesProvider } from '../src/renderer/data/services'
 
 /*
  * One of the project's canvases beside a conversation (ADR-104), as the
@@ -569,6 +571,55 @@ describe('a canvas of boards', () => {
     fireEvent.keyDown(panel, { key: 'h', metaKey: true })
     fireEvent.keyDown(document.body, { key: 'h' })
     expect(vi.mocked(canvases.ground!).mock.calls.length).toBe(calls)
+    measured.mockRestore()
+  })
+
+  it('files a part pointed at on the version it was pointed on, though a newer one is published while it is written', async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
+    const { canvases, say } = views()
+    const first = held()
+    const { client } = canvasClient(first, BOARDS)
+    const services = servicesFor(client, fakeHost({ canvases }))
+    render(
+      <ServicesProvider value={services}>
+        <CanvasHost threadId={THREAD} open={latest} draft={DRAFT} onVersion={vi.fn()} onClose={vi.fn()} />
+      </ServicesProvider>,
+    )
+    await waitFor(() => expect(canvases.show).toHaveBeenCalled())
+    const picked = {
+      selector: 'button.go',
+      label: 'button.go',
+      text: 'Send the gift',
+      rect: { x: 10, y: 20, width: 120, height: 40 },
+      font: '14px · 500 · Inter',
+      colour: '#ffffff',
+      background: '#c2552d',
+      page: { width: 390, height: 844 },
+    }
+    say({
+      kind: 'pointed',
+      pointed: {
+        page: 'Checkout',
+        board: 'Phone',
+        picked,
+        crop: null,
+        cropSize: null,
+        still: 'data:image/jpeg;base64,CCCC',
+        at: { x: 40, y: 60, width: 60, height: 20 },
+      },
+    })
+    const field = await screen.findByRole('textbox', { name: 'Comment on button.go' })
+    // Another agent publishes v2 while the comment is being written; the panel follows the latest.
+    vi.mocked(client.getCanvas).mockImplementation(async () =>
+      detail([
+        version(1, { kind: 'boards', title: 'Checkout', entry: 'canvas.json' }),
+        version(2, { kind: 'boards', title: 'Checkout, v2', entry: 'canvas.json' }),
+      ]),
+    )
+    await act(async () => services.cache.invalidateQueries({ queryKey: keys.canvas(CANVAS) }))
+    await waitFor(() => expect(vi.mocked(canvases.show).mock.calls.at(-1)?.[1]).toMatchObject({ version: 2 }))
+    await userEvent.type(field, 'Say Send it{Enter}')
+    expect(commentsOf(DRAFT)).toMatchObject([{ note: 'Say Send it', on: { kind: 'canvas', version: 1, title: 'Checkout' } }])
     measured.mockRestore()
   })
 
