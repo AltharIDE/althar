@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -91,17 +92,27 @@ const open = (summary: CanvasSummary, over: Parameters<typeof fakeClient>[0] = {
     listRepositoryFolders: vi.fn(async () => ({ folders: ['design/', 'docs/'], truncated: false })),
     ...over,
   })
-  withServices(
-    <CanvasHost
-      threadId={THREAD}
-      open={{ canvasId: CANVAS, version: null, follow: true }}
-      draft={DRAFT}
-      onVersion={vi.fn()}
-      onClose={vi.fn()}
-    />,
-    made.client,
-  )
+  // Saving is the artifact's: it is in its room's row.
+  withServices(<InRoom />, made.client)
   return { ...made, hold: (next: CanvasDetail) => (held = next) }
+}
+
+/** A canvas in its artifact's room, its actions in the room's row. */
+function InRoom() {
+  const [row, setRow] = useState<HTMLSpanElement | null>(null)
+  return (
+    <>
+      <span ref={setRow} />
+      <CanvasHost
+        threadId={THREAD}
+        open={{ canvasId: CANVAS, version: null, follow: true }}
+        draft={DRAFT}
+        onVersion={vi.fn()}
+        onClose={vi.fn()}
+        actionsIn={row}
+      />
+    </>
+  )
 }
 
 describe('Save to repo, in an artifact’s head', () => {

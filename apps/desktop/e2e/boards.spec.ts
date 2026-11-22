@@ -166,9 +166,27 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect.poll(async () => (await canvasView(electronApp)) !== null).toBe(true)
     await shoot(page, electronApp, page, 'test-results/boards-pinned.png')
 
-    // Save to repo opens on the project's place for artifacts, the canvas's folder named in place; the canvas steps aside for it.
-    // What is for the whole artifact is in the task's own row, after its header: the canvas has no head of its own.
+    // Beside the task, the canvas is what it is: its name, Comment and close in the task's row, and a way to the artifact
+    // itself, where it is saved and downloaded. None of that is in the task's header, and the canvas has no head of its own.
     await expect(panel.getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save to repo' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Open the artifact' }).click()
+
+    // It opens as itself, with its own chat: one row over it all, the artifact's, and the canvas with no head of its own.
+    await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Gift a class/ })).toBeVisible()
+    await expect(page.getByText('Lead of Gift a class')).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'View' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Its chat' })).toBeVisible()
+    await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
+    await expect.poll(() => frames(electronApp)).toBe(4)
+    await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
+    await page.waitForTimeout(1_000)
+    await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
+
+    // Save to repo, in the artifact's row, opens on the project's place for artifacts, the canvas's folder named in place; the
+    // canvas steps aside for it.
     await page.getByRole('button', { name: 'Save to repo' }).click()
     const save = page.getByRole('dialog', { name: 'Save to repo' })
     await expect(save.getByRole('textbox', { name: 'Its folder’s name' })).toHaveValue('gift-a-class')
@@ -185,30 +203,13 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.keyboard.press('Escape')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
 
-    // The project's Artifacts view has it as a card, with a picture of it as it was drawn; opened, it is itself, with its own chat.
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
+    // Back to every artifact: it is a card, with a picture of it as it was drawn.
+    await page.getByRole('button', { name: 'Back to Artifacts' }).click()
     const cards = page.getByRole('list', { name: 'The project’s artifacts' })
     const card = cards.getByRole('button', { name: /^Gift a class/ })
     await expect(card).toBeVisible()
     await expect(card.locator('img')).toBeVisible()
     await shoot(page, electronApp, page, 'test-results/boards-artifacts.png')
-    await card.click()
-    await expect(page.getByRole('complementary', { name: 'Gift a class' })).toBeVisible()
-    // One row over it all, the artifact's: the project's header gives way to it, and the canvas has no head of its own.
-    await expect(page.getByRole('button', { name: /^Gift a class/ })).toBeVisible()
-    await expect(page.getByText('Lead of Gift a class')).toBeVisible()
-    await expect(page.getByRole('radiogroup', { name: 'View' })).toHaveCount(0)
-    await expect(page.getByRole('region', { name: 'Its chat' })).toBeVisible()
-    await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
-    await expect.poll(() => frames(electronApp)).toBe(4)
-    await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
-    await page.waitForTimeout(1_000)
-    await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
-    // And back to every artifact.
-    await page.getByRole('button', { name: 'Back to Artifacts' }).click()
-    await expect(cards).toBeVisible()
   } finally {
     await electronApp.close()
   }

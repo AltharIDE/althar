@@ -10,6 +10,7 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { ago } from '../../shared/time'
 import { ArtifactRoom, byOf, type OpenArtifact } from './ArtifactRoom'
+import { onAsked, takeAsked } from './opening'
 
 /*
  * A project's Artifacts view (ADR-104): what its agents made to keep, every
@@ -75,7 +76,19 @@ export function ArtifactsView({
   const views = host.canvases
   const list = useQuery(reads(client).canvases(projectId))
   const drawing = useQuery(reads(client).artifactsDrawing(projectId))
-  const [open, setOpen] = useState<OpenArtifact | null>(null)
+  // One asked to open from a canvas beside a conversation opens as itself, at once.
+  const [open, setOpen] = useState<OpenArtifact | null>(() => {
+    const asked = takeAsked(projectId)
+    return asked === null ? null : { id: asked, version: null }
+  })
+  useEffect(
+    () =>
+      onAsked(() => {
+        const asked = takeAsked(projectId)
+        if (asked !== null) setOpen({ id: asked, version: null })
+      }),
+    [projectId],
+  )
   const [shown, setShown] = useState(kept)
   // A page's and a canvas of boards' cards show the picture kept of them as they were last drawn, where one was.
   const drawn = (list.data ?? []).filter((one) => one.latest.kind === 'html' || one.latest.kind === 'boards')

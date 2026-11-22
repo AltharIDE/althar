@@ -125,6 +125,8 @@ export interface CanvasPanelProps {
   actionsIn?: Element | null
   /** With `actionsIn`, where the row isn't the artifact's own (a task's): its name before its actions, and its close after. */
   titled?: boolean
+  /** With `titled`, its name opens the artifact itself. */
+  onTitle?: () => void
   /** A comment in the list pressed: its pin shows on its part. */
   onCommentPick?: (id: string) => void
   onClose: () => void
@@ -153,6 +155,7 @@ export function CanvasPanel({
   onBack,
   actionsIn,
   titled = false,
+  onTitle,
   onCommentPick,
   onClose,
   children,
@@ -169,7 +172,8 @@ export function CanvasPanel({
   const later = version < latest
   const actions = (
     <>
-      {onVersion !== undefined && latest > 1 && (
+      {/* Its versions step only in its own room: beside a conversation, the artifact itself is a press away. */}
+      {onVersion !== undefined && latest > 1 && actionsIn !== undefined && !titled && (
         <span className={s.versions}>
           <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
           <span className={s.versionWord}>{t.version(version, latest)}</span>
@@ -292,9 +296,15 @@ export function CanvasPanel({
                   <span className={s.panelTile} aria-hidden="true">
                     <Icon name="canvas" size={14} />
                   </span>
-                  <span className={s.rowTitle} title={title}>
-                    {title}
-                  </span>
+                  {onTitle === undefined ? (
+                    <span className={s.rowTitle} title={title}>
+                      {title}
+                    </span>
+                  ) : (
+                    <button type="button" className={cx(s.rowTitle, s.rowLink)} title={title} onClick={onTitle}>
+                      {title}
+                    </button>
+                  )}
                 </>
               )}
               {actions}

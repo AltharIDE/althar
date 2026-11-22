@@ -1,3 +1,4 @@
+import { type ComponentProps, useState } from 'react'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -72,14 +73,31 @@ const canvasClient = (held: CanvasDetail, words = DOCUMENT) =>
 
 const latest: OpenCanvas = { canvasId: CANVAS, version: null, follow: true }
 
+/** A canvas in an artifact's room: its versions and actions in the room's row, outside the panel. */
+function InRoom(props: Omit<ComponentProps<typeof CanvasHost>, 'actionsIn'>) {
+  const [row, setRow] = useState<HTMLSpanElement | null>(null)
+  return (
+    <>
+      <span ref={setRow} role="toolbar" aria-label="The artifact’s row" />
+      <CanvasHost {...props} actionsIn={row} />
+    </>
+  )
+}
+
 const show = (
   client: ReturnType<typeof fakeClient>['client'],
-  { open = latest, draft = DRAFT, canvases }: { open?: OpenCanvas; draft?: string | null; canvases?: CanvasesHost } = {},
+  {
+    open = latest,
+    draft = DRAFT,
+    canvases,
+    room = false,
+  }: { open?: OpenCanvas; draft?: string | null; canvases?: CanvasesHost; room?: boolean } = {},
 ) => {
   const onVersion = vi.fn()
   const onClose = vi.fn()
+  const Host = room ? InRoom : CanvasHost
   const view = withServices(
-    <CanvasHost threadId={THREAD} open={open} draft={draft} onVersion={onVersion} onClose={onClose} />,
+    <Host threadId={THREAD} open={open} draft={draft} onVersion={onVersion} onClose={onClose} />,
     client,
     fakeHost(canvases === undefined ? {} : { canvases }),
   )
@@ -158,7 +176,7 @@ describe('the comments sent on a canvas', () => {
 })
 
 describe('a document beside the conversation', () => {
-  it('shows its words, its name, its versions and the comments sent on it', async () => {
+  it('shows its words, its name, a way to the artifact and the comments sent on it', async () => {
     const { client } = canvasClient(
       detail(
         [version(1), version(2, { note: 'Shorter errors' })],
@@ -178,7 +196,9 @@ describe('a document beside the conversation', () => {
     const panel = await screen.findByRole('complementary', { name: 'Sign-in flow' })
     expect(await within(panel).findByRole('heading', { name: 'Errors' })).toBeTruthy()
     expect(within(panel).getByText('sign-in-flow')).toBeTruthy()
-    expect(within(panel).getByText('v2')).toBeTruthy()
+    // Beside a conversation it is what it is, with a way to the artifact itself, where its versions are.
+    expect(within(panel).getByRole('button', { name: 'Open the artifact' })).toBeTruthy()
+    expect(within(panel).queryByRole('button', { name: /Older version/ })).toBeNull()
     const sent = within(panel).getByRole('list', { name: '1 comment' })
     expect(within(sent).getByText('Make it shorter')).toBeTruthy()
     expect(within(sent).getByText('Whole canvas · on v1 · Answered')).toBeTruthy()
@@ -211,13 +231,14 @@ describe('a document beside the conversation', () => {
 describe('a canvas’s versions', () => {
   const held = detail([version(1), version(2), version(3)])
 
-  it('step with its buttons, and say where a newer one is out while an older one shows', async () => {
+  it('step with their buttons in the artifact’s room, and say where a newer one is out while an older one shows', async () => {
     const { client } = canvasClient(held)
-    const { onVersion } = show(client, { open: { canvasId: CANVAS, version: 2, follow: false } })
+    const { onVersion } = show(client, { open: { canvasId: CANVAS, version: 2, follow: false }, room: true })
     const panel = await screen.findByRole('complementary', { name: 'Sign-in flow' })
-    expect(within(panel).getByText('v2 of 3')).toBeTruthy()
+    const row = screen.getByRole('toolbar', { name: 'The artifact’s row' })
+    expect(await within(row).findByText('v2 of 3')).toBeTruthy()
     expect(within(panel).getByText('v3 is out')).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: /Older version/ }))
+    await userEvent.click(within(row).getByRole('button', { name: /Older version/ }))
     expect(onVersion).toHaveBeenLastCalledWith(1)
     await userEvent.click(within(panel).getByRole('button', { name: 'Show' }))
     expect(onVersion).toHaveBeenLastCalledWith(3)

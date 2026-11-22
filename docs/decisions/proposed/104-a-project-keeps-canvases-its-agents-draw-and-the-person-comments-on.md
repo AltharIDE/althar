@@ -653,10 +653,13 @@ design tool lays out frames.
 - **It shows every board of a page, every page at once, or one board at a
   time.** A page's boards wrap into as many lines as shows them largest in
   the view. Nothing stacks over a canvas but one row: opened as itself,
-  the artifact's own (in the project's place); beside a task's
-  conversation, the task's, with the canvas's name, versions and actions
-  at its end. The canvas has no head of its own and no line of facts;
-  only a newer version than the one shown is said over it, with Show.
+  the artifact's own (in the project's place), with its versions, Save to
+  repo, Download and Comment; beside a task's conversation, the task's,
+  with only the canvas's name and a way to the artifact itself (its name,
+  or Open), Comment and close at its end. Saving, downloading and stepping
+  through versions are the artifact's, done in its room, never in a task's
+  header. The canvas has no head of its own and no line of facts; only a
+  newer version than the one shown is said over it, with Show.
   Its controls float over the boards, as a design tool's do
   (the kit's `BoardsControls`): at the top left the page, and every board
   or one at a time with a step through every page's boards; at the top

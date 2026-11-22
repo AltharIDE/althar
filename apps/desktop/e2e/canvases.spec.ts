@@ -113,17 +113,32 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // Its line for v2: the reply streams in before the window has read the line, so it is waited for, not taken as the last.
     await directions.filter({ hasText: 'v2' }).click()
     const again = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(page.getByText('v2', { exact: true })).toBeVisible()
     await expect(again.getByText(/on v1 · Answered/)).toBeVisible()
     await expect(again.getByText('Moved the picture to the left in v2.')).toBeVisible()
     await shoot(page, electronApp, again, 'test-results/canvas-v2.png')
-
-    // A step back shows v1 as it was, and says v2 is out.
-    await page.getByRole('button', { name: 'Older version' }).click()
-    await expect(again.getByText('v2 is out')).toBeVisible()
-    await expect(page.getByText('v1 of 2')).toBeVisible()
-    await shoot(page, electronApp, again, 'test-results/canvas-older.png')
+    // Beside the task, it is what it is, with a way to the artifact itself: its versions, saving and downloading are there,
+    // never in the task's header.
+    await expect(page.getByRole('button', { name: 'Open the artifact' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Older version' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save to repo' })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/canvas-thread.png', scale: 'css' })
+
+    // Opened as itself, a step back shows v1 as it was, and says v2 is out; then back to the task.
+    await page.getByRole('button', { name: 'Open the artifact' }).click()
+    await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()
+    await expect(page.getByText('v2', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Older version' }).click()
+    const older = page.getByRole('complementary', { name: 'Sign-in, three directions' })
+    await expect(older.getByText('v2 is out')).toBeVisible()
+    await expect(page.getByText('v1 of 2')).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/canvas-older.png')
+    await page.getByRole('button', { name: 'Back to Artifacts' }).click()
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Home' }).click()
+    await page
+      .getByRole('article', { name: 'Redesign sign-in' })
+      .getByRole('button', { name: /^(Open task|Answer)/ })
+      .click()
+    await toConversation(page)
 
     // Another task's lead reaches the same canvases: they are the project's.
     await page.getByRole('button', { name: 'Back to meridian' }).click()

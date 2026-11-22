@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { CanvasAnchor, CanvasBoards, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
-import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, Markdown } from '@althar/ui'
+import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, IconButton, Markdown, Room } from '@althar/ui'
 
 import { sized } from '../../../main/browser/elementWords'
 import type { CanvasPointed } from '../../../main/canvases/boards'
@@ -14,6 +15,7 @@ import { type CanvasSpot, canvasPlace, drop, gather, savePageComment, useComment
 import { useCovered } from '../browser/cover'
 import { boardsOfText, pinsOf, useGround } from './boards'
 import { DownloadCanvas } from './DownloadCanvas'
+import { askToOpen } from './opening'
 import { SaveCanvas } from './SaveCanvas'
 
 /*
@@ -62,6 +64,11 @@ export interface CanvasHostProps {
 
 const LONGEST_SELECTION = 240
 
+export const hostText = {
+  /** A canvas beside a conversation: to the artifact itself, where it is saved, downloaded and its versions stepped through. */
+  open: 'Open the artifact',
+}
+
 /** The comments sent on a canvas, open first, as its panel lists them. */
 export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelComment & { readonly anchor: CanvasAnchor }> =>
   detail.comments
@@ -109,6 +116,7 @@ export const svgAddress = (svg: string) => {
 }
 
 export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn, titled }: CanvasHostProps) {
+  const navigate = useNavigate()
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
   const version = detail.data === undefined ? null : shownVersion(detail.data, open)
@@ -228,6 +236,16 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
   const loading = detail.isPending || (drawsText && version !== null && text.isPending)
   const error = detail.isError ? messageOf(detail.error) : drawsText && text.isError ? messageOf(text.error) : undefined
   const fill = kind === 'html' || kind === 'boards' || kind === 'picture' || kind === 'svg'
+  // In its own room, what is for the whole artifact is there: its versions, saving it, downloading it. Beside a conversation,
+  // the canvas is what it is, with a way to the artifact itself, where those are; never in a task's header.
+  const inRoom = actionsIn !== undefined && titled !== true
+  const toArtifact =
+    summary === undefined
+      ? undefined
+      : () => {
+          askToOpen(summary.projectId, summary.id)
+          void navigate({ to: '/projects/$projectId', params: { projectId: summary.projectId }, search: { room: Room.Artifacts } })
+        }
   return (
     <CanvasPanel
       name={summary?.name ?? ''}
@@ -240,25 +258,33 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
       comments={comments}
       onClose={onClose}
       {...(onBack === undefined ? {} : { onBack })}
-      {...(actionsIn === undefined ? {} : { actionsIn, ...(titled === true ? { titled } : {}) })}
+      {...(actionsIn === undefined
+        ? {}
+        : { actionsIn, ...(titled === true ? { titled, ...(toArtifact === undefined ? {} : { onTitle: toArtifact }) } : {}) })}
       {...(summary === undefined || version === null || error !== undefined
         ? {}
-        : {
-            extra: (
-              <>
-                <SaveCanvas summary={summary} version={latest} {...(titled === true ? { compact: true } : {})} />
-                <DownloadCanvas
-                  projectId={summary.projectId}
-                  canvasId={summary.id}
-                  name={summary.name}
-                  kind={kind}
-                  version={version.number}
-                  manifest={version.manifest}
-                  body={body}
-                />
-              </>
-            ),
-          })}
+        : !inRoom
+          ? {
+              extra: (
+                <IconButton icon="expand" label={hostText.open} tooltip="below" tooltipAlign="end" size="small" onClick={toArtifact} />
+              ),
+            }
+          : {
+              extra: (
+                <>
+                  <SaveCanvas summary={summary} version={latest} />
+                  <DownloadCanvas
+                    projectId={summary.projectId}
+                    canvasId={summary.id}
+                    name={summary.name}
+                    kind={kind}
+                    version={version.number}
+                    manifest={version.manifest}
+                    body={body}
+                  />
+                </>
+              ),
+            })}
       fill={fill}
       loading={loading}
       {...(comment === undefined ? {} : { onComment: comment })}

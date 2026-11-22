@@ -205,16 +205,18 @@ describe('a canvas arriving in a conversation', () => {
 })
 
 describe('a canvas opened from the thread', () => {
-  it('opens at the version named, steps through its versions, and closes', async () => {
+  it('opens at the version named, says a newer one is out and shows it, and closes', async () => {
     const { client } = canvasClient()
     withServices(<Conversation />, client)
     expect(screen.getByText('Opened: none')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open the canvas at v1' }))
     const panel = await panelOf('Sign-in flow, take 1')
     expect(screen.getByText(`Opened: ${CANVAS}`)).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: /Newer version/ }))
-    expect(await panelOf('Sign-in flow, take 2')).toBeTruthy()
-    expect(screen.getByText(`Canvas: ${CANVAS} at 2`)).toBeTruthy()
+    // Its versions step in the artifact itself; beside the conversation, a newer one is said, with Show.
+    expect(within(panel).queryByRole('button', { name: /Newer version/ })).toBeNull()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show' }))
+    expect(await panelOf('Sign-in flow, take 3')).toBeTruthy()
+    expect(screen.getByText(`Canvas: ${CANVAS} at 3`)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Close the panel' }))
     await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull())
     expect(screen.getByText('Canvas: none')).toBeTruthy()

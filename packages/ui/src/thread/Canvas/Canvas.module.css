@@ -381,6 +381,22 @@ button.pinMark:hover {
   margin: 0 4px;
   background: var(--line);
 }
+.rowLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.rowLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rowLink:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .rowTitle {
   min-width: 0;
   max-width: 160px;
