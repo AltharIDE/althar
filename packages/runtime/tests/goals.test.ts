@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Deferred, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Projects } from '../src/Projects'
@@ -266,6 +266,35 @@ describe('thread goals', () => {
       yield* controlGoal(task.threadId, { action: 'pause' })
       gate.open('[lead:slowly]')
     }).pipe(Effect.provide(runtime(':memory:', { holds: gate })), Effect.scoped)
+  })
+
+  it.live('takes back a prepared goal turn before dispatch when the goal is cleared', () => {
+    const prompts: string[] = []
+    return Effect.gen(function* () {
+      const task = yield* newTask()
+      const sessions = yield* Sessions
+      const prepared = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* sessions.gateTurns((_lead, work) =>
+        Effect.as(work(Effect.andThen(Deferred.succeed(prepared, undefined), Deferred.await(release))), true),
+      )
+      const { goal } = yield* setGoal(task.threadId)
+      yield* sessions.kickGoal(task.threadId, goal?.revision ?? 0, lead)
+      yield* Deferred.await(prepared)
+      const [pending] = yield* turns(task.threadId)
+      assert.strictEqual(pending?.state, 'pending')
+      assert.strictEqual((yield* readGoal(task.threadId))?.rounds, 0)
+
+      const cleared = yield* controlGoal(task.threadId, { action: 'clear' })
+      assert.strictEqual(cleared.stopping, pending?.id)
+      const turnId = pending?.id ?? ''
+      assert.isNotEmpty(turnId)
+      yield* sessions.cancelGoalRound(task.threadId, turnId)
+      yield* Deferred.succeed(release, undefined)
+      yield* until(turns(task.threadId), ([turn]) => turn?.state === 'interrupted')
+      assert.isEmpty(prompts)
+      assert.isNull(yield* readGoal(task.threadId))
+    }).pipe(Effect.provide(runtime(':memory:', { promptAsked: (prompt) => void prompts.push(prompt) })), Effect.scoped)
   })
 
   it.live('explains why an unstarted goal needs a lead and why a chosen lead failed to start', () =>
