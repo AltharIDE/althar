@@ -14,9 +14,9 @@ import w from './welcome.module.css'
  * 3 · Tour. The home explained on the first-run welcome's card, with its
  * track along the head: what the home is (its name arriving, and its cores,
  * memory, room and tools set out as a spec), that your settings are there already
- * (each flying across from this Mac), and what it signs in itself (the
- * presses that do it). Then the card opens: it grows to the whole window and
- * melts into it, the light surges up behind, and the tour ends as the
+ * (the home's clearing in beside this Mac's), and what it signs in itself
+ * (the presses that do it). Then the card opens: it grows to the whole window
+ * and melts into it, the light rises behind, and the tour ends as the
  * arrival does, the mark coming up dot by dot over "Welcome to runner-1"
  * and the three doors in. Skip goes straight to that.
  */
@@ -84,11 +84,15 @@ export function TourWelcome() {
   const stage = useRef<HTMLElement>(null)
   const card = useRef<HTMLElement>(null)
   const head = useRef<HTMLElement>(null)
+  const paper = useRef<HTMLSpanElement>(null)
 
   /**
-   * Opens the card into the window: what was on it lifts off and blurs away,
-   * the card grows to the window's edges and its paper melts into it, and its
-   * head glides up to the window's top, while the finale arrives in it.
+   * Opens the card into the window: what was on it blurs away where it
+   * stood, the card's paper grows from the card to past the window's edges
+   * and melts into it, and its head glides up to the window's top, while the
+   * finale clears in on it. Only transforms, opacity and filter move, each on
+   * a layer of its own, so the compositor draws every frame; the page is read
+   * once before the switch and once after it.
    */
   const morph = () => {
     const root = card.current
@@ -98,7 +102,6 @@ export function TourWelcome() {
     const s = holder.getBoundingClientRect()
     const c = root.getBoundingClientRect()
     const h = bar.getBoundingClientRect()
-    const paper = getComputedStyle(root).backgroundColor
     const ghost = root.cloneNode(true) as HTMLElement
     ghost.querySelectorAll('[id]').forEach((one) => one.removeAttribute('id'))
     ghost.classList.add(t.ghost ?? 'ghost')
@@ -112,28 +115,30 @@ export function TourWelcome() {
     })
     holder.append(ghost)
     flushSync(() => setAt(LAST))
-    root.animate(
-      [
-        { clipPath: `inset(${c.top - s.top}px ${s.right - c.right}px ${s.bottom - c.bottom}px ${c.left - s.left}px round 20px)` },
-        { clipPath: 'inset(0px round 0px)' },
-      ],
-      { duration: 960, easing: OPEN },
-    )
-    root.animate([{ backgroundColor: paper }, { backgroundColor: paper, offset: 0.4 }, { backgroundColor: 'transparent' }], {
-      duration: 1400,
-      easing: 'ease-out',
-    })
+    const sheet = paper.current
     const g = bar.getBoundingClientRect()
+    if (sheet !== null) {
+      const p = sheet.getBoundingClientRect()
+      const sx = c.width / p.width
+      const sy = c.height / p.height
+      // The card's corners, as they were, at the scale it starts from.
+      sheet.style.borderRadius = `${20 / sx}px / ${20 / sy}px`
+      sheet.animate([{ transform: `translate(${c.left - p.left}px, ${c.top - p.top}px) scale(${sx}, ${sy})` }, { transform: 'none' }], {
+        duration: 960,
+        easing: OPEN,
+      })
+      sheet.animate([{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }], { duration: 1300, easing: 'linear' })
+    }
     bar.animate([{ transform: `translate(${h.left - g.left}px, ${h.top - g.top}px)` }, { transform: 'none' }], {
       duration: 960,
       easing: OPEN,
     })
     const away = ghost.animate(
       [
-        { opacity: 1, filter: 'blur(0px)', transform: 'none' },
-        { opacity: 0, filter: 'blur(6px)', transform: 'translateY(-10px) scale(1.02)' },
+        { opacity: 1, filter: 'blur(0px)' },
+        { opacity: 0, filter: 'blur(10px)' },
       ],
-      { duration: 420, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' },
+      { duration: 360, easing: 'linear', fill: 'forwards' },
     )
     void away.finished.finally(() => ghost.remove())
   }
@@ -167,6 +172,7 @@ export function TourWelcome() {
         </div>
       </div>
       <section ref={card} className={t.card} data-open={open || undefined} aria-labelledby="tour-title">
+        {open && <span ref={paper} className={t.paper} aria-hidden="true" />}
         <header ref={head} className={t.head}>
           <span className={t.brand}>
             <Icon name="home" size={16} />
@@ -293,32 +299,10 @@ function Answering() {
 
 /* ---- 2 · yours ---- */
 
-/** Your settings, on this Mac and on the home: each flies across, and is ticked where it lands. */
+/** Your settings, on this Mac and on the home: the home's clear in a row at a time, where they stand, each ticked. */
 function Carried() {
-  const scene = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const root = scene.current
-    if (root === null || typeof root.animate !== 'function' || reduced()) return
-    const from = [...root.querySelectorAll<HTMLElement>('[data-from]')]
-    const to = [...root.querySelectorAll<HTMLElement>('[data-to]')]
-    to.forEach((chip, i) => {
-      const a = from[i]!.getBoundingClientRect()
-      const b = chip.getBoundingClientRect()
-      const dx = a.left - b.left
-      const dy = a.top - b.top
-      chip.animate(
-        [
-          { transform: `translate(${dx}px, ${dy}px)`, opacity: 0.0 },
-          { transform: `translate(${dx}px, ${dy}px)`, opacity: 1, offset: 0.05 },
-          { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 34}px) scale(1.06)`, opacity: 1, offset: 0.5 },
-          { transform: 'none', opacity: 1 },
-        ],
-        { duration: 760, delay: 380 + i * 300, easing: 'cubic-bezier(0.3, 0.7, 0.2, 1)', fill: 'backwards' },
-      )
-    })
-  }, [])
   return (
-    <div ref={scene} className={t.carried}>
+    <div className={t.carried}>
       <section className={t.side}>
         <h2 className={t.sideName}>
           <Icon name="computer" size={14} />
@@ -326,7 +310,7 @@ function Carried() {
         </h2>
         <ul className={t.chips}>
           {CARRIED.map(([what, value]) => (
-            <li key={what} data-from>
+            <li key={what}>
               <b>{what}</b>
               <span>{value}</span>
             </li>

@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { Brand, BrandMark, Icon, ProjectMark, ProjectInk } from '@althar/ui'
-import { arrive } from '@althar/ui/screens'
 
 import { enter, type Intent } from '../entries'
 import { useNeeds } from '../directions/parts'
@@ -31,11 +30,47 @@ export function LabWelcome() {
   return <AskWelcome />
 }
 
-/** Starts what's marked to arrive, as the window's launch does, once the welcome is drawn. */
+/**
+ * How the welcomes' words and pieces come in: a blur clearing on a straight
+ * line, in place, nothing rising. Later the further down and across a piece
+ * sits. Only opacity and filter move, so the compositor draws it.
+ */
+export const BLUR_IN = { length: 560, blur: 10, start: 160, down: 480, across: 100 } as const
+
+const ARRIVING = '[data-arrive], [data-arrive-each] > *'
+
+/** Starts each piece of `within` that's marked to arrive, hidden until it starts. */
+export const blurIn = (within: HTMLElement) => {
+  const box = within.getBoundingClientRect()
+  const pieces = [...within.querySelectorAll<HTMLElement>(ARRIVING)].filter((piece) => typeof piece.animate === 'function')
+  // Every place read before anything animates: one layout, not one a piece.
+  const places = pieces.map((piece) => piece.getBoundingClientRect())
+  pieces.forEach((piece, i) => {
+    const r = places[i]!
+    if (box.height > 0 && r.top - box.top > box.height) return
+    const delay =
+      BLUR_IN.start +
+      (box.height > 0 ? ((r.top - box.top) / box.height) * BLUR_IN.down + ((r.left - box.left) / box.width) * BLUR_IN.across : 0)
+    piece.animate(
+      [
+        { opacity: 0, filter: `blur(${BLUR_IN.blur}px)` },
+        { opacity: 1, filter: 'blur(0px)' },
+      ],
+      {
+        duration: BLUR_IN.length,
+        delay,
+        easing: 'linear',
+        fill: 'backwards',
+      },
+    )
+  })
+}
+
+/** Starts what's marked to arrive, once the welcome is drawn; with motion reduced it's simply there. */
 export const useArrive = <T extends HTMLElement>() => {
   const ref = useRef<T>(null)
   useLayoutEffect(() => {
-    if (ref.current !== null && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) arrive(ref.current)
+    if (ref.current !== null && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) blurIn(ref.current)
   }, [])
   return ref
 }

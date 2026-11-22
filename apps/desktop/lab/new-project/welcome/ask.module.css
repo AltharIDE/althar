@@ -40,7 +40,7 @@
   overflow: hidden;
   font-size: clamp(40px, 5vw, 66px);
   text-overflow: ellipsis;
-  animation: say 520ms var(--ease-out) backwards;
+  animation: say 480ms linear backwards;
 }
 /* what pressing will do, on one line */
 .title[data-says] {
@@ -60,7 +60,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--t-2);
-  animation: say 520ms var(--ease-out) 60ms backwards;
+  animation: say 480ms linear 60ms backwards;
 }
 
 /* the one big line, its button beside it */
@@ -122,7 +122,7 @@
 }
 .matches li {
   min-width: 0;
-  animation: card 480ms var(--ease-out) backwards;
+  animation: card 420ms linear backwards;
   animation-delay: calc(var(--i) * 45ms);
 }
 .match {
@@ -205,8 +205,7 @@
 @keyframes say {
   from {
     opacity: 0;
-    transform: translateY(14px);
-    filter: blur(6px);
+    filter: blur(10px);
   }
 }
 @keyframes swell {
@@ -218,7 +217,7 @@
 @keyframes card {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    filter: blur(8px);
   }
 }
 
