@@ -113,6 +113,33 @@ reachable from every lens.
 | **Sandbox** | As today | As today | As today | **Ops profile** (Ops A) |
 | **Its stage is done when** | `spec.md` merges | `design/` merges | its pull requests merge | `ops.md` merges |
 
+## Design directions
+
+A prototype task drew three directions on the whole desktop app with
+made-up data (`prototype-role-lenses-and-the-feature-timeline`; the
+canvases `role-lenses-minimal`, `role-lenses-panels` and
+`role-lenses-feature-first` in Althar, group `role-lenses`). Each shows
+the four lenses, Saved carts' timeline with its Build → Ship handoff
+waiting on DevOps, and the lens switch. The timeline is the same in all
+three.
+
+- **A · Minimal.** The same layout for everyone. A lens changes the
+  landing view and how the board groups: by environment for DevOps, by
+  feature for Product and Design, today's lanes for Engineering. The lens
+  is a chip in the project's row, and its menu lists the handoffs waiting
+  on you.
+- **B · Panels.** Today's board for everyone, with a column of pinned
+  panels at its end, the lens's own first: cluster health, alerts and
+  deploys for DevOps; CI and pull requests for Engineering; canvases,
+  Storybook and screenshot diffs for Design; features by stage and the
+  tracker's cycle for Product. Any panel can be pinned from the lens menu.
+- **C · Feature-first.** The features' timeline, every feature against
+  every stage, is everyone's home, with the lens's inbox of handoffs over
+  it; the board is a press away (Features | Tasks).
+
+They aren't exclusive: each is one of a lens's fields from the table
+above. A is board grouping, B is pinned panels, C is a landing view.
+
 ## What is there already
 
 Reading the code moved a few things against the canvas:
@@ -246,14 +273,26 @@ Each has a recommendation; none is decided.
    scope for this plan;* decide it with the Cloud, which is what a team
    would pay for. **Open.**
 
+4. **Which design direction?** *Recommended: all three, as each lens's
+   defaults rather than a choice between them.* A's grouping is the
+   default board for every lens; B's panel column is what DevOps and
+   Design pin; C's feature table is Product's landing view (the Features
+   room). Phase 1 then ships A first, as it needs no panels or features;
+   C comes with Phase 2 and B with Phase 5. **Open.**
+5. **Five stages or six?** The plan merges Intent into Spec; the
+   prototype draws them apart, with Intent as the tracker issue and Spec
+   as `spec.md`. *Recommended: five by default, six where a project's
+   `flow.yaml` says so,* since a tracker issue merges nowhere and so can't
+   hand over by the rule in ADR-110. **Open.**
+
 Two smaller ones came up while reading the code:
 
-4. **`.althar/flow.yaml`, or a file beside the specs?** *Recommended:
+6. **`.althar/flow.yaml`, or a file beside the specs?** *Recommended:
    `.althar/flow.yaml`,* the first committed file Althar reads under
    `.althar/`, so a repository's Althar settings have one place as they
    grow. `specs/flow.yaml` is the alternative if teams would rather not
    commit anything under `.althar/`. **Open.**
-5. **Do handoff proposals count down?** *Recommended: no, held* until the
+7. **Do handoff proposals count down?** *Recommended: no, held* until the
    next stage's owner looks: a handoff is someone else's work arriving,
    and the person decides when theirs starts. A lens setting could let
    them count down like any plan. **Open.**
