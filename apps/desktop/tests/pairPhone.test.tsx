@@ -1,8 +1,8 @@
 import type { RegisteredClient } from '@althar/contracts'
 import { ApiError } from '@althar/contracts'
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PairPhone } from '@althar/ui'
 
@@ -43,7 +43,14 @@ const made = () => ({
   left: 300_000,
 })
 
+/** The dialog asks the home after a code every 1.5s: the next ask, without waiting for it. */
+const nextAsk = () => act(() => vi.advanceTimersByTimeAsync(1_600))
+
 describe('pairing a phone from the homes menu', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('lets phones in to This Mac, shows the code, and hears the phone pair', async () => {
     let on = false
     let paired = false
@@ -59,15 +66,18 @@ describe('pairing a phone from the homes menu', () => {
       ),
       pairedDevices: vi.fn(async () => ({ clients: paired ? [iPhone, pixel] : [pixel], next: null })),
     })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     withServices(<PhonesDialog home="This Mac" onClose={() => undefined} />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Let phones in' }))
+    await user.click(await screen.findByRole('button', { name: 'Let phones in' }))
     expect(client.setPhoneAccess).toHaveBeenCalledWith(true)
     expect(await screen.findByText('Scan it with your phone’s camera')).toBeTruthy()
     expect(screen.getByText(code)).toBeTruthy()
     expect(screen.getByText('Phones on the same Wi-Fi reach it, at studio-mac.local.')).toBeTruthy()
     expect(screen.getByText('Pixel 9')).toBeTruthy()
     paired = true
-    expect(await screen.findByText('iPhone is paired', {}, { timeout: 4000 })).toBeTruthy()
+    await nextAsk()
+    expect(await screen.findByText('iPhone is paired')).toBeTruthy()
     expect(await screen.findByText('Paired just now')).toBeTruthy()
   })
 
@@ -181,8 +191,11 @@ describe('pairing a phone from the homes menu', () => {
         return asked < 2 ? { state: 'waiting' as const, expiresAt: Date.now() + 100 } : { state: 'paired' as const, device: iPhone }
       }),
     })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
-    expect(await screen.findByText('iPhone is paired', {}, { timeout: 4000 })).toBeTruthy()
+    await waitFor(() => expect(asked).toBe(1))
+    await nextAsk()
+    expect(await screen.findByText('iPhone is paired')).toBeTruthy()
     expect(screen.queryByText('This code ran out')).toBeNull()
   })
 

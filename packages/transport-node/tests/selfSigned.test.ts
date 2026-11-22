@@ -22,6 +22,12 @@ describe('a home’s self-signed certificate', () => {
     expect(certificate.raw.length).toBeLessThan(600)
   })
 
+  it('names an unnamed home Althar, and cuts a long name to what a common name holds', () => {
+    expect(new X509Certificate(selfSignedCertificate('', ['mac.local'], Date.now()).certificate).subject).toBe('CN=Althar')
+    const long = new X509Certificate(selfSignedCertificate('A'.repeat(90), ['mac.local'], Date.now()).certificate)
+    expect(long.subject).toBe(`CN=${'A'.repeat(64)}`)
+  })
+
   it('keeps its key, and so the pin a paired phone holds, when made again', () => {
     const first = selfSignedCertificate('Althar', ['mac.local'], Date.now())
     const again = selfSignedCertificate('Althar', ['renamed-mac.local'], Date.now(), first.key)
