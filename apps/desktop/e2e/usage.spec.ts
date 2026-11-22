@@ -60,6 +60,8 @@ test('sends usage data while its switch is on, named events only, and nothing on
   try {
     // Althar opened, sent at once: on by default, and the first screen doesn't ask.
     await expect.poll(names).toContain('app_opened')
+    await expect.poll(names).toContain('app_window_opened')
+    expect(fake.events.find((event) => event.event === 'app_opened')?.properties).toMatchObject({ launch: 'foreground', install: 'new' })
     await expect(page.getByRole('switch', { name: 'Usage data' })).toHaveCount(0)
 
     // The first project, of the repository found, and a task started on it.
@@ -69,9 +71,18 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .getByRole('checkbox', { name: /meridian/ })
       .click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect.poll(names).toContain('onboarding_project_attempt')
+    expect(names()).not.toContain('onboarding_completed')
     await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done']))
+    await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done', 'onboarding_completed']))
+    expect(fake.events.find((event) => event.event === 'onboarding_project_attempt')?.properties).toMatchObject({
+      source: 'folder',
+      outcome: 'created',
+    })
+    expect(fake.events.filter((event) => event.event === 'onboarding_step_seen').map((event) => event.properties.step)).toEqual(
+      expect.arrayContaining(['agents', 'project', 'code']),
+    )
     await startTask(page, 'Add a retry to the checkout call')
     await expect.poll(names).toContain('task_started')
 

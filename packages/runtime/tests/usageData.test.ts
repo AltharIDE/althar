@@ -28,7 +28,7 @@ const withUsage = (more: Parameters<typeof runtime>[2] = {}) => UsageData.layer.
 const heard = Effect.gen(function* () {
   const usage = yield* UsageData
   const events: Array<UsageEvent> = []
-  const fiber = yield* Effect.forkChild(Stream.runForEach(usage.events, (event) => Effect.sync(() => void events.push(event))))
+  const fiber = yield* Effect.forkChild(Stream.runForEach(usage.events, ({ event }) => Effect.sync(() => void events.push(event))))
   // Listening before anything is recorded.
   yield* Effect.sleep(Duration.millis(50))
   return { events, stop: Fiber.interrupt(fiber) }
@@ -97,6 +97,14 @@ describe('usage data', () => {
       yield* started(project.projectId, 'Retry the checkout', (instance) => instance.personId, 'claude-opus-5')
       const mini = yield* started(project.projectId, 'Bump the lockfile', (instance) => instance.coordinatorId)
       yield* awaiting(events, (seen) => named(seen, 'task_started').length === 2)
+      assert.lengthOf(named(events, 'plan_proposed'), 2)
+      assert.deepStrictEqual(
+        named(events, 'plan_decided').map((event) => event.properties),
+        [
+          { outcome: 'accepted', by: 'person' },
+          { outcome: 'accepted', by: 'coordinator' },
+        ],
+      )
       assert.deepStrictEqual(named(events, 'task_started'), [
         { name: 'task_started', properties: { as: 'planned', agent: 'claude-code', family: 'opus' } },
         { name: 'task_started', properties: { as: 'mini', agent: 'claude-code', family: 'default' } },
@@ -154,6 +162,7 @@ describe('usage data', () => {
         )
       yield* say('Retry the checkout call')
       yield* awaiting(events, (seen) => named(seen, 'task_started').length === 1)
+      yield* awaiting(events, (seen) => named(seen, 'task_first_turn_finished').length === 1)
       yield* say('And log each retry')
       const sql = yield* SqlClient.SqlClient
       yield* until(
@@ -164,6 +173,9 @@ describe('usage data', () => {
       assert.deepStrictEqual(named(events, 'task_started'), [
         // The fake agent's models are no family Althar knows.
         { name: 'task_started', properties: { as: 'direct', agent: 'codex', family: 'other' } },
+      ])
+      assert.deepStrictEqual(named(events, 'task_first_turn_finished'), [
+        { name: 'task_first_turn_finished', properties: { outcome: 'completed', agent: 'codex', family: 'other', took: 'under_10s' } },
       ])
       yield* stop
     }).pipe(Effect.provide(withUsage())),
@@ -263,6 +275,13 @@ describe('usage data', () => {
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 2)
       yield* Effect.sleep(Duration.millis(800))
       assert.lengthOf(named(events, 'task_settled'), 2)
+      assert.deepStrictEqual(
+        named(events, 'task_merged').map((event) => event.properties),
+        [
+          { where: 'here', took: 'under_10m' },
+          { where: 'host', took: 'under_10m' },
+        ],
+      )
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: host.taskId })
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: host.taskId })
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 3)
@@ -291,7 +310,7 @@ describe('usage data', () => {
     }).pipe(Effect.provide(withUsage())),
   )
 
-  it.live('says an ask was answered, by the person or by the coordinator, but not one the rules settled', () =>
+  it.live('says an ask opened, how long the person took to answer, and when the coordinator answered a permission directly', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const project = yield* opened()
@@ -306,7 +325,7 @@ describe('usage data', () => {
         answer: { kind: 'abandon' },
       })
       const instance = yield* Instance
-      // One the rules settle was answered by no one.
+      // A system answer on a stuck request is not an answer by the permission rules.
       yield* fact({
         projectId: project.projectId as ProjectId,
         aggregateType: 'attention_request',
@@ -328,10 +347,14 @@ describe('usage data', () => {
         })
       yield* awaiting(events, (seen) => named(seen, 'ask_answered').length >= 2)
       yield* Effect.sleep(Duration.millis(800))
+      assert.includeDeepMembers(
+        named(events, 'ask_opened').map((event) => event.properties),
+        [{ ask: 'stuck' }],
+      )
       assert.deepStrictEqual(
         named(events, 'ask_answered').map((event) => event.properties),
         [
-          { ask: 'stuck', by: 'person' },
+          { ask: 'stuck', by: 'person', took: 'under_10m' },
           { ask: 'permission', by: 'coordinator' },
         ],
       )

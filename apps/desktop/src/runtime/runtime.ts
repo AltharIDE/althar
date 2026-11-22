@@ -351,7 +351,9 @@ const program = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning('The private local API could not start', error)),
     )
   yield* Effect.forkScoped(
-    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+    Stream.runForEach(Context.get(context, UsageData).events, ({ event, at }) =>
+      Effect.sync(() => parent.postMessage({ type: 'usage', usage: event, usageAt: at })),
+    ),
   )
   // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
   yield* Effect.forkScoped(

@@ -55,7 +55,7 @@ import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
-import { installOf, usageData } from './usageData'
+import { installOf, usageData, WELCOME_STEPS } from './usageData'
 import { masker } from '../logs/mask'
 import { outsideOf } from './browser/addresses'
 import { browserAgent } from './browser/devices'
@@ -302,6 +302,7 @@ interface RuntimeMessage {
   readonly value?: unknown
   /** A usage event, as the runtime says it; usageData.ts keeps only what it names. */
   readonly usage?: unknown
+  readonly usageAt?: unknown
   /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
   readonly crash?: unknown
   /** A screenshot an agent asked for (screenshots.ts). */
@@ -336,6 +337,8 @@ let waiting = 0
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
 const crashPolicy = crashConsent(() => preferences.crashReports && !doNotTrack(process.env))
+const usagePolicy = crashConsent(() => preferences.usageData && !doNotTrack(process.env))
+let usageSince = 0
 
 /*
  * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
@@ -373,19 +376,43 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
  * and an update installed when it opens on another version than last time.
  */
 const install = preferencesRead.then(() => installOf(locations().profile, app.getVersion()))
+const startedAtLogin = () =>
+  app.isPackaged &&
+  openedAtLogin(process.platform, process.argv, process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin)
 const usage = Promise.all([install, ready]).then(([install]) => {
   const sender = usageData({
     ...usageTarget,
     installId: install.id,
     app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-    allowed: () => preferences.usageData && !doNotTrack(process.env),
+    allowed: usagePolicy.allowed,
+    generation: usagePolicy.generation,
     fetch: (url, options) => net.fetch(url, options),
   })
-  sender.record({ name: 'app_opened' })
+  sender.record({
+    name: 'app_opened',
+    properties: { launch: startedAtLogin() ? 'login' : 'foreground', install: install.first ? 'new' : 'returning' },
+  })
   if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
   return sender
 })
-const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
+const recordUsage = (said: unknown, at = Date.now()) => {
+  if (!usagePolicy.allowed() || at <= usageSince) return
+  const generation = usagePolicy.generation()
+  void usage.then((sender) => {
+    if (usagePolicy.generation() === generation) sender.record(said, at)
+  })
+}
+
+let lastWindowDay: number | undefined
+const windowOpenedForUsage = () => {
+  if (!usagePolicy.allowed()) return
+  const at = Date.now()
+  if (at <= usageSince) return
+  const day = Math.floor(at / 86_400_000)
+  if (day === lastWindowDay) return
+  lastWindowDay = day
+  recordUsage({ name: 'app_window_opened' }, at)
+}
 
 /* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
 const names = factsAsker('names')
@@ -520,6 +547,27 @@ const homes = startHomeConnections({
   log: (message) => logs.error(message),
 })
 const mineLocal = (contents: WebContents) => mine(contents) && homes.state(contents.id).current.kind === 'local'
+const welcomeSeen = new Set<string>()
+ipcMain.on('althar:welcome-usage', (event, action: unknown, value: unknown, outcome: unknown) => {
+  if (!mineLocal(event.sender) || event.senderFrame !== event.sender.mainFrame || !usagePolicy.allowed()) return
+  if (
+    action === 'project' &&
+    (value === 'folder' || value === 'clone' || value === 'new') &&
+    (outcome === 'created' || outcome === 'not_created')
+  ) {
+    recordUsage({ name: 'onboarding_project_attempt', properties: { source: value, outcome } })
+  }
+  if (action === 'step') {
+    const step = WELCOME_STEPS.find((one) => one === value)
+    if (step === undefined || welcomeSeen.has(step)) return
+    welcomeSeen.add(step)
+    recordUsage({ name: 'onboarding_step_seen', properties: { step } })
+  }
+  if (action === 'completed' && !welcomeSeen.has(action)) {
+    welcomeSeen.add(action)
+    recordUsage({ name: 'onboarding_completed' })
+  }
+})
 const localWindows = () =>
   new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
 const handleLocal: typeof ipcMain.handle = (channel, listener) =>
@@ -723,7 +771,11 @@ const startRuntime = () => {
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
-    if (message.type === 'usage') return recordUsage(message.usage)
+    if (message.type === 'usage') {
+      const at = message.usageAt
+      if (typeof at === 'number' && Number.isSafeInteger(at) && at > 0 && at <= Date.now()) recordUsage(message.usage, at)
+      return
+    }
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed' || message.type === 'profile-in-use') {
       storeFailure = storeFailureOf(message)
@@ -945,6 +997,8 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   // A document of the window's gone, as it reloads when the runtime restarts, takes with it what said where its pages show: they hide until the new one says.
   window.webContents.on('did-navigate', () => pages?.hideIn(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
+  window.on('show', windowOpenedForUsage)
+  window.on('focus', windowOpenedForUsage)
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
     const remote = homes.state(window.webContents.id).current.kind !== 'local'
@@ -1146,14 +1200,20 @@ ipcMain.handle('althar:preferences', async () => {
 })
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
-  // Stop crash reporting before any asynchronous work, including the preference's disk write.
-  const finish = key === 'crashReports' && typeof value === 'boolean' ? crashPolicy.changing() : undefined
+  // Pause reporting before any asynchronous work, including the preference's disk write.
+  const changingUsage = key === 'usageData' && typeof value === 'boolean'
+  const finish = changingUsage
+    ? usagePolicy.changing()
+    : key === 'crashReports' && typeof value === 'boolean'
+      ? crashPolicy.changing()
+      : undefined
   try {
     await preferencesRead
     // Merged into the preferences as they stand once it is kept, so changes made together each stay.
     const kept = await writeAppPreference(locations().profile, key, value)
     preferences = { ...preferences, [key]: kept }
   } finally {
+    if (changingUsage) usageSince = Date.now()
     finish?.()
   }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
@@ -1319,7 +1379,7 @@ void ready.then(() => {
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
   // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
-  const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
+  const background = startedAtLogin()
   if (background) {
     firstScreenDrawn = true
     releaseBackground()
@@ -1357,6 +1417,7 @@ void ready.then(() => {
     mine: mineLocal,
     address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
     email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
+    sent: () => recordUsage({ name: 'problem_reported' }),
   })
   edge = startEdge({
     profile: () => locations().profile,

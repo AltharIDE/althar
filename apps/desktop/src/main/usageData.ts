@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto'
 
+import { MODEL_FAMILIES, Product } from '@althar/contracts'
+import type { AgentId } from '@althar/provider-adapters'
 import type { UsageEvent as Said, Settled, Took } from '@althar/runtime'
 import { PostHog, type PostHogOptions } from 'posthog-node'
 
 import { readPreferences, writePreference } from './preferences'
 
 /*
- * Anonymous usage data (Linear DEV-76): how many who open Althar sign an
- * agent in, make a project, start a task and see it settle, and whether they
- * come back. Only the events named here leave, each with only the properties
+ * Anonymous usage data (Linear DEV-76): where people get to in setup and
+ * while doing work, where work gets stuck, and whether they come back.
+ * Only the events named here leave, each with only the properties
  * named for it, and each property only as a count, a word from a fixed list
  * or an agent's or model family's id: never a path, a repository's or
  * project's name, a prompt, a message, what an agent wrote, a file or an
@@ -35,8 +37,24 @@ const oneOf =
   (value) =>
     typeof value === 'string' && words.includes(value)
 
-/** An agent's or a model family's id, as Althar names them: claude-code, codex, opus. Never anything the person wrote. */
-const id: Holds = (value) => typeof value === 'string' && /^[a-z0-9][a-z0-9.-]{0,39}$/.test(value)
+const BUILT_IN_AGENTS = [
+  'claude-code',
+  'codex',
+  'opencode',
+  'copilot',
+  'copilot-direct',
+  'junie',
+  'grok',
+  'kimi',
+  'mistral-vibe',
+  'qwen-code',
+  'antigravity',
+] as const satisfies ReadonlyArray<AgentId>
+const agent = oneOf(...BUILT_IN_AGENTS, 'other')
+const family = oneOf(...MODEL_FAMILIES, 'default', 'other')
+const ask = oneOf('permission', 'question', 'stuck')
+export const WELCOME_STEPS = ['projects', 'coordinator', 'makers', 'review', 'agents', 'project', 'bring', 'code', 'issues'] as const
+const welcomeStep = oneOf(...WELCOME_STEPS)
 
 /** A version of Althar: 0.1.0, 0.2.0-beta.1. */
 const version: Holds = (value) => typeof value === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.]{1,20})?$/.test(value)
@@ -53,21 +71,53 @@ export const SETTLED = ['merged_here', 'pull_request', 'abandoned', 'reviewed', 
 /** What may be sent: each event Althar names, and the properties each may carry. */
 export const USAGE_EVENTS = {
   /** Althar opened. */
-  app_opened: {},
-  /** The first project was made on the first screen, of this many repositories. */
+  app_opened: { launch: oneOf('foreground', 'login'), install: oneOf('new', 'returning') },
+  app_window_opened: {},
+  onboarding_step_seen: { step: welcomeStep },
+  onboarding_project_attempt: { source: oneOf('folder', 'clone', 'new'), outcome: oneOf('created', 'not_created') },
+  onboarding_completed: {},
+  /** The first project was made, of this many repositories. */
   first_screen_done: { repositories: count },
   /** An agent was found signed in, the first time this launch, or was signed in. */
-  agent_signed_in: { agent: id, how: oneOf('found', 'signed_in') },
+  agent_signed_in: { agent, how: oneOf('found', 'signed_in') },
   /** A project was made, of this many repositories. */
   project_made: { repositories: count },
+  task_created: { as: oneOf('task', 'review', 'import') },
   /** A task started: as planned, as a mini task the coordinator started at once, by writing to a lead, or as a review; its lead's agent and model family. */
-  task_started: { as: oneOf('planned', 'mini', 'direct', 'review'), agent: id, family: id },
+  task_started: { as: oneOf('planned', 'mini', 'direct', 'review'), agent, family },
   /** A task settled: merged here, as a pull request, abandoned, its review posted, or done on sight; how long it took, and in how many steps. */
   task_settled: { as: oneOf(...SETTLED), took: oneOf(...TOOK), steps: count },
-  /** An ask was answered: a permission, a question or a stuck step, by the person or by the coordinator. */
-  ask_answered: { ask: oneOf('permission', 'question', 'stuck'), by: oneOf('person', 'coordinator') },
+  task_merged: { where: oneOf('here', 'host'), took: oneOf(...TOOK) },
+  task_reopened: {},
+  plan_proposed: {},
+  plan_decided: { outcome: oneOf('accepted', 'declined'), by: oneOf('person', 'coordinator', 'system') },
+  task_first_turn_finished: {
+    outcome: oneOf('completed', 'failed', 'interrupted'),
+    agent,
+    family,
+    took: oneOf('under_10s', '10s_to_1m', '1m_to_5m', 'over_5m'),
+    failure: oneOf(
+      'usage_limit',
+      'context_full',
+      'session_lost',
+      'auth_required',
+      'invalid_request',
+      'transient',
+      'agent_exited',
+      'turn_in_progress',
+      'unknown',
+    ),
+  },
+  ask_opened: { ask },
+  ask_answered: { ask, by: oneOf('person', 'coordinator', 'rules'), took: oneOf(...TOOK) },
   /** An agent's account reached its usage limit. */
-  usage_limit_hit: { agent: id },
+  usage_limit_hit: { agent },
+  integration_connected: { product: oneOf(...Product.literals) },
+  automation_created: {},
+  automation_run_finished: { trigger: oneOf('schedule', 'now'), outcome: oneOf('made', 'nothing', 'failed', 'skipped', 'missed') },
+  automation_paused_after_failures: {},
+  work_imported: {},
+  problem_reported: {},
   /** Althar opened on another version than last time, from this one. */
   update_installed: { from: version },
 } as const satisfies FromRuntime & Readonly<Record<string, Readonly<Record<string, Holds>>>>
@@ -94,7 +144,10 @@ export const usageEventOf = (said: unknown): UsageEvent | null => {
   const given = typeof properties === 'object' && properties !== null ? (properties as Readonly<Record<string, unknown>>) : {}
   const kept = Object.entries(USAGE_EVENTS[name] as Readonly<Record<string, Holds>>).flatMap(([key, holds]) => {
     const value = given[key]
-    return holds(value) ? [[key, value as string | number] as const] : []
+    if (holds(value)) return [[key, value as string | number] as const]
+    // A custom ACP connection counts as an agent without naming the connection.
+    if (key === 'agent' && typeof value === 'string' && value !== '') return [[key, 'other'] as const]
+    return []
   })
   return { name, properties: Object.fromEntries(kept) }
 }
@@ -117,14 +170,15 @@ export const isInstallId = (value: unknown): value is string => typeof value ===
 export const installOf = async (
   profile: string,
   version: string,
-): Promise<{ readonly id: string; readonly updatedFrom: string | null }> => {
+): Promise<{ readonly id: string; readonly first: boolean; readonly updatedFrom: string | null }> => {
   const kept = (await readPreferences(profile)).usage
   const was = typeof kept === 'object' && kept !== null ? (kept as { readonly id?: unknown; readonly version?: unknown }) : {}
-  const id = isInstallId(was.id) ? was.id : randomUUID()
+  const previousId = isInstallId(was.id) ? was.id : null
+  const id = previousId ?? randomUUID()
   const last = typeof was.version === 'string' ? was.version : null
   // One that can't be kept is made again next time: usage data is never worth a failure.
   if (id !== was.id || last !== version) await writePreference(profile, 'usage', { id, version }).catch(() => undefined)
-  return { id, updatedFrom: last !== null && last !== version ? last : null }
+  return { id, first: previousId === null, updatedFrom: last !== null && last !== version ? last : null }
 }
 
 /** The system, as PostHog's own SDKs name it. */
@@ -140,6 +194,8 @@ export interface UsageDataOptions {
   readonly app: { readonly version: string; readonly platform: string; readonly arch: string }
   /** Whether the person's switch is on and DO_NOT_TRACK isn't set, asked as each event comes and again before each request goes. */
   readonly allowed: () => boolean
+  /** Changes with the switch, so a request dropped while off is never retried after turning it back on. */
+  readonly generation?: () => number
   /** How a request goes: the app's own network; in tests, one that records it. */
   readonly fetch: NonNullable<PostHogOptions['fetch']>
   /** How long PostHog's client waits before trying a request again; quicker in tests. */
@@ -148,7 +204,7 @@ export interface UsageDataOptions {
 
 export interface UsageData {
   /** Sends an event, if it is one Althar names and the person allows it; anything else is dropped. Never fails. */
-  readonly record: (said: unknown) => void
+  readonly record: (said: unknown, at?: number) => void
   /** Lets what is on its way finish, briefly, as Althar quits. */
   readonly stop: () => Promise<void>
 }
@@ -161,7 +217,7 @@ export interface UsageData {
  * never leaves.
  */
 export const usageData = (options: UsageDataOptions): UsageData => {
-  let client: PostHog | undefined
+  let client: { readonly generation: number; readonly posthog: PostHog } | undefined
   const sending = new Set<Promise<void>>()
   const base = {
     $app_version: options.app.version,
@@ -170,8 +226,11 @@ export const usageData = (options: UsageDataOptions): UsageData => {
     // Anonymous: no person profile is made or updated.
     $process_person_profile: false,
   }
-  const sender = () =>
-    (client ??= new PostHog(options.key, {
+  const generation = options.generation ?? (() => 0)
+  const sender = () => {
+    const current = generation()
+    if (client?.generation === current) return client.posthog
+    const posthog = new PostHog(options.key, {
       host: options.host,
       disableGeoip: true,
       // No flags, no surveys, nothing kept on disk: events alone.
@@ -180,10 +239,14 @@ export const usageData = (options: UsageDataOptions): UsageData => {
       persistence: 'memory',
       fetchRetryCount: 2,
       ...(options.retryDelay === undefined ? {} : { fetchRetryDelay: options.retryDelay }),
-      fetch: (url, init) => (options.allowed() ? options.fetch(url, init) : Promise.reject(new Error('Usage data is off.'))),
-    }))
-  // Each goes as when it happened, not when its request did, so a funnel reads them in the order they came.
-  const send = (said: unknown, at: Date) => {
+      fetch: (url, init) =>
+        options.allowed() && generation() === current ? options.fetch(url, init) : Promise.reject(new Error('Usage data is off.')),
+    })
+    client = { generation: current, posthog }
+    return posthog
+  }
+  // Each carries when it happened, so waiting for a ledger read or a retry doesn't move it in a funnel.
+  const record = (said: unknown, at = Date.now()) => {
     if (options.key === '' || options.host === '' || !options.allowed()) return
     const event = usageEventOf(said)
     if (event === null) return
@@ -192,7 +255,7 @@ export const usageData = (options: UsageDataOptions): UsageData => {
         distinctId: options.installId,
         event: event.name,
         properties: { ...event.properties, ...base },
-        timestamp: at,
+        timestamp: new Date(at),
       })
       // Usage data is never worth a failure: one that couldn't go is gone.
       .catch(() => undefined)
@@ -200,10 +263,10 @@ export const usageData = (options: UsageDataOptions): UsageData => {
     sending.add(sent)
   }
   return {
-    record: (said) => send(said, new Date()),
+    record,
     stop: async () => {
       await Promise.race([Promise.all(sending), new Promise((resolve) => setTimeout(resolve, 2_000).unref?.())])
-      await client?.shutdown(1_000).catch(() => undefined)
+      await client?.posthog.shutdown(1_000).catch(() => undefined)
     },
   }
 }

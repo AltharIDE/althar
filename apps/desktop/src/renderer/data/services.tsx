@@ -4,6 +4,7 @@ import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
 import type { WatchEvent } from '@althar/contracts'
+import type { WelcomeStep } from '@althar/ui/screens'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
@@ -183,10 +184,17 @@ export interface StorageHost {
   readonly show: (place: StoragePlace) => Promise<void>
 }
 
+/** The welcome's own milestones passed to main. */
+export type WelcomeMilestone =
+  | [action: 'step', step: WelcomeStep]
+  | [action: 'project', source: 'folder' | 'clone' | 'new', outcome: 'created' | 'not_created']
+  | [action: 'completed']
+
 export interface Host {
   readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
+  readonly welcomeUsage?: (...milestone: WelcomeMilestone) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
