@@ -6,19 +6,157 @@ use std::{
     time::Duration,
 };
 
-use tokio::{io::AsyncReadExt, process::Command, time::timeout};
+use tokio::{
+    io::AsyncReadExt,
+    process::Command,
+    time::{Instant, timeout},
+};
 
-use crate::wire::{AgentWorkspaceSetup, AgentWorkspaceSetupResult};
+use crate::{
+    agent_workspace_set::AgentWorkspace,
+    valid_id,
+    wire::{AgentRepositorySetupResult, AgentWorkspaceSetup, AgentWorkspaceSetupResult},
+};
 
 pub(crate) const LIMIT: Duration = Duration::from_secs(10 * 60);
 pub(crate) const OUTPUT_BYTES: usize = 2_048;
 pub(crate) const DESCRIPTOR_BYTES: usize = 128 * 1024;
 const COMMANDS: usize = 20;
 const COMMAND_BYTES: usize = 8_000;
+const GROUP_OUTPUT_BYTES: usize = 192;
 
 pub(crate) struct WorkspaceSetup {
     pub(crate) folder: PathBuf,
     pub(crate) commands: Vec<OsString>,
+}
+
+pub(crate) enum SetupPlan {
+    Single(WorkspaceSetup),
+    Set(Vec<(String, WorkspaceSetup)>),
+}
+
+impl SetupPlan {
+    pub(crate) fn from_wire(
+        workspaces: &AgentWorkspace,
+        given: &AgentWorkspaceSetup,
+    ) -> io::Result<Self> {
+        if given.repositories.is_empty() {
+            return Ok(Self::Single(WorkspaceSetup::from_wire(
+                &workspaces.root,
+                given,
+            )?));
+        }
+        if !given.directory.is_empty() || !given.commands.is_empty() || given.repositories.len() > 8
+        {
+            return Err(invalid("The worker setup has an invalid repository list"));
+        }
+        let mut repositories = Vec::new();
+        for given in &given.repositories {
+            let checkout = workspaces
+                .checkout(&given.workspace_id)
+                .ok_or_else(|| invalid("The setup repository is outside this worker workspace"))?;
+            if repositories.iter().any(|(id, _)| *id == given.workspace_id) {
+                return Err(invalid("The worker setup repeats a repository"));
+            }
+            let setup = WorkspaceSetup::new(
+                checkout,
+                Path::new(&given.directory),
+                given.commands.iter().map(OsString::from).collect(),
+            )?;
+            repositories.push((given.workspace_id.clone(), setup));
+        }
+        Ok(Self::Set(repositories))
+    }
+
+    pub(crate) fn guardian_args(&self) -> Vec<OsString> {
+        let arguments = |args: &mut Vec<OsString>, plan: &WorkspaceSetup| {
+            args.push(plan.folder.clone().into_os_string());
+            args.push(plan.commands.len().to_string().into());
+            args.extend(plan.commands.iter().cloned());
+        };
+        match self {
+            Self::Single(plan) => {
+                let mut args = vec!["--agent-unit-with-setup".into()];
+                arguments(&mut args, plan);
+                args
+            }
+            Self::Set(repositories) => {
+                let mut args = vec![
+                    "--agent-unit-with-repository-setup".into(),
+                    repositories.len().to_string().into(),
+                ];
+                for (id, plan) in repositories {
+                    args.push(id.into());
+                    arguments(&mut args, plan);
+                }
+                args
+            }
+        }
+    }
+
+    pub(crate) fn repository_args<'a>(
+        root: &Path,
+        args: &'a [OsString],
+    ) -> io::Result<(Self, &'a OsString, &'a [OsString])> {
+        let parse = |count: &OsString| count.to_str().and_then(|count| count.parse::<usize>().ok());
+        let Some((count, mut tail)) = args.split_first() else {
+            return Err(invalid("Missing repository setup"));
+        };
+        let count = parse(count)
+            .filter(|count| (1..=8).contains(count))
+            .ok_or_else(|| invalid("Invalid repository setup count"))?;
+        let mut repositories = Vec::with_capacity(count);
+        for _ in 0..count {
+            let [id, folder, count, rest @ ..] = tail else {
+                return Err(invalid("Incomplete repository setup"));
+            };
+            let id = id
+                .to_str()
+                .filter(|id| valid_id(id, "ws_"))
+                .ok_or_else(|| invalid("Invalid repository setup ID"))?;
+            let count = parse(count)
+                .filter(|count| *count < rest.len())
+                .ok_or_else(|| invalid("Invalid setup command count"))?;
+            let (commands, remaining) = rest.split_at(count);
+            let directory = Path::new(folder)
+                .strip_prefix(root)
+                .map_err(io::Error::other)?;
+            repositories.push((
+                id.into(),
+                WorkspaceSetup::new(root, directory, commands.to_vec())?,
+            ));
+            tail = remaining;
+        }
+        let (executable, args) = tail
+            .split_first()
+            .ok_or_else(|| invalid("Missing agent executable"))?;
+        Ok((Self::Set(repositories), executable, args))
+    }
+
+    pub(crate) async fn run(&self) -> AgentWorkspaceSetupResult {
+        match self {
+            Self::Single(setup) => run_workspace_setup(setup, LIMIT).await,
+            Self::Set(repositories) => {
+                let until = Instant::now() + LIMIT;
+                let mut result = AgentWorkspaceSetupResult::default();
+                for (id, setup) in repositories {
+                    let outcome =
+                        run_workspace_setup(setup, until.saturating_duration_since(Instant::now()))
+                            .await;
+                    let output_tail = outcome.output_tail
+                        [outcome.output_tail.len().saturating_sub(GROUP_OUTPUT_BYTES)..]
+                        .to_vec();
+                    result.repositories.push(AgentRepositorySetupResult {
+                        workspace_id: id.clone(),
+                        exit_code: outcome.exit_code,
+                        timed_out: outcome.timed_out,
+                        output_tail,
+                    });
+                }
+                result
+            }
+        }
+    }
 }
 
 fn invalid(message: &'static str) -> io::Error {
@@ -100,9 +238,19 @@ fn append_tail(tail: &mut Vec<u8>, data: &[u8]) {
     tail.extend_from_slice(data);
 }
 
-pub(crate) async fn run_workspace_setup(setup: &WorkspaceSetup) -> AgentWorkspaceSetupResult {
+async fn run_workspace_setup(
+    setup: &WorkspaceSetup,
+    duration: Duration,
+) -> AgentWorkspaceSetupResult {
+    if duration.is_zero() {
+        return AgentWorkspaceSetupResult {
+            exit_code: 1,
+            timed_out: true,
+            ..Default::default()
+        };
+    }
     let mut output_tail = Vec::with_capacity(OUTPUT_BYTES);
-    let finished = timeout(LIMIT, async {
+    let finished = timeout(duration, async {
         for line in &setup.commands {
             // Each command is a separate shell, as for a recorded setup on the home.
             let mut script = OsString::from("exec 2>&1\n");
@@ -157,6 +305,7 @@ pub(crate) async fn run_workspace_setup(setup: &WorkspaceSetup) -> AgentWorkspac
         exit_code,
         timed_out,
         output_tail,
+        ..Default::default()
     }
 }
 
@@ -181,7 +330,7 @@ mod tests {
                 "touch unexpected".into(),
             ],
         )?;
-        let result = run_workspace_setup(&setup).await;
+        let result = run_workspace_setup(&setup, LIMIT).await;
         assert_eq!(result.exit_code, 7);
         assert!(!result.timed_out);
         assert_eq!(result.output_tail.len(), OUTPUT_BYTES);

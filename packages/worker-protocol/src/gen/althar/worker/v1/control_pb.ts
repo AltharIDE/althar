@@ -12,7 +12,7 @@ import type { Message, UnknownEnum } from '@bufbuild/protobuf'
 export const file_althar_worker_v1_control: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEi/QQKEEFnZW50V29ya2VyRnJhbWUSMwoFaGVsbG8YASABKAsyIi5hbHRoYXIud29ya2VyLnYxLkFnZW50V29ya2VySGVsbG9IABIwCgVyZWFkeRgCIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5SZWFkeUgAEjEKBm91dHB1dBgDIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEi4KBGV4aXQYBCABKAsyHi5hbHRoYXIud29ya2VyLnYxLkFnZW50UnVuRXhpdEgAEjsKCWhlYXJ0YmVhdBgFIAEoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3JrZXJIZWFydGJlYXRIABI5CghzbmFwc2hvdBgGIAEoCzIlLmFsdGhhci53b3JrZXIudjEuQWdlbnRTbmFwc2hvdFJlc3VsdEgAEjAKBXBhdGNoGAcgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASMgoHY29tbWl0cxgIIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEjoKDW1hbmFnZWRfcmVhZHkYCSABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZkgAEj4KDm1hbmFnZWRfb3V0cHV0GAogASgLMiQuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRPdXRwdXRIABI6CgxtYW5hZ2VkX2V4aXQYCyABKAsyIi5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZEV4aXRIAEIJCgdwYXlsb2FkIrcFCg5BZ2VudEhvbWVGcmFtZRIxCgVoZWxsbxgBIAEoCzIgLmFsdGhhci53b3JrZXIudjEuQWdlbnRIb21lSGVsbG9IABIwCgVzdGFydBgCIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5TdGFydEgAEjAKBWlucHV0GAMgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASLgoEc3RvcBgEIAEoCzIeLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5TdG9wSAASOwoJaGVhcnRiZWF0GAUgASgLMiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtlckhlYXJ0YmVhdEgAEjgKCXJlY29uY2lsZRgGIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5SZWNvbmNpbGVIABIzCghjaGVja291dBgHIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEjoKCHNuYXBzaG90GAggASgLMiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFNuYXBzaG90UmVxdWVzdEgAEjYKC3NldHVwX2NodW5rGAkgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASPAoNbWFuYWdlZF9zdGFydBgKIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRNYW5hZ2VkU3RhcnRIABI5CgxtYW5hZ2VkX3N0b3AYCyABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZkgAEjoKDHByZXZpZXdfb3BlbhgMIAEoCzIiLmFsdGhhci53b3JrZXIudjEuQWdlbnRQcmV2aWV3T3BlbkgAQgkKB3BheWxvYWQiiQEKEEFnZW50V29ya2VySGVsbG8SEQoJd29ya2VyX2lkGAEgASgJEg8KB3ZlcnNpb24YAiABKA0SPQoMY2FwYWJpbGl0aWVzGAMgAygLMicuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtlckNhcGFiaWxpdHkSEgoKam91cm5hbF9pZBgEIAEoCSKMAQoVQWdlbnRXb3JrZXJDYXBhYmlsaXR5EhIKCnByb2plY3RfaWQYASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSFwoPd29ya3NwYWNlX3NldHVwGAMgASgIEhgKEG1hbmFnZWRfY29tbWFuZHMYBCABKAgSFwoPbWFuYWdlZF9wcmV2aWV3GAUgASgIIlcKDkFnZW50SG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEg8KB3ZlcnNpb24YAyABKA0SEAoIbGVhc2VfbXMYBCABKA0i4QEKDUFnZW50UnVuU3RhcnQSDgoGcnVuX2lkGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSEwoLcHJvdmlkZXJfaWQYAyABKAkSFAoMd29ya3NwYWNlX2lkGAQgASgJEjYKBnNvdXJjZRgFIAEoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3Jrc3BhY2VTb3VyY2USDQoFdG9vbHMYBiABKAgSOgoFc2V0dXAYByABKAsyKy5hbHRoYXIud29ya2VyLnYxLkFnZW50V29ya3NwYWNlU2V0dXBTb3VyY2UiOQoZQWdlbnRXb3Jrc3BhY2VTZXR1cFNvdXJjZRIMCgRzaXplGAEgASgNEg4KBnNoYTI1NhgCIAEoDCI6ChNBZ2VudFdvcmtzcGFjZVNldHVwEhEKCWRpcmVjdG9yeRgBIAEoCRIQCghjb21tYW5kcxgCIAMoCSJCChRBZ2VudFdvcmtzcGFjZVNvdXJjZRIMCgRzaXplGAEgASgNEg4KBnNoYTI1NhgCIAEoDBIMCgRoZWFkGAMgASgJIocBCg1BZ2VudFJ1blJlYWR5Eg4KBnJ1bl9pZBgBIAEoCRIWCg53b3Jrc3BhY2VfcGF0aBgCIAEoCRISCgp0b29sc19wb3J0GAMgASgNEjoKBXNldHVwGAQgASgLMisuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVNldHVwUmVzdWx0IlYKGUFnZW50V29ya3NwYWNlU2V0dXBSZXN1bHQSEQoJZXhpdF9jb2RlGAEgASgNEhEKCXRpbWVkX291dBgCIAEoCBITCgtvdXRwdXRfdGFpbBgDIAEoDCI1Cg9BZ2VudE1hbmFnZWRSZWYSDgoGcnVuX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiawoRQWdlbnRNYW5hZ2VkU3RhcnQSMgoHbWFuYWdlZBgBIAEoCzIhLmFsdGhhci53b3JrZXIudjEuQWdlbnRNYW5hZ2VkUmVmEhEKCWRpcmVjdG9yeRgCIAEoCRIPCgdjb21tYW5kGAMgASgJIlYKEkFnZW50TWFuYWdlZE91dHB1dBIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSDAoEZGF0YRgCIAEoDCKgAQoQQWdlbnRNYW5hZ2VkRXhpdBIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSMgoHb3V0Y29tZRgCIAEoDjIhLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5PdXRjb21lEhYKCWV4aXRfY29kZRgDIAEoDUgAiAEBQgwKCl9leGl0X2NvZGUiZwoQQWdlbnRQcmV2aWV3T3BlbhIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSEQoJdHVubmVsX2lkGAIgASgJEgwKBHBvcnQYAyABKA0iRQoTQWdlbnRQcmV2aWV3UmVxdWVzdBITCgl0dW5uZWxfaWQYASABKAlIABIOCgRkYXRhGAIgASgMSABCCQoHcGF5bG9hZCIkChRBZ2VudFByZXZpZXdSZXNwb25zZRIMCgRkYXRhGAEgASgMIi0KDUFnZW50UnVuQnl0ZXMSDgoGcnVuX2lkGAEgASgJEgwKBGRhdGEYAiABKAwiHgoMQWdlbnRSdW5TdG9wEg4KBnJ1bl9pZBgBIAEoCSI5ChFBZ2VudFJ1blJlY29uY2lsZRIOCgZydW5faWQYASABKAkSFAoMd29ya3NwYWNlX2lkGAIgASgJIngKDEFnZW50UnVuRXhpdBIOCgZydW5faWQYASABKAkSMgoHb3V0Y29tZRgCIAEoDjIhLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5PdXRjb21lEhYKCWV4aXRfY29kZRgDIAEoDUgAiAEBQgwKCl9leGl0X2NvZGUiKAoUQWdlbnRXb3JrZXJIZWFydGJlYXQSEAoIc2VxdWVuY2UYASABKA0iTAoUQWdlbnRTbmFwc2hvdFJlcXVlc3QSDgoGcnVuX2lkGAEgASgJEhEKCWJhc2VfdHJlZRgCIAEoCRIRCgliYXNlX2hlYWQYAyABKAkiogEKE0FnZW50U25hcHNob3RSZXN1bHQSDgoGcnVuX2lkGAEgASgJEgwKBHRyZWUYAiABKAkSDAoEc2l6ZRgDIAEoDRIOCgZzaGEyNTYYBCABKAwSEwoLdW5hdmFpbGFibGUYBSABKAgSDAoEaGVhZBgGIAEoCRIUCgxjb21taXRzX3NpemUYByABKA0SFgoOY29tbWl0c19zaGEyNTYYCCABKAwiQAoRQWdlbnRUb29sc1JlcXVlc3QSEAoGcnVuX2lkGAEgASgJSAASDgoEZGF0YRgCIAEoDEgAQgkKB3BheWxvYWQiIgoSQWdlbnRUb29sc1Jlc3BvbnNlEgwKBGRhdGEYASABKAwiwgIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SAASOQoOZGlhZ25vc3RpY19sb2cYBSABKAsyHy5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMb2dIAEIJCgdwYXlsb2FkIoECCglIb21lRnJhbWUSLAoFaGVsbG8YASABKAsyGy5hbHRoYXIud29ya2VyLnYxLkhvbWVIZWxsb0gAEj0KEGRpYWdub3N0aWNfb2ZmZXIYAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNPZmZlckgAEj0KEGRpYWdub3N0aWNfc3RhcnQYAyABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNTdGFydEgAEj0KEGRpYWdub3N0aWNfbGVhc2UYBCABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMZWFzZUgAQgkKB3BheWxvYWQiywEKC1dvcmtlckhlbGxvEhEKCXdvcmtlcl9pZBgBIAEoCRITCgttaW5fdmVyc2lvbhgCIAEoDRITCgttYXhfdmVyc2lvbhgDIAEoDRIbChNhY2NlcHRzX2RpYWdub3N0aWNzGAQgASgIEh8KF3JlbmV3c19kaWFnbm9zdGljX2xlYXNlGAUgASgIEh8KF3N0cmVhbXNfZGlhZ25vc3RpY19sb2dzGAYgASgIEiAKGGFjY2VwdHNfcHJvamVjdF9jb21tYW5kcxgHIAEoCCLiAQoJSG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHdmVyc2lvbhgEIAEoDRIcChRzdXBwb3J0c19kaWFnbm9zdGljcxgFIAEoCBIpCiFzdXBwb3J0c19kaWFnbm9zdGljX2xlYXNlX3JlbmV3YWwYBiABKAgSIAoYc3VwcG9ydHNfZGlhZ25vc3RpY19sb2dzGAcgASgIEiEKGXN1cHBvcnRzX3Byb2plY3RfY29tbWFuZHMYCCABKAgiiQEKD0RpYWdub3N0aWNPZmZlchISCgphdHRlbXB0X2lkGAEgASgJEg0KBWZlbmNlGAIgASgJEhgKEGNsYWltYWJsZV9mb3JfbXMYAyABKA0SOQoPcHJvamVjdF9jb21tYW5kGAQgASgLMiAuYWx0aGFyLndvcmtlci52MS5Qcm9qZWN0Q29tbWFuZCI6Cg5Qcm9qZWN0Q29tbWFuZBISCgpwcm9qZWN0X2lkGAEgASgJEhQKDGNvbW1hbmRfbmFtZRgCIAEoCSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSJSCg1EaWFnbm9zdGljTG9nEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSDgoGb2Zmc2V0GAMgASgNEg4KBm91dHB1dBgEIAEoDCq4AQoPQWdlbnRSdW5PdXRjb21lEiEKHUFHRU5UX1JVTl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASHAoYQUdFTlRfUlVOX09VVENPTUVfRVhJVEVEEAESHQoZQUdFTlRfUlVOX09VVENPTUVfU1RPUFBFRBACEiIKHkFHRU5UX1JVTl9PVVRDT01FX1NUQVJUX0ZBSUxFRBADEiEKHUFHRU5UX1JVTl9PVVRDT01FX1VOQ09ORklSTUVEEAQqugEKEURpYWdub3N0aWNPdXRjb21lEiIKHkRJQUdOT1NUSUNfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiAKHERJQUdOT1NUSUNfT1VUQ09NRV9TVUNDRUVERUQQARIdChlESUFHTk9TVElDX09VVENPTUVfRkFJTEVEEAISHgoaRElBR05PU1RJQ19PVVRDT01FX1VOS05PV04QAxIgChxESUFHTk9TVElDX09VVENPTUVfQ0FOQ0VMTEVEEAQy9wIKFFdvcmtlckNvbnRyb2xTZXJ2aWNlEkkKB0Nvbm5lY3QSHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckZyYW1lGhsuYWx0aGFyLndvcmtlci52MS5Ib21lRnJhbWUoATABElQKCFJ1bkFnZW50EiIuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtlckZyYW1lGiAuYWx0aGFyLndvcmtlci52MS5BZ2VudEhvbWVGcmFtZSgBMAESWwoKQWdlbnRUb29scxIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRUb29sc1JlcXVlc3QaJC5hbHRoYXIud29ya2VyLnYxLkFnZW50VG9vbHNSZXNwb25zZSgBMAESYQoMQWdlbnRQcmV2aWV3EiUuYWx0aGFyLndvcmtlci52MS5BZ2VudFByZXZpZXdSZXF1ZXN0GiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFByZXZpZXdSZXNwb25zZSgBMAFiBnByb3RvMw',
+    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEi/QQKEEFnZW50V29ya2VyRnJhbWUSMwoFaGVsbG8YASABKAsyIi5hbHRoYXIud29ya2VyLnYxLkFnZW50V29ya2VySGVsbG9IABIwCgVyZWFkeRgCIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5SZWFkeUgAEjEKBm91dHB1dBgDIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEi4KBGV4aXQYBCABKAsyHi5hbHRoYXIud29ya2VyLnYxLkFnZW50UnVuRXhpdEgAEjsKCWhlYXJ0YmVhdBgFIAEoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3JrZXJIZWFydGJlYXRIABI5CghzbmFwc2hvdBgGIAEoCzIlLmFsdGhhci53b3JrZXIudjEuQWdlbnRTbmFwc2hvdFJlc3VsdEgAEjAKBXBhdGNoGAcgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASMgoHY29tbWl0cxgIIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEjoKDW1hbmFnZWRfcmVhZHkYCSABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZkgAEj4KDm1hbmFnZWRfb3V0cHV0GAogASgLMiQuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRPdXRwdXRIABI6CgxtYW5hZ2VkX2V4aXQYCyABKAsyIi5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZEV4aXRIAEIJCgdwYXlsb2FkIvMHCg5BZ2VudEhvbWVGcmFtZRIxCgVoZWxsbxgBIAEoCzIgLmFsdGhhci53b3JrZXIudjEuQWdlbnRIb21lSGVsbG9IABIwCgVzdGFydBgCIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5TdGFydEgAEjAKBWlucHV0GAMgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASLgoEc3RvcBgEIAEoCzIeLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5TdG9wSAASOwoJaGVhcnRiZWF0GAUgASgLMiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtlckhlYXJ0YmVhdEgAEjgKCXJlY29uY2lsZRgGIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5SZWNvbmNpbGVIABIzCghjaGVja291dBgHIAEoCzIfLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5CeXRlc0gAEjoKCHNuYXBzaG90GAggASgLMiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFNuYXBzaG90UmVxdWVzdEgAEjYKC3NldHVwX2NodW5rGAkgASgLMh8uYWx0aGFyLndvcmtlci52MS5BZ2VudFJ1bkJ5dGVzSAASPAoNbWFuYWdlZF9zdGFydBgKIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRNYW5hZ2VkU3RhcnRIABI5CgxtYW5hZ2VkX3N0b3AYCyABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZkgAEjoKDHByZXZpZXdfb3BlbhgMIAEoCzIiLmFsdGhhci53b3JrZXIudjEuQWdlbnRQcmV2aWV3T3BlbkgAEjoKDGhlbHBlcl9zdGFydBgNIAEoCzIiLmFsdGhhci53b3JrZXIudjEuQWdlbnRIZWxwZXJTdGFydEgAEjsKDGhlbHBlcl9pbnB1dBgOIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRNYW5hZ2VkSW5wdXRIABI3Cgxza2lsbHNfY2h1bmsYDyABKAsyHy5hbHRoYXIud29ya2VyLnYxLkFnZW50UnVuQnl0ZXNIABJCChNoZWxwZXJfc2tpbGxzX2NodW5rGBAgASgLMiMuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRJbnB1dEgAEkQKFWhlbHBlcl9jaGVja291dF9jaHVuaxgRIAEoCzIjLmFsdGhhci53b3JrZXIudjEuQWdlbnRNYW5hZ2VkSW5wdXRIAEIJCgdwYXlsb2FkIokBChBBZ2VudFdvcmtlckhlbGxvEhEKCXdvcmtlcl9pZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgNEj0KDGNhcGFiaWxpdGllcxgDIAMoCzInLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3JrZXJDYXBhYmlsaXR5EhIKCmpvdXJuYWxfaWQYBCABKAkihgIKFUFnZW50V29ya2VyQ2FwYWJpbGl0eRISCgpwcm9qZWN0X2lkGAEgASgJEhMKC3Byb3ZpZGVyX2lkGAIgASgJEhcKD3dvcmtzcGFjZV9zZXR1cBgDIAEoCBIYChBtYW5hZ2VkX2NvbW1hbmRzGAQgASgIEhcKD21hbmFnZWRfcHJldmlldxgFIAEoCBIWCg53b3Jrc3BhY2Vfc2V0cxgGIAEoCBIVCg1oZWxwZXJfYWdlbnRzGAcgASgIEhMKC3NraWxsX2ZpbGVzGAggASgIEhoKEmhlbHBlcl9za2lsbF9maWxlcxgJIAEoCBIYChBoZWxwZXJfY2hlY2tvdXRzGAogASgIIlcKDkFnZW50SG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEg8KB3ZlcnNpb24YAyABKA0SEAoIbGVhc2VfbXMYBCABKA0i4AIKDUFnZW50UnVuU3RhcnQSDgoGcnVuX2lkGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSEwoLcHJvdmlkZXJfaWQYAyABKAkSFAoMd29ya3NwYWNlX2lkGAQgASgJEjYKBnNvdXJjZRgFIAEoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3Jrc3BhY2VTb3VyY2USDQoFdG9vbHMYBiABKAgSOgoFc2V0dXAYByABKAsyKy5hbHRoYXIud29ya2VyLnYxLkFnZW50V29ya3NwYWNlU2V0dXBTb3VyY2USQAoMcmVwb3NpdG9yaWVzGAggAygLMiouYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVJlcG9zaXRvcnkSOwoGc2tpbGxzGAkgASgLMisuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVNldHVwU291cmNlInsKGEFnZW50V29ya3NwYWNlUmVwb3NpdG9yeRIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEQoJZGlyZWN0b3J5GAIgASgJEjYKBnNvdXJjZRgDIAEoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3Jrc3BhY2VTb3VyY2UiOQoZQWdlbnRXb3Jrc3BhY2VTZXR1cFNvdXJjZRIMCgRzaXplGAEgASgNEg4KBnNoYTI1NhgCIAEoDCJCCg9BZ2VudFNraWxsRmlsZXMSLwoFZmlsZXMYASADKAsyIC5hbHRoYXIud29ya2VyLnYxLkFnZW50U2tpbGxGaWxlIkAKDkFnZW50U2tpbGxGaWxlEgwKBHBhdGgYASABKAkSDAoEZGF0YRgCIAEoDBISCgpleGVjdXRhYmxlGAMgASgIIngKE0FnZW50V29ya3NwYWNlU2V0dXASEQoJZGlyZWN0b3J5GAEgASgJEhAKCGNvbW1hbmRzGAIgAygJEjwKDHJlcG9zaXRvcmllcxgDIAMoCzImLmFsdGhhci53b3JrZXIudjEuQWdlbnRSZXBvc2l0b3J5U2V0dXAiUQoUQWdlbnRSZXBvc2l0b3J5U2V0dXASFAoMd29ya3NwYWNlX2lkGAEgASgJEhEKCWRpcmVjdG9yeRgCIAEoCRIQCghjb21tYW5kcxgDIAMoCSJCChRBZ2VudFdvcmtzcGFjZVNvdXJjZRIMCgRzaXplGAEgASgNEg4KBnNoYTI1NhgCIAEoDBIMCgRoZWFkGAMgASgJItsBCg1BZ2VudFJ1blJlYWR5Eg4KBnJ1bl9pZBgBIAEoCRIWCg53b3Jrc3BhY2VfcGF0aBgCIAEoCRISCgp0b29sc19wb3J0GAMgASgNEjoKBXNldHVwGAQgASgLMisuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVNldHVwUmVzdWx0EhMKC3NraWxsc19wYXRoGAUgASgJEj0KDG1jcF9jb21tYW5kcxgGIAMoCzInLmFsdGhhci53b3JrZXIudjEuQWdlbnRXb3JrZXJNY3BDb21tYW5kIjkKFUFnZW50V29ya2VyTWNwQ29tbWFuZBIMCgRuYW1lGAEgASgJEhIKCmV4ZWN1dGFibGUYAiABKAkimgEKGUFnZW50V29ya3NwYWNlU2V0dXBSZXN1bHQSEQoJZXhpdF9jb2RlGAEgASgNEhEKCXRpbWVkX291dBgCIAEoCBITCgtvdXRwdXRfdGFpbBgDIAEoDBJCCgxyZXBvc2l0b3JpZXMYBCADKAsyLC5hbHRoYXIud29ya2VyLnYxLkFnZW50UmVwb3NpdG9yeVNldHVwUmVzdWx0Im0KGkFnZW50UmVwb3NpdG9yeVNldHVwUmVzdWx0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIRCglleGl0X2NvZGUYAiABKA0SEQoJdGltZWRfb3V0GAMgASgIEhMKC291dHB1dF90YWlsGAQgASgMIjUKD0FnZW50TWFuYWdlZFJlZhIOCgZydW5faWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSJrChFBZ2VudE1hbmFnZWRTdGFydBIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSEQoJZGlyZWN0b3J5GAIgASgJEg8KB2NvbW1hbmQYAyABKAkiVgoSQWdlbnRNYW5hZ2VkT3V0cHV0EjIKB21hbmFnZWQYASABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZhIMCgRkYXRhGAIgASgMIuUBChBBZ2VudEhlbHBlclN0YXJ0EjIKB21hbmFnZWQYASABKAsyIS5hbHRoYXIud29ya2VyLnYxLkFnZW50TWFuYWdlZFJlZhIRCglkaXJlY3RvcnkYAiABKAkSEwoLcHJvdmlkZXJfaWQYAyABKAkSOwoGc2tpbGxzGAQgASgLMisuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVNldHVwU291cmNlEjgKCGNoZWNrb3V0GAUgASgLMiYuYWx0aGFyLndvcmtlci52MS5BZ2VudFdvcmtzcGFjZVNvdXJjZSJVChFBZ2VudE1hbmFnZWRJbnB1dBIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSDAoEZGF0YRgCIAEoDCKgAQoQQWdlbnRNYW5hZ2VkRXhpdBIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSMgoHb3V0Y29tZRgCIAEoDjIhLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5PdXRjb21lEhYKCWV4aXRfY29kZRgDIAEoDUgAiAEBQgwKCl9leGl0X2NvZGUiZwoQQWdlbnRQcmV2aWV3T3BlbhIyCgdtYW5hZ2VkGAEgASgLMiEuYWx0aGFyLndvcmtlci52MS5BZ2VudE1hbmFnZWRSZWYSEQoJdHVubmVsX2lkGAIgASgJEgwKBHBvcnQYAyABKA0iRQoTQWdlbnRQcmV2aWV3UmVxdWVzdBITCgl0dW5uZWxfaWQYASABKAlIABIOCgRkYXRhGAIgASgMSABCCQoHcGF5bG9hZCIkChRBZ2VudFByZXZpZXdSZXNwb25zZRIMCgRkYXRhGAEgASgMIi0KDUFnZW50UnVuQnl0ZXMSDgoGcnVuX2lkGAEgASgJEgwKBGRhdGEYAiABKAwiHgoMQWdlbnRSdW5TdG9wEg4KBnJ1bl9pZBgBIAEoCSI5ChFBZ2VudFJ1blJlY29uY2lsZRIOCgZydW5faWQYASABKAkSFAoMd29ya3NwYWNlX2lkGAIgASgJIngKDEFnZW50UnVuRXhpdBIOCgZydW5faWQYASABKAkSMgoHb3V0Y29tZRgCIAEoDjIhLmFsdGhhci53b3JrZXIudjEuQWdlbnRSdW5PdXRjb21lEhYKCWV4aXRfY29kZRgDIAEoDUgAiAEBQgwKCl9leGl0X2NvZGUiKAoUQWdlbnRXb3JrZXJIZWFydGJlYXQSEAoIc2VxdWVuY2UYASABKA0iYgoUQWdlbnRTbmFwc2hvdFJlcXVlc3QSDgoGcnVuX2lkGAEgASgJEhEKCWJhc2VfdHJlZRgCIAEoCRIRCgliYXNlX2hlYWQYAyABKAkSFAoMd29ya3NwYWNlX2lkGAQgASgJIrgBChNBZ2VudFNuYXBzaG90UmVzdWx0Eg4KBnJ1bl9pZBgBIAEoCRIMCgR0cmVlGAIgASgJEgwKBHNpemUYAyABKA0SDgoGc2hhMjU2GAQgASgMEhMKC3VuYXZhaWxhYmxlGAUgASgIEgwKBGhlYWQYBiABKAkSFAoMY29tbWl0c19zaXplGAcgASgNEhYKDmNvbW1pdHNfc2hhMjU2GAggASgMEhQKDHdvcmtzcGFjZV9pZBgJIAEoCSJAChFBZ2VudFRvb2xzUmVxdWVzdBIQCgZydW5faWQYASABKAlIABIOCgRkYXRhGAIgASgMSABCCQoHcGF5bG9hZCIiChJBZ2VudFRvb2xzUmVzcG9uc2USDAoEZGF0YRgBIAEoDCLCAgoLV29ya2VyRnJhbWUSLgoFaGVsbG8YASABKAsyHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckhlbGxvSAASPQoQZGlhZ25vc3RpY19jbGFpbRgCIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY0NsYWltSAASPwoRZGlhZ25vc3RpY19yZXN1bHQYAyABKAsyIi5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNSZXN1bHRIABI9ChBkaWFnbm9zdGljX3JlbmV3GAQgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVuZXdIABI5Cg5kaWFnbm9zdGljX2xvZxgFIAEoCzIfLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY0xvZ0gAQgkKB3BheWxvYWQigQIKCUhvbWVGcmFtZRIsCgVoZWxsbxgBIAEoCzIbLmFsdGhhci53b3JrZXIudjEuSG9tZUhlbGxvSAASPQoQZGlhZ25vc3RpY19vZmZlchgCIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY09mZmVySAASPQoQZGlhZ25vc3RpY19zdGFydBgDIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1N0YXJ0SAASPQoQZGlhZ25vc3RpY19sZWFzZRgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY0xlYXNlSABCCQoHcGF5bG9hZCLLAQoLV29ya2VySGVsbG8SEQoJd29ya2VyX2lkGAEgASgJEhMKC21pbl92ZXJzaW9uGAIgASgNEhMKC21heF92ZXJzaW9uGAMgASgNEhsKE2FjY2VwdHNfZGlhZ25vc3RpY3MYBCABKAgSHwoXcmVuZXdzX2RpYWdub3N0aWNfbGVhc2UYBSABKAgSHwoXc3RyZWFtc19kaWFnbm9zdGljX2xvZ3MYBiABKAgSIAoYYWNjZXB0c19wcm9qZWN0X2NvbW1hbmRzGAcgASgIIuIBCglIb21lSGVsbG8SDwoHaG9tZV9pZBgBIAEoCRIRCgl3b3JrZXJfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIPCgd2ZXJzaW9uGAQgASgNEhwKFHN1cHBvcnRzX2RpYWdub3N0aWNzGAUgASgIEikKIXN1cHBvcnRzX2RpYWdub3N0aWNfbGVhc2VfcmVuZXdhbBgGIAEoCBIgChhzdXBwb3J0c19kaWFnbm9zdGljX2xvZ3MYByABKAgSIQoZc3VwcG9ydHNfcHJvamVjdF9jb21tYW5kcxgIIAEoCCKJAQoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDRI5Cg9wcm9qZWN0X2NvbW1hbmQYBCABKAsyIC5hbHRoYXIud29ya2VyLnYxLlByb2plY3RDb21tYW5kIjoKDlByb2plY3RDb21tYW5kEhIKCnByb2plY3RfaWQYASABKAkSFAoMY29tbWFuZF9uYW1lGAIgASgJIjQKD0RpYWdub3N0aWNDbGFpbRISCgphdHRlbXB0X2lkGAEgASgJEg0KBWZlbmNlGAIgASgJIkgKD0RpYWdub3N0aWNTdGFydBISCgphdHRlbXB0X2lkGAEgASgJEg0KBWZlbmNlGAIgASgJEhIKCnJ1bl9mb3JfbXMYAyABKA0iewoQRGlhZ25vc3RpY1Jlc3VsdBISCgphdHRlbXB0X2lkGAEgASgJEg0KBWZlbmNlGAIgASgJEjQKB291dGNvbWUYAyABKA4yIy5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNPdXRjb21lEg4KBm91dHB1dBgEIAEoDCJGCg9EaWFnbm9zdGljUmVuZXcSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRIQCghzZXF1ZW5jZRgDIAEoDSJaCg9EaWFnbm9zdGljTGVhc2USEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRIQCghzZXF1ZW5jZRgDIAEoDRISCgpydW5fZm9yX21zGAQgASgNIlIKDURpYWdub3N0aWNMb2cSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRIOCgZvZmZzZXQYAyABKA0SDgoGb3V0cHV0GAQgASgMKrgBCg9BZ2VudFJ1bk91dGNvbWUSIQodQUdFTlRfUlVOX09VVENPTUVfVU5TUEVDSUZJRUQQABIcChhBR0VOVF9SVU5fT1VUQ09NRV9FWElURUQQARIdChlBR0VOVF9SVU5fT1VUQ09NRV9TVE9QUEVEEAISIgoeQUdFTlRfUlVOX09VVENPTUVfU1RBUlRfRkFJTEVEEAMSIQodQUdFTlRfUlVOX09VVENPTUVfVU5DT05GSVJNRUQQBCq6AQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADEiAKHERJQUdOT1NUSUNfT1VUQ09NRV9DQU5DRUxMRUQQBDL3AgoUV29ya2VyQ29udHJvbFNlcnZpY2USSQoHQ29ubmVjdBIdLmFsdGhhci53b3JrZXIudjEuV29ya2VyRnJhbWUaGy5hbHRoYXIud29ya2VyLnYxLkhvbWVGcmFtZSgBMAESVAoIUnVuQWdlbnQSIi5hbHRoYXIud29ya2VyLnYxLkFnZW50V29ya2VyRnJhbWUaIC5hbHRoYXIud29ya2VyLnYxLkFnZW50SG9tZUZyYW1lKAEwARJbCgpBZ2VudFRvb2xzEiMuYWx0aGFyLndvcmtlci52MS5BZ2VudFRvb2xzUmVxdWVzdBokLmFsdGhhci53b3JrZXIudjEuQWdlbnRUb29sc1Jlc3BvbnNlKAEwARJhCgxBZ2VudFByZXZpZXcSJS5hbHRoYXIud29ya2VyLnYxLkFnZW50UHJldmlld1JlcXVlc3QaJi5hbHRoYXIud29ya2VyLnYxLkFnZW50UHJldmlld1Jlc3BvbnNlKAEwAWIGcHJvdG8z',
   )
 
 /**
@@ -204,6 +204,41 @@ export type AgentHomeFrame = Message<'althar.worker.v1.AgentHomeFrame'> & {
         value: AgentPreviewOpen
         case: 'previewOpen'
       }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.AgentHelperStart helper_start = 13;
+         */
+        value: AgentHelperStart
+        case: 'helperStart'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.AgentManagedInput helper_input = 14;
+         */
+        value: AgentManagedInput
+        case: 'helperInput'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.AgentRunBytes skills_chunk = 15;
+         */
+        value: AgentRunBytes
+        case: 'skillsChunk'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.AgentManagedInput helper_skills_chunk = 16;
+         */
+        value: AgentManagedInput
+        case: 'helperSkillsChunk'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.AgentManagedInput helper_checkout_chunk = 17;
+         */
+        value: AgentManagedInput
+        case: 'helperCheckoutChunk'
+      }
     | { case: undefined; value?: undefined }
 }
 
@@ -274,6 +309,31 @@ export type AgentWorkerCapability = Message<'althar.worker.v1.AgentWorkerCapabil
    * @generated from field: bool managed_preview = 5;
    */
   managedPreview: boolean
+
+  /**
+   * @generated from field: bool workspace_sets = 6;
+   */
+  workspaceSets: boolean
+
+  /**
+   * @generated from field: bool helper_agents = 7;
+   */
+  helperAgents: boolean
+
+  /**
+   * @generated from field: bool skill_files = 8;
+   */
+  skillFiles: boolean
+
+  /**
+   * @generated from field: bool helper_skill_files = 9;
+   */
+  helperSkillFiles: boolean
+
+  /**
+   * @generated from field: bool helper_checkouts = 10;
+   */
+  helperCheckouts: boolean
 }
 
 /**
@@ -355,6 +415,19 @@ export type AgentRunStart = Message<'althar.worker.v1.AgentRunStart'> & {
    * @generated from field: althar.worker.v1.AgentWorkspaceSetupSource setup = 7;
    */
   setup?: AgentWorkspaceSetupSource | undefined
+
+  /**
+   * Multi-repository tasks send the listed bundles in order. The primary
+   * repository's ID is workspace_id. A single source and a set are exclusive.
+   *
+   * @generated from field: repeated althar.worker.v1.AgentWorkspaceRepository repositories = 8;
+   */
+  repositories: AgentWorkspaceRepository[]
+
+  /**
+   * @generated from field: althar.worker.v1.AgentWorkspaceSetupSource skills = 9;
+   */
+  skills?: AgentWorkspaceSetupSource | undefined
 }
 
 /**
@@ -362,6 +435,34 @@ export type AgentRunStart = Message<'althar.worker.v1.AgentRunStart'> & {
  * Use `create(AgentRunStartSchema)` to create a new message.
  */
 export const AgentRunStartSchema: GenMessage<AgentRunStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 5)
+
+/**
+ * @generated from message althar.worker.v1.AgentWorkspaceRepository
+ */
+export type AgentWorkspaceRepository = Message<'althar.worker.v1.AgentWorkspaceRepository'> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string
+
+  /**
+   * @generated from field: string directory = 2;
+   */
+  directory: string
+
+  /**
+   * @generated from field: althar.worker.v1.AgentWorkspaceSource source = 3;
+   */
+  source?: AgentWorkspaceSource | undefined
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentWorkspaceRepository.
+ * Use `create(AgentWorkspaceRepositorySchema)` to create a new message.
+ */
+export const AgentWorkspaceRepositorySchema: GenMessage<AgentWorkspaceRepository> =
+  /*@__PURE__*/
+  messageDesc(file_althar_worker_v1_control, 6)
 
 /**
  * @generated from message althar.worker.v1.AgentWorkspaceSetupSource
@@ -384,7 +485,49 @@ export type AgentWorkspaceSetupSource = Message<'althar.worker.v1.AgentWorkspace
  */
 export const AgentWorkspaceSetupSourceSchema: GenMessage<AgentWorkspaceSetupSource> =
   /*@__PURE__*/
-  messageDesc(file_althar_worker_v1_control, 6)
+  messageDesc(file_althar_worker_v1_control, 7)
+
+/**
+ * @generated from message althar.worker.v1.AgentSkillFiles
+ */
+export type AgentSkillFiles = Message<'althar.worker.v1.AgentSkillFiles'> & {
+  /**
+   * @generated from field: repeated althar.worker.v1.AgentSkillFile files = 1;
+   */
+  files: AgentSkillFile[]
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentSkillFiles.
+ * Use `create(AgentSkillFilesSchema)` to create a new message.
+ */
+export const AgentSkillFilesSchema: GenMessage<AgentSkillFiles> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 8)
+
+/**
+ * @generated from message althar.worker.v1.AgentSkillFile
+ */
+export type AgentSkillFile = Message<'althar.worker.v1.AgentSkillFile'> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string
+
+  /**
+   * @generated from field: bytes data = 2;
+   */
+  data: Uint8Array
+
+  /**
+   * @generated from field: bool executable = 3;
+   */
+  executable: boolean
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentSkillFile.
+ * Use `create(AgentSkillFileSchema)` to create a new message.
+ */
+export const AgentSkillFileSchema: GenMessage<AgentSkillFile> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
 
 /**
  * @generated from message althar.worker.v1.AgentWorkspaceSetup
@@ -401,13 +544,44 @@ export type AgentWorkspaceSetup = Message<'althar.worker.v1.AgentWorkspaceSetup'
    * @generated from field: repeated string commands = 2;
    */
   commands: string[]
+
+  /**
+   * @generated from field: repeated althar.worker.v1.AgentRepositorySetup repositories = 3;
+   */
+  repositories: AgentRepositorySetup[]
 }
 
 /**
  * Describes the message althar.worker.v1.AgentWorkspaceSetup.
  * Use `create(AgentWorkspaceSetupSchema)` to create a new message.
  */
-export const AgentWorkspaceSetupSchema: GenMessage<AgentWorkspaceSetup> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 7)
+export const AgentWorkspaceSetupSchema: GenMessage<AgentWorkspaceSetup> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 10)
+
+/**
+ * @generated from message althar.worker.v1.AgentRepositorySetup
+ */
+export type AgentRepositorySetup = Message<'althar.worker.v1.AgentRepositorySetup'> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string
+
+  /**
+   * @generated from field: string directory = 2;
+   */
+  directory: string
+
+  /**
+   * @generated from field: repeated string commands = 3;
+   */
+  commands: string[]
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentRepositorySetup.
+ * Use `create(AgentRepositorySetupSchema)` to create a new message.
+ */
+export const AgentRepositorySetupSchema: GenMessage<AgentRepositorySetup> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 11)
 
 /**
  * A single Git bundle with one scoped snapshot ref, staged before launch.
@@ -435,7 +609,7 @@ export type AgentWorkspaceSource = Message<'althar.worker.v1.AgentWorkspaceSourc
  * Describes the message althar.worker.v1.AgentWorkspaceSource.
  * Use `create(AgentWorkspaceSourceSchema)` to create a new message.
  */
-export const AgentWorkspaceSourceSchema: GenMessage<AgentWorkspaceSource> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 8)
+export const AgentWorkspaceSourceSchema: GenMessage<AgentWorkspaceSource> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 12)
 
 /**
  * @generated from message althar.worker.v1.AgentRunReady
@@ -462,13 +636,47 @@ export type AgentRunReady = Message<'althar.worker.v1.AgentRunReady'> & {
    * @generated from field: althar.worker.v1.AgentWorkspaceSetupResult setup = 4;
    */
   setup?: AgentWorkspaceSetupResult | undefined
+
+  /**
+   * @generated from field: string skills_path = 5;
+   */
+  skillsPath: string
+
+  /**
+   * @generated from field: repeated althar.worker.v1.AgentWorkerMcpCommand mcp_commands = 6;
+   */
+  mcpCommands: AgentWorkerMcpCommand[]
 }
 
 /**
  * Describes the message althar.worker.v1.AgentRunReady.
  * Use `create(AgentRunReadySchema)` to create a new message.
  */
-export const AgentRunReadySchema: GenMessage<AgentRunReady> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
+export const AgentRunReadySchema: GenMessage<AgentRunReady> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 13)
+
+/**
+ * A tool registered by name on the execution worker for this project.
+ * Command arguments and credentials are provisioned on that worker.
+ *
+ * @generated from message althar.worker.v1.AgentWorkerMcpCommand
+ */
+export type AgentWorkerMcpCommand = Message<'althar.worker.v1.AgentWorkerMcpCommand'> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string
+
+  /**
+   * @generated from field: string executable = 2;
+   */
+  executable: string
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentWorkerMcpCommand.
+ * Use `create(AgentWorkerMcpCommandSchema)` to create a new message.
+ */
+export const AgentWorkerMcpCommandSchema: GenMessage<AgentWorkerMcpCommand> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 14)
 
 /**
  * @generated from message althar.worker.v1.AgentWorkspaceSetupResult
@@ -490,6 +698,11 @@ export type AgentWorkspaceSetupResult = Message<'althar.worker.v1.AgentWorkspace
    * @generated from field: bytes output_tail = 3;
    */
   outputTail: Uint8Array
+
+  /**
+   * @generated from field: repeated althar.worker.v1.AgentRepositorySetupResult repositories = 4;
+   */
+  repositories: AgentRepositorySetupResult[]
 }
 
 /**
@@ -498,7 +711,40 @@ export type AgentWorkspaceSetupResult = Message<'althar.worker.v1.AgentWorkspace
  */
 export const AgentWorkspaceSetupResultSchema: GenMessage<AgentWorkspaceSetupResult> =
   /*@__PURE__*/
-  messageDesc(file_althar_worker_v1_control, 10)
+  messageDesc(file_althar_worker_v1_control, 15)
+
+/**
+ * @generated from message althar.worker.v1.AgentRepositorySetupResult
+ */
+export type AgentRepositorySetupResult = Message<'althar.worker.v1.AgentRepositorySetupResult'> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string
+
+  /**
+   * @generated from field: uint32 exit_code = 2;
+   */
+  exitCode: number
+
+  /**
+   * @generated from field: bool timed_out = 3;
+   */
+  timedOut: boolean
+
+  /**
+   * @generated from field: bytes output_tail = 4;
+   */
+  outputTail: Uint8Array
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentRepositorySetupResult.
+ * Use `create(AgentRepositorySetupResultSchema)` to create a new message.
+ */
+export const AgentRepositorySetupResultSchema: GenMessage<AgentRepositorySetupResult> =
+  /*@__PURE__*/
+  messageDesc(file_althar_worker_v1_control, 16)
 
 /**
  * Managed commands share the assigned task checkout. They have their own
@@ -522,7 +768,7 @@ export type AgentManagedRef = Message<'althar.worker.v1.AgentManagedRef'> & {
  * Describes the message althar.worker.v1.AgentManagedRef.
  * Use `create(AgentManagedRefSchema)` to create a new message.
  */
-export const AgentManagedRefSchema: GenMessage<AgentManagedRef> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 11)
+export const AgentManagedRefSchema: GenMessage<AgentManagedRef> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 17)
 
 /**
  * @generated from message althar.worker.v1.AgentManagedStart
@@ -548,7 +794,7 @@ export type AgentManagedStart = Message<'althar.worker.v1.AgentManagedStart'> & 
  * Describes the message althar.worker.v1.AgentManagedStart.
  * Use `create(AgentManagedStartSchema)` to create a new message.
  */
-export const AgentManagedStartSchema: GenMessage<AgentManagedStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 12)
+export const AgentManagedStartSchema: GenMessage<AgentManagedStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 18)
 
 /**
  * @generated from message althar.worker.v1.AgentManagedOutput
@@ -569,7 +815,64 @@ export type AgentManagedOutput = Message<'althar.worker.v1.AgentManagedOutput'> 
  * Describes the message althar.worker.v1.AgentManagedOutput.
  * Use `create(AgentManagedOutputSchema)` to create a new message.
  */
-export const AgentManagedOutputSchema: GenMessage<AgentManagedOutput> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 13)
+export const AgentManagedOutputSchema: GenMessage<AgentManagedOutput> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 19)
+
+/**
+ * @generated from message althar.worker.v1.AgentHelperStart
+ */
+export type AgentHelperStart = Message<'althar.worker.v1.AgentHelperStart'> & {
+  /**
+   * @generated from field: althar.worker.v1.AgentManagedRef managed = 1;
+   */
+  managed?: AgentManagedRef | undefined
+
+  /**
+   * @generated from field: string directory = 2;
+   */
+  directory: string
+
+  /**
+   * @generated from field: string provider_id = 3;
+   */
+  providerId: string
+
+  /**
+   * @generated from field: althar.worker.v1.AgentWorkspaceSetupSource skills = 4;
+   */
+  skills?: AgentWorkspaceSetupSource | undefined
+
+  /**
+   * @generated from field: althar.worker.v1.AgentWorkspaceSource checkout = 5;
+   */
+  checkout?: AgentWorkspaceSource | undefined
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentHelperStart.
+ * Use `create(AgentHelperStartSchema)` to create a new message.
+ */
+export const AgentHelperStartSchema: GenMessage<AgentHelperStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 20)
+
+/**
+ * @generated from message althar.worker.v1.AgentManagedInput
+ */
+export type AgentManagedInput = Message<'althar.worker.v1.AgentManagedInput'> & {
+  /**
+   * @generated from field: althar.worker.v1.AgentManagedRef managed = 1;
+   */
+  managed?: AgentManagedRef | undefined
+
+  /**
+   * @generated from field: bytes data = 2;
+   */
+  data: Uint8Array
+}
+
+/**
+ * Describes the message althar.worker.v1.AgentManagedInput.
+ * Use `create(AgentManagedInputSchema)` to create a new message.
+ */
+export const AgentManagedInputSchema: GenMessage<AgentManagedInput> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 21)
 
 /**
  * @generated from message althar.worker.v1.AgentManagedExit
@@ -595,7 +898,7 @@ export type AgentManagedExit = Message<'althar.worker.v1.AgentManagedExit'> & {
  * Describes the message althar.worker.v1.AgentManagedExit.
  * Use `create(AgentManagedExitSchema)` to create a new message.
  */
-export const AgentManagedExitSchema: GenMessage<AgentManagedExit> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 14)
+export const AgentManagedExitSchema: GenMessage<AgentManagedExit> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 22)
 
 /**
  * @generated from message althar.worker.v1.AgentPreviewOpen
@@ -621,7 +924,7 @@ export type AgentPreviewOpen = Message<'althar.worker.v1.AgentPreviewOpen'> & {
  * Describes the message althar.worker.v1.AgentPreviewOpen.
  * Use `create(AgentPreviewOpenSchema)` to create a new message.
  */
-export const AgentPreviewOpenSchema: GenMessage<AgentPreviewOpen> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 15)
+export const AgentPreviewOpenSchema: GenMessage<AgentPreviewOpen> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 23)
 
 /**
  * @generated from message althar.worker.v1.AgentPreviewRequest
@@ -652,7 +955,7 @@ export type AgentPreviewRequest = Message<'althar.worker.v1.AgentPreviewRequest'
  * Describes the message althar.worker.v1.AgentPreviewRequest.
  * Use `create(AgentPreviewRequestSchema)` to create a new message.
  */
-export const AgentPreviewRequestSchema: GenMessage<AgentPreviewRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 16)
+export const AgentPreviewRequestSchema: GenMessage<AgentPreviewRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 24)
 
 /**
  * @generated from message althar.worker.v1.AgentPreviewResponse
@@ -668,7 +971,7 @@ export type AgentPreviewResponse = Message<'althar.worker.v1.AgentPreviewRespons
  * Describes the message althar.worker.v1.AgentPreviewResponse.
  * Use `create(AgentPreviewResponseSchema)` to create a new message.
  */
-export const AgentPreviewResponseSchema: GenMessage<AgentPreviewResponse> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 17)
+export const AgentPreviewResponseSchema: GenMessage<AgentPreviewResponse> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 25)
 
 /**
  * @generated from message althar.worker.v1.AgentRunBytes
@@ -689,7 +992,7 @@ export type AgentRunBytes = Message<'althar.worker.v1.AgentRunBytes'> & {
  * Describes the message althar.worker.v1.AgentRunBytes.
  * Use `create(AgentRunBytesSchema)` to create a new message.
  */
-export const AgentRunBytesSchema: GenMessage<AgentRunBytes> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 18)
+export const AgentRunBytesSchema: GenMessage<AgentRunBytes> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 26)
 
 /**
  * @generated from message althar.worker.v1.AgentRunStop
@@ -705,7 +1008,7 @@ export type AgentRunStop = Message<'althar.worker.v1.AgentRunStop'> & {
  * Describes the message althar.worker.v1.AgentRunStop.
  * Use `create(AgentRunStopSchema)` to create a new message.
  */
-export const AgentRunStopSchema: GenMessage<AgentRunStop> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 19)
+export const AgentRunStopSchema: GenMessage<AgentRunStop> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 27)
 
 /**
  * @generated from message althar.worker.v1.AgentRunReconcile
@@ -726,7 +1029,7 @@ export type AgentRunReconcile = Message<'althar.worker.v1.AgentRunReconcile'> & 
  * Describes the message althar.worker.v1.AgentRunReconcile.
  * Use `create(AgentRunReconcileSchema)` to create a new message.
  */
-export const AgentRunReconcileSchema: GenMessage<AgentRunReconcile> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 20)
+export const AgentRunReconcileSchema: GenMessage<AgentRunReconcile> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 28)
 
 /**
  * @generated from message althar.worker.v1.AgentRunExit
@@ -754,7 +1057,7 @@ export type AgentRunExit = Message<'althar.worker.v1.AgentRunExit'> & {
  * Describes the message althar.worker.v1.AgentRunExit.
  * Use `create(AgentRunExitSchema)` to create a new message.
  */
-export const AgentRunExitSchema: GenMessage<AgentRunExit> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 21)
+export const AgentRunExitSchema: GenMessage<AgentRunExit> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 29)
 
 /**
  * @generated from message althar.worker.v1.AgentWorkerHeartbeat
@@ -770,7 +1073,7 @@ export type AgentWorkerHeartbeat = Message<'althar.worker.v1.AgentWorkerHeartbea
  * Describes the message althar.worker.v1.AgentWorkerHeartbeat.
  * Use `create(AgentWorkerHeartbeatSchema)` to create a new message.
  */
-export const AgentWorkerHeartbeatSchema: GenMessage<AgentWorkerHeartbeat> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 22)
+export const AgentWorkerHeartbeatSchema: GenMessage<AgentWorkerHeartbeat> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 30)
 
 /**
  * @generated from message althar.worker.v1.AgentSnapshotRequest
@@ -790,13 +1093,20 @@ export type AgentSnapshotRequest = Message<'althar.worker.v1.AgentSnapshotReques
    * @generated from field: string base_head = 3;
    */
   baseHead: string
+
+  /**
+   * Either the task repository ID or an active helper's scoped command ID.
+   *
+   * @generated from field: string workspace_id = 4;
+   */
+  workspaceId: string
 }
 
 /**
  * Describes the message althar.worker.v1.AgentSnapshotRequest.
  * Use `create(AgentSnapshotRequestSchema)` to create a new message.
  */
-export const AgentSnapshotRequestSchema: GenMessage<AgentSnapshotRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 23)
+export const AgentSnapshotRequestSchema: GenMessage<AgentSnapshotRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 31)
 
 /**
  * A Git binary patch against the requested tree. The home verifies its own
@@ -844,13 +1154,18 @@ export type AgentSnapshotResult = Message<'althar.worker.v1.AgentSnapshotResult'
    * @generated from field: bytes commits_sha256 = 8;
    */
   commitsSha256: Uint8Array
+
+  /**
+   * @generated from field: string workspace_id = 9;
+   */
+  workspaceId: string
 }
 
 /**
  * Describes the message althar.worker.v1.AgentSnapshotResult.
  * Use `create(AgentSnapshotResultSchema)` to create a new message.
  */
-export const AgentSnapshotResultSchema: GenMessage<AgentSnapshotResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 24)
+export const AgentSnapshotResultSchema: GenMessage<AgentSnapshotResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 32)
 
 /**
  * A connection to just the home tool server for this active run. Tool
@@ -884,7 +1199,7 @@ export type AgentToolsRequest = Message<'althar.worker.v1.AgentToolsRequest'> & 
  * Describes the message althar.worker.v1.AgentToolsRequest.
  * Use `create(AgentToolsRequestSchema)` to create a new message.
  */
-export const AgentToolsRequestSchema: GenMessage<AgentToolsRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 25)
+export const AgentToolsRequestSchema: GenMessage<AgentToolsRequest> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 33)
 
 /**
  * @generated from message althar.worker.v1.AgentToolsResponse
@@ -900,7 +1215,7 @@ export type AgentToolsResponse = Message<'althar.worker.v1.AgentToolsResponse'> 
  * Describes the message althar.worker.v1.AgentToolsResponse.
  * Use `create(AgentToolsResponseSchema)` to create a new message.
  */
-export const AgentToolsResponseSchema: GenMessage<AgentToolsResponse> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 26)
+export const AgentToolsResponseSchema: GenMessage<AgentToolsResponse> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 34)
 
 /**
  * @generated from message althar.worker.v1.WorkerFrame
@@ -952,7 +1267,7 @@ export type WorkerFrame = Message<'althar.worker.v1.WorkerFrame'> & {
  * Describes the message althar.worker.v1.WorkerFrame.
  * Use `create(WorkerFrameSchema)` to create a new message.
  */
-export const WorkerFrameSchema: GenMessage<WorkerFrame> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 27)
+export const WorkerFrameSchema: GenMessage<WorkerFrame> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 35)
 
 /**
  * @generated from message althar.worker.v1.HomeFrame
@@ -997,7 +1312,7 @@ export type HomeFrame = Message<'althar.worker.v1.HomeFrame'> & {
  * Describes the message althar.worker.v1.HomeFrame.
  * Use `create(HomeFrameSchema)` to create a new message.
  */
-export const HomeFrameSchema: GenMessage<HomeFrame> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 28)
+export const HomeFrameSchema: GenMessage<HomeFrame> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 36)
 
 /**
  * The first worker frame declares an inclusive range of supported versions.
@@ -1046,7 +1361,7 @@ export type WorkerHello = Message<'althar.worker.v1.WorkerHello'> & {
  * Describes the message althar.worker.v1.WorkerHello.
  * Use `create(WorkerHelloSchema)` to create a new message.
  */
-export const WorkerHelloSchema: GenMessage<WorkerHello> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 29)
+export const WorkerHelloSchema: GenMessage<WorkerHello> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 37)
 
 /**
  * The first home frame binds this stream to one authenticated, negotiated session.
@@ -1099,7 +1414,7 @@ export type HomeHello = Message<'althar.worker.v1.HomeHello'> & {
  * Describes the message althar.worker.v1.HomeHello.
  * Use `create(HomeHelloSchema)` to create a new message.
  */
-export const HomeHelloSchema: GenMessage<HomeHello> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 30)
+export const HomeHelloSchema: GenMessage<HomeHello> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 38)
 
 /**
  * A lease of zero requests reconciliation without granting a new start.
@@ -1132,7 +1447,7 @@ export type DiagnosticOffer = Message<'althar.worker.v1.DiagnosticOffer'> & {
  * Describes the message althar.worker.v1.DiagnosticOffer.
  * Use `create(DiagnosticOfferSchema)` to create a new message.
  */
-export const DiagnosticOfferSchema: GenMessage<DiagnosticOffer> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 31)
+export const DiagnosticOfferSchema: GenMessage<DiagnosticOffer> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 39)
 
 /**
  * The worker operator resolves this reference locally. No paths or argv are sent.
@@ -1155,7 +1470,7 @@ export type ProjectCommand = Message<'althar.worker.v1.ProjectCommand'> & {
  * Describes the message althar.worker.v1.ProjectCommand.
  * Use `create(ProjectCommandSchema)` to create a new message.
  */
-export const ProjectCommandSchema: GenMessage<ProjectCommand> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 32)
+export const ProjectCommandSchema: GenMessage<ProjectCommand> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 40)
 
 /**
  * @generated from message althar.worker.v1.DiagnosticClaim
@@ -1176,7 +1491,7 @@ export type DiagnosticClaim = Message<'althar.worker.v1.DiagnosticClaim'> & {
  * Describes the message althar.worker.v1.DiagnosticClaim.
  * Use `create(DiagnosticClaimSchema)` to create a new message.
  */
-export const DiagnosticClaimSchema: GenMessage<DiagnosticClaim> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 33)
+export const DiagnosticClaimSchema: GenMessage<DiagnosticClaim> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 41)
 
 /**
  * A home persists the claim before sending this once. Zero means reconcile.
@@ -1204,7 +1519,7 @@ export type DiagnosticStart = Message<'althar.worker.v1.DiagnosticStart'> & {
  * Describes the message althar.worker.v1.DiagnosticStart.
  * Use `create(DiagnosticStartSchema)` to create a new message.
  */
-export const DiagnosticStartSchema: GenMessage<DiagnosticStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 34)
+export const DiagnosticStartSchema: GenMessage<DiagnosticStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 42)
 
 /**
  * @generated from message althar.worker.v1.DiagnosticResult
@@ -1235,7 +1550,7 @@ export type DiagnosticResult = Message<'althar.worker.v1.DiagnosticResult'> & {
  * Describes the message althar.worker.v1.DiagnosticResult.
  * Use `create(DiagnosticResultSchema)` to create a new message.
  */
-export const DiagnosticResultSchema: GenMessage<DiagnosticResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 35)
+export const DiagnosticResultSchema: GenMessage<DiagnosticResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 43)
 
 /**
  * Available only when both peers negotiate renewal. Sequence starts at one.
@@ -1264,7 +1579,7 @@ export type DiagnosticRenew = Message<'althar.worker.v1.DiagnosticRenew'> & {
  * Describes the message althar.worker.v1.DiagnosticRenew.
  * Use `create(DiagnosticRenewSchema)` to create a new message.
  */
-export const DiagnosticRenewSchema: GenMessage<DiagnosticRenew> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 36)
+export const DiagnosticRenewSchema: GenMessage<DiagnosticRenew> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 44)
 
 /**
  * A renewal confirms the current authority and never authorizes another start.
@@ -1298,7 +1613,7 @@ export type DiagnosticLease = Message<'althar.worker.v1.DiagnosticLease'> & {
  * Describes the message althar.worker.v1.DiagnosticLease.
  * Use `create(DiagnosticLeaseSchema)` to create a new message.
  */
-export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 37)
+export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 45)
 
 /**
  * Raw stdout, emitted before the result on the claiming stream. Offsets are
@@ -1332,7 +1647,7 @@ export type DiagnosticLog = Message<'althar.worker.v1.DiagnosticLog'> & {
  * Describes the message althar.worker.v1.DiagnosticLog.
  * Use `create(DiagnosticLogSchema)` to create a new message.
  */
-export const DiagnosticLogSchema: GenMessage<DiagnosticLog> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 38)
+export const DiagnosticLogSchema: GenMessage<DiagnosticLog> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 46)
 
 /**
  * @generated from enum althar.worker.v1.AgentRunOutcome

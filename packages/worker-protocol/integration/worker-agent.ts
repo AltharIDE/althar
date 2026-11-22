@@ -22,6 +22,7 @@ import {
   AgentPreviewRequestSchema,
   AgentPreviewResponseSchema,
   AgentRunOutcome,
+  AgentSkillFilesSchema,
   AgentWorkerFrameSchema,
   AgentWorkspaceSetupResultSchema,
   type AgentPreviewRequest,
@@ -136,7 +137,7 @@ const fixture = async (t: TestContext) => {
   }
 }
 
-const hello = (id = workerId, journal = journalId, managedCommands = false): AgentWorkerFrame['payload'] => ({
+const hello = (id = workerId, journal = journalId, managedCommands = false, helperSkillFiles = false): AgentWorkerFrame['payload'] => ({
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
@@ -151,6 +152,11 @@ const hello = (id = workerId, journal = journalId, managedCommands = false): Age
         workspaceSetup: false,
         managedCommands,
         managedPreview: managedCommands,
+        workspaceSets: false,
+        helperAgents: managedCommands,
+        skillFiles: false,
+        helperSkillFiles,
+        helperCheckouts: helperSkillFiles,
       },
     ],
   },
@@ -163,6 +169,10 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   const greeting = await worker.read()
   equal(greeting?.case, 'hello')
   await rejects(pool.start(workerId, placement, { setup: { directory: '', commands: ['true'] } }), /update this worker/i)
+  await rejects(
+    pool.start(workerId, placement, { skills: [{ path: 'skill.md', data: Buffer.from('Selected'), executable: false }] }),
+    /update this worker/i,
+  )
   deepEqual(
     pool.list(projectId).map(({ workerId, busy }) => ({ workerId, busy })),
     [{ workerId, busy: false }],
@@ -178,7 +188,14 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal(start.value.workspaceId, workspaceId)
   worker.send({
     case: 'ready',
-    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId, workspacePath: '/private/worker/workspace', toolsPort: 0 },
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
   })
   const agent = await pending
   equal(agent.workspacePath, '/private/worker/workspace')
@@ -210,6 +227,90 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   deepEqual(pool.list(projectId), [])
 })
 
+void test('rejects worker command registrations inside a task checkout', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello())
+  equal((await worker.read())?.case, 'hello')
+  const pending = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const rejected = rejects(pending, /invalid agent readiness/)
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId: start.value.runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [
+        {
+          $typeName: 'althar.worker.v1.AgentWorkerMcpCommand',
+          name: 'projectTools',
+          executable: '/private/worker/workspace/script',
+        },
+      ],
+    },
+  })
+  await rejected
+})
+
+void test('binds the selected helper skills to its own process and streams their digest', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello(workerId, journalId, true, true))
+  equal((await worker.read())?.case, 'hello')
+  const pending = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const runId = start.value.runId
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await pending
+  ok(agent.startHelper !== undefined)
+  const commandId = 'proc_' + '8'.repeat(32)
+  const file = { path: 'helper/SKILL.md', data: Buffer.alloc(4096, 92), executable: false }
+  const waiting = agent.startHelper({ id: commandId, directory: '', providerId, output: () => undefined, skills: [file] })
+  const started = await worker.read()
+  ok(started?.case === 'helperStart' && started.value.managed !== undefined && started.value.skills !== undefined)
+  const { managed, skills } = started.value
+  deepEqual([managed.runId, managed.commandId], [runId, commandId])
+  const pieces: Buffer[] = []
+  let received = 0
+  while (received < skills.size) {
+    const piece = await worker.read()
+    ok(piece?.case === 'helperSkillsChunk')
+    deepEqual(piece.value.managed, managed)
+    ok(piece.value.data.byteLength > 0 && piece.value.data.byteLength <= 2048)
+    pieces.push(Buffer.from(piece.value.data))
+    received += piece.value.data.byteLength
+  }
+  equal(received, skills.size)
+  const assets = Buffer.concat(pieces)
+  equal(Buffer.from(skills.sha256).toString('hex'), createHash('sha256').update(assets).digest('hex'))
+  const [asset] = fromBinary(AgentSkillFilesSchema, assets).files
+  ok(asset !== undefined)
+  equal(asset.path, file.path)
+  deepEqual(Buffer.from(asset.data), file.data)
+  worker.send({ case: 'managedReady', value: managed })
+  const helper = await waiting
+  equal(helper.skillsPath, `/private/worker/.${runId}-${commandId}.skills`)
+  const stopping = helper.stop()
+  equal((await worker.read())?.case, 'managedStop')
+  worker.send({ case: 'managedExit', value: { $typeName: 'althar.worker.v1.AgentManagedExit', managed, outcome: AgentRunOutcome.STOPPED } })
+  await stopping
+})
+
 void test('managed output and stop stay attached to the selected task lease', { timeout: 15_000 }, async (t) => {
   const { pool, connect, unassign } = await fixture(t)
   const worker = connect()
@@ -221,7 +322,14 @@ void test('managed output and stop stay attached to the selected task lease', { 
   const { runId } = start.value
   worker.send({
     case: 'ready',
-    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId, workspacePath: '/private/worker/workspace', toolsPort: 0 },
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
   })
   const agent = await opening
   const received: string[] = []
@@ -271,6 +379,48 @@ void test('managed output and stop stay attached to the selected task lease', { 
   await stopping
   await tunnelClosed
   deepEqual(received, ['Listening'])
+  ok(agent.startHelper !== undefined)
+  const helperId = 'proc_' + '8'.repeat(32)
+  const options = {
+    id: helperId,
+    directory: 'web app',
+    output: (bytes: Uint8Array) => {
+      received.push(Buffer.from(bytes).toString())
+    },
+  }
+  await rejects(agent.startHelper({ ...options, providerId: 'different' }), /cannot start the selected helper/i)
+  await rejects(
+    agent.startHelper({ ...options, providerId, skills: [{ path: 'SKILL.md', data: Buffer.from('Helper'), executable: false }] }),
+    /cannot start the selected helper/i,
+  )
+  const waitingHelper = agent.startHelper({ ...options, providerId })
+  const helperStart = await worker.read()
+  ok(helperStart?.case === 'helperStart' && helperStart.value.managed !== undefined)
+  equal(helperStart.value.managed.commandId, helperId)
+  equal(helperStart.value.providerId, providerId)
+  worker.send({ case: 'managedReady', value: helperStart.value.managed })
+  const helper = await waitingHelper
+  ok(helper.write !== undefined)
+  await helper.write(Buffer.from('helper ACP input'))
+  const helperInput = await worker.read()
+  ok(helperInput?.case === 'helperInput')
+  deepEqual(helperInput.value.managed, helperStart.value.managed)
+  equal(Buffer.from(helperInput.value.data).toString(), 'helper ACP input')
+  worker.send({
+    case: 'managedOutput',
+    value: { $typeName: 'althar.worker.v1.AgentManagedOutput', managed: helperStart.value.managed, data: Buffer.from('helper ACP output') },
+  })
+  worker.send({
+    case: 'managedExit',
+    value: {
+      $typeName: 'althar.worker.v1.AgentManagedExit',
+      managed: helperStart.value.managed,
+      outcome: AgentRunOutcome.EXITED,
+      exitCode: 0,
+    },
+  })
+  equal((await helper.exit).exitCode, 0)
+  deepEqual(received, ['Listening', 'helper ACP output'])
   unassign()
   await rejects(
     agent.startCommand({ id: 'proc_' + '7'.repeat(32), directory: '', command: 'true', output: () => undefined }),
@@ -303,7 +453,14 @@ void test('revocation withdraws the lease and leaves the in-flight stop unconfir
   ok(start?.case === 'start')
   worker.send({
     case: 'ready',
-    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId: start.value.runId, workspacePath: '/private/checkout', toolsPort: 0 },
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId: start.value.runId,
+      workspacePath: '/private/checkout',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
   })
   const agent = await pending
   equal(agent.ownsRun(), true)
@@ -339,7 +496,14 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
   const runId = start.value.runId
   worker.send({
     case: 'ready',
-    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId, workspacePath: '/private/checkout', toolsPort: 5001 },
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/checkout',
+      toolsPort: 5001,
+      skillsPath: '',
+      mcpCommands: [],
+    },
   })
   const agent = await pending
   const tunnel = worker.tools()
@@ -372,44 +536,54 @@ void test(
   async (t) => {
     const { root } = await fixture(t)
     const folder = join(root, 'project folder')
+    const other = join(root, 'other')
     mkdirSync(folder)
-    const child = spawn(
-      '/bin/sh',
-      [
-        '-c',
-        'cat | "$@"',
-        'setup-test',
-        native,
-        '--agent-unit-with-setup',
-        folder,
-        '1',
-        'printf staged > setup.log; printf setup-finished',
-        '/usr/bin/cat',
-      ],
-      { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] },
-    )
-    t.after(() => child.kill())
-    const stopped = once(child, 'exit')
-    const output = child.stdout[Symbol.asyncIterator]()
-    equal((await output.next()).value?.[0], 1)
-    const lease = Buffer.alloc(8)
-    lease.writeBigUInt64LE(process.hrtime.bigint() / 1_000_000n + 6000n)
-    child.stdin.write(lease)
-    let setup = Buffer.alloc(0)
-    while (setup.length < 2 || setup.length < setup.readUInt16LE(0) + 2) {
-      const chunk = await output.next()
-      ok(!chunk.done)
-      setup = Buffer.concat([setup, chunk.value])
+    mkdirSync(other)
+    const second = 'ws_' + '7'.repeat(32)
+    const firstCommand = 'printf staged > setup.log; printf setup-finished'
+    const secondCommand = 'printf second > setup.log; printf second-setup; exit 7'
+    for (const grouped of [false, true]) {
+      const setupArgs = grouped
+        ? ['--agent-unit-with-repository-setup', '2', workspaceId, folder, '1', firstCommand, second, other, '1', secondCommand]
+        : ['--agent-unit-with-setup', folder, '1', firstCommand]
+      const child = spawn('/bin/sh', ['-c', 'cat | "$@"', 'setup-test', native, ...setupArgs, '/usr/bin/cat'], {
+        cwd: root,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      t.after(() => child.kill())
+      const stopped = once(child, 'exit')
+      const output = child.stdout[Symbol.asyncIterator]()
+      equal((await output.next()).value?.[0], 1)
+      const lease = Buffer.alloc(8)
+      lease.writeBigUInt64LE(process.hrtime.bigint() / 1_000_000n + 6000n)
+      child.stdin.write(lease)
+      let setup = Buffer.alloc(0)
+      while (setup.length < 2 || setup.length < setup.readUInt16LE(0) + 2) {
+        const chunk = await output.next()
+        ok(!chunk.done)
+        setup = Buffer.concat([setup, chunk.value])
+      }
+      equal(setup.length, setup.readUInt16LE(0) + 2)
+      const result = fromBinary(AgentWorkspaceSetupResultSchema, setup.subarray(2))
+      if (grouped) {
+        deepEqual(
+          result.repositories.map(({ workspaceId, exitCode, outputTail }) => [workspaceId, exitCode, Buffer.from(outputTail).toString()]),
+          [
+            [workspaceId, 0, 'setup-finished'],
+            [second, 7, 'second-setup'],
+          ],
+        )
+        equal(readFileSync(join(other, 'setup.log'), 'utf8'), 'second')
+      } else {
+        equal(result.exitCode, 0)
+        equal(Buffer.from(result.outputTail).toString(), 'setup-finished')
+      }
+      equal(readFileSync(join(folder, 'setup.log'), 'utf8'), 'staged')
+      child.stdin.write(Buffer.from([1, 5, 0, 104, 101, 108, 108, 111]))
+      deepEqual((await output.next()).value, Buffer.from('hello'))
+      child.stdin.end()
+      deepEqual(await stopped, [243, null])
     }
-    equal(setup.length, setup.readUInt16LE(0) + 2)
-    const result = fromBinary(AgentWorkspaceSetupResultSchema, setup.subarray(2))
-    equal(result.exitCode, 0)
-    equal(Buffer.from(result.outputTail).toString(), 'setup-finished')
-    equal(readFileSync(join(folder, 'setup.log'), 'utf8'), 'staged')
-    child.stdin.write(Buffer.from([1, 5, 0, 104, 101, 108, 108, 111]))
-    deepEqual((await output.next()).value, Buffer.from('hello'))
-    child.stdin.end()
-    deepEqual(await stopped, [243, null])
   },
 )
 
@@ -440,7 +614,7 @@ void test(
 )
 
 void test(
-  'the native worker owns a systemd agent, moves ACP bytes, and accepts a new connection after stop',
+  'the native worker checks out one repository and a repository set under systemd',
   { timeout: 25_000, skip: process.platform !== 'linux' || process.env.ALTHAR_TEST_SYSTEMD !== '1' },
   async (t) => {
     const { root, pool, home, path } = await fixture(t)
@@ -472,9 +646,13 @@ void test(
       },
     }
     const provider = join(root, 'agent.sh')
-    writeFileSync(provider, '#!/bin/sh\nwhile IFS= read -r line; do printf \'%s\\n\' "$line" >> README.md; cat README.md; done\n', {
-      mode: 0o700,
-    })
+    writeFileSync(
+      provider,
+      '#!/bin/sh\nif [ -d api ]; then cd api; fi\nwhile IFS= read -r line; do printf \'%s\\n\' "$line" >> README.md; cat README.md; done\n',
+      {
+        mode: 0o700,
+      },
+    )
     const previewServer = join(root, 'preview.cjs')
     writeFileSync(
       previewServer,
@@ -496,7 +674,18 @@ void test(
       tools.closeAllConnections()
     })
     const config = join(root, 'agent-config')
-    writeFileSync(config, workspaces + '\n' + [projectId, providerId, provider].join('\t') + '\n', { mode: 0o600 })
+    const helperProvider = 'local-helper'
+    writeFileSync(
+      config,
+      [
+        workspaces,
+        [projectId, providerId, provider].join('\t'),
+        [projectId, helperProvider, '/usr/bin/cat'].join('\t'),
+        ['mcp', projectId, 'projectTools', '/usr/bin/cat'].join('\t'),
+        '',
+      ].join('\n'),
+      { mode: 0o600 },
+    )
     const child = spawn(
       native,
       [
@@ -523,30 +712,92 @@ void test(
       child.kill('SIGTERM')
       await done
     })
-    const open = async () => {
+    const webId = 'ws_' + '7'.repeat(32)
+    const open = async (grouped: boolean) => {
       for await (const _ of setInterval(30, undefined, { signal: AbortSignal.timeout(8000) })) {
         if (child.exitCode !== null) throw new Error(stderr)
         if (pool.list(projectId).some((slot) => !slot.busy))
           return pool.start(workerId, placement, {
-            checkout,
+            ...(grouped
+              ? {
+                  repositories: [
+                    { workspaceId, directory: 'api', checkout },
+                    { workspaceId: webId, directory: 'web', checkout },
+                  ],
+                }
+              : { checkout }),
             toolPort,
-            setup: { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
+            skills: [{ path: '.agents/skills/fixture/SKILL.md', data: Buffer.from('Worker skill'), executable: false }],
+            setup: grouped
+              ? {
+                  repositories: [
+                    { workspaceId, directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
+                    { workspaceId: webId, directory: '', commands: ['printf second-setup > web-setup.log; printf web-failed; exit 7'] },
+                  ],
+                }
+              : { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
           })
       }
       throw new Error(stderr || 'The native worker did not connect')
     }
 
-    for (const data of ['first agent', 'next agent']) {
-      const agent = await open()
+    for (const [data, grouped] of [
+      ['first agent', false],
+      ['next agent', true],
+    ] as const) {
+      const agent = await open(grouped)
+      const directory = grouped ? 'api' : ''
+      const leadCheckout = join(agent.workspacePath, directory)
+      deepEqual(agent.localMcp, [{ name: 'projectTools', executable: '/usr/bin/cat' }])
+      ok(agent.skillsPath !== undefined)
+      equal(readFileSync(join(agent.skillsPath, '.agents/skills/fixture/SKILL.md'), 'utf8'), 'Worker skill')
+      ok(!agent.skillsPath.startsWith(agent.workspacePath + '/'))
       ok(agent.workspacePath.startsWith(workspaces + '/'))
-      equal(agent.setup?.exitCode, 0)
-      equal(Buffer.from(agent.setup?.outputTail ?? []).toString(), 'ready')
-      equal(readFileSync(join(agent.workspacePath, 'setup.log'), 'utf8'), 'worker-setup')
+      const firstSetup = grouped ? agent.setup?.repositories.find((one) => one.workspaceId === workspaceId) : agent.setup
+      equal(firstSetup?.exitCode, 0)
+      equal(Buffer.from(firstSetup?.outputTail ?? []).toString(), 'ready')
+      equal(readFileSync(join(leadCheckout, 'setup.log'), 'utf8'), 'worker-setup')
       equal(existsSync(join(repo, 'setup.log')), false)
+      ok(agent.startHelper !== undefined)
+      let echoedHelper!: (bytes: Uint8Array) => void
+      const helperBytes = new Promise<Uint8Array>((resolve) => {
+        echoedHelper = resolve
+      })
+      const helper = await agent.startHelper({
+        id: 'proc_' + '9'.repeat(32),
+        directory,
+        providerId: helperProvider,
+        output: echoedHelper,
+        skills: [{ path: 'helper/SKILL.md', data: Buffer.from('Only for helper'), executable: false }],
+      })
+      ok(helper.skillsPath !== undefined)
+      equal(readFileSync(join(helper.skillsPath, 'helper/SKILL.md'), 'utf8'), 'Only for helper')
+      equal(existsSync(join(agent.skillsPath, 'helper/SKILL.md')), false)
+      ok(helper.write !== undefined)
+      await helper.write(Buffer.from('helper ACP across the same workspace'))
+      equal(Buffer.from(await helperBytes).toString(), 'helper ACP across the same workspace')
+      await helper.stop()
+      equal(existsSync(helper.skillsPath), false)
+      if (!grouped) {
+        const id = 'proc_' + 'c'.repeat(32)
+        let heard!: (bytes: Uint8Array) => void
+        const spoken = new Promise<Uint8Array>((resolve) => {
+          heard = resolve
+        })
+        const scratch = await agent.startHelper({ id, directory: '', providerId, output: heard, checkout })
+        ok(scratch.checkoutPath !== undefined && scratch.checkoutPath !== agent.workspacePath)
+        ok(scratch.write !== undefined)
+        await scratch.write(Buffer.from('A separate change\n'))
+        equal(Buffer.from(await spoken).toString(), 'Home source\nA separate change\n')
+        equal(readFileSync(join(leadCheckout, 'README.md'), 'utf8'), 'Home source\n')
+        ok(Buffer.from((await agent.readPatch(tree, head, id)).patch).includes('+A separate change'))
+        await scratch.stop()
+        await rejects(agent.readPatch(tree, head, id), /does not own/)
+      }
       const commandOutput: Buffer[] = []
       const build = await agent.startCommand({
         id: 'proc_' + 'a'.repeat(32),
-        directory: '',
+        directory,
         command: "cat setup.log; printf 'build failed' >&2; exit 7",
         output: (bytes) => commandOutput.push(Buffer.from(bytes)),
       })
@@ -554,11 +805,11 @@ void test(
       equal(Buffer.concat(commandOutput).toString(), 'worker-setupbuild failed')
       const service = await agent.startCommand({
         id: 'proc_' + 'b'.repeat(32),
-        directory: '',
+        directory,
         command: `${quote(process.execPath)} ${quote(previewServer)}`,
         output: () => undefined,
       })
-      const note = join(agent.workspacePath, 'preview.port')
+      const note = join(leadCheckout, 'preview.port')
       for await (const _ of setInterval(25, undefined, { signal: AbortSignal.timeout(5_000) })) {
         if (existsSync(note) && readFileSync(note, 'utf8') !== '') break
       }
@@ -574,14 +825,23 @@ void test(
       const echoed = once(agent.output, 'data', { signal: AbortSignal.timeout(8000) })
       await agent.write(Buffer.from(data + '\n'))
       deepEqual(await echoed, [Buffer.from('Home source\n' + data + '\n')])
-      const change = await agent.readPatch(tree, head)
+      const change = await agent.readPatch(tree, head, grouped ? workspaceId : undefined)
       ok(Buffer.from(change.patch).includes('+' + data))
+      if (grouped) {
+        equal(readFileSync(join(agent.workspacePath, 'web/README.md'), 'utf8'), 'Home source\n')
+        const secondSetup = agent.setup?.repositories.find((one) => one.workspaceId === webId)
+        equal(secondSetup?.exitCode, 7)
+        equal(Buffer.from(secondSetup?.outputTail ?? []).toString(), 'web-failed')
+        ok(Buffer.from((await agent.readPatch(tree, head, webId)).patch).includes('+second-setup'))
+        await rejects(agent.readPatch(tree, head, 'ws_' + '8'.repeat(32)), /does not own/)
+      }
       const response = await fetch('http://127.0.0.1:' + agent.toolPort + '/mcp', {
         headers: { Authorization: 'Bearer tool-token' },
         signal: AbortSignal.timeout(5000),
       })
       equal(await response.text(), 'home tools')
       equal((await agent.stop()).outcome, AgentRunOutcome.STOPPED)
+      equal(existsSync(agent.skillsPath), false)
     }
   },
 )

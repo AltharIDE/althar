@@ -172,9 +172,9 @@ choose its place again.
 
 | Capability | On the home today | On an enrolled worker today |
 | --- | --- | --- |
-| Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in a worktree for one repository |
-| Other roles | Coordinator, helpers, reviewers and pull request reviews | The home still runs them |
-| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker’s installed toolchain, provider account and project setup, with Althar’s built-in tools through the home |
+| Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in separate worktrees for up to eight repositories |
+| Other roles | Coordinator, helpers, reviewers and pull request reviews | Helpers can join the lead’s checkout or use a separate copy on the same worker. The home runs the coordinator and reviews. |
+| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker’s installed toolchain, provider account and project setup. Built-in and selected HTTP MCP tools connect through the home. Selected command-based MCP tools use executables registered on the worker. Codex and Claude leads and helpers can load selected skills. |
 | State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git changes, managed command output and private HTTP previews from the active task checkout |
 | Assignment | The task's own home | An available worker granted access to the project that advertises the lead's provider |
 

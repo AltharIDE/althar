@@ -21,7 +21,7 @@ import { addItem, updateItem } from './threads'
 import { Questions } from './Questions'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 import { taskWorker, type WorkerSetupOutcome } from './workerExecution'
-import type { WorkerSetup } from '@althar/worker-protocol/agent-runs'
+import type { WorkerSetupCommands } from '@althar/worker-protocol/agent-runs'
 
 /*
  * A task's worktree set up by Althar itself, outside any agent's sandbox,
@@ -279,7 +279,7 @@ interface Unset {
 }
 
 interface WorkerSetupPlan {
-  readonly spec?: WorkerSetup
+  readonly spec?: WorkerSetupCommands
   readonly record: (result: WorkerSetupOutcome | undefined) => Effect.Effect<void>
 }
 
@@ -825,11 +825,10 @@ export class Setups extends Context.Service<
               const recorded = recordedOf(workspace.recorded)
               const folder = workspace.within === null ? workspace.worktree : join(workspace.worktree, workspace.within)
               const found = workspace.kept ?? installIn(folder, workspace.worktree)
-              const commands = recorded?.commands ?? (found === null ? [] : [found])
-              const missing = recorded?.copy ?? []
-              if (commands.length === 0 && missing.length === 0) return
-              const command = recorded === null ? found : shownOf(recorded)
-              if (command === null) return
+              const setupPlan = recorded ?? (found === null ? undefined : { commands: [found], copy: [] })
+              if (setupPlan === undefined || (setupPlan.commands.length === 0 && setupPlan.copy.length === 0)) return
+              const { commands, copy: missing } = setupPlan
+              const command = shownOf(setupPlan)
               const startedAt = yield* timestamp
               return {
                 ...(commands.length === 0 ? {} : { spec: { commands, directory: (workspace.within ?? '').split(sep).join('/') } }),

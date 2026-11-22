@@ -33,6 +33,7 @@ import {
   type SentImage,
   type LineComment,
   workerProblem,
+  workerRepositoryLimit,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
@@ -1927,10 +1928,12 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              let repositoryLimit: number | undefined
               if (workerId !== undefined) {
                 const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
                 const message = aside ? 'This task stays on its home.' : workerProblem(worker, steps)
                 if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
+                repositoryLimit = workerRepositoryLimit(worker, steps)
               }
 
               const created = yield* projects.createTask({
@@ -1941,7 +1944,7 @@ export const handlers = apiLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                ...(workerId === undefined ? {} : { requireSingleRepository: true }),
+                ...(repositoryLimit === undefined ? {} : { workerRepositoryLimit: repositoryLimit }),
                 ...(taskId === undefined ? {} : { taskId }),
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.

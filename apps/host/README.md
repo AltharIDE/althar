@@ -264,6 +264,16 @@ Use a host, worker and Desktop built from the same revision for this flow. It su
 
 Althar runs the saved project setup in the worker’s task checkout and keeps the result in the thread. While that checkout is active, use the task’s **Run** menu to run a saved build, test or dev server there. The run has its own output and **Stop** button.
 
+A task can send up to eight repositories to the same worker. Althar runs setup and records Git changes separately for each repository. When a helper joins the lead’s changes, it can work in that same checkout if its provider is registered for the project on the worker. A scratch helper starts in its own copy on the worker. If its lead asked it to keep changes, the home keeps them on the helper's own Git ref so the lead can bring them in. The lead's checkout stays separate. Reviews run on the home.
+
+Codex and Claude leads and helpers can use the skills selected for them in Althar. HTTP MCP servers connect through the home, where their credentials stay. For a selected MCP server that starts as a local command, register an executable on the worker using the same server name. Give it its own local configuration and credentials. For example, add this line to `agents.conf` before starting the worker.
+
+```sh
+printf 'mcp\t%s\t%s\t%s\n' "$PROJECT_ID" projectTools /opt/althar-tools/project-tools >> "$worker_data/agents.conf"
+```
+
+The executable can be a wrapper for a locally installed server. Keep it outside the worker’s workspaces. The thread names selected servers that are unavailable.
+
 Bind a dev server to `localhost`, `127.0.0.1` or `::1` on the worker and have it print its HTTP address. Choose **Worker preview** when the run shows it. The page opens in a private Althar window through the home. This preview reads HTTP pages and assets and closes its connection when the run stops.
 
 The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.

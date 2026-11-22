@@ -12,9 +12,13 @@ mod agent_preview;
 #[cfg(target_os = "linux")]
 mod agent_setup;
 #[cfg(target_os = "linux")]
+mod agent_skills;
+#[cfg(target_os = "linux")]
 mod agent_tools;
 #[cfg(target_os = "linux")]
 mod agent_workspace;
+#[cfg(target_os = "linux")]
+mod agent_workspace_set;
 #[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;

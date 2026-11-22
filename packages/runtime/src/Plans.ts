@@ -337,7 +337,9 @@ export class Plans extends Context.Service<
             readOnly: parameters.reads === true,
           })
           const worker = config.workers?.list(plan.projectId).find((one) => one.workerId === workerId)
-          const message = workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ?? workerProblem(worker, parameters.steps)
+          const message =
+            workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ??
+            workerProblem(worker, parameters.steps, requirements.repositoryCount)
           if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
           return { parameters: JSON.stringify({ ...parameters, workerId }) }
         })

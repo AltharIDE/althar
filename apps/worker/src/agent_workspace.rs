@@ -12,7 +12,7 @@ use tokio::process::Command;
 
 use crate::wire::AgentWorkspaceSource;
 
-const MAX_BUNDLE_BYTES: u32 = 128 * 1024 * 1024;
+pub(crate) const MAX_BUNDLE_BYTES: u32 = 128 * 1024 * 1024;
 const SNAPSHOT_REF: &str = "refs/althar/worker-snapshot";
 
 fn invalid(message: &'static str) -> io::Error {
@@ -27,7 +27,7 @@ pub(crate) struct WorkspaceTransfer {
     remaining: u32,
 }
 
-fn private_directory(path: &Path) -> io::Result<()> {
+pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
     DirBuilder::new().mode(0o700).create(path)
 }
 
@@ -418,6 +418,7 @@ pub(crate) async fn workspace_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{agent_workspace_set::WorkspaceSet, wire::AgentWorkspaceRepository};
 
     #[tokio::test]
     async fn stages_an_authenticated_bundle_and_exports_worker_commits_and_dirty_files()
@@ -464,6 +465,53 @@ mod tests {
             head: head.clone(),
             sha256: ring::digest::digest(&SHA256, &bytes).as_ref().to_vec(),
         };
+        let primary = format!("ws_{}", "1".repeat(32));
+        let second = format!("ws_{}", "2".repeat(32));
+        let entries = [
+            AgentWorkspaceRepository {
+                workspace_id: primary.clone(),
+                directory: "api".into(),
+                source: Some(specification.clone()),
+            },
+            AgentWorkspaceRepository {
+                workspace_id: second.clone(),
+                directory: "web".into(),
+                source: Some(specification.clone()),
+            },
+        ];
+        let grouped = fixture.path().join("project").join("grouped");
+        {
+            let plan = WorkspaceSet::new(grouped.clone(), "bad-group", &primary, &entries)?;
+            let mut transfers = plan.uploads(&entries)?.into_iter();
+            let (mut first, spec) = transfers
+                .next()
+                .ok_or_else(|| invalid("Missing first repo"))?;
+            first.put(&bytes)?;
+            first.install(spec).await?;
+            let (mut wrong, spec) = transfers
+                .next()
+                .ok_or_else(|| invalid("Missing second repo"))?;
+            wrong.put(&vec![0; bytes.len()])?;
+            assert!(wrong.install(spec).await.is_err());
+            assert!(!grouped.exists());
+        }
+        let plan = WorkspaceSet::new(grouped.clone(), "good-group", &primary, &entries)?;
+        for (mut transfer, spec) in plan.uploads(&entries)? {
+            transfer.put(&bytes)?;
+            transfer.install(spec).await?;
+            assert!(!grouped.exists());
+        }
+        let workspace = plan.publish()?;
+        assert_eq!(
+            workspace.checkout(&primary),
+            Some(grouped.join("api").as_path())
+        );
+        assert_eq!(
+            workspace.checkout(&second),
+            Some(grouped.join("web").as_path())
+        );
+        assert!(workspace.checkout("").is_none());
+        assert_eq!(fs::read_to_string(grouped.join("web/README.md"))?, "Home\n");
         let destination = fixture.path().join("project").join("attempt");
         let mut bad_transfer =
             WorkspaceTransfer::create(destination.clone(), "bad", &specification)?;

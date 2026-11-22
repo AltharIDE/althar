@@ -154,6 +154,7 @@ export interface TaskThread {
     readonly change: string | null
     /** In a copy of its own, not the change's worktree; `writes`, what it changes there kept as a commit for its lead. */
     readonly copy?: boolean
+    readonly copyOf?: string
     readonly writes?: boolean
   }
 }
