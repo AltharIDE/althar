@@ -2,7 +2,7 @@ import { chmod, mkdir, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { DiagnosticOutcome, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
+import { AgentRunOutcome, DiagnosticOutcome, type AgentRunExit, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
 import { describe, expect, it } from 'vitest'
 
 import { openWorkerStore } from '../src/workerStore'
@@ -21,6 +21,50 @@ const result = (attemptId: string, fence: string, outcome: DiagnosticOutcome = D
 })
 
 describe('the private worker ledger', () => {
+  it('fences agent placement across store restarts until the original worker confirms its stop', async () => {
+    const profile = temporary()
+    const first = await openWorkerStore(profile, homeId)
+    const run = {
+      runId: `war_${'3'.repeat(32)}`,
+      projectId: `proj_${'4'.repeat(32)}`,
+      workspaceId: `ws_${'5'.repeat(32)}`,
+      providerId: 'codex',
+    }
+    const worker = first.enroll(fingerprint)
+    const other = first.enroll(otherFingerprint)
+    const journal = `wjn_${'6'.repeat(32)}`
+    const otherJournal = `wjn_${'7'.repeat(32)}`
+    try {
+      expect(first.agents.begin(worker, run)).toBe(false)
+      expect(first.agents.bind(worker, journal)).toBe(true)
+      expect(first.agents.bind(other, otherJournal)).toBe(true)
+      expect(first.agents.begin(worker, run)).toBe(false)
+      expect(first.enroll(fingerprint, run.projectId)).toBe(worker)
+      expect(first.enroll(otherFingerprint, run.projectId)).toBe(other)
+      expect(first.agents.permits(worker, run.projectId)).toBe(true)
+      expect(first.agents.begin(worker, run)).toBe(true)
+      expect(() => first.enqueue(worker)).toThrow('no outstanding')
+    } finally {
+      first.close()
+    }
+    const reopened = await openWorkerStore(profile, homeId)
+    try {
+      expect(reopened.agents.outstanding(worker)).toEqual(run)
+      expect(reopened.agents.bind(worker, `wjn_${'8'.repeat(32)}`)).toBe(false)
+      expect(reopened.agents.bind(worker, journal)).toBe(true)
+      const replaced = { ...run, runId: `war_${'9'.repeat(32)}` }
+      expect(reopened.agents.begin(other, replaced)).toBe(false)
+      const stopped: AgentRunExit = { $typeName: 'althar.worker.v1.AgentRunExit', runId: run.runId, outcome: AgentRunOutcome.STOPPED }
+      expect(reopened.agents.finish(other, stopped)).toBe(false)
+      expect(reopened.agents.finish(worker, { ...stopped, outcome: AgentRunOutcome.UNCONFIRMED })).toBe(false)
+      expect(reopened.agents.finish(worker, stopped)).toBe(true)
+      expect(reopened.agents.outstanding(worker)).toBeUndefined()
+      expect(reopened.agents.begin(other, replaced)).toBe(true)
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('requires a current enrollment and records exactly one grant across concurrent store handles', async () => {
     const profile = temporary()
     let clock = 1000

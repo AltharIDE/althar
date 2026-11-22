@@ -1,13 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { Readable, Writable } from 'node:stream'
+import { once } from 'node:events'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, type ThreadSnapshot } from '@althar/contracts'
 import { agents as registry } from '@althar/provider-adapters'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -18,7 +20,7 @@ import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
 import { Folders } from '../src/Folders'
 import { Secrets } from '../src/Secrets'
 
-import { fakeAgents, fakeConnectors, ROOMY } from './support'
+import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
 /*
  * More of the API, as the app's window has it: an agent Althar can download
@@ -28,7 +30,14 @@ import { fakeAgents, fakeConnectors, ROOMY } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
-const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly editors?: RuntimeOptions['editors'] } = {}) =>
+const connected = (
+  options: {
+    readonly agents?: Layer.Layer<Agents>
+    readonly editors?: RuntimeOptions['editors']
+    readonly workers?: RuntimeOptions['workers']
+    readonly countdown?: Duration.Duration
+  } = {},
+) =>
   Effect.gen(function* () {
     const channel = new MessageChannel()
     yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
@@ -45,6 +54,8 @@ const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly ed
         agentsRoot: mkdtempSync(join(tmpdir(), 'althar-agents-')),
         busy: { machine: ROOMY },
         checksAppear: Duration.zero,
+        ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
+        ...(options.workers === undefined ? {} : { workers: options.workers }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
@@ -239,6 +250,149 @@ describe('the coordinator’s question, through the API', () => {
         assert.isTrue(
           answered.items.some((item) => item.kind === 'agent_message' && item.content.text.includes(fields[0]?.options[0]?.value ?? '?')),
         )
+      }),
+    ),
+  )
+})
+
+describe('a normal task assigned to a worker', () => {
+  it.live('projects the held plan’s requirements and rechecks the selected worker at Start', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '6'.repeat(32)
+        const { client, grant } = yield* connected({
+          countdown: Duration.minutes(5),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true }],
+            open: () => Effect.die('A busy worker must not start again'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        assert.isTrue(item?.kind === 'task')
+        const plan = item?.kind === 'task' ? item.content.plan : null
+        assert.deepStrictEqual(plan?.workerRequirements, { repositoryCount: 1, homeOnly: false, readOnly: false })
+        const planId = plan?.id ?? ''
+        yield* client.HoldPlan({ commandId: commandId(), planId })
+        const rejected = yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId, workerId }))
+        assert.strictEqual(rejected.message, 'This worker is already running a task.')
+        const held = (yield* thread).items.find((one) => one.kind === 'task')
+        assert.strictEqual(held?.kind === 'task' ? held.content.phase : null, 'held')
+      }),
+    ),
+  )
+
+  it.live('refuses unsupported worker starts before creating a task', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '5'.repeat(32)
+        let opened = 0
+        const { client, grant } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['codex'], busy: false }],
+            open: () => Effect.sync(() => ++opened).pipe(Effect.andThen(Effect.die('A refused task must not open a worker'))),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folderWith(['api', 'web'])) })
+        const request = {
+          projectId: project.id,
+          workerId,
+          title: 'Test placement',
+          steps: [{ key: 'implement' as const, agentId: 'codex', model: null, skipped: false }],
+        }
+        const refused = (changes: Partial<Pick<typeof request, 'steps'>> & { repositories?: string[]; chat?: boolean }) =>
+          Effect.flip(client.StartTask({ ...request, ...changes, commandId: commandId() })).pipe(Effect.map((error) => error.message))
+        assert.strictEqual(yield* refused({ repositories: ['api', 'web'] }), 'A worker needs a task with one repository.')
+        assert.strictEqual(yield* refused({ chat: true }), 'This task stays on its home.')
+        assert.strictEqual(
+          yield* refused({ repositories: ['api'], steps: [{ ...request.steps[0]!, agentId: 'claude-code' }] }),
+          'This worker does not have the lead’s agent.',
+        )
+        assert.lengthOf((yield* client.ListTasks({ projectId: project.id })).tasks, 0)
+        assert.strictEqual(opened, 0)
+      }),
+    ),
+  )
+
+  it.live('starts its lead in the worker checkout and lands its edits before the task sees the turn finish', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '4'.repeat(32)
+        const workerPath = repository()
+        let expectedProject: string | undefined
+        const placed: Array<{ workspace: string; site: string }> = []
+        const { client, grant } = yield* connected({
+          workers: {
+            list: (projectId) => (projectId === expectedProject ? [{ workerId, providers: ['codex'], busy: false }] : []),
+            open: (request) =>
+              Effect.gen(function* () {
+                placed.push({ workspace: request.workspaceId, site: request.worktree })
+                const child = spawn('bun', [fakeAgentMain], { cwd: workerPath, stdio: ['pipe', 'pipe', 'ignore'] })
+                const exited = once(child, 'exit')
+                const stop = Effect.promise(async () => {
+                  if (child.exitCode === null && child.signalCode === null) child.kill()
+                  await exited
+                })
+                yield* Effect.addFinalizer(() => stop)
+                return {
+                  transport: {
+                    _tag: 'Remote' as const,
+                    stdin: Writable.toWeb(child.stdin),
+                    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+                    exited: Effect.promise(() =>
+                      exited.then(([code, signal]) => ({ code: code as number | null, signal: signal as string | null })),
+                    ),
+                    stop,
+                  },
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  checkpoint: Effect.sync(() => {
+                    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workerPath }).toString().trim()
+                    const home = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: request.worktree }).toString().trim()
+                    if (head === home) return
+                    execFileSync('git', ['-c', 'protocol.file.allow=always', 'fetch', '--no-tags', workerPath, head], {
+                      cwd: request.worktree,
+                      stdio: 'ignore',
+                    })
+                    execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: request.worktree, stdio: 'ignore' })
+                  }),
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        expectedProject = project.id
+        assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), [
+          { workerId, providers: ['codex'], busy: false },
+        ])
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          workerId,
+          title: 'Work on the worker',
+          description: '[lead:edit] [lead:finish]',
+          end: 'ready',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        })
+        const snapshot = yield* until(
+          client.GetThread({ threadId: task.threadId, fresh: true }),
+          (view) =>
+            view.task.files.some((file) => file.path === 'change.txt') &&
+            view.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+        )
+        assert.lengthOf(placed, 1)
+        assert.strictEqual(snapshot.task.worktree, placed[0]?.site)
+        assert.isTrue(existsSync(join(workerPath, 'change.txt')))
       }),
     ),
   )

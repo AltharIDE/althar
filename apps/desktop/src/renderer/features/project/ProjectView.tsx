@@ -404,11 +404,18 @@ export function ProjectView({
   }, [togglePane, footShown, setFootShown])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
-  // What was said in every conversation, for the bar's search: read as it opens (the finder's catalog, kept a moment), the
-  // titles being found at once without it.
-  const [asideSearching, setAsideSearching] = useState(false)
+  // Titles already in the bar are found at once. Only matching passages in
+  // this project come back from the store as the person types.
+  const [asideSearch, setAsideSearch] = useState('')
   const catalogClient = useServices().client
-  const said = useQuery({ ...catalogRead(catalogClient), enabled: asideSearching }).data
+  const asideWords = asideSearch.trim()
+  const said = useQuery(
+    catalogRead(
+      catalogClient,
+      { text: asideWords, kinds: ['said'], ...(about === null ? {} : { projectId: about }) },
+      about !== null && asideWords !== '',
+    ),
+  ).data?.documents
   const passages = useMemo(() => (said === undefined ? undefined : passagesOf(said, about)), [said, about])
   const draftOf = draftKey.coordinator(about ?? '')
   // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the project again.
@@ -622,7 +629,8 @@ export function ProjectView({
     ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
-    onStart: (planId) => void model.startPlan(planId),
+    workers: model.workers,
+    onStart: (planId, workerId) => model.startPlan(planId, workerId),
     onHold: (planId) => void model.holdPlan(planId),
     onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
     onReopen: (taskId) => void model.reopenTask(taskId),
@@ -1083,7 +1091,7 @@ export function ProjectView({
                             board={seen?.tasks ?? []}
                             now={Date.parse(now)}
                             passages={passages}
-                            onSearching={setAsideSearching}
+                            onSearch={setAsideSearch}
                           />
                         )}
                       </Now>
@@ -1245,7 +1253,9 @@ export function ProjectView({
                           {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                           team={{
                             projectId,
-                            start: (planId) => model.startPlan(planId),
+                            start: async (planId) => {
+                              await model.startPlan(planId)
+                            },
                             hold: (planId) => model.holdPlan(planId),
                             change: setTeamFor,
                           }}

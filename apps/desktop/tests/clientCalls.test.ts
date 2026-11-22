@@ -95,13 +95,21 @@ describe('what the client sends', () => {
     expect((await sent(heard, client.openProject('grant_1'))).payload).toEqual({ grant: 'grant_1' })
   })
 
-  it('reads the home since when it was last left, or all of it', async () => {
+  it('reads saved cards for the board and home, with a date for home where given', async () => {
     const { client, heard } = await standIn()
+    expect(await sent(heard, client.getBoard('p1'))).toEqual({ tag: 'GetBoard', payload: { projectId: 'p1', cached: true } })
     expect(await sent(heard, client.getHome('2026-10-06T18:00:00.000Z'))).toEqual({
       tag: 'GetHome',
-      payload: { since: '2026-10-06T18:00:00.000Z' },
+      payload: { since: '2026-10-06T18:00:00.000Z', cached: true },
     })
-    expect((await sent(heard, client.getHome())).payload).toEqual({})
+    expect((await sent(heard, client.getHome())).payload).toEqual({ cached: true })
+  })
+
+  it('sends a bounded search or the requested page of the older catalog', async () => {
+    const { client, heard } = await standIn()
+    const search = { text: 'retry', projectId: 'p1', kinds: ['said'] as const }
+    expect(await sent(heard, client.getSearchDocuments(undefined, search))).toEqual({ tag: 'GetSearchDocuments', payload: { search } })
+    expect(await sent(heard, client.getSearchDocuments('next'))).toEqual({ tag: 'GetSearchDocuments', payload: { after: 'next' } })
   })
 
   it('changes a plan’s steps, and how it ends where that was changed too', async () => {

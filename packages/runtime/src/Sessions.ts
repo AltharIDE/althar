@@ -1,3 +1,4 @@
+import { type GoalLead, endGoalRound, goalLaunchChoice, pauseGoal, runnableGoal } from './threadGoals'
 import type { MessageSender, SentCanvasComment, UndoTurnResult } from '@althar/contracts'
 import { type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import { Commands, bumpRevision } from '@althar/persistence-sqlite'
@@ -241,6 +242,9 @@ export class Sessions extends Context.Service<
     }): Effect.Effect<'later' | 'same', NoSession | Failure>
     /** Explicitly resumes retained input after a failed turn or a usage reset; an ordinary input-batch wake does not retry failures. */
     wake(threadId: string): Effect.Effect<void>
+    kickGoal(threadId: string, revision: number, lead?: GoalLead): Effect.Effect<void>
+    cancelGoalRound(threadId: string, turnId: string): Effect.Effect<void>
+    readonly recoverGoals: Effect.Effect<void>
     /** Starts the startup snapshot once Runtime has installed turn gates, recording hooks and tools. */
     readonly recoverQueued: Effect.Effect<void>
     /**
@@ -290,7 +294,7 @@ export class Sessions extends Context.Service<
       readonly byPerson?: boolean
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
-    interrupt(threadId: string, by?: 'person'): Effect.Effect<void, NoSession>
+    interrupt(threadId: string, by?: 'person', background?: boolean): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
     /** Stops a command the thread's session left running; it goes from the list. Nothing, where the session or the command is gone already. */
@@ -1178,6 +1182,7 @@ export class Sessions extends Context.Service<
           /** The agent accepted or refused this choice; clearing for a takeover has not resolved it yet. */
           readonly resolved?: true
           readonly onlyIfEmpty?: true
+          readonly goalRevision?: number
         },
       ) =>
         Effect.gen(function* () {
@@ -1187,6 +1192,8 @@ export class Sessions extends Context.Service<
               if (running.stopping || threads.get(running.thread.threadId) !== running) return false
               if (options?.after !== undefined && running.nextLead !== options.after) return false
               if (options?.onlyIfEmpty === true && running.nextLead !== undefined) return false
+              if (options?.goalRevision !== undefined && (yield* runnableGoal(running.thread.threadId))?.revision !== options.goalRevision)
+                return false
               if (options?.choice === undefined && options?.resolved !== true && running.nextLead === next) return true
               const [session] = yield* sql<{ revision: number }>`SELECT revision FROM provider_sessions WHERE id = ${running.sessionId}`
               if (session === undefined) return yield* new NoSession({ threadId: running.thread.threadId })
@@ -1443,6 +1450,7 @@ export class Sessions extends Context.Service<
         readonly effort?: string
         readonly accountId?: string
         readonly recovering?: string
+        readonly goalRevision?: number
         /** Who it stands in for, as the session it starts again after did. */
         readonly standsIn?: StandIn
       }) =>
@@ -1462,6 +1470,15 @@ export class Sessions extends Context.Service<
               )
             )
               return input.recovering
+            const goalStillActive = Effect.gen(function* () {
+              if (input.goalRevision !== undefined && (yield* runnableGoal(input.threadId))?.revision !== input.goalRevision)
+                return yield* new SessionFailed({
+                  agentId: input.agentId,
+                  reason: 'The goal changed before the lead started.',
+                  summary: 'The goal changed before the lead started.',
+                })
+            })
+            yield* goalStillActive
             yield* inLiveProject(input.threadId)
             yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
@@ -1503,6 +1520,7 @@ export class Sessions extends Context.Service<
             )
             // Every session starts from a brief (ADR-005), even the first on a task.
             const brief = yield* (briefing === undefined ? briefFor(thread, { kind: 'start' }) : Fiber.join(briefing)).pipe(
+              Effect.tap(() => goalStillActive),
               beforeTakingOver(connected),
             )
             return yield* activate(
@@ -1510,6 +1528,7 @@ export class Sessions extends Context.Service<
               {
                 text: brief,
                 closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
+                ...(input.goalRevision === undefined ? {} : { onlyForGoal: true }),
               },
               blocked,
             )
@@ -2077,7 +2096,7 @@ export class Sessions extends Context.Service<
         ),
       )
 
-      const startLast = (threadId: string, recovering?: string) =>
+      const startLast = (threadId: string, recovering?: string, goalRevision?: number) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [last] = yield* sql<{
@@ -2127,6 +2146,7 @@ export class Sessions extends Context.Service<
               threadId,
               agentId: standing.agentId,
               ...(recovering === undefined ? {} : { recovering }),
+              ...(goalRevision === undefined ? {} : { goalRevision }),
               ...(standing.model === null ? {} : { model: standing.model }),
               ...(standing.effort === null ? {} : { effort: standing.effort }),
             })
@@ -2147,12 +2167,72 @@ export class Sessions extends Context.Service<
             threadId,
             agentId: on.agentId,
             ...(recovering === undefined ? {} : { recovering }),
+            ...(goalRevision === undefined ? {} : { goalRevision }),
             ...(on.model === null ? {} : { model: on.model }),
             ...(on.effort == null ? {} : { effort: on.effort }),
             ...(standing === undefined ? {} : { standsIn: standing }),
           })
           return true
         })
+
+      const wakeGoal = (running: Running, revision: number, lead?: GoalLead) =>
+        Effect.gen(function* () {
+          const { threadId } = running.thread
+          if (running.stopping || (yield* runnableGoal(threadId))?.revision !== revision) return
+          if (running.deliveryHeld === 'transient' && running.heldTurn !== undefined) {
+            const sql = yield* SqlClient.SqlClient
+            const [held] = yield* sql<{ goalRound: number }>`SELECT goal_round FROM turn_deliveries WHERE id = ${running.heldTurn}`
+            if (held?.goalRound === 1 && (yield* runnableGoal(threadId))?.revision === revision) running.deliveryHeld = null
+          }
+          if (lead !== undefined && (running.entry.definition.id !== lead.agentId || lead.model !== undefined || lead.effort !== undefined))
+            yield* setLeadChoice(running, lead, {
+              goalRevision: revision,
+              choice: { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null },
+            })
+          yield* Queue.offer(running.wake, undefined)
+        })
+
+      const kickGoal = (threadId: string, revision: number, lead?: GoalLead) =>
+        Effect.gen(function* () {
+          const goal = yield* runnableGoal(threadId)
+          if (goal?.revision !== revision) return
+          if (goal.rounds >= goal.roundLimit) return yield* endGoalRound(threadId, revision, null)
+          const running = threads.get(threadId)
+          if (running !== undefined) return yield* wakeGoal(running, revision, lead)
+          if (lead !== undefined) yield* start({ threadId, goalRevision: revision, ...lead })
+          else if (!(yield* startLast(threadId, undefined, revision))) {
+            const saved = yield* goalLaunchChoice(threadId)
+            if (saved === undefined) yield* endGoalRound(threadId, revision, 'Choose a lead, then resume the goal.')
+            else yield* start({ threadId, goalRevision: revision, ...saved })
+          }
+        }).pipe(
+          Effect.catchTag('SessionRunning', () =>
+            Effect.suspend(() => {
+              const running = threads.get(threadId)
+              return running === undefined ? Effect.void : wakeGoal(running, revision, lead)
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              if (threads.has(threadId) || (yield* runnableGoal(threadId))?.revision !== revision) return
+              yield* Effect.logWarning('Could not start the goal’s lead', cause)
+              yield* endGoalRound(threadId, revision, 'The lead could not start. Check its connection and resume the goal.')
+            }).pipe(Effect.ignore),
+          ),
+        )
+
+      const recoverGoals = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const active = yield* sql<{ threadId: string; revision: number }>`
+          SELECT g.thread_id, g.generation AS revision FROM thread_goals g
+          JOIN threads t ON t.id = g.thread_id
+          WHERE g.status = 'active'
+            AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state = 'running')`
+        yield* Effect.forkIn(
+          run(Effect.forEach(active, (goal) => kickGoal(goal.threadId, goal.revision), { discard: true })),
+          sessionsScope,
+        )
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not recover goals', cause)))
 
       let recovering = false
       const recoverQueued = Effect.suspend(() => {
@@ -2251,6 +2331,28 @@ export class Sessions extends Context.Service<
         })
 
       return Sessions.of({
+        recoverGoals: run(recoverGoals),
+        kickGoal: (threadId, revision, lead) => Effect.asVoid(Effect.forkIn(run(kickGoal(threadId, revision, lead)), sessionsScope)),
+        cancelGoalRound: (threadId, turnId) =>
+          Effect.asVoid(
+            Effect.forkIn(
+              Effect.suspend(() => {
+                const running = threads.get(threadId)
+                if (running?.goalRoundTurn !== turnId || running.promptSent === null) return Effect.void
+                return Deferred.await(running.promptSent).pipe(
+                  Effect.timeoutOption(Duration.seconds(5)),
+                  Effect.andThen(
+                    Effect.suspend(() =>
+                      running.goalRoundTurn === turnId && threads.get(threadId) === running
+                        ? Effect.ignore(running.agent.interrupt)
+                        : Effect.void,
+                    ),
+                  ),
+                )
+              }),
+              sessionsScope,
+            ),
+          ),
         recoverQueued,
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
@@ -2331,6 +2433,7 @@ export class Sessions extends Context.Service<
                   undoing.set(item.threadId, gate)
                   return yield* Effect.gen(function* () {
                     if (running !== undefined) yield* stopRunning(running, { state: 'completed', reason: 'stopped' })
+                    yield* pauseGoal(item.threadId, 'The conversation was undone. Check the work before resuming.')
                     yield* recoverTurnUndo(item.threadId)
                     return yield* undoConversation(input)
                   }).pipe(
@@ -2480,7 +2583,7 @@ export class Sessions extends Context.Service<
             const running = threads.get(threadId)
             if (running !== undefined) running.moved = true
           }),
-        interrupt: (threadId, by) =>
+        interrupt: (threadId, by, background = false) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
             if (running === undefined) return Effect.fail(new NoSession({ threadId }))
@@ -2489,11 +2592,22 @@ export class Sessions extends Context.Service<
             // Asked to stop before the prompt has reached the agent, there is nothing to cancel yet: the agent would take
             // the stop for the turn before this one, or lose it, while its prompt goes on. Wait until it has the prompt.
             const sent = running.promptSent
-            return (sent === null ? Effect.void : Deferred.await(sent)).pipe(
+            const wasRunning = running.turnRunning
+            const cancel = (sent === null ? Effect.void : Deferred.await(sent)).pipe(
               // A stop never waits longer than a turn's start would: a prompt that never went out has nothing to cancel.
               Effect.timeoutOption(Duration.seconds(5)),
-              Effect.andThen(Effect.ignore(running.agent.interrupt)),
+              Effect.flatMap((ready) =>
+                Effect.suspend(() =>
+                  Option.isSome(ready) &&
+                  threads.get(threadId) === running &&
+                  running.promptSent === sent &&
+                  running.turnRunning === wasRunning
+                    ? Effect.ignore(running.agent.interrupt)
+                    : Effect.void,
+                ),
+              ),
             )
+            return background ? Effect.asVoid(Effect.forkIn(cancel, running.scope)) : cancel
           }),
         stop: (threadId) =>
           exclusive(

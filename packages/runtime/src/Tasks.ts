@@ -1,3 +1,4 @@
+import { pauseTaskGoal } from './threadGoals'
 import {
   type CommandEnvelope,
   Ids,
@@ -366,6 +367,7 @@ export class Tasks extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const standing = yield* standingOf(input.taskId)
+          yield* pauseTaskGoal(input.taskId)
           if (!actionsOf(standing).includes('stop')) return
           // Suspended first, so no step takes its agents stopping as one going.
           yield* sql.withTransaction(suspend(input.taskId, input.envelope, 'stopped'))
@@ -424,6 +426,7 @@ export class Tasks extends Context.Service<
             })
             yield* touchQuestion(call.id)
           }
+          yield* pauseTaskGoal(taskId)
           yield* suspend(taskId, envelope, why)
         })
 

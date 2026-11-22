@@ -29,6 +29,7 @@ const OWN = [
   'read_checks',
   'read_gallery',
   'record_setup',
+  'report_goal',
   'run_it',
   'start_helper',
   'stop_helper',

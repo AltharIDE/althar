@@ -2,6 +2,7 @@
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Send + Sync>> {
     use althar_worker::{
+        agent::{AgentConfig, run_agent_unit, watch_agent_slot},
         diagnostic::{DiagnosticJournal, read_credentials, run_worker_once},
         grpc::WorkerEnrollment,
         project::{ProjectConfig, run_unit},
@@ -9,12 +10,17 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     };
     use std::{env, io, path::Path, process::ExitCode, time::Duration};
 
-    const USAGE: &str = "Usage: althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file>] [--watch]";
+    const USAGE: &str = "Usage: althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file> | --agent-config <private-file>] [--watch]";
     let raw = env::args_os().skip(1).collect::<Vec<_>>();
     if let [flag, executable, args @ ..] = raw.as_slice()
         && flag == "--project-unit"
     {
         return Ok(run_unit(Path::new(executable), args).await?);
+    }
+    if let [flag, executable, args @ ..] = raw.as_slice()
+        && flag == "--agent-unit"
+    {
+        return Ok(run_agent_unit(Path::new(executable), args).await?);
     }
     let args = raw
         .into_iter()
@@ -32,6 +38,7 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     };
     let mut relay_files = None;
     let mut project = None;
+    let mut agents = None;
     let mut watch = false;
     let mut options = &args[7..];
     loop {
@@ -49,12 +56,19 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
                 project = Some(ProjectConfig::read(Path::new(path))?);
                 rest
             }
+            [flag, path, rest @ ..] if flag == "--agent-config" && agents.is_none() => {
+                agents = Some(AgentConfig::read(Path::new(path))?);
+                rest
+            }
             [flag, rest @ ..] if flag == "--watch" && !watch => {
                 watch = true;
                 rest
             }
             _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into()),
         };
+    }
+    if agents.is_some() && (!watch || project.is_some()) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into());
     }
     let relay = relay_files
         .as_ref()
@@ -105,7 +119,15 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     let work = async {
         let mut failures = 0u32;
         loop {
-            let delay = match run().await {
+            let result = match &agents {
+                Some(config) => {
+                    watch_agent_slot(address, &enrollment, relay.as_ref(), config, &journal)
+                        .await
+                        .map(|()| None)
+                }
+                None => run().await,
+            };
+            let delay = match result {
                 Ok(Some(result)) => {
                     failures = 0;
                     print_result(result);
@@ -113,7 +135,11 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
                 }
                 Ok(None) => {
                     failures = 0;
-                    Duration::from_secs(1)
+                    if agents.is_some() {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs(1)
+                    }
                 }
                 Err(error) => {
                     let seconds = 2u64.pow(failures.min(5)).min(30);

@@ -1,3 +1,4 @@
+import { readGoal } from './threadGoals'
 import { createHash } from 'node:crypto'
 import { type CheckoutAnswer, type MessageSender, PLANS_AND_REVIEWS, ShipRoute } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, type ProjectId, newId, taskLifecycle, transition } from '@althar/domain'
@@ -1699,6 +1700,14 @@ export class Runs extends Context.Service<
             )
               yield* releaseExternalOn(event.threadId, 'lead_stopped')
             else return
+          }
+          if (event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined) {
+            const [turn] = yield* sql<{ goalRevision: number | null }>`SELECT goal_revision FROM turn_deliveries WHERE id = ${event.turnId}`
+            if (turn?.goalRevision != null) {
+              const goal = yield* readGoal(event.threadId)
+              // The goal's scheduler owns continuation. Its limit or blocker is shown on the goal itself.
+              if (goal !== null && goal.status !== 'complete') return
+            }
           }
           // A lead whose last message only points back at what folded says it again first: its next turn is what's read.
           if (
