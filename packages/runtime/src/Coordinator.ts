@@ -289,6 +289,12 @@ const Started = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
   ...Where,
 })
+/* Something to look at, made as an artifact with its own chat (ADR-104, "Talking to an artifact"): what it is, what to draw, who draws it. */
+const ArtifactAsked = Schema.Struct({
+  title: Schema.String,
+  request: Schema.String,
+  lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
+})
 /* A pull request to review, by its link or number, and the model that reviews it. */
 const ToReview = Schema.Struct({
   pull_request: Schema.Union([Schema.String, Schema.Number]),
@@ -1406,6 +1412,45 @@ export class Coordinator extends Context.Service<
             return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
           }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
+        })
+
+      /**
+       * Something the person wants to look at, made as an artifact (ADR-104, "Talking to an artifact"): its own chat, never a
+       * task on the board nor an aside, draws it and publishes it, and it shows among the project's artifacts from the moment it
+       * starts, where the person opens it and talks to it. The same title from the same session starts it once.
+       */
+      const startArtifact = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ArtifactAsked, input)
+          const lead = yield* stepOf(access.projectId, asked.lead)
+          yield* notAReview(access)
+          const title = asked.title.trim().slice(0, TITLE_LENGTH)
+          if (title === '') return yield* new ToolRefused({ message: 'Give the artifact a title: what it is, in a few words.' })
+          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000artifact\u0000${title.toLowerCase()}`).digest('hex').slice(0, 32)}`
+          const created = yield* projects.createTask({
+            envelope: yield* envelope('task.create', { title: title.toLowerCase(), artifact: true }, commandId, instance.coordinatorId),
+            projectId: access.projectId,
+            title,
+            description: asked.request,
+            request: asked.request,
+            draft: true,
+            plain: true,
+            shelf: 'scratch',
+            artifact: { canvasId: null },
+          })
+          if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${title} is being drawn already, in its own chat.`
+          const planId = yield* plans.propose({
+            projectId: access.projectId as ProjectId,
+            taskId: created.taskId,
+            steps: [{ key: 'implement', ...lead, skipped: false }],
+            reason: asked.lead.reason ?? null,
+            actorId: instance.coordinatorId,
+            end: null,
+            here: true,
+            aside: true,
+          })
+          yield* plans.start(planId, instance.coordinatorId)
+          return `Started the artifact ${title}: its own chat draws it now, and it shows in the project's Artifacts, where the person opens it and talks to it there. It is not a task or an aside. Say so in a sentence; don't draw it yourself.`
         })
 
       /**
@@ -3148,6 +3193,24 @@ export class Coordinator extends Context.Service<
             required: ['title', 'lead'],
           },
           startNow,
+        ),
+        tool(
+          'start_artifact',
+          "Makes something for the person to look at as an artifact: a mockup, design directions, a mood board, a diagram, a page. Its own chat, with the lead you pick (a Claude model for design), draws it and publishes it; it shows in the project's Artifacts at once, where the person opens it and talks to it to change it. It is never a task on the board nor an aside, and nothing of it waits on the person. Use it, not start_task or an aside, whenever what they want is a thing to look at rather than work in the repository. Give it a title (what it is, in a few words) and the request in their words, with what the lead needs to know.",
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: TITLE_LENGTH },
+              request: { type: 'string', description: 'What to draw, in the person’s words, with what the lead needs to know.' },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
+                required: ['model'],
+              },
+            },
+            required: ['title', 'request', 'lead'],
+          },
+          startArtifact,
         ),
         tool(
           'review_pull_request',

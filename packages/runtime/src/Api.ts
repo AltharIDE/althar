@@ -1379,8 +1379,20 @@ export const handlers = apiLayer(
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
-      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"): none until the runtime keeps them.
-      ListArtifactsDrawing: () => Effect.succeed([]),
+      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"), newest first: each shows among
+      // the project's artifacts from the moment it starts, until its first canvas.
+      ListArtifactsDrawing: ({ projectId }) =>
+        api(
+          Effect.map(
+            sql<{ taskId: string; threadId: string; projectId: string; title: string; startedAt: string }>`
+              SELECT k.id AS task_id, t.id AS thread_id, k.project_id, k.title, k.created_at AS started_at
+              FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              WHERE k.project_id = ${projectId} AND k.artifact_chat = 1 AND k.artifact_canvas_id IS NULL
+                AND k.state IN ('open', 'draft')
+              ORDER BY k.created_at DESC, k.id DESC`,
+            (rows) => rows.map((row) => ({ ...row })),
+          ),
+        ),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
       GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
       ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),
@@ -1923,6 +1935,7 @@ export const handlers = apiLayer(
         chat,
         taskId,
         workerId,
+        artifact,
       }) =>
         once(
           commandId,
@@ -1933,6 +1946,14 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              // An artifact has one chat of its own (ADR-104, "Talking to an artifact"): asked again, it is the one open.
+              if (aside && artifact !== undefined && artifact.canvasId !== null) {
+                const [open] = yield* sql<{ id: string }>`
+                  SELECT id FROM tasks WHERE artifact_chat = 1 AND artifact_canvas_id = ${artifact.canvasId}
+                    AND project_id = ${projectId} AND state IN ('open', 'draft')
+                  ORDER BY created_at DESC LIMIT 1`
+                if (open !== undefined) return yield* queries.task(open.id)
+              }
               if (workerId !== undefined) {
                 const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
                 const message = aside ? 'This task stays on its home.' : workerProblem(worker, steps)
@@ -1952,7 +1973,12 @@ export const handlers = apiLayer(
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
                 ...(aside
-                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  ? {
+                      plain: true,
+                      shelf: 'scratch' as const,
+                      ...(artifact === undefined ? {} : { artifact }),
+                      ...(description?.trim() ? { request: description } : {}),
+                    }
                   : requestOf(title, description, issue)),
               })
               for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })

@@ -674,6 +674,44 @@ design tool lays out frames.
   answer shows under its comment. The other tools are moving around and
   using the boards as the pages they are.
 
+### Talking to an artifact
+
+**An artifact is something you talk to.** Opened from the project's
+Artifacts, it has a chat of its own beside it, where anyone who opens it
+asks about it or has it changed. That chat is never a task on the board and
+never an aside: it has no lanes, no step and no state such as Ready or
+Needs you, and nothing of it waits on the person. A designer's workflow is
+looking at a design and saying what they think of it, not moving a card.
+
+- **What it is.** A chat on Scratch, as an aside is (a conversation and a
+  copy of the default branch, nothing installed, nothing leaving this
+  computer), marked as an artifact's (`tasks.artifact_chat`) with the
+  canvas it is about (`tasks.artifact_canvas_id`). The board, the home and
+  the asides' pills leave it out, and it never moves to the board, whatever
+  it writes. A canvas has one open chat; asked for again, the runtime
+  answers with it (`StartTask` with `chat` and `artifact`), and the canvas's
+  summary names it (`CanvasSummary.chat`).
+- **When it starts.** As the person shows they mean to talk: they go to its
+  composer, or point at a part. Only looking at an artifact starts nothing.
+  What they write and point at before then is kept by the artifact, and is
+  the chat's when it starts.
+- **Its agent.** Briefed lightly, as an aside's is, with the artifact named:
+  it answers in its reply, and changes the artifact by getting it
+  (`canvas_get`), changing its files and publishing a new version
+  (`canvas_publish`), which shows beside the conversation at once. It
+  changes nothing outside `.althar/canvases/`; a version it publishes says
+  it came from the artifact's chat. Where the person wants it built in the
+  product, a task builds it.
+- **A lead still makes and changes artifacts,** in its task's conversation,
+  as before. The artifact's chat and the lead are two agents on one canvas,
+  which "Two agents on one canvas" already holds.
+- **Asked of the coordinator.** When the person wants something to look at
+  (a mockup, design directions, a mood board, a diagram), the coordinator
+  starts an artifact (`start_artifact`) rather than a task or an aside: its
+  chat draws it, and it shows among the project's artifacts from the moment
+  it starts (`ListArtifactsDrawing`), until its first version makes it the
+  canvas the chat is about.
+
 ### Saving one to a repository
 
 A canvas lives in Althar until someone saves it to a folder in one of the

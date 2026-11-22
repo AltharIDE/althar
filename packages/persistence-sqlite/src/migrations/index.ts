@@ -102,6 +102,7 @@ import { statements as finderIndex } from './0097_finder_index'
 import { statements as threadGoals } from './0098_thread_goals'
 import { statements as canvasBoards } from './0099_canvas_boards'
 import { statements as canvasSaves } from './0100_canvas_saves'
+import { statements as artifactChats } from './0101_artifact_chats'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -221,6 +222,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0098_thread_goals', statements: threadGoals },
   { key: '0099_canvas_boards', statements: canvasBoards },
   { key: '0100_canvas_saves', statements: canvasSaves },
+  { key: '0101_artifact_chats', statements: artifactChats },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

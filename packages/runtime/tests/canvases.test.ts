@@ -715,3 +715,108 @@ describe('saving a canvas to its repository', () => {
     ),
   )
 })
+
+describe('an artifact’s own chat', () => {
+  const LEAD = { key: 'implement' as const, agentId: 'codex', model: null, skipped: false }
+
+  it.live('is one per canvas, never on the board or among the asides, briefed as the artifact’s, and what it publishes says so', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected
+        const { client, sql } = setup
+        const { project: opened, first } = yield* project(setup)
+        draw(first.folder, 'sign-in', { 'README.md': '# Sign-in\n\nThe form.\n' })
+        yield* ask(setup, first.access, 'canvas_publish', { name: 'sign-in' })
+        const [drawn] = yield* client.ListCanvases({ projectId: opened.id })
+        assert.isDefined(drawn)
+        if (drawn === undefined) return
+        assert.isNull(drawn.chat ?? null)
+        assert.strictEqual(drawn.latest.by.role, 'lead')
+
+        // Opened and talked to, it has a chat of its own; asked again, it is the same one.
+        const start = () =>
+          client.StartTask({
+            commandId: commandId(),
+            projectId: opened.id,
+            title: 'Sign-in',
+            steps: [LEAD],
+            chat: true,
+            artifact: { canvasId: drawn.id },
+          })
+        const chat = yield* start()
+        assert.strictEqual((yield* start()).id, chat.id)
+        const [listed] = yield* client.ListCanvases({ projectId: opened.id })
+        assert.deepStrictEqual(listed?.chat, { taskId: chat.id, threadId: chat.threadId })
+        const thread = yield* client.GetThread({ threadId: chat.threadId })
+        assert.deepStrictEqual(thread.task?.artifact, { canvasId: drawn.id })
+
+        // Never a task on the board, nor an aside's pill.
+        const board = yield* client.GetBoard({ projectId: opened.id })
+        assert.isFalse(board.tasks.some((task) => task.taskId === chat.id))
+        assert.isTrue(board.tasks.some((task) => task.taskId === first.task.id))
+        assert.deepStrictEqual(yield* client.ListArtifactsDrawing({ projectId: opened.id }), [])
+
+        // Its lead is told it is the artifact's chat, and how to change it.
+        yield* client.Send({ commandId: commandId(), threadId: chat.threadId, body: 'Make the form shorter', disposition: 'after_current' })
+        const prompt = yield* until(
+          sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${chat.threadId}`,
+          (rows) => rows.length > 0,
+        )
+        assert.include(prompt[0]?.prompt ?? '', "You are an artifact's own chat")
+        assert.include(prompt[0]?.prompt ?? '', `.althar/canvases/sign-in/`)
+        assert.notInclude(prompt[0]?.prompt ?? '', 'an aside of this project')
+
+        // What it publishes on its canvas is the chat's, and the canvas stays its own.
+        const [folder] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${chat.id}`
+        const access: ToolAccess = { role: 'lead', projectId: opened.id, threadId: chat.threadId, sessionId: 'session', taskId: chat.id }
+        yield* ask(setup, access, 'canvas_get', { name: 'sign-in' })
+        writeFileSync(join(folder?.path ?? '', CANVASES_FOLDER, 'sign-in', 'README.md'), '# Sign-in\n\nShorter.\n')
+        assert.include(yield* ask(setup, access, 'canvas_publish', { name: 'sign-in' }), 'Published sign-in v2 on v1')
+        const [after] = yield* client.ListCanvases({ projectId: opened.id })
+        assert.strictEqual(after?.latest.by.role, 'chat')
+        assert.deepStrictEqual(after?.chat, { taskId: chat.id, threadId: chat.threadId })
+        const [shelf] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${chat.id}`
+        assert.strictEqual(shelf?.shelf, 'scratch')
+      }),
+    ),
+  )
+
+  it.live('started by the coordinator, is drawing among the artifacts until its first canvas, which is then its own', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected
+        const { client, sql } = setup
+        const { project: opened, coordinator } = yield* project(setup)
+        const said = yield* ask(setup, coordinator, 'start_artifact', {
+          title: 'Spring mood board',
+          request: 'A mood board for the spring classes. [lead:wait]',
+          lead: { agent: 'codex' },
+        })
+        assert.include(said, 'Started the artifact Spring mood board')
+        assert.include(
+          yield* ask(setup, coordinator, 'start_artifact', { title: 'Spring mood board', request: 'Again', lead: { agent: 'codex' } }),
+          'already',
+        )
+        const drawing = yield* client.ListArtifactsDrawing({ projectId: opened.id })
+        assert.deepStrictEqual(
+          drawing.map((one) => one.title),
+          ['Spring mood board'],
+        )
+        const [one] = drawing
+        if (one === undefined) return
+        const board = yield* client.GetBoard({ projectId: opened.id })
+        assert.isFalse(board.tasks.some((task) => task.taskId === one.taskId))
+
+        // Its first canvas is its artifact: no longer drawing, and the canvas names it as its chat.
+        const [folder] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${one.taskId}`
+        draw(folder?.path ?? '', 'spring', { 'README.md': '# Spring\n' })
+        const access: ToolAccess = { role: 'lead', projectId: opened.id, threadId: one.threadId, sessionId: 'session', taskId: one.taskId }
+        yield* ask(setup, access, 'canvas_publish', { name: 'spring' })
+        assert.deepStrictEqual(yield* client.ListArtifactsDrawing({ projectId: opened.id }), [])
+        const spring = (yield* client.ListCanvases({ projectId: opened.id })).find((canvas) => canvas.name === 'spring')
+        assert.deepStrictEqual(spring?.chat, { taskId: one.taskId, threadId: one.threadId })
+        assert.strictEqual(spring?.latest.by.role, 'chat')
+      }),
+    ),
+  )
+})

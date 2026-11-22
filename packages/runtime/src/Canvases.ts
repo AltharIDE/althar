@@ -151,6 +151,8 @@ interface VersionRow {
   readonly bytes: number
   readonly taskId: string | null
   readonly taskTitle: string | null
+  /** 1 where it was published from an artifact's own chat. */
+  readonly artifactChat: number
   readonly threadId: string
   readonly createdAt: string
 }
@@ -169,7 +171,7 @@ const factsOf = (row: VersionRow): CanvasVersionFacts => ({
   by:
     row.taskId === null
       ? { role: 'coordinator', taskId: null, taskTitle: null, threadId: row.threadId }
-      : { role: 'lead', taskId: row.taskId, taskTitle: row.taskTitle, threadId: row.threadId },
+      : { role: row.artifactChat === 1 ? 'chat' : 'lead', taskId: row.taskId, taskTitle: row.taskTitle, threadId: row.threadId },
   at: row.createdAt,
 })
 
@@ -190,7 +192,7 @@ export const CANVAS_TOOLS = [
 ] as const
 
 /** Selects a project's canvases with their latest versions. */
-const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.thread_id, v.created_at`
+const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, coalesce(t.artifact_chat, 0) AS artifact_chat, v.thread_id, v.created_at`
 
 export class Canvases extends Context.Service<
   Canvases,
@@ -337,6 +339,16 @@ export class Canvases extends Context.Service<
           }
         })
 
+      /** A canvas's own chat, open: where anyone who opens it talks to it (ADR-104, "Talking to an artifact"). */
+      const chatOf = (canvasId: string) =>
+        Effect.map(
+          sql<{ taskId: string; threadId: string }>`
+            SELECT k.id AS task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.artifact_chat = 1 AND k.artifact_canvas_id = ${canvasId} AND k.state IN ('open', 'draft')
+            ORDER BY k.created_at DESC LIMIT 1`,
+          ([one]) => (one === undefined ? null : { taskId: one.taskId, threadId: one.threadId }),
+        )
+
       const summaryOf = (canvas: CanvasRow) =>
         Effect.gen(function* () {
           const latest = yield* latestOf(canvas.id)
@@ -357,6 +369,7 @@ export class Canvases extends Context.Service<
                   openComments: counts?.open ?? 0,
                   archived: canvas.archivedAt !== null,
                   saved: yield* saves.saved(canvas.id),
+                  chat: yield* chatOf(canvas.id),
                 }
           return summary
         })
@@ -609,6 +622,10 @@ export class Canvases extends Context.Service<
               yield* sql`INSERT INTO canvas_versions (canvas_id, number, base, manifest, entry, entry_sha256, kind, title, note, files, bytes, actor_id, thread_id, task_id, session_id, created_at)
                   VALUES (${row.id}, ${number}, ${base}, ${putManifest.sha256}, ${entry}, ${manifest.files.find((file) => file.path === entry)?.sha256 ?? ''}, ${kind}, ${title ?? latest?.title ?? row.title}, ${note},
                     ${read.files.length}, ${read.files.reduce((sum, file) => sum + file.bytes.length, 0)}, ${actorId}, ${access.threadId}, ${access.taskId}, ${access.sessionId}, ${at})`
+              // A chat drawing a new artifact takes the first canvas it publishes as its own (ADR-104, "Talking to an artifact").
+              if (access.taskId !== null)
+                yield* sql`UPDATE tasks SET artifact_canvas_id = ${row.id}
+                    WHERE id = ${access.taskId} AND artifact_chat = 1 AND artifact_canvas_id IS NULL`
               const subject = { type: 'canvas_version' as const, id: `${row.id}:${number}`, role: 'file' as const }
               const kept = {
                 projectId: access.projectId as ProjectId,

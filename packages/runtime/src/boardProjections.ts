@@ -77,8 +77,8 @@ export const boardRows = (projectId: string, deviceId: string, settled: number, 
           WHERE f.task_id = k.id AND f.device_id = ${deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)`
     const read = sql<BoardRow>`
       SELECT k.id, k.state, k.created_at, k.settled_at, ${columns} FROM tasks k ${joins}
-      WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
-        SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
+      WHERE k.project_id = ${projectId} AND k.artifact_chat = 0 AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
+        SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned') AND artifact_chat = 0
         ORDER BY settled_at DESC, id DESC LIMIT ${settled}))
       ORDER BY k.created_at, k.id`
     return yield* cached ? (yield* Database.ReadLane).read(read) : read
@@ -91,11 +91,11 @@ export const homeRows = (settled: number, cached: boolean) =>
     SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at, ${cached ? sql`v.view` : sql`NULL`} AS view
     FROM tasks k JOIN projects p ON p.id = k.project_id
     ${cached ? sql`LEFT JOIN board_card_views v ON v.task_id = k.id` : sql``}
-    WHERE p.archived_at IS NULL AND (k.state IN ('open', 'draft') OR k.id IN (
+    WHERE p.archived_at IS NULL AND k.artifact_chat = 0 AND (k.state IN ('open', 'draft') OR k.id IN (
       -- A merged task the board still shows can be ready again.
       SELECT id FROM (
         SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
-        FROM tasks WHERE state IN ('done', 'abandoned'))
+        FROM tasks WHERE state IN ('done', 'abandoned') AND artifact_chat = 0)
       WHERE state = 'done' AND place <= ${settled}))
     ORDER BY k.created_at, k.id`
     return yield* cached ? (yield* Database.ReadLane).read(read) : read

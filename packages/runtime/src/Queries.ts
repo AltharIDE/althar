@@ -4445,6 +4445,9 @@ export class Queries extends Context.Service<
               SELECT max(x.rowid) FROM record_events x
               WHERE x.aggregate_type = 'workspace' AND x.aggregate_id = w.id AND x.type = 'workspace.move_waits')
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
+          // An artifact's own chat opens as the artifact (ADR-104, "Talking to an artifact"): the canvas it is about.
+          const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+            SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${head.taskId}`
           return {
             threadId,
             accepting,
@@ -4466,6 +4469,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(artifact?.artifactChat === 1 ? { artifact: { canvasId: artifact.artifactCanvasId } } : {}),
               ...(!severalChanges
                 ? {}
                 : {

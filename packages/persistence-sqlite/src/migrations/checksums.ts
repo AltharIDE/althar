@@ -104,4 +104,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0098_thread_goals': '4ae57df0484133805d3b45a9921b11bdf0788d3eca93d07616d73205d583d5bd',
   '0099_canvas_boards': '5f80536c108d96d68b91d9a0f380968c190a934c4b3683fc6517c0560f791971',
   '0100_canvas_saves': '13a4975f84ef6d062f71cbab803250f00bb19ed4cb3c2415a090d356feefd893',
+  '0101_artifact_chats': '4a31aa48db0e424982ad7a24cc9e20f46508492036527d2c4c3f2f2cd42905da',
 }
