@@ -26,11 +26,13 @@
   display: flex;
   flex-direction: column;
 }
-/* the canvas's panel draws its own edge; the chat's border stands for it */
+/* the canvas's panel draws its own edge, and slides in beside a conversation: here the chat's border stands for the one, and
+   it is in place from the first frame, so its view is laid where it stays */
 .canvas > * {
   flex: 1;
   min-height: 0;
   border-left: 0;
+  animation: none;
 }
 .first {
   flex: 1;
