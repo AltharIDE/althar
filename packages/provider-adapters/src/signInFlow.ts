@@ -4,6 +4,7 @@ import { Effect } from 'effect'
 
 import { adapterNode, asNode, privateTemp, removeTemp } from './process'
 import type { AgentDefinition, LaunchSpec } from './registry'
+import type { SignInProxy } from './signInProxy'
 
 /*
  * An agent's own sign-in, run by Althar rather than in a terminal (ADR-012:
@@ -66,7 +67,8 @@ export type SignInFlowEvent =
   | { readonly kind: 'refused'; readonly message: string }
   /** Signed in, as `who` on `plan` where the agent says. */
   | { readonly kind: 'done'; readonly who: string | null; readonly plan: string | null }
-  | { readonly kind: 'failed'; readonly message: string }
+  /** Why it stopped: `message` in one short line (`signInSaid`), `detail` in the agent's own words, for the log only. */
+  | { readonly kind: 'failed'; readonly message: string; readonly detail?: string }
 
 export interface SignInFlowHandle {
   /** A code the browser's page showed, for the agent. */
@@ -85,7 +87,49 @@ export interface SignInFlowOptions {
   readonly openUrl?: (url: string) => void
   /** How long it waits before it gives up, in ms. */
   readonly timeout?: number
+  /** A way out of its own (`openSignInProxy`), closed once the sign-in has stopped. */
+  readonly proxy?: SignInProxy | null
 }
+
+/**
+ * What a sign-in that failed says beside its Try again: one short line, in fixed words. Never the agent's own words, an
+ * address or an error's text: those go to the log only (the failed event's `detail`).
+ */
+export const signInSaid = {
+  noReply: 'No reply. Check the connection.',
+  timedOut: 'Not finished in time.',
+  notApproved: 'Not approved.',
+  /** Codex's login listens on one port for the browser: another login there (Codex's own app, a terminal) holds it. */
+  busy: 'Another sign-in is open. Close it first.',
+  stopped: (agent: string) => `${agent} stopped before signing in.`,
+  notStarted: (agent: string) => `${agent} didn’t start.`,
+  subscription: (agent: string) => `${agent} needs an eligible subscription on this account.`,
+  ineligible: (agent: string) => `This account can't use ${agent}. Sign in with another.`,
+  unknown: 'Couldn’t sign in.',
+} as const
+
+/** A sign-in's failure in the agent's own words, as the person is told it. */
+export const signInFailureOf = (agent: string, raw: string): string =>
+  /SUBSCRIPTION_REQUIRED/.test(raw)
+    ? signInSaid.subscription(agent)
+    : /ineligible|onboarding failed/i.test(raw)
+      ? signInSaid.ineligible(agent)
+      : /access_denied|denied access|cancell?ed|not approved/i.test(raw)
+        ? signInSaid.notApproved
+        : /EADDRINUSE|already in use/i.test(raw)
+          ? signInSaid.busy
+          : /stopped (signing in|listening)/i.test(raw)
+            ? signInSaid.stopped(agent)
+            : /error sending request|couldn.t (be )?reach|could not (be )?reach|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|network|dns|timed? ?out|connection (error|failed|refused|reset|closed)/i.test(
+                  raw,
+                )
+              ? signInSaid.noReply
+              : /in time|expired/i.test(raw)
+                ? signInSaid.timedOut
+                : signInSaid.unknown
+
+/** A failure in the agent's own words: the short line, and its words for the log. */
+const failure = (agent: string, raw: string): SignInFlowEvent => ({ kind: 'failed', message: signInFailureOf(agent, raw), detail: raw })
 
 const FIFTEEN_MINUTES = 15 * 60_000
 /** How long a sign-in told to stop has to read that, before it is killed. */
@@ -129,18 +173,32 @@ export const startSignInFlow = (
   options: SignInFlowOptions,
 ): SignInFlowHandle | null => {
   const inApp = agent.signIn.inApp
-  if (inApp === undefined || inApp.kind === 'copilot-device' || !inApp.ways.includes(options.way)) return null
+  if (inApp === undefined || inApp.kind === 'copilot-device' || !inApp.ways.includes(options.way)) {
+    options.proxy?.close()
+    return null
+  }
   const node = options.node ?? adapterNode()
   const spec = inApp.run(node)
   // Its own environment too, for an agent started as a session is (ACP's `authenticate`), and a temporary folder of its own where it asks.
   const temp = privateTemp(spec)
-  const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...spec.env, ...temp?.env, ...options.home }
+  const env = {
+    ...process.env,
+    ...asNode({ command: spec.command, args: spec.args }),
+    ...spec.env,
+    ...temp?.env,
+    ...options.home,
+    ...options.proxy?.env,
+  }
   // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
   const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
   const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-  // Its temporary folder goes once it has stopped, or where it never started.
-  child.on('exit', () => Effect.runFork(removeTemp(temp?.folder)))
-  child.on('error', () => Effect.runFork(removeTemp(temp?.folder)))
+  // Its temporary folder and its way out go once it has stopped, or where it never started.
+  const gone = () => {
+    options.proxy?.close()
+    Effect.runFork(removeTemp(temp?.folder))
+  }
+  child.on('exit', gone)
+  child.on('error', gone)
   let over = false
   const end = (event?: SignInFlowEvent, grace = 0) => {
     if (over) return
@@ -155,12 +213,14 @@ export const startSignInFlow = (
   }
   // oxlint-disable-next-line althar/one-clock
   const timer = setTimeout(
-    () => end({ kind: 'failed', message: 'The sign-in wasn’t finished in time.' }),
+    () => end({ kind: 'failed', message: signInSaid.timedOut, detail: 'The sign-in wasn’t finished in time.' }),
     options.timeout ?? FIFTEEN_MINUTES,
   )
-  child.on('error', (error) => end({ kind: 'failed', message: error.message }))
+  child.on('error', (error) => end({ kind: 'failed', message: signInSaid.notStarted(agent.name), detail: error.message }))
   // Its input closed under a write (EPIPE) ends the sign-in, rather than the process Althar runs in.
-  child.stdin.on('error', () => end({ kind: 'failed', message: 'The agent stopped listening while signing in.' }))
+  child.stdin.on('error', () =>
+    end({ kind: 'failed', message: signInSaid.stopped(agent.name), detail: 'It stopped listening while signing in.' }),
+  )
   // Once over, one still running out its grace says nothing more and opens no page; its input closed, it is sent nothing.
   const saying = (event: SignInFlowEvent) => {
     if (!over) say(event)
@@ -175,7 +235,7 @@ export const startSignInFlow = (
     inApp.kind === 'claude-login'
       ? claude(agent, child, saying, end, env)
       : inApp.kind === 'codex-app-server'
-        ? codex(child, saying, end, opening)
+        ? codex(agent, child, saying, end, opening)
         : acpAuthenticate(agent, inApp, child, saying, end, opening)
   return {
     paste: (code) => {
@@ -221,7 +281,7 @@ const claude = (
     if (/invalid code/i.test(text)) say({ kind: 'refused', message: lastLine(text) ?? text.trim() })
   })
   child.on('exit', (code) => {
-    if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
+    if (code !== 0) return end(failure(agent.name, lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.'))
     // Signed in: its status says who as.
     const status = agent.signIn.status?.(adapterNode())
     if (status === undefined) return end({ kind: 'done', who: null, plan: null })
@@ -237,7 +297,13 @@ const claude = (
 }
 
 /* Codex's app-server: JSON-RPC lines on stdio. */
-const codex = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEvent) => void, end: End, options: SignInFlowOptions) => {
+const codex = (
+  agent: AgentDefinition,
+  child: ChildProcessWithoutNullStreams,
+  say: (event: SignInFlowEvent) => void,
+  end: End,
+  options: SignInFlowOptions,
+) => {
   let next = 0
   let loginId: string | null = null
   const waiting = new Map<number, (result: Record<string, unknown> | null, error: string | null) => void>()
@@ -279,26 +345,26 @@ const codex = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEve
     const params = (message.params ?? {}) as Record<string, unknown>
     if (params.loginId !== loginId) return
     if (params.success !== true)
-      return end({ kind: 'failed', message: typeof params.error === 'string' ? params.error : 'Codex didn’t finish signing in.' })
+      return end(failure(agent.name, typeof params.error === 'string' ? params.error : 'Codex didn’t finish signing in.'))
     // Signed in: the account says who as.
     send('account/read', {}, (result) => {
       const account = (result?.account ?? null) as Record<string, unknown> | null
       end({ kind: 'done', who: typeof account?.email === 'string' ? account.email : null, plan: chatGptPlan(account?.planType) })
     })
   }
-  child.on('exit', () => end({ kind: 'failed', message: 'Codex stopped signing in.' }))
+  child.on('exit', () => end(failure(agent.name, 'Codex stopped signing in.')))
   send('initialize', { clientInfo: { name: 'althar', title: 'Althar', version: '0' } }, (_result, error) => {
-    if (error !== null) return end({ kind: 'failed', message: error })
+    if (error !== null) return end(failure(agent.name, error))
     notify('initialized', {})
     send('account/login/start', { type: options.way === 'device' ? 'chatgptDeviceCode' : 'chatgpt' }, (result, failed) => {
-      if (failed !== null || result === null) return end({ kind: 'failed', message: failed ?? 'Codex didn’t start signing in.' })
+      if (failed !== null || result === null) return end(failure(agent.name, failed ?? 'Codex didn’t start signing in.'))
       loginId = typeof result.loginId === 'string' ? result.loginId : null
       if (typeof result.authUrl === 'string') {
         options.openUrl?.(result.authUrl)
         say({ kind: 'browser', link: result.authUrl, paste: false })
       } else if (typeof result.userCode === 'string' && typeof result.verificationUrl === 'string')
         say({ kind: 'device', code: result.userCode, page: result.verificationUrl, minutes: 15 })
-      else end({ kind: 'failed', message: 'Codex didn’t say how to sign in.' })
+      else end(failure(agent.name, 'Codex didn’t say how to sign in.'))
     })
   })
   return {
@@ -370,22 +436,12 @@ const acpAuthenticate = (
   }
   byLine(child.stdout, heard)
   byLine(child.stderr, look)
-  child.on('exit', () => end({ kind: 'failed', message: `${agent.name} stopped signing in.` }))
+  child.on('exit', () => end(failure(agent.name, `${agent.name} stopped signing in.`)))
   send('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'althar', version: '0' } }, (error) => {
-    if (error !== null) return end({ kind: 'failed', message: error })
+    if (error !== null) return end(failure(agent.name, error))
     send('authenticate', { methodId: inApp.method }, (failed) =>
-      end(failed === null ? { kind: 'done', who: null, plan: null } : { kind: 'failed', message: refusedWords(agent, failed) }),
+      end(failed === null ? { kind: 'done', who: null, plan: null } : failure(agent.name, failed)),
     )
   })
   return { paste: () => undefined, cancel: () => undefined }
 }
-
-/** Why an ACP sign-in was turned down, in the person's words where the agent's are a code. */
-const refusedWords = (agent: AgentDefinition, said: string) =>
-  /SUBSCRIPTION_REQUIRED/.test(said)
-    ? `${agent.name} needs an eligible subscription on this account.`
-    : /ineligible|onboarding failed/i.test(said)
-      ? `This account can't use ${agent.name}. Sign in with another.`
-      : /access_denied|denied access|cancelled/i.test(said)
-        ? 'The sign-in wasn’t approved.'
-        : (lastLine(said) ?? said)

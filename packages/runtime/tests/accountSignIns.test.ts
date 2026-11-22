@@ -187,7 +187,8 @@ describe('signing an account in inside Althar', () => {
       // Another code clears it while it is tried.
       yield* signIns.paste(flowId, 'another')
       const failed = yield* until(signIns.get(flowId), (state) => state.state === 'failed')
-      assert.deepStrictEqual(failed, { state: 'failed', message: 'Login was not completed.' })
+      // The person reads a short line; Claude Code's own words go to the log.
+      assert.deepStrictEqual(failed, { state: 'failed', message: 'Couldn’t sign in.' })
     }).pipe(Effect.provide(layer(false, [], claudeSigningIn()))),
   )
 
