@@ -26,6 +26,7 @@ import {
   keepShown,
   keptViewsIn,
   readEvidence,
+  findComputerCapture,
   readShown,
   saysNothing,
   unverifiedOf,
@@ -461,6 +462,7 @@ export const makeRunTools = (dependencies: RunToolsDependencies) =>
         const evidence = yield* readEvidence(
           handed,
           worktrees.map((worktree) => worktree.path),
+          (id) => findComputerCapture(access.threadId, id),
         )
         // A quick task whose lead changed the repository has its work on a branch of its own from here, before anything below reads
         // it; what it hands as evidence now isn't work. One that changed nothing has no branch still, and has built nothing to say.
@@ -947,6 +949,10 @@ export const makeRunTools = (dependencies: RunToolsDependencies) =>
                     description: 'What it shows, in a line: "The Evidence section with two screenshots and a test run".',
                   },
                   path: { type: 'string', description: 'For a screenshot or recording: the picture, from the worktree.' },
+                  computer_capture: {
+                    type: 'string',
+                    description: 'For a screenshot captured in this task by the computer tool, its capture ID in place of path.',
+                  },
                   command: { type: 'string', description: 'For a command or test run: what you ran.' },
                   exit_code: { type: 'integer' },
                   output: {

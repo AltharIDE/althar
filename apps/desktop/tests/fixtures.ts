@@ -40,7 +40,10 @@ import type {
   ThreadSnapshot,
   Unfurl,
   WatchEvent,
+  ConnectionInfo,
+  HomeFolders,
 } from '@althar/contracts'
+import { SOCKET_CALLS } from '@althar/contracts'
 import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
@@ -1102,6 +1105,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    findHomeFolders: vi.fn(async () => homeFolders),
+    getMachine: vi.fn(async () => ({
+      system: 'Ubuntu 24.04.1 LTS',
+      cores: 8,
+      memory: 32 * 1024 ** 3,
+      disk: { free: 212 * 1000 ** 3, size: 512 * 1000 ** 3 },
+      git: '2.43.0',
+    })),
     bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -1626,3 +1637,30 @@ export const streamed = (
   agentId,
   text,
 })
+
+/**
+ * A window's connection to a home on another computer, with the calls the
+ * home says it may make: today's, by default; none said, as a home from
+ * before it said, where `calls` is null.
+ */
+export const remoteConnection = (calls: ReadonlyArray<string> | null = SOCKET_CALLS): ConnectionInfo => {
+  const homeId = `home_${'1'.repeat(32)}`
+  return {
+    identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
+    hostDeviceId: `dev_${'3'.repeat(32)}`,
+    apiVersion: 1,
+    appVersion: 'fixture',
+    position: { homeId, cursor: 0, checkpoint: null },
+    ...(calls === null ? {} : { calls }),
+  }
+}
+
+/** What a home on another computer finds where its person keeps code, and where new code goes there. */
+export const homeFolders: HomeFolders = {
+  lookedIn: ['~/code'],
+  repositories: [
+    { grant: 'grant_site', name: 'site', where: '~/code/site', branch: 'main', worked: 1_700_000_000_000 },
+    { grant: 'grant_api', name: 'api', where: '~/code/api', branch: 'main', worked: 1_690_000_000_000 },
+  ],
+  place: { grant: 'grant_code', where: '~/code' },
+}

@@ -51,7 +51,7 @@ export const startHomeConnections = ({
   readonly profile: string
   readonly entry: string
   readonly mine: (contents: WebContents) => boolean
-  readonly open: (home: WindowHome, projectId?: string) => void
+  readonly open: (home: WindowHome, projectId?: string, fresh?: boolean) => void
   readonly log: (message: string) => void
   readonly usage: (event: HomeUsageEvent) => void
 }) => {
@@ -224,7 +224,9 @@ export const startHomeConnections = ({
     return controller.overview()
   })
   ipcMain.handle('althar:homes-save', (event, check: unknown, name: unknown) => controller.save(owner(event), check, name))
-  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown) => controller.open(owner(event), id, projectId))
+  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown, fresh: unknown) =>
+    controller.open(owner(event), id, projectId, fresh),
+  )
   ipcMain.handle('althar:homes-rename', (event, id: unknown, name: unknown) => controller.rename(owner(event), id, name))
   ipcMain.handle('althar:homes-change', (event, id: unknown, check: unknown) => controller.change(owner(event), id, check))
   ipcMain.handle('althar:homes-forget', (event, id: unknown) => {

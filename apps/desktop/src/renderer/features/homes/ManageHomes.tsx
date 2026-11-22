@@ -178,6 +178,14 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       .then(() => homes.open(id, projectId))
       .catch(() => undefined)
   }
+  /** Its window, on New project. */
+  const openNew = (id: string) => {
+    onClose()
+    void saved
+      .settled()
+      .then(() => homes.openNew(id))
+      .catch(() => undefined)
+  }
   return (
     <Dialog
       title="Homes"
@@ -208,7 +216,13 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
                 </span>
               )}
             </div>
-            <Shelf projects={overview?.projects.local} local onOpen={(projectId) => open('local', projectId)} />
+            <Shelf
+              projects={overview?.projects.local}
+              local
+              onOpen={(projectId) => open('local', projectId)}
+              onWelcome={() => open('local')}
+              onNew={() => openNew('local')}
+            />
           </li>
           {saved.shown.map((home) => (
             <Home
@@ -221,6 +235,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
               onEdit={(what) => setEditing(what === null ? null : { id: home.id, what })}
               onRename={(name) => saved.rename(home, name)}
               onOpen={(projectId) => open(home.id, projectId)}
+              onNew={() => openNew(home.id)}
               onForget={() => {
                 setEditing(null)
                 saved.forget(home)
@@ -276,6 +291,7 @@ function Home({
   onEdit,
   onRename,
   onOpen,
+  onNew,
   onForget,
 }: {
   home: RemoteHome
@@ -286,6 +302,8 @@ function Home({
   onEdit: (what: 'name' | 'connection' | null) => void
   onRename: (name: string) => void
   onOpen: (projectId?: string) => void
+  /** Its window, on New project. */
+  onNew: () => void
   onForget: () => void
 }) {
   const live = livenessOf(overview, home)
@@ -396,7 +414,7 @@ function Home({
       {editing === 'connection' ? (
         <Connection home={home} homes={homes} onDone={() => onEdit(null)} />
       ) : (
-        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} />
+        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} onWelcome={() => onOpen()} onNew={onNew} />
       )}
     </li>
   )
@@ -445,22 +463,34 @@ const doing = (working: number, yours: number) => {
   return working > 0 ? `${working} running` : 'Nothing running'
 }
 
-/** The projects on a home, each a press from being opened there. */
+/**
+ * The projects on a home, each a press from being opened there, and New
+ * project after them, opening its window on it; with none, a press opens its
+ * window on its welcome, to make one.
+ */
 function Shelf({
   projects,
   live = projects?.live === true,
   local = false,
   onOpen,
+  onWelcome,
+  onNew,
 }: {
   projects: HomeProjects | undefined
   live?: boolean
   local?: boolean
   onOpen: (projectId: string) => void
+  onWelcome: () => void
+  onNew: () => void
 }) {
   if (projects === undefined)
     return <p className={s.empty}>{local ? 'Its projects show here once a window on it opens.' : 'Open it to see its projects here.'}</p>
   if (projects.list.length === 0)
-    return <p className={s.empty}>{local ? 'Add a project and it shows here.' : 'Add a project on the host and it shows here.'}</p>
+    return (
+      <p className={s.empty}>
+        No projects yet. <LinkButton onClick={onWelcome}>New project</LinkButton>
+      </p>
+    )
   const alive = live && projects.live
   return (
     <ul className={s.shelf} data-rest={!alive || undefined}>
@@ -481,6 +511,14 @@ function Shelf({
           </button>
         </li>
       ))}
+      <li>
+        <button type="button" className={`${s.project} ${s.adding}`} onClick={onNew}>
+          <span className={s.addMark} aria-hidden="true">
+            <Icon name="plus" size={14} />
+          </span>
+          <span className={s.projectName}>New project</span>
+        </button>
+      </li>
     </ul>
   )
 }

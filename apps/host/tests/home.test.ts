@@ -80,6 +80,9 @@ describe('a persistent headless home', () => {
         }).pipe(Scope.provide(scope))
         const projectId = initialized.projects[0]
         if (projectId === undefined) throw new Error('Missing provisioned project')
+        assert.strictEqual((yield* hostStatus(options.profile, false, projectId)).homeId, initialized.homeId)
+        const unknownProject = yield* Effect.flip(hostStatus(options.profile, false, `proj_${'0'.repeat(32)}`))
+        assert.strictEqual(unknownProject.code, 'InvalidConfig')
         const task = yield* api.CreateTask({ commandId: `cmd_${'1'.repeat(32)}`, projectId, title: 'Work persists' })
         yield* Scope.close(scope, Exit.void)
         assert.strictEqual((yield* hostStatus(options.profile)).state, 'ready')

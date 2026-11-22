@@ -89,5 +89,11 @@ export const ConnectionInfo = Schema.Struct({
   apiVersion: Schema.Int,
   appVersion: Schema.String,
   position: FeedPosition,
+  /**
+   * The calls this connection may make, where its role allows fewer than
+   * all (a socket's). Absent from homes before 22 Nov 2026, which allowed a
+   * socket less: no making projects there, say.
+   */
+  calls: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ConnectionInfo = typeof ConnectionInfo.Type

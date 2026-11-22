@@ -1,4 +1,5 @@
 import { StrictMode } from 'react'
+import { SOCKET_CALLS } from '@althar/contracts'
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
@@ -10,7 +11,7 @@ import { ManageHomes } from '../src/renderer/features/homes/ManageHomes'
 import { HomeOpening } from '../src/renderer/features/homes/HomeOpening'
 import { HomeReport } from '../src/renderer/features/homes/HomeReport'
 import { homeProblem, homesUi, keyOf, livenessOf, openedAgo, useHomeState, useHomesOverview } from '../src/renderer/features/homes/useHomes'
-import { hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
+import { foldersOnHome, hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
 import { fakeClient, fakeHost, home as snapshot, project } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -55,6 +56,7 @@ const fixture = () => {
     connect: vi.fn(async () => {}),
     save: vi.fn(async () => {}),
     open: vi.fn(async () => {}),
+    openNew: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     change: vi.fn(async () => {}),
     forget: vi.fn(async () => {}),
@@ -76,6 +78,7 @@ const fixture = () => {
     },
     onOpen: () => () => {},
     onProject: () => () => {},
+    onNewProject: () => () => {},
   } satisfies HomesHost
   return {
     homes,
@@ -345,6 +348,19 @@ it('shows each home by its projects, live while its window is connected, and ope
   await userEvent.click(within(dialog).getByRole('button', { name: /ledger/ }))
   expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id, 'prj_ledger')
   expect(close).toHaveBeenCalledOnce()
+})
+
+it('offers New project after each home’s projects, opening that home’s window on it', async () => {
+  const at = fixture()
+  const { close } = manage(at)
+  const dialog = await screen.findByRole('dialog', { name: 'Homes' })
+  const [here, there] = within(dialog).getAllByRole('button', { name: 'New project' })
+  await userEvent.click(there!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenCalledExactlyOnceWith(home.id))
+  expect(close).toHaveBeenCalledOnce()
+  await userEvent.click(here!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenLastCalledWith('local'))
+  expect(at.homes.open).not.toHaveBeenCalled()
 })
 
 it('manages paired homes by their origin and offers a new pairing instead of SSH edits', async () => {
@@ -817,7 +833,7 @@ it.each(['connecting', 'disconnected', 'connected'] as const)(
   },
 )
 
-it('offers setup for empty project shelves and uses the Connect a home action without opening a folder', async () => {
+it('offers New project on an empty shelf, opening that home’s window on its welcome, and Connect a home without a folder', async () => {
   const at = fixture()
   const connect = vi.fn()
   render(
@@ -829,8 +845,11 @@ it('offers setup for empty project shelves and uses the Connect a home action wi
       onConnect={connect}
     />,
   )
-  expect(screen.getByText('Add a project and it shows here.')).not.toBeNull()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(screen.getAllByText('No projects yet.')).toHaveLength(2)
+  const [here, there] = screen.getAllByRole('button', { name: 'New project' })
+  await userEvent.click(there!)
+  await waitFor(() => expect(at.homes.open).toHaveBeenCalledWith(home.id, undefined))
+  expect(here).toBeDefined()
   await userEvent.click(screen.getByRole('button', { name: 'Connect a home' }))
   expect(connect).toHaveBeenCalledOnce()
 })
@@ -980,9 +999,17 @@ it.each([false, true])('bounds startup when a runtime never sends its port (remo
   }
 })
 
-function RemoteStart() {
+function RemoteStart({ onNew = () => {} }: { onNew?: () => void }) {
   const model = useStart()
-  return <StartView model={model} accounts={useAccountSignIn(model)} onProject={() => {}} home={() => <p>Projects on the remote home</p>} />
+  return (
+    <StartView
+      model={model}
+      accounts={useAccountSignIn(model)}
+      onProject={() => {}}
+      onNew={onNew}
+      home={() => <p>Projects on the remote home</p>}
+    />
+  )
 }
 
 it.each([remote, { current: { kind: 'https' as const, home: paired }, connection: 'connected' as const }])(
@@ -998,11 +1025,13 @@ it.each([remote, { current: { kind: 'https' as const, home: paired }, connection
         apiVersion: 1,
         appVersion: 'test',
         position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+        calls: SOCKET_CALLS,
       },
       listProjects: vi.fn(() => listed.promise),
     })
     const host = fakeHost({ homes: at.homes })
-    const services = servicesFor(client, host)
+    // As the window makes them on another computer's home: its folders are the home's.
+    const services = servicesFor(client, foldersOnHome(host, client))
     // A local welcome left on show must not replace the remote host’s first screen.
     welcome.begin()
     render(
@@ -1011,17 +1040,19 @@ it.each([remote, { current: { kind: 'https' as const, home: paired }, connection
       </ServicesProvider>,
     )
     expect(screen.queryByText('Projects on the remote home')).toBeNull()
-    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /^This is/ })).toBeNull()
     await act(async () => listed.resolve({ cursor: 0, projects: [] }))
     const name = here.current.kind === 'local' ? '' : here.current.home.name
-    expect(await screen.findByRole('heading', { name: `No projects on ${name} yet` })).not.toBeNull()
+    expect(await screen.findByRole('heading', { name: `This is ${name}` })).not.toBeNull()
+    // What the home found on its own disk, never this computer's.
+    await waitFor(() => expect(client.findHomeFolders).toHaveBeenCalled())
     expect(host.findRepositories).not.toHaveBeenCalled()
     expect(host.pickFolders).not.toHaveBeenCalled()
     act(() => {
       services.cache.setQueryData(reads(client).projects().queryKey, { cursor: 1, projects: [project] })
     })
     expect(await screen.findByText('Projects on the remote home')).not.toBeNull()
-    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /^This is/ })).toBeNull()
   },
 )
 
@@ -1112,8 +1143,7 @@ it('identifies its own remote window and offers Connect even when projects are n
 it('distinguishes empty homes and live projects that are idle, running, or waiting on the person', async () => {
   const at = fixture()
   const { view } = manage(at, { ...overview, projects: { local: { live: true, list: [] }, [home.homeId]: { live: true, list: [] } } })
-  expect(screen.getByText('Add a project and it shows here.')).not.toBeNull()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(screen.getAllByText('No projects yet.')).toHaveLength(2)
   view.rerender(
     <ManageHomes
       homes={at.homes}
