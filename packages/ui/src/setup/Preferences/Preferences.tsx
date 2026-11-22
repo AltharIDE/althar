@@ -1021,10 +1021,10 @@ export interface BrowserPreferencesText {
 export const browserPreferencesText: BrowserPreferencesText = {
   links: 'Links from threads',
   linksNote:
-    'Local addresses are what Althar and its agents run on this computer. A task’s run opens beside its conversation in every case.',
-  local: 'Local beside, web in your browser',
-  beside: 'Always beside the conversation',
-  outside: 'Always in your browser',
+    'What runs on this computer opens beside; the web, where you’re signed in, opens in your browser. A task’s run always opens beside.',
+  local: 'Local only',
+  beside: 'All beside',
+  outside: 'All in your browser',
   keep: 'Keep cookies',
   keepNote: 'Each task’s pages keep their own, apart from your browser’s and other tasks’.',
   keeps: {

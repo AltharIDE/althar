@@ -699,11 +699,11 @@ export const BrowserSettings: Story = {
   render: () => <Browser />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('radio', { name: 'Local beside, web in your browser' })).toBeChecked()
-    await userEvent.click(c.getByRole('radio', { name: 'Always in your browser' }))
-    await expect(c.getByRole('radio', { name: 'Always in your browser' })).toBeChecked()
-    await userEvent.click(c.getByRole('radio', { name: 'Local beside, web in your browser' }))
-    await expect(c.getByRole('radio', { name: 'Local beside, web in your browser' })).toBeChecked()
+    await expect(c.getByRole('radio', { name: 'Local only' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: 'All in your browser' }))
+    await expect(c.getByRole('radio', { name: 'All in your browser' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: 'Local only' }))
+    await expect(c.getByRole('radio', { name: 'Local only' })).toBeChecked()
     await userEvent.click(c.getByRole('button', { name: 'Clear all' }))
     await expect(c.getByText('None kept.')).toBeInTheDocument()
   },
