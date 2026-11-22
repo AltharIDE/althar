@@ -12,6 +12,7 @@ import {
   failingOnBase,
   leftQueueForLead,
   leftQueueLine,
+  leftQueueLinked,
   leftQueueNote,
   leftQueueNoteForLead,
   leftQueueUnclaimed,
@@ -249,6 +250,31 @@ describe('a merge queue send-back, and whose it is', () => {
       "The merge queue took PR #4 out: it conflicts with what's ahead of it.",
     )
     assert.strictEqual(listed(['a', 'b', 'c']), 'a, b and c')
+  })
+
+  it('links each failed job where it stands in the line, never a name inside another or the line’s own words', () => {
+    const failed = {
+      ...detail(['test / linux', 'test', 'out']),
+      pages: [
+        { name: 'out', url: 'https://ci/out' },
+        { name: 'test / linux', url: null },
+        { name: 'test', url: 'https://ci/test' },
+      ],
+    }
+    const { title, links } = leftQueueLinked('PR #4', 'https://pr/4', 'checks', failed)
+    assert.strictEqual(title, 'The merge queue took PR #4 out: test / linux, test and out failed.')
+    assert.deepStrictEqual(
+      links.map((link) => [link.label, link.url, title.slice(link.at, link.at + link.label.length), title.slice(link.at - 2, link.at)]),
+      [
+        ['PR #4', 'https://pr/4', 'PR #4', 'k '],
+        ['test', 'https://ci/test', 'test', ', '],
+        ['out', 'https://ci/out', 'out', 'd '],
+      ],
+    )
+    // No job named: the pull request alone.
+    assert.deepStrictEqual(leftQueueLinked('PR #4', 'https://pr/4', 'conflict', failed).links, [
+      { label: 'PR #4', url: 'https://pr/4', at: 21 },
+    ])
   })
 
   it('tells the person why nothing names it, and its lead, for its next turn, to change nothing for it', () => {

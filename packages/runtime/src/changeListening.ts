@@ -52,7 +52,7 @@ import {
   fromAlthar,
   gaveUpLine,
   leftQueueForLead,
-  leftQueueLine,
+  leftQueueLinked,
   leftQueueNote,
   leftQueueNoteForLead,
   leftQueueUnclaimed,
@@ -688,7 +688,7 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
       description?: string,
       more: {
         readonly details?: string | undefined
-        readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+        readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at?: number }>
         readonly logs?: ReadonlyArray<CheckLogShown>
       } = {},
     ) =>
@@ -1263,15 +1263,13 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
           const own = now.leftQueue === 'conflict' || queueOwnFailures(now.leftQueue, queued).length > 0
           // The person's line names what failed, each linked to its page, and folds the logs' ends under it; what the lead is told
           // (the logs as text, their framing, its tools) stays the lead's. Where the build couldn't be read, the host's answer folds.
+          const taken = leftQueueLinked(name, now.url, now.leftQueue, queued)
           yield* sayOn(
             link,
-            leftQueueLine(name, now.leftQueue, queued),
+            taken.title,
             own || now.leftQueue === 'removed' ? undefined : leftQueueUnclaimed(now.leftQueue, queued, repository.defaultBranch),
             {
-              links: [
-                { label: name, url: now.url },
-                ...(queued?.pages ?? []).flatMap((page) => (page.url === null ? [] : [{ label: page.name, url: page.url }])),
-              ],
+              links: taken.links,
               logs: (queued?.jobs ?? []).map((job) => ({ name: job.name, url: job.url, log: job.tail, missing: job.missing })),
               details: queued !== null && queued.failing.length === 0 && queued.logs.length > 0 ? queued.logs.join('\n\n') : undefined,
             },

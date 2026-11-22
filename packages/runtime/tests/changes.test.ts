@@ -604,8 +604,9 @@ describe('a task that ends in a pull request', () => {
       const taken = heard.find((notice) => notice['title'] === line) as Record<string, unknown> | undefined
       assert.isDefined(taken)
       assert.isUndefined(taken?.['description'])
-      assert.deepInclude(taken?.['links'], { label: 'test', url: 'https://example.com/jobs/1' })
-      assert.deepInclude(taken?.['links'], { label: 'verify', url: 'https://example.com/jobs/2' })
+      // Each link says where its label stands in the line.
+      assert.deepInclude(taken?.['links'], { label: 'test', url: 'https://example.com/jobs/1', at: line.indexOf('test') })
+      assert.deepInclude(taken?.['links'], { label: 'verify', url: 'https://example.com/jobs/2', at: line.indexOf('verify') })
       const logs = taken?.['logs'] as ReadonlyArray<{ name: string; log: string | null; missing: string | null }>
       assert.include(logs.find((log) => log.name === 'test')?.log, 'FAIL limit.test.ts')
       assert.include(logs.find((log) => log.name === 'verify')?.missing, 'GitHub refused (403)')

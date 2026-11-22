@@ -118,7 +118,7 @@ export type RoundBlock =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning'
-      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at?: number }>
       /** What the line is built on, such as a host's raw answer: folded under it. */
       readonly details?: string
       /** The failed checks it names: the end of each one's log, or why it couldn't be read, folded under it. */

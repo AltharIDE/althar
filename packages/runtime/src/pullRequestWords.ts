@@ -144,6 +144,34 @@ export const leftQueueLine = (name: string, why: ChangeRequest['leftQueue'], det
     : leftQueueNote(name, why)
 
 /**
+ * `leftQueueLine` with its links: the pull request's name, and each failed job that has a page, each where it stands in the
+ * line, so a job whose name also stands earlier in it (test in "test / linux", or "out") links its own.
+ */
+export const leftQueueLinked = (
+  name: string,
+  url: string,
+  why: ChangeRequest['leftQueue'],
+  detail: QueueDetail | null | undefined,
+): { readonly title: string; readonly links: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at: number }> } => {
+  const title = leftQueueLine(name, why, detail)
+  const named = title.indexOf(name)
+  const links: Array<{ readonly label: string; readonly url: string; readonly at: number }> =
+    named < 0 ? [] : [{ label: name, url, at: named }]
+  const failing = detail?.failing ?? []
+  const head = `The merge queue took ${name} out: `
+  if (failing.length === 0 || title !== `${head}${listed(failing)} failed.`) return { title, links }
+  const pages = [...(detail?.pages ?? [])]
+  let at = head.length
+  failing.forEach((job, index) => {
+    const page = pages.findIndex((one) => one.name === job && one.url !== null)
+    const found = page < 0 ? undefined : pages.splice(page, 1)[0]?.url
+    if (found !== undefined && found !== null) links.push({ label: job, url: found, at })
+    at += job.length + (index === failing.length - 2 ? ' and '.length : ', '.length)
+  })
+  return { title, links }
+}
+
+/**
  * Said to the person after that line, where nothing in the queue's build names the pull request: why its lead wasn't put to
  * work, and what is theirs to do. `base` is the default branch the build's jobs were compared with.
  */

@@ -521,6 +521,41 @@ describe('a task’s thread in rounds, on its screen', () => {
     return client
   }
 
+  it('links each check a merge-queue send-back names to its own page, its logs folded under the line', async () => {
+    // "test / linux" has no page and comes first; "out" stands in the line's words too: each link goes where it says it is.
+    const title = 'The merge queue took PR #1 out: test / linux, test and out failed.'
+    show([
+      items.you('Ship it'),
+      items.says('Shipped.'),
+      items.notice(
+        {
+          source: 'runtime',
+          title,
+          links: [
+            { label: 'PR #1', url: 'https://ci/pr/1', at: 21 },
+            { label: 'test', url: 'https://ci/test', at: title.indexOf(', test') + 2 },
+            { label: 'out', url: 'https://ci/out', at: title.indexOf('and out') + 4 },
+          ],
+          logs: [{ name: 'test', url: 'https://ci/test', log: 'FAIL limit.test.ts', missing: null }],
+        },
+        null,
+      ),
+    ])
+    const line = (await screen.findByRole('link', { name: 'PR #1' })).closest('p, div') as HTMLElement
+    expect(line.textContent).toContain(title)
+    const links = within(line).getAllByRole('link')
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['PR #1', 'https://ci/pr/1'],
+      ['test', 'https://ci/test'],
+      ['out', 'https://ci/out'],
+    ])
+    // The test linked is the check's own, after "test / linux", whose words stay plain.
+    expect(line.innerHTML).toContain('out: test / linux, <a')
+    expect(screen.queryByText('FAIL limit.test.ts')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Logs' }))
+    expect(await screen.findByText(/FAIL limit\.test\.ts/)).toBeTruthy()
+  })
+
   it('shows what the coordinator passed on on the person’s side, in a line and the rest on a click', async () => {
     show([
       items.notice(

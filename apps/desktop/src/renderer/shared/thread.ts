@@ -206,7 +206,7 @@ export type Block =
       readonly id: string
       readonly text: string
       /** Words in the text that are links, and what the line is built on, folded under it. */
-      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at?: number }>
       readonly details?: string
       /** The failed checks it names: the end of each one's log, or why it couldn't be read, folded under it. */
       readonly logs?: ReadonlyArray<CheckLogShown>

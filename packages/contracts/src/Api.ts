@@ -2193,8 +2193,11 @@ export const NoticeItem = Schema.Struct({
     description: Schema.NullOr(Schema.String),
     /** What the line is built on, kept apart from it: a host's raw answer, pretty-printed, drawn folded under "Details". */
     details: Schema.optional(Schema.String),
-    /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
-    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+    /**
+     * Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. `at`, where
+     * given, is where the label starts in the title, for a label that also stands earlier in it ("test" in "test / linux").
+     */
+    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String, at: Schema.optional(Schema.Number) }))),
     /** The failed checks the line names, such as the merge queue's: the end of each one's log, or why it couldn't be read, folded under it. */
     logs: Schema.optional(Schema.Array(CheckLogShown)),
     /**
