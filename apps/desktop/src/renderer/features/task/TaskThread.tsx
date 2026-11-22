@@ -4,6 +4,7 @@ import {
   AltharLine,
   Checked,
   LinkButton,
+  logLines,
   Gallery,
   type GalleryShot,
   Markdown,
@@ -515,7 +516,21 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
+          <AltharLine
+            key={block.id}
+            tone={block.tone}
+            {...(block.details === undefined ? {} : { details: block.details })}
+            {...(block.logs === undefined
+              ? {}
+              : {
+                  logs: block.logs.map((log) => ({
+                    name: log.name,
+                    url: log.url,
+                    lines: log.log === null ? null : logLines(log.log),
+                    missing: log.missing,
+                  })),
+                })}
+          >
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>

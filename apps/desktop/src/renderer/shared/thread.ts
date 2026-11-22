@@ -2,6 +2,7 @@ import { plainTitle, toolWordsOf } from '@althar/contracts'
 import type {
   AllowedBy,
   AttachedFile,
+  CheckLogShown,
   FileMention,
   Picture,
   SentLineComment,
@@ -205,8 +206,10 @@ export type Block =
       readonly id: string
       readonly text: string
       /** Words in the text that are links, and what the line is built on, folded under it. */
-      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at?: number }>
       readonly details?: string
+      /** The failed checks it names: the end of each one's log, or why it couldn't be read, folded under it. */
+      readonly logs?: ReadonlyArray<CheckLogShown>
     }
   /**
    * The agent compacting its context, as it reported it: a line across the
@@ -1016,6 +1019,7 @@ export const blocksOf = (
             text: noticeText(item.content),
             ...(item.content.links === undefined ? {} : { links: item.content.links }),
             ...(item.content.details === undefined ? {} : { details: item.content.details }),
+            ...(item.content.logs === undefined ? {} : { logs: item.content.logs }),
           })
           if (carriedOn(item.content)) restartedAt = blocks.length - 1
           if (relayed(item.content)) {
