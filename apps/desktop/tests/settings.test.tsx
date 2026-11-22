@@ -226,6 +226,55 @@ describe('the quick settings', () => {
     expect(within(panel).getByText('1 at a time until memory frees up')).toBeTruthy()
   })
 
+  it('put the popover’s agents back to what was last kept when several changes on their way can’t be', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    // Two changes, to 3 and then 2, both still on their way.
+    const refusals: Array<() => void> = []
+    vi.mocked(client.setAgentsAtOnce).mockImplementation(
+      () => new Promise<void>((_, reject) => void refusals.push(() => reject(new Error('disk full')))),
+    )
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(vi.mocked(client.setAgentsAtOnce).mock.calls.map(([n]) => n)).toEqual([3, 2])
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 2 })
+    // Both refused, in order: the popover goes back to what was kept, not to the first change's 3.
+    for (const refuse of refusals) refuse()
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual(lowered)
+    expect(within(panel).getByText('1 at a time until memory frees up')).toBeTruthy()
+  })
+
+  it('put the popover’s agents at the number kept when a later change on its way can’t be', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    const answers: Array<{ keep: () => void; refuse: () => void }> = []
+    vi.mocked(client.setAgentsAtOnce).mockImplementation(
+      () =>
+        new Promise<void>((resolve, reject) => void answers.push({ keep: () => resolve(), refuse: () => reject(new Error('disk full')) })),
+    )
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    // The change to 3 is kept, the one to 2 isn't: 3 it is, still fewer for now and why.
+    answers[0]?.keep()
+    await Promise.resolve()
+    answers[1]?.refuse()
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual({ ...lowered, configured: 3 })
+  })
+
   it('take another number of agents at once, step by step, and say when it can’t be kept', async () => {
     const { client } = fakeClient()
     withServices(<Quick />, client)
@@ -684,7 +733,7 @@ describe('the Settings tab', () => {
     await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
     await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
     const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })
-    expect(within(adding).getByText(/althar-host enroll-worker/)).toBeTruthy()
+    expect(within(adding).getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeTruthy()
     expect(within(adding).queryByText(/althar workers enroll/)).toBeNull()
     expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
   })

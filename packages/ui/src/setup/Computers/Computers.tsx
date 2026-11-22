@@ -116,7 +116,7 @@ export interface ComputersText {
   /** On a home in this app: its own command line. */
   commands: { listen: string; enroll: string; agents: string; start: string }
   /** On a Linux home of its own: what differs, run there with althar-host. */
-  hostSteps: { listen: string }
+  hostSteps: { listen: string; enroll: string }
   hostCommands: { listen: string; enroll: string }
   addWaiting: string
   done: string
@@ -170,7 +170,8 @@ export const computersText: ComputersText = {
     listen: 'Let this home take workers, then restart Althar.',
     enroll: 'Enroll the worker’s certificate for each project it may work on.',
     agents: 'On the worker, sign in to the agent, install its ACP adapter, and say which project it works on.',
-    start: 'Start the worker with the home and worker IDs enrolling printed, and leave it running.',
+    start:
+      'Start the worker at a name the home’s certificate covers, with the home and worker IDs enrolling printed, and leave it running.',
   },
   commands: {
     listen: 'althar workers configure --address <private-ip> --ca home-ca.pem --certificate home.pem --key home.key',
@@ -178,13 +179,17 @@ export const computersText: ComputersText = {
     agents:
       "umask 077; mkdir -p ~/althar-worker/workspaces && printf '%s\\n%s\\t%s\\t%s\\n' ~/althar-worker/workspaces <project-id> codex </path/to/acp-adapter> > ~/althar-worker/agents.conf",
     start:
-      './althar-worker https://<home>:6770 <home-id> <worker-id> ca.pem client.pem client.key ~/althar-worker/journal --agent-config ~/althar-worker/agents.conf --watch',
+      './althar-worker https://<home-name>:6770 <home-id> <worker-id> ca.pem client.pem client.key ~/althar-worker/journal --agent-config ~/althar-worker/agents.conf --watch',
   },
-  hostSteps: { listen: 'On the home, let it take workers, then restart it.' },
+  hostSteps: {
+    listen: 'On the home, let it take workers at a private address they reach, then restart it.',
+    enroll: 'On the home, enroll the worker’s certificate for each project it may work on, then read the home’s ID.',
+  },
   hostCommands: {
     listen:
-      'althar-host configure-workers --worker-ca ca.pem --tls-certificate home.pem --tls-key home.key && systemctl --user restart althar-host.service',
-    enroll: 'althar-host enroll-worker --worker-certificate client.pem --project-id <project-id> --json',
+      'althar-host configure-workers --listen-address <private-ip> --worker-ca ca.pem --tls-certificate home.pem --tls-key home.key && systemctl --user restart althar-host.service',
+    enroll:
+      'althar-host enroll-worker --worker-certificate client.pem --project-id <project-id> --json && althar-host status --wait --json',
   },
   addWaiting: 'It shows here once it connects.',
   done: 'Done',
@@ -556,7 +561,7 @@ export function AddWorkerDialog({ home, enabled, standalone = false, onClose, te
     : { words: t.steps.listen, command: t.commands.listen }
   const steps = [
     ...(enabled ? [] : [listen]),
-    { words: t.steps.enroll, command: standalone ? t.hostCommands.enroll : t.commands.enroll },
+    standalone ? { words: t.hostSteps.enroll, command: t.hostCommands.enroll } : { words: t.steps.enroll, command: t.commands.enroll },
     { words: t.steps.agents, command: t.commands.agents },
     { words: t.steps.start, command: t.commands.start },
   ]

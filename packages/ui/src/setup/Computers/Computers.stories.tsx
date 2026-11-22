@@ -162,8 +162,10 @@ export const AddAWorkerToALinuxHome: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
     await expect(page.getByRole('dialog', { name: 'Add a worker to studio' })).toBeInTheDocument()
-    await expect(page.getByText(/althar-host configure-workers/)).toBeInTheDocument()
-    await expect(page.getByText(/althar-host enroll-worker/)).toBeInTheDocument()
+    // Bound where a worker on another computer reaches it, and the home's ID read from its status: enrolling gives only the worker's.
+    await expect(page.getByText(/althar-host configure-workers --listen-address <private-ip>/)).toBeInTheDocument()
+    await expect(page.getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeInTheDocument()
+    await expect(page.getByText(/at a name the home’s certificate covers/)).toBeInTheDocument()
     await expect(page.queryByText(/althar workers/)).toBeNull()
   },
 }
