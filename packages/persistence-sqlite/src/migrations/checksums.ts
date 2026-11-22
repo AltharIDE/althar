@@ -100,4 +100,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0094_preset_tunings': 'e415b238eb87c7ca10fe6b5fca58d13059dc9cf41e30a79e8f85669248cf2dce',
   '0095_sessions_by_agent': 'bcfdc66359f3d62b1cade2085845e5d17c680adc6f3202560f6d4a0ac77b6b05',
   '0096_home_events': '53968d0dafcd3c044785f534768bf5bbefa3ffb57ee4bfc7b226906ba52f3b62',
+  '0097_finder_index': 'ee10eb26f8e795cb9db898161feb581bb947b379c8453f80c1f4196ae437aecf',
+  '0098_thread_goals': '4ae57df0484133805d3b45a9921b11bdf0788d3eca93d07616d73205d583d5bd',
 }

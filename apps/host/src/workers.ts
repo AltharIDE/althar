@@ -4,6 +4,7 @@ import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 
 import { bindWorkerHandshake, workerCertificateFingerprint } from '@althar/worker-protocol/grpc'
+import { makeAgentWorkerPool } from '@althar/worker-protocol/agent-runs'
 import { connectHomeRelay, validateHomeRelay } from '@althar/worker-protocol/relay'
 import { Effect, Schema } from 'effect'
 
@@ -119,17 +120,20 @@ export const listenWorkers = (options: HostOptions, homeId: string) =>
           let listener: Awaited<ReturnType<typeof bindWorkerHandshake>> | undefined
           try {
             const ip = config.address.includes(':') ? `[${config.address}]` : config.address
+            const agentWorkers = makeAgentWorkerPool(store.agents)
             const bound = await bindWorkerHandshake(`${ip}:${config.port}`, {
               homeId,
               ...tls,
               workerForCertificate: store.workerForCertificate,
               diagnostics: store,
+              agentWorkers,
             })
             listener = bound
             const target = config.address === '0.0.0.0' ? '127.0.0.1' : config.address === '::' ? '::1' : config.address
             const stopRelay = relay === undefined ? undefined : connectHomeRelay(relay, { host: target, port: bound.port })
             return {
               port: bound.port,
+              agentWorkers,
               close: () => {
                 stopRelay?.()
                 bound.close()

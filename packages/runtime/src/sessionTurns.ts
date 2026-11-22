@@ -44,6 +44,7 @@ import {
 } from './sessionState'
 import type { Setups } from './Setups'
 import { addItem, recorder } from './threads'
+import { endGoalRound, goalBrief, runnableGoal, startGoalRound } from './threadGoals'
 import { toolClock } from './turnTimes'
 import { checkpointAfterTurn, checkpointBeforeTurn } from './turnUndo'
 
@@ -271,7 +272,12 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       // From here to its prompt going out is the turn getting ready, which its timings keep (turnTimes.ts).
       const readying = yield* Clock.currentTimeMillis
       // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
-      if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
+      const availableGoal = thread.role === 'task' && thread.helper === undefined ? yield* runnableGoal(thread.threadId) : null
+      if (availableGoal !== null && availableGoal.rounds >= availableGoal.roundLimit)
+        yield* endGoalRound(thread.threadId, availableGoal.revision, null)
+      const goal = availableGoal !== null && availableGoal.rounds < availableGoal.roundLimit ? availableGoal : null
+      const hasWork = () => (goal !== null ? Effect.succeed(true) : inputWaiting(thread.threadId))
+      if (running.nextLead !== undefined && (yield* hasWork())) {
         const next = running.nextLead
         if (next.agentId !== running.entry.definition.id) {
           if (!(yield* setLeadChoice(running, undefined, { after: next }))) return true
@@ -291,7 +297,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         )
       }
       // Its folder moved: a fresh session there takes up what is said now, handed the work so far.
-      if (running.moved && running.handover === 'none' && (yield* inputWaiting(thread.threadId))) {
+      if (running.moved && running.handover === 'none' && (yield* hasWork())) {
         running.moved = false
         running.handover = 'under_way'
         yield* Effect.forkIn(run(dependencies.handOver(running, 'moved')), sessionsScope)
@@ -334,11 +340,11 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const compactAt = queued.findIndex((input) => input.body === COMPACT)
       const beforeCompact = compactAt === -1 ? queued : queued.slice(0, compactAt)
       const manualCompact = compactAt >= 0 && beforeCompact.every((input) => input.state === 'noted')
-      // Compact a full coordinator as its turn ends. A lead waits for its next input, and a queued Compact keeps its place.
+      // Compact a full coordinator as its turn ends. A lead waits for its next message or goal round.
       const autoCompact =
         compactAt === -1 &&
         automaticCompactionDue(running) &&
-        (thread.role === 'coordinator' || queued.some((input) => input.state === 'queued'))
+        (thread.role === 'coordinator' || goal !== null || queued.some((input) => input.state === 'queued'))
       const compacting = manualCompact || autoCompact
       const selected = autoCompact ? [] : manualCompact ? queued.slice(compactAt, compactAt + 1) : beforeCompact
       const before = running.context
@@ -349,9 +355,11 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         if (waiting.some((input) => input.state === 'queued' && running.blockedInputs?.has(input.id))) running.deliveryHeld = 'recovery'
         return false
       }
-      if (!asking && running.brief === undefined) return false
-      // The coordinator speaks when spoken to: its brief waits for the person's first message. So does an aside opened with +.
-      if (!asking && (thread.role === 'coordinator' || running.waitsForWords === true)) return false
+      const activeGoal = compacting ? null : goal
+      const goalRound = activeGoal !== null && !asking
+      if (!asking && !goalRound && (running.brief === undefined || running.brief.onlyForGoal === true)) return false
+      // An aside opened with + waits for the person's first message or goal. The coordinator only answers messages.
+      if (!asking && (thread.role === 'coordinator' || (running.waitsForWords === true && !goalRound))) return false
       // The images the person sent with each, read from the store for this turn: only an agent that takes images is sent them.
       const sent = yield* imagesFor(
         selected.map((input) => input.id),
@@ -433,8 +441,10 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
               ),
             )
           : null
-      let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, withRecords(becameWork)))
       const turnId = yield* newId(Ids.turnDelivery)
+      const words = promptFor(inputs, briefed, withRecords(becameWork))
+      const withGoal = activeGoal === null ? words : `${goalBrief(activeGoal, goalRound, turnId)}\n\n${words}`
+      let prompt = compacting ? COMPACT : asTold(running.entry.definition, withGoal)
       const [session] = yield* sql<{
         model: string | null
         effort: string | null
@@ -461,6 +471,8 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
               )
               prompt = asTold(running.entry.definition, promptFor(inputs, briefed, withRecords(news)))
             }
+            if (activeGoal !== null && (yield* runnableGoal(thread.threadId))?.revision !== activeGoal.revision)
+              return yield* new TakenBack()
             const at = yield* timestamp
             yield* sql`INSERT INTO turn_deliveries ${sql.insert({
               id: turnId,
@@ -472,6 +484,8 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
               effort: session?.effort ?? null,
               // What the agent is told, kept so it can always be read back (docs/architecture/03).
               prompt,
+              goalRevision: activeGoal?.revision ?? null,
+              goalRound: goalRound ? 1 : 0,
               state: 'pending',
               origin: inputs.some((i) => i.author === 'person' && (i.senderKind === 'window' || i.senderKind === 'paired_device'))
                 ? 'person'
@@ -497,6 +511,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         )
         .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
       if (!claimed) return true
+      running.goalRoundTurn = goalRound ? turnId : undefined
       // System-only plan turns before the person speaks have no chat message to undo.
       // Once chat undo is available, keep later system turns in the same restorable suffix.
       if (
@@ -705,8 +720,10 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         }
         return Effect.gen(function* () {
           // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
-          yield* sql.withTransaction(
+          const admitted = yield* sql.withTransaction(
             Effect.gen(function* () {
+              if (goalRound && (inputBatches.pending(thread.threadId) || (yield* inputWaiting(thread.threadId)))) return false
+              if (activeGoal !== null && !(yield* startGoalRound(thread.threadId, activeGoal, goalRound))) return false
               const revision = yield* change('turn_deliveries', turnId, { state: 'delivered', deliveredAt: yield* timestamp })
               yield* fact({
                 projectId: thread.projectId,
@@ -731,8 +748,13 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
               yield* shownWhereRead(running, turnId, inputs).pipe(
                 Effect.catchCause((cause) => Effect.logWarning('Could not show what a turn gives the agent where it reads it', cause)),
               )
+              return true
             }),
           )
+          if (!admitted) {
+            prevented = true
+            return
+          }
           // Recording delivery and dispatch are one boundary: any crash from here may have reached the agent.
           if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) {
             prevented = true
@@ -775,6 +797,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         )
       running.turnRunning = false
       running.promptSent = null
+      running.goalRoundTurn = undefined
       running.turnEndedAt = yield* Clock.currentTimeMillis
       // Its copies made fresh again for its next turn now, while the person reads and writes, rather than as they wait.
       if (readsCopies) yield* copiesAfter(thread.projectId)
@@ -850,6 +873,17 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             payload: { stopReason: ended?.stopReason, errorClass },
             actorId: instance.systemId,
           })
+          if (activeGoal !== null && !prevented) {
+            const endedEarly =
+              state === 'interrupted' && !running.stopping && running.handover === 'none' && !(yield* inputWaiting(thread.threadId))
+            const stopped =
+              ended?.stopReason === 'refusal' || endedEarly
+                ? 'The agent stopped without working on the goal.'
+                : state === 'failed' && !lost && (!held || (goalRound && errorClass === 'transient'))
+                  ? 'The agent could not continue. Resume the goal to try again.'
+                  : null
+            yield* endGoalRound(thread.threadId, activeGoal.revision, stopped)
+          }
           // Refused, nothing was delivered. Out of usage, or its service out of reach, what the person said waits for the
           // agent that carries on; Althar's own prompts are given again by what carries the work on.
           const back = prevented || refused ? inputs : lost ? inputs.filter((input) => input.body !== COMPACT) : held ? inputs : []
@@ -1146,7 +1180,15 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
           )
         // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
         // is still queued after one wakes it again, and asks again.
-        if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
+        if (
+          running.stopping ||
+          !(
+            running.brief !== undefined ||
+            (yield* hasQueued(thread.threadId)) ||
+            (thread.role === 'task' && thread.helper === undefined && (yield* runnableGoal(thread.threadId)) !== null)
+          )
+        )
+          return
         // A compaction is one call of the agent's own, and loads nothing here: it never waits for a place.
         const delivered = (effect: Effect.Effect<boolean, unknown, Store>) =>
           run(effect).pipe(

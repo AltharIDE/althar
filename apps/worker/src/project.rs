@@ -97,7 +97,7 @@ impl ProjectConfig {
 
 // Both processes use the same Linux monotonic clock. Sample it before reading
 // the time left in the lease so time spent writing to the pipe consumes the grant.
-fn monotonic_ms() -> u64 {
+pub(crate) fn monotonic_ms() -> u64 {
     let now = clock_gettime(ClockId::Monotonic);
     (now.tv_sec as u64) * 1000 + (now.tv_nsec as u64) / 1_000_000
 }
@@ -207,28 +207,38 @@ impl ProjectUnit {
     }
 
     fn cgroup_path(&self, group: &[u8]) -> io::Result<PathBuf> {
-        let group = std::str::from_utf8(group).map_err(|_| invalid("Invalid control group"))?;
-        let Some(relative) = group.trim().strip_prefix('/') else {
-            return Err(invalid("The project command needs systemd and cgroup v2"));
-        };
-        let relative = Path::new(relative);
-        if relative.file_name().and_then(|name| name.to_str()) != Some(self.name.as_str())
-            || !relative
-                .components()
-                .all(|part| matches!(part, std::path::Component::Normal(_)))
-        {
-            return Err(invalid("Unexpected project control group"));
-        }
-        Ok(Path::new("/sys/fs/cgroup").join(relative))
+        cgroup_path(&self.name, group)
     }
 
     fn empty(path: &Path) -> bool {
-        match fs::read_to_string(path.join("cgroup.events")) {
-            Ok(events) => events.lines().any(|line| line == "populated 0"),
-            Err(error) => error.kind() == io::ErrorKind::NotFound && !path.exists(),
-        }
+        cgroup_empty(path)
     }
+}
 
+pub(crate) fn cgroup_path(unit: &str, group: &[u8]) -> io::Result<PathBuf> {
+    let group = std::str::from_utf8(group).map_err(|_| invalid("Invalid control group"))?;
+    let Some(relative) = group.trim().strip_prefix('/') else {
+        return Err(invalid("The project command needs systemd and cgroup v2"));
+    };
+    let relative = Path::new(relative);
+    if relative.file_name().and_then(|name| name.to_str()) != Some(unit)
+        || !relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(invalid("Unexpected project control group"));
+    }
+    Ok(Path::new("/sys/fs/cgroup").join(relative))
+}
+
+pub(crate) fn cgroup_empty(path: &Path) -> bool {
+    match fs::read_to_string(path.join("cgroup.events")) {
+        Ok(events) => events.lines().any(|line| line == "populated 0"),
+        Err(error) => error.kind() == io::ErrorKind::NotFound && !path.exists(),
+    }
+}
+
+impl ProjectUnit {
     pub(crate) async fn run(
         &self,
         config: &ProjectConfig,
