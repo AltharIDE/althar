@@ -56,6 +56,9 @@ export const workerExecution = (
     }
   >()
   const preparing = new Set<string>()
+  /** A worker at work, or being readied for a task: taking it out would cut its task off, so it waits. */
+  const working = (workerId: string) =>
+    preparing.has(workerId) || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
   return {
     list: (projectId) =>
       (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {
@@ -90,6 +93,7 @@ export const workerExecution = (
         try: () => {
           const listing = ledger?.()
           if (listing === undefined) throw new Error('This home takes no workers.')
+          if (working(workerId)) throw new Error('It runs a task. Remove it once that finishes.')
           listing.revoke(workerId)
         },
         catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),

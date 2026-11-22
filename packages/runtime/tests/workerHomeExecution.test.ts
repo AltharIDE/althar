@@ -483,6 +483,9 @@ it.live('lists the home’s enrolled workers, connected or not, and takes one ou
       [online],
     )
     assert.strictEqual(yield* Effect.flip(service.revoke!(offline)), 'No worker has that identity')
+    // One at work keeps its task: it can't be taken out under it.
+    assert.strictEqual(yield* Effect.flip(service.revoke!(online)), 'It runs a task. Remove it once that finishes.')
+    assert.deepStrictEqual(removed, [offline])
     // A home that isn't listening for workers has no list of them, and nothing to take out.
     const off = workerExecution(
       () => undefined,
