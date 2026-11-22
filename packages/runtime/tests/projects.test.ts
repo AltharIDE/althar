@@ -167,8 +167,9 @@ describe('projects', () => {
   it('tells a fork by an upstream beside its origin, on the same host, naming another repository', () => {
     const origin = { name: 'origin', url: 'git@github.com:you/web.git' }
     assert.deepStrictEqual(forkOf([origin, { name: 'upstream', url: 'https://github.com/meridian/web.git' }]), {
-      fork: { url: 'git@github.com:you/web.git', path: ['you', 'web'] },
-      upstream: { url: 'https://github.com/meridian/web.git', path: ['meridian', 'web'] },
+      fork: { url: 'git@github.com:you/web.git', path: ['you', 'web'], remote: 'origin' },
+      upstream: { url: 'https://github.com/meridian/web.git', path: ['meridian', 'web'], remote: 'upstream' },
+      by: 'names',
     })
     assert.isNull(forkOf([origin]))
     assert.isNull(forkOf([{ name: 'upstream', url: 'https://github.com/meridian/web.git' }]))

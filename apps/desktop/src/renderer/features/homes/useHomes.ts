@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
+import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 
 /*
  * What the window's homes share: where its own home stands, what main knows
@@ -41,6 +41,9 @@ export const useHomeState = (homes: HomesHost | undefined): HomeState | null => 
 
 /** Every home, as main knows it; null until first read. */
 export const useHomesOverview = (homes: HomesHost | undefined): HomesOverview | null => useFollowed(homes?.overview, homes?.onOverview)
+
+/** A home being set up over SSH, as main tells it; null while there's none, and until first read. */
+export const useHomeSetup = (homes: HomesHost | undefined): HomeSetup | null => useFollowed(homes?.setup, homes?.onSetup)
 
 /** Asks the window to show its homes, as File › Homes… does: the chip's menu, or Connect a home where there's no chip yet. */
 export const showHomes = () => window.dispatchEvent(new Event('althar:show-homes'))

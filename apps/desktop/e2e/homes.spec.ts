@@ -88,6 +88,10 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     // The first connection is reachable from the app itself, even where its native menu bar is hidden.
     await page.getByRole('button', { name: 'Homes', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
+    // A first home opens on what a home is, then how to set one up; one set up already pairs, or is checked over SSH.
+    await page.getByRole('dialog', { name: 'Your first home' }).getByRole('button', { name: 'Set one up' }).click()
+    await page.getByRole('radio', { name: /^With a pairing code/ }).click()
+    await page.getByRole('button', { name: 'Paste its code', exact: true }).click()
     const connect = page.getByRole('dialog', { name: 'Connect a home' })
     await expect(connect).toBeVisible()
     await page.getByRole('radio', { name: 'SSH', exact: true }).click()
@@ -99,7 +103,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await still(page)
     await page.screenshot({ path: 'test-results/homes-flow-02-connect.png', scale: 'css' })
     await page.getByRole('button', { name: 'Check host', exact: true }).click()
-    await expect(page.getByText(endpoint.homeId, { exact: true })).toBeVisible()
+    await expect(page.getByLabel(endpoint.homeId, { exact: true })).toBeVisible()
     await page.getByLabel('Name', { exact: true }).fill('My VPS')
     await still(page)
     await page.screenshot({ path: 'test-results/homes-flow-03-confirm.png', scale: 'css' })

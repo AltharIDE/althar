@@ -82,6 +82,7 @@ export const entryOf = (repository: ProjectRepository, toward?: WorkTowardModel[
                 upstream: repository.fork.upstream,
                 target: TARGETS[repository.fork.target],
                 ...(repository.fork.canPush === null ? {} : { canPush: repository.fork.canPush }),
+                remote: repository.fork.remote,
               },
             }),
       }),
@@ -146,6 +147,7 @@ export function Repositories({
       onTowardChange={toward.change}
       onTowardCreate={toward.create}
       onTargetChange={model.setTarget}
+      onAddRemote={(id) => void model.addParentRemote(id)}
       onLeaveOut={(id) => void model.leaveOut(id)}
       onAdd={() => void model.add()}
       onDrop={(files) => void model.addDropped(files)}

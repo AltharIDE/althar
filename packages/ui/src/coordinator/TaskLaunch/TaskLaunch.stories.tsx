@@ -12,6 +12,7 @@ import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { BlockerStands, TaskEnd, WorksIn } from '../../foundations/vocabulary'
+import { Select } from '../../primitives/Select/Select'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
@@ -157,6 +158,51 @@ export const Held: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Add back: Dry run on a copy' }))
     await waitFor(() => expect(c.queryByText('skipped')).not.toBeInTheDocument())
   },
+}
+
+export const HeldWithWorker: Story = {
+  render: function Render() {
+    const [worker, choose] = useState('home')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        footNote={
+          <>
+            <Select
+              label="Run on"
+              variant="filled"
+              value={worker}
+              options={[
+                { value: 'home', label: 'This home' },
+                { value: 'auto', label: 'Best available worker' },
+                { value: 'worker', label: 'Linux worker aaaaaa' },
+              ]}
+              onChange={choose}
+            />
+            {worker !== 'home' && (
+              <>
+                {' '}
+                <span role="status">Setup and lead run on the worker. Review runs on this home.</span>
+              </>
+            )}
+          </>
+        }
+      />
+    )
+  },
+}
+
+export const HeldWithAutomaticPlacement: Story = {
+  ...HeldWithWorker,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Run on' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Best available worker' }))
+  },
+}
+
+export const HeldOnHome: Story = {
+  render: () => <Launch held estimate={undefined} footNote={<span role="status">A worker needs a task with one repository.</span>} />,
 }
 
 const started = fn()

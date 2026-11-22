@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { Room } from '@althar/ui'
-import { socketCanCall } from '@althar/contracts'
+import { socketCanCall, type FinderQuery, type SearchDocument } from '@althar/contracts'
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -59,23 +59,6 @@ const readUses = (): Readonly<Record<string, Use>> => {
   }
 }
 
-/** Warm once with the window, before the first key. No index data is stored
- * in browser storage: only ids and usage counts. Removed projects leave on refresh. */
-export const useWarmSearch = () => {
-  const { client, cache, feed } = useServices()
-  useEffect(() => {
-    void cache.prefetchQuery(catalogRead(client))
-    return feed.listen((event) => {
-      if (
-        event._tag === 'Changed' &&
-        ['project', 'task', 'thread_item', 'user_input', 'project_note', 'external_link', 'run', 'card'].includes(event.aggregateType)
-      ) {
-        void cache.invalidateQueries({ queryKey: catalogKey, refetchType: 'none' })
-      }
-    })
-  }, [client, cache, feed])
-}
-
 /**
  * `place`: the box chooses where something goes rather than where the person does: a project, for its coordinator, or a
  * task, an aside among them, and nothing else shows.
@@ -97,13 +80,18 @@ export function FinderView({
   const path = useRouterState({ select: (state) => state.location.pathname })
   const thread = path.startsWith('/threads/') ? path.slice('/threads/'.length) : null
   const projects = useQuery(reads(client).projects()).data?.projects ?? EMPTY_PROJECTS
-  const catalog = useQuery(catalogRead(client))
-  const documents = catalog.data ?? EMPTY_DOCUMENTS
-  const currentTask = documents.find((one) => one.kind === 'task' && one.threadId === thread)
+  const [search, setSearch] = useState<FinderQuery>({ text: '' })
+  const readsDocuments = search.kinds?.length !== 0
+  const catalog = useQuery(catalogRead(client, search, readsDocuments))
+  const documents = catalog.data?.documents ?? EMPTY_DOCUMENTS
+  const [drilled, setDrilled] = useState<string | null>(thread)
+  const actionRead = useQuery({ ...reads(client).thread(drilled ?? ''), enabled: drilled !== null })
+  const current = useQuery({ ...reads(client).thread(thread ?? ''), enabled: thread !== null }).data
+  const currentTask = current?.task.id ?? null
   const usage = useMemo(() => readUses(), [])
   const context: Context = useMemo(
-    () => ({ project: projectId, task: currentTask?.taskId ?? null, projects, usage }),
-    [projectId, currentTask?.taskId, projects, usage],
+    () => ({ project: projectId, task: currentTask, projects, usage }),
+    [projectId, currentTask, projects, usage],
   )
   const fileThread = thread ?? projects.find((one) => one.id === projectId)?.coordinatorThreadId ?? null
   const files = useQuery({
@@ -112,12 +100,30 @@ export function FinderView({
     enabled: fileThread !== null,
     staleTime: 30_000,
   })
-  const entries = useMemo(
-    () => entriesFor(documents, projects, context, files.data?.files ?? [], fileThread),
-    [documents, projects, context, files.data, fileThread],
-  )
-  const [drilled, setDrilled] = useState<string | null>(thread)
-  const actionRead = useQuery({ ...reads(client).thread(drilled ?? ''), enabled: drilled !== null })
+  const entries = useMemo(() => {
+    const task = current?.task
+    const projected: ReadonlyArray<SearchDocument> =
+      current === undefined || task === undefined || documents.some((one) => one.id === `task:${task.id}`)
+        ? documents
+        : [
+            ...documents,
+            {
+              id: `task:${task.id}`,
+              kind: 'task',
+              projectId: current.project.id,
+              threadId: current.threadId,
+              taskId: task.id,
+              itemId: null,
+              title: task.title,
+              body: task.request ?? task.description,
+              ref: task.slug,
+              url: null,
+              changedAt: '1970-01-01T00:00:00.000Z',
+              state: task.phase ?? task.state,
+            },
+          ]
+    return entriesFor(projected, projects, context, files.data?.files ?? [], fileThread)
+  }, [documents, current, projects, context, files.data, fileThread])
   const hydrated = useMemo(() => {
     // Dictate is there where this window can dictate.
     const available = withTaskActions(entries, actionRead.data).filter(
@@ -137,14 +143,21 @@ export function FinderView({
   const { preferences } = usePreferences()
   const newTab = useNewTab()
   const [error, setError] = useState<string | null>(null)
-  // A burst (streamed text) refreshes once it rests, keeping the last whole
-  // collection and the typed words while a replacement comes together.
+  // Coalesce feed updates while a query is open, without starving it when
+  // messages stream continuously. Closed windows do no search work.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const unlisten = feed.listen((event) => {
-      if (event._tag !== 'Changed') return
-      clearTimeout(timer)
-      timer = setTimeout(() => void cache.invalidateQueries({ queryKey: catalogKey }), 1000)
+      if (
+        event._tag !== 'Changed' ||
+        timer !== undefined ||
+        !['project', 'task', 'thread_item', 'user_input', 'project_note', 'external_link', 'run', 'card'].includes(event.aggregateType)
+      )
+        return
+      timer = setTimeout(() => {
+        timer = undefined
+        void cache.invalidateQueries({ queryKey: catalogKey }, { cancelRefetch: false })
+      }, 1000)
     })
     return () => {
       clearTimeout(timer)
@@ -246,6 +259,8 @@ export function FinderView({
       context={context}
       placing={place !== undefined}
       entries={hydrated}
+      onSearch={setSearch}
+      searching={readsDocuments && catalog.isPending}
       onDrill={(entry) => {
         if (entry.go.to === 'task') setDrilled(entry.go.slug)
       }}
@@ -266,8 +281,8 @@ export function FinderView({
               Try again
             </button>
           </p>
-        ) : catalog.isPending ? (
-          <p role="status">Reading your projects…</p>
+        ) : readsDocuments && (catalog.isPending || catalog.data?.indexing === true) ? (
+          <p role="status">{catalog.isPending ? 'Reading your projects…' : 'Indexing conversation history…'}</p>
         ) : undefined
       }
     />

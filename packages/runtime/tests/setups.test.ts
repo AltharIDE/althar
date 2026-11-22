@@ -14,7 +14,7 @@ import { Projects } from '../src/Projects'
 import { installIn, runOf, setupIn } from '../src/runCommand'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { lastLinesOf, type SetUp, shellFor, toldOf } from '../src/Setups'
+import { lastLinesOf, type SetUp, Setups, shellFor, toldOf } from '../src/Setups'
 import { Tasks } from '../src/Tasks'
 import { items, repository, runtime, until } from './support'
 
@@ -181,6 +181,47 @@ const alive = (pid: number) => {
   }
 }
 
+it.live('plans setup per worker repository and records the worker result without running a home command', () =>
+  Effect.gen(function* () {
+    const { task } = yield* taskIn(repository())
+    const setups = yield* Setups
+    const sql = yield* SqlClient.SqlClient
+    const [workspace] = yield* sql<{ id: string; binding: string }>`
+      SELECT id, binding_id AS binding FROM workspaces WHERE task_id = ${task.taskId}`
+    if (workspace === undefined) return assert.fail('The task should have a checkout')
+    const plan = () => setups.workerPlan(task.taskId, workspace.id)
+    assert.isUndefined(yield* setups.workerPlan(task.taskId, 'ws_' + 'f'.repeat(32)))
+    assert.isUndefined(yield* plan())
+    const folder = join('packages', 'api')
+    yield* sql`UPDATE repository_bindings SET folder = ${folder}, run_setup = 'make deps' WHERE id = ${workspace.binding}`
+    const kept = yield* plan()
+    if (kept === undefined) return assert.fail('The worker should get the kept setup')
+    assert.deepStrictEqual(kept.spec, { commands: ['make deps'], directory: 'packages/api' })
+    yield* kept.record({ code: 124, timedOut: true, output: 'timed out on worker' })
+    const recorded = (commands: ReadonlyArray<string>, copy: ReadonlyArray<string>) =>
+      sql`UPDATE repository_bindings SET recorded_setup = ${JSON.stringify({ taskId: null, at: '2026-11-22T07:00:00Z', commands, copy })}
+        WHERE id = ${workspace.binding}`
+    yield* recorded([], [])
+    assert.isUndefined(yield* plan())
+    yield* recorded([], ['.env'])
+    const filesOnly = yield* plan()
+    if (filesOnly === undefined) return assert.fail('The worker should say what stayed on the home')
+    assert.isUndefined(filesOnly.spec)
+    yield* filesOnly.record(undefined)
+    yield* recorded(['make lint', 'make prepare'], ['ignored-config'])
+    const mixed = yield* plan()
+    if (mixed === undefined) return assert.fail('The worker should get the recorded commands')
+    assert.deepStrictEqual(mixed.spec, { commands: ['make lint', 'make prepare'], directory: 'packages/api' })
+    yield* mixed.record({ code: 0, timedOut: false, output: '' })
+    const setup = yield* setupItems(task.threadId)
+    assert.lengthOf(setup, 3)
+    assert.include(JSON.stringify(setup[0]), 'timed out on worker')
+    assert.include(JSON.stringify(setup[1]), '.env')
+    assert.include(JSON.stringify(setup[2]), 'ignored-config')
+    assert.deepStrictEqual(yield* setupProcesses, [])
+  }).pipe(Effect.provide(runtime())),
+)
+
 describe('what sets up a worktree', () => {
   const folder = () => mkdtempSync(join(tmpdir(), 'althar-setup-'))
   const manifest = (at: string, fields: Record<string, unknown>) => writeFileSync(join(at, 'package.json'), JSON.stringify(fields))
@@ -311,6 +352,9 @@ describe('what sets up a worktree', () => {
       replayed,
       "When the worktree was made, Althar set it up with the repository's recorded setup, and that went through: what it installs and copies is there, so don't run it again.",
     )
+    // One the person edited that failed: Althar asks them before record_setup replaces it.
+    const mine = toldOf([{ name: 'meridian', setUp: { ...done, code: 1 }, recorded: true, byPerson: true, checkout: null }], false)
+    assert.include(mine, 'The person edited this setup themselves, so Althar asks them before record_setup replaces it')
     // Nothing ran and nothing recorded: only the ask.
     assert.match(
       toldOf([{ name: 'meridian', setUp: { ...done, command: null }, recorded: false, checkout: null }], false),

@@ -442,9 +442,8 @@ export function useAsides({
 }
 
 /**
- * What was said in each conversation of a project, a passage each, the latest first: from the passages the finder's catalog
- * holds (every public message and report, the latest few thousand across the profile), by the aside's id, or null for the
- * coordinator's. The search finds a conversation by any of them.
+ * What was said in a project's matching conversations, latest first, by the
+ * aside's id, or null for the coordinator's.
  */
 export const passagesOf = (
   documents: ReadonlyArray<SearchDocument>,
@@ -474,7 +473,7 @@ export function AsidesBar({
   board,
   now,
   passages,
-  onSearching,
+  onSearch,
 }: {
   scratch: ReadonlyArray<BoardTask>
   open: AsideOpen
@@ -490,8 +489,7 @@ export function AsidesBar({
   now: number
   /** What was said in each conversation (`passagesOf`), once the window has read it: the titles are found without it. */
   passages?: ReadonlyMap<string | null, readonly string[]> | undefined
-  /** The search opens or shuts: the window reads what was said as it opens. */
-  onSearching?: ((open: boolean) => void) | undefined
+  onSearch?: ((text: string) => void) | undefined
 }) {
   const byAgent = useAgentRenames()
   const { recent, older } = asidesOf(scratch, now, {
@@ -502,7 +500,6 @@ export function AsidesBar({
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
   const [searching, setSearching] = useState(false)
-  useEffect(() => onSearching?.(searching), [searching, onSearching])
   // ⌘J, from anywhere in the window, opens the search over every conversation, or shuts it. A project kept behind another
   // tab runs no effects (KeptScreens' Activity), so this is the one in front; with its conversation's pane closed, it waits.
   useEffect(() => {
@@ -510,11 +507,12 @@ export function AsidesBar({
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'j') return
       if (strip.current?.checkVisibility?.() === false) return
       event.preventDefault()
-      setSearching((was) => !was)
+      if (searching) onSearch?.('')
+      setSearching(!searching)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [onSearch, searching])
   // When each was last spoken in, as the search says it.
   const dated = (one: Aside): Aside => {
     const task = scratch.find((candidate) => candidate.taskId === one.id)
@@ -531,6 +529,7 @@ export function AsidesBar({
       older={older.map(dated)}
       searching={searching}
       onSearchingChange={setSearching}
+      {...(onSearch === undefined ? {} : { onSearch })}
       {...(passages?.get(null) === undefined ? {} : { coordinatorWords: passages.get(null)! })}
       searchKbd="⌘J"
       current={open.kind === 'coordinator' ? null : open.taskId}

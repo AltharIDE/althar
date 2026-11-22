@@ -1,14 +1,14 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, fakeClient, items, snapshot } from './fixtures'
+import { change, fakeClient, fakeHost, items, snapshot } from './fixtures'
 import type { ChangeSummary } from '@althar/contracts'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ApiError } from '@althar/contracts'
-import { useMerge } from '../src/renderer/data/merges'
+import { QUEUES_AFTER, useMerge } from '../src/renderer/data/merges'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -54,6 +54,26 @@ describe('a task’s parts', () => {
     const popover = await parts()
     await userEvent.click(popover.getByRole('button', { name: 'Merge PR #714, then PR #715' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith(base.task.id, 'def456', above.url))
+  })
+
+  it('saves a separate copy from a worker worktree and shows while it is being saved', async () => {
+    let finish!: () => void
+    const saveWorkerSnapshot = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const working = snapshot({ task: { ...base.task, worktree: '/tmp/w/api', workerId: 'wrk_' + '1'.repeat(32) } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => working) })
+    withServices(<Task />, client, fakeHost({ saveWorkerSnapshot }))
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    await userEvent.click(await popover.findByRole('button', { name: 'Save a local copy' }))
+    expect(saveWorkerSnapshot).toHaveBeenCalledWith({ projectId: base.project.id, taskId: base.task.id })
+    expect(popover.getByRole('button', { name: 'Saving local copy…' })).toHaveProperty('disabled', true)
+    finish()
+    expect(await popover.findByRole('button', { name: 'Save a local copy' })).toBeTruthy()
   })
 
   it('moves a running task to Local from its folder’s row, and asks before switching a branch of the person’s own', async () => {
@@ -353,6 +373,10 @@ describe('a task’s parts', () => {
       // Its branch merges through a queue, as its host said: Merge puts it there. Every read of it says open, never queued.
       const bound = change({ ...second, needs: [{ kind: 'merge_queue', state: 'met' }] })
       const one = vi.fn(async () => snapshot({ task: { ...base.task, changes: [bound] } }))
+      // Merge answers its press for a moment (QUEUES_AFTER) before it shows in its queue: that moment is the clock's, not the runner's.
+      beforeEach(() => void vi.useFakeTimers({ shouldAdvanceTime: true }))
+      afterEach(() => void vi.useRealTimers())
+      const answeredLongEnough = () => act(() => vi.advanceTimersByTimeAsync(QUEUES_AFTER))
 
       it('is in its queue just after Merge answers the press, before the host has answered or any read says so', async () => {
         const { merge } = held()
@@ -363,7 +387,8 @@ describe('a task’s parts', () => {
         // The press, answered at once where it was made.
         expect(await popover.findByText('Merging', said)).toBeTruthy()
         // Then into the queue, the host still holding the merge and every read still saying open, not queued.
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         expect(merge).toHaveBeenCalledOnce()
         expect(popover.queryByText('Merging', said)).toBeNull()
         expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
@@ -375,7 +400,8 @@ describe('a task’s parts', () => {
         withServices(<Task />, client)
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         act(() => answers[0]!.reject(new ApiError({ reason: 'ConnectorFailed', message: 'The merge queue refused it.' })))
         expect(await screen.findByText('The merge queue refused it.')).toBeTruthy()
         await waitFor(() => expect(popover.queryByText('In the merge queue')).toBeNull())
@@ -395,7 +421,8 @@ describe('a task’s parts', () => {
         )
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         // The host has it in its queue, and a read says so.
         read = { ...bound, queued: true }
         act(() => answers[0]!.resolve())
@@ -422,7 +449,8 @@ describe('a task’s parts', () => {
         )
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         // A read has it in the queue, Merge still unanswered.
         read = { ...bound, queued: true }
         await act(() => services.cache.invalidateQueries())

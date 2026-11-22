@@ -8,7 +8,8 @@ import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
-import { altharToolOf, type McpCall, mcpCallOf } from './mcpCalls'
+import { altharToolOf, anyMcpCallOf, type McpCall, mcpCallOf } from './mcpCalls'
+import { parentOf, subAgentOf, type SubAgentCall, type WebCall, webCallOf } from './activity'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -129,6 +130,12 @@ export type SessionEvent =
       readonly mcp?: McpCall
       /** The person's MCP server it calls, where it is a call to one (`serverStatus.ts`). */
       readonly server?: string
+      /** A search on the web, or a page it reads, where it is one (`activity.ts`). */
+      readonly web?: WebCall
+      /** The sub-agent it starts, where it starts one (`activity.ts`). */
+      readonly subAgent?: SubAgentCall
+      /** The call of the sub-agent that makes it, by its id, where it is a sub-agent's (Claude Code). */
+      readonly parent?: string
       /** The tool of Althar's own server it calls, by its name there, where it is one: draft_task. */
       readonly althar?: string
     }
@@ -147,9 +154,27 @@ export type SessionEvent =
       readonly skill?: string
       readonly mcp?: McpCall
       readonly server?: string
+      readonly web?: WebCall
+      readonly subAgent?: SubAgentCall
+      readonly parent?: string
     }
   /** The skills it could see, as it says, whole each time (`skills.ts`). */
   | { readonly _tag: 'SkillsSeen'; readonly skills: ReadonlyArray<SeenSkill> }
+  /**
+   * The agent compacting its context (ACP's `compaction_update`, which it
+   * sends only to a client that says it takes them): how it stands, the
+   * summary it kept, whole, where it says one, and why it failed. Its
+   * summary may also come in pieces as it is written (`CompactionSummary`).
+   */
+  | {
+      readonly _tag: 'Compaction'
+      readonly compactionId: string
+      readonly status: 'in_progress' | 'completed' | 'failed' | 'cancelled'
+      readonly summary?: string
+      readonly error?: string
+    }
+  /** More of the summary a compaction under way keeps, after what came before (`compaction_summary_chunk`). */
+  | { readonly _tag: 'CompactionSummary'; readonly compactionId: string; readonly text: string }
   | { readonly _tag: 'Plan'; readonly entries: ReadonlyArray<{ readonly content: string; readonly status: string }> }
   | {
       readonly _tag: 'ContextUsage'
@@ -205,6 +230,8 @@ export type SessionEvent =
    * when its account runs out.
    */
   | { readonly _tag: 'TurnEnded'; readonly stopReason: StopReason; readonly usage?: TokenUsage; readonly failure?: Classified }
+
+const COMPACTION_STATUSES = ['in_progress', 'completed', 'failed', 'cancelled'] as const
 
 const toolKinds: ReadonlyArray<string> = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']
 const asToolKind = (kind: string | null | undefined): ToolKind =>
@@ -406,6 +433,15 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title, update._meta)),
         ...defined('server', serverOfCall(update.title, update._meta)),
+        // A call to one of the person's servers, Althar's page tools too, stays theirs: never a web call, whatever it reads.
+        ...defined(
+          'web',
+          anyMcpCallOf(update.title, update._meta) === undefined
+            ? webCallOf(asToolKind(update.kind), update.rawInput, update._meta, update.title)
+            : undefined,
+        ),
+        ...defined('subAgent', subAgentOf(update.title, update.rawInput, update._meta)),
+        ...defined('parent', parentOf(update._meta)),
         ...defined('althar', altharToolOf(update.title, update._meta)),
       }
     case 'tool_call_update':
@@ -422,6 +458,14 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title ?? '', update._meta)),
         ...defined('server', serverOfCall(update.title ?? '', update._meta)),
+        ...defined(
+          'web',
+          anyMcpCallOf(update.title ?? '', update._meta) === undefined
+            ? webCallOf(update.kind == null ? undefined : asToolKind(update.kind), update.rawInput, update._meta, update.title ?? undefined)
+            : undefined,
+        ),
+        ...defined('subAgent', subAgentOf(update.title ?? '', update.rawInput, update._meta)),
+        ...defined('parent', parentOf(update._meta)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
@@ -461,9 +505,25 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
     case 'plan_update':
     case 'plan_removed':
     case 'session_info_update':
-    case 'compaction_update':
-    case 'compaction_summary_chunk':
       return { _tag: 'Other', update: update.sessionUpdate, raw: update }
+    case 'compaction_update': {
+      const status = COMPACTION_STATUSES.find((one) => one === update.status)
+      if (status === undefined) return { _tag: 'Other', update: update.sessionUpdate, raw: update }
+      const summary = (update.summary ?? []).flatMap((block) => textOf(block) ?? []).join('')
+      return {
+        _tag: 'Compaction',
+        compactionId: update.compactionId,
+        status,
+        ...defined('summary', summary === '' ? undefined : summary),
+        ...defined('error', update.error),
+      }
+    }
+    case 'compaction_summary_chunk': {
+      const text = textOf(update.content)
+      return text === undefined
+        ? { _tag: 'Other', update: update.sessionUpdate, raw: update }
+        : { _tag: 'CompactionSummary', compactionId: update.compactionId, text }
+    }
     default:
       return { _tag: 'Other', update: String((update as { readonly sessionUpdate?: unknown }).sessionUpdate), raw: update }
   }

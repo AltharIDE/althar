@@ -181,6 +181,54 @@ impl DiagnosticJournal {
         }
     }
 
+    pub(crate) fn agent_identity(&self) -> io::Result<String> {
+        let path = self.root.join("agent-identity");
+        if let Some(bytes) = self.read(&path, 36)? {
+            let identity = String::from_utf8(bytes).map_err(io::Error::other)?;
+            if !valid_id(&identity, "wjn_") {
+                return Err(invalid("Invalid agent execution journal identity"));
+            }
+            return Ok(identity);
+        }
+        let mut random = [0; 16];
+        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        let mut identity = String::from("wjn_");
+        for byte in random {
+            use std::fmt::Write as _;
+            write!(identity, "{byte:02x}").map_err(io::Error::other)?;
+        }
+        self.publish(&path, identity.as_bytes())?;
+        Ok(identity)
+    }
+
+    fn agent_group_path(&self, run_id: &str) -> io::Result<PathBuf> {
+        if !valid_id(run_id, "war_") {
+            return Err(invalid("Invalid agent run identity"));
+        }
+        Ok(self.root.join(format!("{run_id}.agent-cgroup")))
+    }
+
+    pub(crate) fn agent_group(&self, run_id: &str) -> io::Result<Option<Vec<u8>>> {
+        self.read(&self.agent_group_path(run_id)?, 4096)
+    }
+
+    pub(crate) fn record_agent_group(&self, run_id: &str, group: &[u8]) -> io::Result<()> {
+        if group.len() > 4096 || self.agent_group(run_id)?.is_some() {
+            return Err(invalid(
+                "The agent run already has a control group or the record is too large",
+            ));
+        }
+        self.publish(&self.agent_group_path(run_id)?, group)
+    }
+
+    pub(crate) fn forget_agent_group(&self, run_id: &str) -> io::Result<()> {
+        match fs::remove_file(self.agent_group_path(run_id)?) {
+            Ok(()) => self.directory.sync_all(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
     fn record_start(&self, offer: &DiagnosticOffer) -> io::Result<()> {
         self.publish(
             &self.root.join(format!("{}.started", offer.attempt_id)),

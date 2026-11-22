@@ -57,6 +57,14 @@ export type Transport =
       readonly stderr?: (chunk: string, pid: number) => void
     }
   | { readonly _tag: 'InProcess'; readonly agent: InProcessAgent }
+  | {
+      readonly _tag: 'Remote'
+      readonly stdin: WritableStream<Uint8Array>
+      readonly stdout: ReadableStream<Uint8Array>
+      readonly exited: Effect.Effect<ProcessExit>
+      readonly stop: Effect.Effect<void>
+      readonly expectedVersion?: string
+    }
 
 export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
 
@@ -330,6 +338,8 @@ export interface AgentConnection {
 
 export interface ConnectOptions {
   readonly transport: Transport
+  /** Receives workspace changes before a remote turn can finish. */
+  readonly checkpoint?: Effect.Effect<void, AgentRequestFailed>
   /** Decides a permission request, from the project's rules (docs/architecture/03). It is interrupted if the agent withdraws the request. */
   readonly onPermission: (request: PermissionRequest) => Effect.Effect<PermissionDecision>
   /** What the agent's permission options mean: the registry's `permissions`. */
@@ -679,20 +689,24 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
     let owned: OwnedProcess | undefined
     let connection: acp.ClientConnection
-    if (options.transport._tag === 'Process') {
-      const { capture, stderr } = options.transport
-      owned = yield* spawnOwned(options.transport.spec, options.transport.cwd, {
+    const transport = options.transport
+    if (transport._tag === 'Process') {
+      const { capture, stderr } = transport
+      owned = yield* spawnOwned(transport.spec, transport.cwd, {
         ...(capture === undefined ? {} : { capture }),
         ...(stderr === undefined ? {} : { stderr }),
         // An agent and all it starts, its builds and tests, run in the background: Althar's window, and the person's other apps, first.
         background: true,
       })
       connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
+    } else if (transport._tag === 'Remote') {
+      yield* Effect.addFinalizer(() => transport.stop)
+      connection = app.connect(takingBackground(acp.ndJsonStream(transport.stdin, transport.stdout), heardBackground))
     } else {
       // In process, over a pair of streams, so what it leaves running is taken off them as a process's would be.
       const toAgent = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
       const toClient = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
-      const peer = options.transport.agent.app.connect({ readable: toAgent.readable, writable: toClient.writable })
+      const peer = transport.agent.app.connect({ readable: toAgent.readable, writable: toClient.writable })
       const client = app.connect(takingBackground({ readable: toClient.readable, writable: toAgent.writable }, heardBackground))
       void client.closed.then(() => peer.close())
       void peer.closed.then(() => client.close())
@@ -700,25 +714,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => connection.close()))
 
-    const closed: Effect.Effect<ProcessExit> =
-      owned === undefined
-        ? Effect.as(
-            Effect.promise(() => connection.closed.catch(() => undefined)),
-            { code: null, signal: null },
-          )
-        : Deferred.await(owned.exited)
+    const streamClosed = Effect.as(
+      Effect.promise(() => connection.closed.catch(() => undefined)),
+      { code: null, signal: null },
+    )
+    const exited = transport._tag === 'Remote' ? transport.exited : owned === undefined ? undefined : Deferred.await(owned.exited)
+    const closed = exited ?? streamClosed
 
     /** Turns an SDK error into an agent that has gone, or a classified request failure. */
     const failure = (method: string, cause: unknown): Effect.Effect<never, Failure> =>
       Effect.gen(function* () {
         const exit =
-          owned === undefined
+          exited === undefined
             ? connection.signal.aborted
               ? { code: null, signal: null }
               : undefined
-            : yield* Effect.map(Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.millis(250))), (option) =>
-                Option.getOrUndefined(option),
-              )
+            : yield* Effect.map(exited.pipe(Effect.timeoutOption(Duration.millis(250))), (option) => Option.getOrUndefined(option))
         if (exit !== undefined) {
           return yield* new AgentExited({ code: exit.code, signal: exit.signal, stderr: owned?.stderrTail() ?? '' })
         }
@@ -743,7 +754,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           // A way to ask only where someone answers: without it Claude Code turns AskUserQuestion off.
           ...(options.onQuestion === undefined ? {} : { elicitation: { form: {} } }),
           // What the agent says of itself, such as a command stopped, as a notice rather than in its own words.
-          session: { notices: {} },
+          // Its context compacting as a lifecycle of its own, with the summary it keeps, rather than a tool call or a notice.
+          session: { notices: {}, compaction: {} },
           _meta: {
             jetbrains: {
               air: {
@@ -771,11 +783,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       images: capabilities.promptCapabilities?.image === true,
       embeddedContext: capabilities.promptCapabilities?.embeddedContext === true,
     }
-    if (
-      options.transport._tag === 'Process' &&
-      options.transport.expectedVersion !== undefined &&
-      info.version !== options.transport.expectedVersion
-    )
+    if (transport._tag !== 'InProcess' && transport.expectedVersion !== undefined && info.version !== transport.expectedVersion)
       return yield* new AgentRequestFailed({
         method: 'initialize',
         failure: 'invalid_request',
@@ -1079,6 +1087,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               // No turn of its own: one that stopped the turn goes with the next prompt, one it carried on past is dropped.
               carried = !turn.cancelled && turn.stoppedByRefusal ? turn.resumeWith : undefined
               turn.resumeWith = undefined
+            }
+            if (options.checkpoint !== undefined) {
+              const captured = yield* Effect.exit(options.checkpoint)
+              if (Exit.isFailure(captured)) {
+                return yield* endTurn(turn, Effect.asVoid(Queue.failCause(turn.queue, captured.cause)))
+              }
             }
             const usage = normalizeUsage(response.usage)
             // Claude Code and Codex end a turn that failed as any other, `end_turn`, with the failure on the response itself.

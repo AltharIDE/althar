@@ -99,4 +99,10 @@ export const checksums: Readonly<Record<string, string>> = {
   '0093_runnable_task': '89c4231ffb6fcf0a3dc33f8ebfb6c9f954fae30ded5b5a8c9c5f5fff1145c50d',
   '0094_preset_tunings': 'e415b238eb87c7ca10fe6b5fca58d13059dc9cf41e30a79e8f85669248cf2dce',
   '0095_sessions_by_agent': 'bcfdc66359f3d62b1cade2085845e5d17c680adc6f3202560f6d4a0ac77b6b05',
+  '0096_home_events': '53968d0dafcd3c044785f534768bf5bbefa3ffb57ee4bfc7b226906ba52f3b62',
+  '0097_finder_index': 'ee10eb26f8e795cb9db898161feb581bb947b379c8453f80c1f4196ae437aecf',
+  '0098_thread_goals': '4ae57df0484133805d3b45a9921b11bdf0788d3eca93d07616d73205d583d5bd',
+  '0099_thread_item_dates': '994be2824ca04613c3021805828ef2886c9e9111a09f085ce1e2ba9e3fb80dd3',
+  '0100_setups_by_thread': 'c070405d63371205574c3b58b1b3e9810f26c90e84d352ae59519ad829b05023',
+  '0101_bounded_home_search': '9c6b6e47bb403506173901a17f0362370babef0a5a5074b277e8769b8fee190e',
 }

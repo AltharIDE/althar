@@ -6,7 +6,15 @@ import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, Service, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import {
+  GOAL_LENGTH,
+  goalCommand,
+  type AttentionRequest,
+  type Service,
+  type TaskAction,
+  type ThreadItem,
+  type ThreadSnapshot,
+} from '@althar/contracts'
 import { useQuery } from '@tanstack/react-query'
 import {
   CheckoutAsk,
@@ -20,6 +28,7 @@ import {
   type FileView,
   commandDown,
   Behind,
+  Goal,
   keys,
   modKey,
   DictationTray,
@@ -122,13 +131,17 @@ import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
 import { pages } from '../browser/pages'
+import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import {
   composerComment,
   cropsOf,
   drop,
-  giveBack as giveCommentsBack,
-  takeAll,
+  giveBackLines,
+  isDiffDraft,
+  takeComments,
+  readingCommentCrops,
+  toLineComment,
   useComments,
   withComments,
   canvasCommentsOf,
@@ -556,6 +569,9 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const steers = useSendMidTurn()?.to === 'steer'
+  const [goalExpanded, setGoalExpanded] = useState(false)
+  const [savingWorkerCopy, setSavingWorkerCopy] = useState(false)
+  const [goalNote, setGoalNote] = useState<string | null>(null)
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -628,6 +644,7 @@ export function TaskView({
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()
   const comments = useComments(kept)
+  useDraftCanvasVersions(kept, comments)
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
@@ -673,6 +690,8 @@ export function TaskView({
   const { show } = changes
   // The person's comments on its lines (DEV-175): gathered there, sent to the lead in one message, and read back where they are now.
   const lineComments = useLineComments(
+    kept,
+    comments,
     model.snapshot?.task.id ?? null,
     changes.open,
     // A commit moves no line against the base, but its files are no longer uncommitted: a comment it addressed is read again.
@@ -859,7 +878,7 @@ export function TaskView({
       ? { model: named(reviewer.agentId, reviewer.model), took: tookOf(snapshot, now) ?? '' }
       : null
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
-  const openFile = editor === undefined ? undefined : (path: string) => editors.open(editor.id, { path })
+  const openFile = editor === undefined || snapshot.task.workerId != null ? undefined : (path: string) => editors.open(editor.id, { path })
   // The document open beside the thread, as the editor opens it: by its whole path inside the task's folder.
   const docSource = host.doc?.source ?? host.doc?.path
   const docInEditor = docSource === undefined ? null : editorPath(docSource, snapshot.task.worktree)
@@ -890,16 +909,15 @@ export function TaskView({
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
-  const send = (body: string, now: boolean, outgoing?: Outgoing) => {
-    setDraft('')
-    if (outgoing !== undefined) images.clear()
-    // Their comments went with it (taken as it was made, in submit).
+  const deliver = (body: string, now: boolean, outgoing?: Outgoing) => {
     if (session === null || !session.held) return model.send(body, chosen ?? undefined, outgoing)
-    if (waiting !== null) {
-      setHandover(null)
-      return model.handOver(waiting, body, outgoing)
-    }
+    if (waiting !== null) return model.handOver(waiting, body, outgoing)
     return now ? model.sendNow(body, outgoing) : model.send(body, undefined, outgoing)
+  }
+  const send = (body: string, now: boolean) => {
+    setDraft('')
+    if (waiting !== null) setHandover(null)
+    return deliver(body, now)
   }
   /**
    * What the composer sends: with its images, unless they can't go yet, when
@@ -907,29 +925,63 @@ export function TaskView({
    * back in the composer, words, images and the agent picked to take over.
    */
   const submit = (body: string, now: boolean) => {
-    const own = images.take(receiver)
+    const goal = goalCommand(body)
+    if (goal !== undefined) {
+      const attached = images.props(receiver)
+      if (attached.images.length > 0 || attached.files.length > 0 || comments.length > 0) {
+        setGoalNote('Send attachments in a message alongside the goal.')
+        return
+      }
+      setGoalNote(null)
+      if (goal.action === 'show') {
+        if (snapshot.task.goal != null) {
+          setGoalExpanded(true)
+          setDraft('')
+        } else setDraft('/goal ')
+        return
+      }
+      setDraft('')
+      const starts = goal.action === 'set' || goal.action === 'resume'
+      const lead = starts ? (waiting ?? (session?.held === true ? undefined : (chosen ?? undefined))) : undefined
+      if (starts && waiting !== null) setHandover(null)
+      void model.setGoal(goal, lead, () => {
+        setDraft((current) => withQueued(current, body))
+        if (starts && waiting !== null) setHandover((current) => current ?? waiting)
+      })
+      return
+    }
+    setGoalNote(null)
+    const pictures = receiver.takes !== false
+    const own = images.take(receiver, pictures && readingCommentCrops(kept))
     if (own === null) return
     turnUndo.dismiss()
-    // The comments made beside the conversation go after the person's words, their crops after the person's own pictures where pictures go.
-    const gathered = takeAll(kept)
-    const pictures = receiver.takes !== false
+    const batch = takeComments(kept)
+    setDraft('')
+    images.clear()
+    const picked = waiting
+    if (picked !== null) setHandover(null)
+    const gathered = batch.taken
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const lines = gathered.filter(isDiffDraft).map(toLineComment)
     const outgoing: Outgoing = {
       ...own,
       sent: [...own.sent, ...crops.sent],
       pictures: [...own.pictures, ...crops.pictures],
-      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
       canvasComments: canvasCommentsOf(gathered),
+      onAccepted: () => batch.finish(true),
+      ...(lines.length === 0 ? {} : { comments: lines }),
     }
-    const said = withComments(body, gathered, own.sent.length, pictures)
-    const picked = waiting
-    void send(said, now, outgoing).then((accepted) => {
-      if (accepted) return
+    const restore = () => {
+      batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      giveCommentsBack(kept, gathered)
       if (picked !== null) setHandover(picked)
-    })
+    }
+    void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
+      if (!accepted) return restore()
+      batch.finish(true)
+      if (lines.length > 0) lineComments.reread()
+    }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -943,15 +995,29 @@ export function TaskView({
   }
   // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
   const sendComments = () => {
-    const comments = lineComments.take()
+    const batch = takeComments(kept, true)
+    const comments = batch.taken.filter(isDiffDraft).map(toLineComment)
     if (comments.length === 0) return
-    const outgoing: Outgoing = { sent: [], pictures: [], files: [], attached: [], comments }
+    const outgoing: Outgoing = {
+      sent: [],
+      pictures: [],
+      files: [],
+      attached: [],
+      comments,
+      onAccepted: () => batch.finish(true),
+    }
     setSendingComments(true)
-    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then((accepted) => {
-      setSendingComments(false)
-      if (accepted) lineComments.reread()
-      else lineComments.giveBack(comments)
-    })
+    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then(
+      (accepted) => {
+        setSendingComments(false)
+        batch.finish(accepted)
+        if (accepted) lineComments.reread()
+      },
+      () => {
+        setSendingComments(false)
+        batch.finish(false)
+      },
+    )
   }
   // A queued message goes back in the composer to be changed, and out of the queue, at once. One the lead had already read
   // comes back where it was, the line saying why, and the composer goes back to what it held, unless written in since.
@@ -978,7 +1044,7 @@ export function TaskView({
     if (said.dictated === true) setDraftDictated(kept, true)
     const unimage = images.restore(said)
     // Its comments on the diff wait there again, to be sent with the next; taken off with the rest where it was refused.
-    const uncomment = said.comments === undefined ? () => undefined : lineComments.giveBack(said.comments)
+    const uncomment = said.comments === undefined ? () => undefined : giveBackLines(kept, said.comments)
     unrestore = () => {
       unimage()
       uncomment()
@@ -996,7 +1062,7 @@ export function TaskView({
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
       // Its comments on the diff wait there again, to be sent with the next.
-      if (said.comments !== undefined) lineComments.giveBack(said.comments)
+      if (said.comments !== undefined) giveBackLines(kept, said.comments)
     })
   }
 
@@ -1127,13 +1193,28 @@ export function TaskView({
   const readingAt = (now: string): StartedReading | null =>
     board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
+  const saveCopy = servicesHost.saveWorkerSnapshot
   const partsActionsAt = (reading: StartedReading | null): PartsActions => ({
     ...(reading === null || startedAll.length === 0 ? {} : { started: { tasks: startedAll, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
-    ...(snapshot.task.worktree === null || editor === undefined
+    ...(snapshot.task.worktree === null || editor === undefined || snapshot.task.workerId != null
       ? {}
       : { openInEditor: { name: editor.name, open: () => editors.open(editor.id) } }),
+    ...(snapshot.task.workerId == null || saveCopy === undefined
+      ? {}
+      : {
+          copyWorker: {
+            pending: savingWorkerCopy,
+            open: () => {
+              if (savingWorkerCopy) return
+              setSavingWorkerCopy(true)
+              void saveCopy({ projectId: snapshot.project.id, taskId: snapshot.task.id })
+                .catch(() => undefined)
+                .finally(() => setSavingWorkerCopy(false))
+            },
+          },
+        }),
     ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
       ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
       : {}),
@@ -1289,10 +1370,16 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || aside?.notice != null || turnUndo.notice !== null ? (
+          model.error !== null ||
+          goalNote !== null ||
+          conflict !== null ||
+          line !== null ||
+          aside?.notice != null ||
+          turnUndo.notice !== null ? (
             <>
               {aside?.notice}
               {turnUndo.notice}
+              {goalNote !== null && <div role="alert">{goalNote}</div>}
               {model.error !== null && (
                 <Problem
                   as="div"
@@ -1323,6 +1410,18 @@ export function TaskView({
         above={
           <>
             {aside?.bar}
+            {snapshot.task.goal != null && (
+              <Goal
+                goal={snapshot.task.goal}
+                expanded={goalExpanded}
+                onExpand={setGoalExpanded}
+                objectiveLimit={GOAL_LENGTH}
+                onPause={() => void model.setGoal({ action: 'pause' })}
+                onResume={() => void model.setGoal({ action: 'resume' }, session?.held === true ? undefined : (chosen ?? undefined))}
+                onEdit={(objective) => void model.setGoal({ action: 'edit', objective })}
+                onClear={() => void model.setGoal({ action: 'clear' })}
+              />
+            )}
             <Now ticking={clockRuns}>
               {(now) => (
                 <Behind
@@ -1367,10 +1466,18 @@ export function TaskView({
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (taskId === undefined) return
-          // Pressed, a comment opens again on its page beside the conversation.
-          pages.place(taskId, 'beside')
+          const spot = comments.find((one) => one.id === id)?.on
+          if (spot?.kind === 'diff') {
+            setCommentShown(id)
+            show(files.some((file) => file.path === spot.line.path) ? spot.line.path : undefined)
+            return
+          }
           setFace('talk')
-          pages.reopen(taskId, id)
+          if (spot?.kind === 'canvas') host.openCanvas(spot.canvasId, spot.version, false)
+          if (spot?.kind === 'page') {
+            pages.place(taskId, 'beside')
+            pages.reopen(taskId, id)
+          }
         }}
         onRemoveComment={(id) => drop(kept, id)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
@@ -1816,6 +1923,7 @@ export function TaskView({
                               : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                             {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                             onPassOn={(words) => void model.send(words)}
+                            onTrustBot={(login) => client.trustBot(snapshot.task.id, login)}
                             {...(onOpenTask === undefined ? {} : { onOpenTask })}
                             {...(reading === null
                               ? {}
@@ -2025,16 +2133,13 @@ export function TaskView({
               onFinding={changes.goToFinding}
               comments={lineComments.comments}
               comment={commentShown}
-              // Comments are on the task's own change: one settled takes none.
-              {...(snapshot.task.phase === 'settled'
-                ? {}
-                : {
-                    onComment: lineComments.add,
-                    onEditComment: lineComments.edit,
-                    onRemoveComment: lineComments.remove,
-                    onSendComments: sendComments,
-                    sendingComments,
-                  })}
+              nextCommentNumber={comments.length + 1}
+              onRemoveComment={lineComments.remove}
+              onEditComment={lineComments.edit}
+              // oxlint-disable-next-line althar/press-at-once -- takeComments removes the waiting notes before the request starts.
+              onSendComments={sendComments}
+              sendingComments={sendingComments}
+              {...(snapshot.task.phase === 'settled' ? {} : { onComment: lineComments.add })}
               view={changes.view}
               onRetry={changes.retry}
               onClose={() => {

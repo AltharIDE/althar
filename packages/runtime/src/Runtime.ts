@@ -1,6 +1,6 @@
 import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
-import { Context, Layer } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 
 import { startupLayer } from './startup'
 
@@ -46,6 +46,7 @@ import { Reviews } from './Reviews'
 import { Runs } from './Runs'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { fillIndex } from './Search'
+import { finderIndex } from './finderIndex'
 import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
@@ -64,6 +65,7 @@ import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 import { WorktreeRepair } from './WorktreeRepair'
+import { WorkerSnapshots } from './WorkerSnapshots'
 import { ApiCommands } from './ApiCommands'
 import { ClientIdentities } from './ClientIdentities'
 
@@ -172,12 +174,19 @@ export const layer = (options: RuntimeLayerOptions) => {
   const judging = startupLayer('permissionjudge', PermissionJudge.layer).pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
-  const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
+  const core = Layer.mergeAll(
+    startupLayer('projects', Projects.layer),
+    startupLayer('sessions', Sessions.layer),
+    Launches.layer,
+    WorkerSnapshots.layer,
+  ).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
-      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, startupLayer('connections', Connections.layer)).pipe(
-        Layer.provideMerge(judging),
-      ),
+      Layer.mergeAll(
+        Permissions.layer,
+        Setups.layer.pipe(Layer.provideMerge(Questions.layer)),
+        startupLayer('connections', Connections.layer),
+      ).pipe(Layer.provideMerge(judging)),
     ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.
@@ -228,11 +237,15 @@ export const layer = (options: RuntimeLayerOptions) => {
         // A child that ended, and a call that waits while the person is away (Situations.ts).
         Situations.layer,
         startupLayer('search-index', fillIndex),
+        finderIndex,
         // The skills an older Althar shipped come out of the person's store on the first start after it stopped.
         startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
-    Layer.tap((services) => Context.get(services, Sessions).recoverQueued),
+    Layer.tap((services) => {
+      const sessions = Context.get(services, Sessions)
+      return Effect.andThen(sessions.recoverQueued, sessions.recoverGoals)
+    }),
   )
 }
 

@@ -14,10 +14,12 @@
     "./screenshots": "./src/screenshots.ts",
     "./pageBridge": "./src/pageBridge.ts",
     "./pullRequestReview": "./src/pullRequestReview.ts",
+    "./privateFiles": "./src/privateFiles.ts",
+    "./workerHome": "./src/workerHome/index.ts",
     "./windowActions": "./src/windowActions.ts"
   },
   "scripts": {
-    "check": "vp check",
+    "check": "vp check && bun scripts/check-source-size.ts",
     "fix": "vp check --fix",
     "test": "vp test run",
     "probe:tools": "bun scripts/probe-tools.ts",
@@ -35,7 +37,9 @@
     "@althar/provider-adapters": "workspace:*",
     "@althar/skills": "workspace:*",
     "@althar/transport-node": "workspace:*",
+    "@althar/worker-protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@simplewebauthn/server": "14.1.0",
     "effect": "4.0.7",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",

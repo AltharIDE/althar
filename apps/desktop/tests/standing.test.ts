@@ -160,6 +160,73 @@ describe('what stands in a change’s way', () => {
   })
 })
 
+describe('a change whose only failures are optional checks (#1117)', () => {
+  const site = checks({
+    outcome: 'failed',
+    passed: 2,
+    failed: 1,
+    total: 3,
+    failing: ['Workers Builds: althar-site'],
+    list: [
+      { name: 'check', state: 'passed', summary: null },
+      { name: 'test', state: 'passed', summary: null },
+      { name: 'Workers Builds: althar-site', state: 'failed', summary: null },
+    ],
+  })
+  const needs = [{ kind: 'checks', state: 'met', have: 2, need: 2, required: ['check', 'test'] }] as const
+
+  it('says the required checks passed and the optional failure quietly, never red', () => {
+    const seen = change({ checks: site, needs })
+    expect(isBlocked(standingOf(seen))).toBe(false)
+    expect(factsOf(seen).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([
+      ['All 2 required checks passed', 'check', 'ok'],
+      ['Optional Workers Builds: althar-site failed', undefined, 'quiet'],
+    ])
+  })
+
+  it('says a skipped required check is met, not passed, beside an optional failure: still ready, still not red', () => {
+    const skipped = checks({
+      ...site,
+      passed: 1,
+      list: [
+        { name: 'check', state: 'passed', summary: null },
+        { name: 'test', state: 'skipped', summary: null },
+        { name: 'Workers Builds: althar-site', state: 'failed', summary: null },
+      ],
+    })
+    const seen = change({ checks: skipped, needs })
+    expect(isBlocked(standingOf(seen))).toBe(false)
+    expect(factsOf(seen).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([
+      ['All 2 required checks met', 'check', 'ok'],
+      ['Optional Workers Builds: althar-site failed', undefined, 'quiet'],
+    ])
+  })
+
+  it('says nothing green while a required check hasn’t reported yet, and counts each required name once', () => {
+    // `lint` is required and not yet reported: still to come, not passed.
+    const waiting = change({
+      checks: site,
+      needs: [{ kind: 'checks', state: 'waiting', have: 2, need: 3, who: ['lint'], required: ['check', 'test', 'lint'] }],
+    })
+    expect(isBlocked(standingOf(waiting))).toBe(false)
+    expect(factsOf(waiting).map((fact) => [fact.words, fact.tone])).toEqual([
+      ['Checks running, 2 of 3 passed', 'live'],
+      ['Optional Workers Builds: althar-site failed', 'quiet'],
+    ])
+    // Two runs of `test`: still two required checks.
+    const twice = checks({ ...site, passed: 3, total: 4, list: [...site.list, { name: 'test', state: 'passed', summary: null }] })
+    expect(factsOf(change({ checks: twice, needs }))[0]?.words).toBe('All 2 required checks passed')
+  })
+
+  it('still says a required failure in red, the optional one quietly after it', () => {
+    const both = change({ checks: checks({ ...site, failed: 2, failing: ['test', 'Workers Builds: althar-site'] }), needs })
+    expect(factsOf(both).map((fact) => [fact.words, fact.tone])).toEqual([
+      ['test failed', 'danger'],
+      ['Optional Workers Builds: althar-site failed', 'quiet'],
+    ])
+  })
+})
+
 describe('the next thing, in words', () => {
   it('keeps Ship and the fix after a merge actionable in place, with their own progress and retry words', () => {
     const ship = { kind: 'ship', commits: 2 } as const

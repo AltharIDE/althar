@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId, now } from '@althar/domain'
-import { osStartTime } from '@althar/provider-adapters'
+import { osStartTime, stopProcessGroup } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -31,16 +31,20 @@ const alive = (pid: number) => {
 
 /** A process in its own group, as the runtime starts agents. */
 const detached = (command: string, args: Array<string>) =>
-  Effect.gen(function* () {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore' })
-    child.unref()
-    // Listened for at once: a process that exits straight away must not be missed.
-    const exit = new Promise<void>((resolve) => child.once('exit', () => resolve()))
-    const pid = yield* Effect.callback<number>((resume) => {
-      child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-    })
-    return { pid, exited: Effect.promise(() => exit) }
-  })
+  Effect.acquireRelease(
+    Effect.gen(function* () {
+      const child = spawn(command, args, { detached: true, stdio: 'ignore' })
+      child.unref()
+      // Listened for at once: a process that exits straight away must not be missed.
+      const exit = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      const pid = yield* Effect.callback<number, Error>((resume) => {
+        child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
+        child.once('error', (error) => resume(Effect.fail(error)))
+      })
+      return { pid, exited: Effect.promise(() => exit) }
+    }),
+    ({ pid }) => stopProcessGroup(pid, '100 millis'),
+  )
 
 describe('the runtime instance', () => {
   it.live('records each launch, keeping the device and the person across launches', () =>
@@ -93,10 +97,10 @@ describe('the runtime instance', () => {
   it.live.skipIf(windows)('reconciles what an earlier launch left: stops its processes, and marks its sessions, turns and requests', () =>
     Effect.gen(function* () {
       const file = database()
-      const sleeper = yield* detached('sleep', ['30'])
+      const sleeper = yield* detached('sleep', ['300'])
       // A leader that exits at once, leaving what it started running in its group.
       const leaderPidFile = join(mkdtempSync(join(tmpdir(), 'althar-orphan-')), 'pid')
-      const leader = yield* detached('/bin/sh', ['-c', 'sleep 30 & echo $! > "$0"; sleep 0.2; exit 0', leaderPidFile])
+      const leader = yield* detached('/bin/sh', ['-c', 'sleep 300 & echo $! > "$0"; sleep 0.2; exit 0', leaderPidFile])
       const leaderStarted = yield* osStartTime(leader.pid)
       yield* leader.exited
       const gone = yield* detached('true', [])
@@ -130,7 +134,7 @@ describe('the runtime instance', () => {
         yield* process(processes.live, { pid: sleeper.pid, osStartedAt: sleeperStarted, state: 'running' })
         yield* process(processes.dead, { pid: gone.pid, osStartedAt: at, state: 'running' })
         yield* process(processes.launching, { state: 'launching' })
-        yield* process(processes.leaderless, { pid: leader.pid, osStartedAt: leaderStarted ?? at, state: 'running' })
+        yield* process(processes.leaderless, { pid: leader.pid, osStartedAt: leaderStarted ?? at, purpose: 'run', state: 'running' })
         // One worktree git finished adding before the crash, one it never started.
         const [ready, never] = [tasks[2], tasks[3]] as [(typeof tasks)[number], (typeof tasks)[number]]
         yield* sql`UPDATE workspaces SET state = 'preparing' WHERE task_id IN (${ready.task.taskId}, ${never.task.taskId})`
@@ -194,7 +198,7 @@ describe('the runtime instance', () => {
       assert.isFalse(alive(sleeper.pid))
       // What the leaderless group's leader left running was stopped with it.
       assert.isFalse(alive(Number(readFileSync(leaderPidFile, 'utf8').trim())))
-    }),
+    }).pipe(Effect.scoped),
   )
 
   it.live('starts nothing on a store an update couldn’t migrate, and says where the copy from before it is', () =>

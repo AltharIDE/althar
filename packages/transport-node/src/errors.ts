@@ -7,6 +7,7 @@ export const TransportReason = Schema.Literals([
   'HomeMismatch',
   'ApiVersionMismatch',
   'AuthenticationFailed',
+  'ApprovalUnavailable',
   'ConnectionClosed',
   'SshUnavailable',
   'SshHostKeyRejected',

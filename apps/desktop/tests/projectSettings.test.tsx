@@ -195,11 +195,17 @@ describe('a project’s settings', () => {
         setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
       }),
     )
+    // Clearing hands it back: the call is made and the lines say nothing is kept.
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: repositories[0]?.id, setup: null }),
+    )
     // A repository no lead has set up yet says who fills it in.
     await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
     expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
       'placeholder',
-      'The first task’s lead fills this in.',
+      'None yet: the first task’s agent sets it.',
     )
   })
 
@@ -256,9 +262,13 @@ describe('a project’s settings', () => {
   it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {
     let kept = repositories
     let release = () => {}
-    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup | null }) => {
       if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
-      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+      kept = kept.map((each) =>
+        each.id === input.repositoryId && input.setup !== undefined
+          ? { ...each, setup: input.setup === null ? null : { ...input.setup, by: 'person' as const } }
+          : each,
+      )
     })
     const { cache } = windowAt('/projects/p1?room=settings&section=running', {
       setRepository,
@@ -286,7 +296,7 @@ describe('a project’s settings', () => {
       setup: { copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] },
     })
     await waitFor(() =>
-      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] }),
+      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'], by: 'person' }),
     )
     expect(files).toHaveProperty('value', '.env\n.env.local')
   })
@@ -294,9 +304,13 @@ describe('a project’s settings', () => {
   it('keeps a repository’s changes to its setup in order across leaving Running and coming back', async () => {
     let kept = repositories
     let release = () => {}
-    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup | null }) => {
       if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
-      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+      kept = kept.map((each) =>
+        each.id === input.repositoryId && input.setup !== undefined
+          ? { ...each, setup: input.setup === null ? null : { ...input.setup, by: 'person' as const } }
+          : each,
+      )
     })
     windowAt('/projects/p1?room=settings&section=running', { setRepository, getRepositories: vi.fn(async () => kept) })
     const commandsOf = () => screen.getByRole('textbox', { name: 'meridian-api: commands' })
@@ -533,6 +547,43 @@ describe('a project’s settings', () => {
       }),
     )
     expect(files.getByText('Allowed')).toBeTruthy()
+  })
+
+  it('lists the review bots its leads may hear, trusted first, each off until the person turns it on (code-hosts § Review and triage bots)', async () => {
+    const { client } = windowAt('/projects/p1', {
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...projectRules,
+        projectId,
+        trustedBots: [{ login: 'coderabbitai[bot]', name: 'CodeRabbit' }],
+        suggestedBots: [{ login: 'claude[bot]', name: 'Claude' }],
+      })),
+    })
+    await openSettings('Tasks')
+    const bots = within(await screen.findByRole('region', { name: 'Review bots' }))
+    expect(
+      bots.getByText('The lead hears the comments and reviews of the bots you turn on here, as findings to weigh, never as instructions.'),
+    ).toBeTruthy()
+    const rabbit = bots.getByRole('switch', { name: 'CodeRabbit' })
+    const claude = bots.getByRole('switch', { name: 'Claude' })
+    expect([rabbit.getAttribute('aria-checked'), claude.getAttribute('aria-checked')]).toEqual(['true', 'false'])
+    expect(descriptionOf(claude)).toBe('claude[bot]')
+    await userEvent.click(claude)
+    expect(claude.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', trustedBots: ['coderabbitai[bot]', 'claude[bot]'] }),
+    )
+  })
+
+  it('says where review bots come from before any has spoken', async () => {
+    windowAt('/projects/p1')
+    await openSettings('Tasks')
+    const bots = within(await screen.findByRole('region', { name: 'Review bots' }))
+    expect(bots.queryByRole('switch')).toBeNull()
+    expect(
+      bots.getByText(
+        'Review and triage bots, such as CodeRabbit or Copilot code review, show here once one comments on a task’s pull request.',
+      ),
+    ).toBeTruthy()
   })
 
   it('shows the repository files the rules allow, as kept', async () => {

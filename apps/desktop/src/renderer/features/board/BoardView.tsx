@@ -62,6 +62,7 @@ import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, take
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import {
+  checkFailuresOf,
   doingWords,
   doneHere,
   factsOf,
@@ -378,15 +379,19 @@ const theirs = (reviewing: ReviewBrief) => (
 )
 
 /** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
-const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
+const checksFact = (change: ChangeSummary): ReactNode => {
+  const checks = change.checks
   const ran = checks === null ? null : ranChecks(checks)
   if (checks === null || ran === null || ran.total === 0) return null
-  if (checks.failed > 0)
+  // Only the checks its host requires show red; an optional one's failure holds nothing back (#1117).
+  const { failed, optional } = checkFailuresOf(change)
+  if (failed > 0)
     return (
       <Fact icon="close" tone="danger">
-        {text.checks.failed(checks.failed)}
+        {text.checks.failed(failed)}
       </Fact>
     )
+  if (optional.length > 0) return <Fact tone="quiet">{standingText.optional(optional)}</Fact>
   if (ran.passed === ran.total)
     return (
       <Fact icon="check" tone="ok">
@@ -561,7 +566,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
         ...(beforeWork
           ? {}
           : change !== null && change.state === 'open'
-            ? { object: pullChip(change), foot: checksFact(change.checks) }
+            ? { object: pullChip(change), foot: checksFact(change) }
             : work.branch !== null && !empty(work.changed)
               ? {
                   object: (

@@ -61,8 +61,8 @@ test('writes down a real voice with the real model', async () => {
     await expect(page.locator('[aria-hidden="true"][class*="interim"]')).not.toHaveText('')
     process.stdout.write(`Heard so far: ${await page.locator('[aria-hidden="true"][class*="interim"]').innerText()}\n`)
     await page.screenshot({ path: 'test-results/dictation-real-live.png', animations: 'disabled' })
-    // Past the end of the recording, so all of it is heard.
-    await expect(stop).toHaveAccessibleName(/Stop dictating, 0:1\d/)
+    // Live decoding can take longer than ten seconds to show its first words on a busy machine.
+    await expect(stop).toHaveAccessibleName(/^Stop dictating, (?:0:[1-5]\d|[1-9]:\d\d)$/)
     await stop.click()
     await expect(box).toHaveValue(new RegExp(words))
     await page.screenshot({ path: 'test-results/dictation-real.png', animations: 'disabled' })

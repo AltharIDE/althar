@@ -69,11 +69,23 @@ interface OutlineProps extends Disclosable {
   kind: string
   title: ReactNode
   mono?: boolean
-  aside: ReactNode
-  children: ReactNode
+  aside?: ReactNode
+  /** What it opens to. Without it, the row is all there is, and doesn't open. */
+  children?: ReactNode
 }
 
 function Outline({ lead, kind, title, mono, aside, children, ...disclosure }: OutlineProps) {
+  if (children === undefined)
+    return (
+      <div className={s.ext} data-rhythm={Rhythm.External}>
+        <div className={cx(s.row, s.plain)}>
+          {lead}
+          <span className={s.kind}>{kind}</span>
+          <span className={cx(s.title, mono && s.mono)}>{title}</span>
+          {aside !== undefined && <span className={s.aside}>{aside}</span>}
+        </div>
+      </div>
+    )
   return (
     <Disclosure {...disclosure} rhythm={Rhythm.External} className={s.ext}>
       <DisclosureTrigger>
@@ -81,7 +93,7 @@ function Outline({ lead, kind, title, mono, aside, children, ...disclosure }: Ou
           {lead}
           <span className={s.kind}>{kind}</span>
           <span className={cx(s.title, mono && s.mono)}>{title}</span>
-          <span className={s.aside}>{aside}</span>
+          {aside !== undefined && <span className={s.aside}>{aside}</span>}
           <Caret />
         </button>
       </DisclosureTrigger>
@@ -91,22 +103,42 @@ function Outline({ lead, kind, title, mono, aside, children, ...disclosure }: Ou
 }
 
 export interface WebFetchProps extends Disclosable {
-  title: string
+  /** The page's title. Without one, where it is: its address, without the host the row names beside it. */
+  title?: string
   url: string
-  /** The part of the page it used. */
-  excerpt: string
+  /** The part of the page it used, where it is known. */
+  excerpt?: string
   text?: Partial<ExternalText>
+}
+
+/* where a page is on its host, for a page whose title isn't known */
+function pathOf(url: string) {
+  try {
+    const { pathname } = new URL(url)
+    return pathname === '/' ? hostOf(url) : decodeURI(pathname)
+  } catch {
+    return url
+  }
 }
 
 export function WebFetch({ title, url, excerpt, text, ...disclosure }: WebFetchProps) {
   const t = { ...externalText, ...text }
   const host = hostOf(url)
   return (
-    <Outline lead={<Favicon host={host} />} kind={t.read} title={title} aside={host} {...disclosure}>
+    <Outline
+      lead={<Favicon host={host} />}
+      kind={t.read}
+      title={title ?? pathOf(url)}
+      mono={title === undefined}
+      aside={host}
+      {...disclosure}
+    >
       <div className={s.body}>
-        <blockquote className={s.quote} cite={url}>
-          {excerpt}
-        </blockquote>
+        {excerpt !== undefined && (
+          <blockquote className={s.quote} cite={url}>
+            {excerpt}
+          </blockquote>
+        )}
         <NewTab className={s.link} href={url} t={t}>
           {url.replace(/^https?:\/\//, '')}
           {safeHref(url) && <span aria-hidden="true"> ↗</span>}
@@ -167,7 +199,8 @@ export interface SearchResult {
 
 export interface WebSearchProps extends Disclosable {
   query: string
-  results: readonly SearchResult[]
+  /** What it found, where it is known. Without them, the row says only what was searched for, and doesn't open. */
+  results?: readonly SearchResult[]
   text?: Partial<ExternalText>
 }
 
@@ -182,20 +215,22 @@ export function WebSearch({ query, results, text, ...disclosure }: WebSearchProp
       }
       kind={t.searched}
       title={query}
-      aside={t.results(results.length)}
+      {...(results === undefined ? {} : { aside: t.results(results.length) })}
       {...disclosure}
     >
-      <ul className={s.list}>
-        {results.map((r, i) => (
-          <li key={i}>
-            <NewTab className={s.result} href={r.url} t={t}>
-              <Favicon host={r.host} small />
-              <span className={s.resultTitle}>{r.title}</span>
-              <span className={s.aside}>{r.host}</span>
-            </NewTab>
-          </li>
-        ))}
-      </ul>
+      {results === undefined ? undefined : (
+        <ul className={s.list}>
+          {results.map((r, i) => (
+            <li key={i}>
+              <NewTab className={s.result} href={r.url} t={t}>
+                <Favicon host={r.host} small />
+                <span className={s.resultTitle}>{r.title}</span>
+                <span className={s.aside}>{r.host}</span>
+              </NewTab>
+            </li>
+          ))}
+        </ul>
+      )}
     </Outline>
   )
 }

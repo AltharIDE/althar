@@ -62,7 +62,10 @@ const manually = (net: AppNet, url: string, init: RequestInit): Promise<Response
       )
     })
     request.on('error', (error) => settle(() => reject(error)))
-    if (typeof init.body === 'string') request.write(init.body)
+    const body = init.body
+    if (typeof body === 'string') request.write(body)
+    else if (ArrayBuffer.isView(body)) request.write(Buffer.from(body.buffer, body.byteOffset, body.byteLength))
+    else if (body instanceof ArrayBuffer) request.write(Buffer.from(body))
     request.end()
   })
 
