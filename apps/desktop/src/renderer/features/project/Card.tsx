@@ -1,27 +1,14 @@
 import { useState } from 'react'
 
-import {
-  type AgentStatus,
-  type ChangeSummary,
-  type PlanStep,
-  type Product,
-  type ProjectWorker,
-  type TaskEnd as End,
-  type WorksIn as Where,
-  workerPlanProblem,
-  workerProblem,
-  automaticWorker,
-  automaticWorkerUnavailable,
-  workerName,
-} from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   AsideCard,
   AsideState,
+  device,
   type IssueRefProps,
   type LaunchStep,
   LinkButton,
   PresetOffer,
-  Select,
   TaskCard,
   TaskEnd,
   TaskLaunch,
@@ -43,6 +30,8 @@ import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
+import { useHomeState } from '../homes/useHomes'
+import { HOME, placementOf } from './runsOn'
 import s from './Card.module.css'
 
 /*
@@ -262,60 +251,24 @@ function PlanCard({
     if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
-  const workers = actions.workers ?? []
-  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
-  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
-  const best = automaticWorker(workers, steps, plan.workerRequirements?.repositoryCount)
-  const selection = selected === 'auto' ? best : workers.find((worker) => worker.workerId === selected)
-  const hasCapacity = selected === 'auto' || workers.some((worker) => worker.capacity !== undefined)
-  const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
-  const startProblem =
-    selected === 'home'
-      ? undefined
-      : (planProblem ??
-        (selected === 'auto' && selection === undefined
-          ? automaticWorkerUnavailable
-          : workerProblem(selection, steps, plan.workerRequirements?.repositoryCount)))
-  const from = fromOf(card)
-  const placementNote =
-    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
+  // Where it runs, while it is held: the home, or one of its workers (ADR-103). The runtime checks the choice again as it starts.
+  const here = useHomeState(useServices().host.homes)
+  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: HOME })
+  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : HOME
   const placement =
-    card.phase !== 'held' || (workers.length === 0 && selected === 'home') ? undefined : (
-      <>
-        {(planProblem === undefined || selected !== 'home') && (
-          <Select
-            label="Run on"
-            variant="filled"
-            value={selected}
-            options={[
-              { value: 'home', label: 'This home' },
-              ...(hasCapacity
-                ? [{ value: 'auto', label: 'Best available worker', disabled: best === undefined || planProblem !== undefined }]
-                : []),
-              ...workers.map((worker) => {
-                const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
-                const label = workerName(worker)
-                return {
-                  value: worker.workerId,
-                  label: problem === undefined ? label : `${label} · ${problem}`,
-                  disabled: problem !== undefined,
-                }
-              }),
-              ...(selected !== 'home' && selected !== 'auto' && selection === undefined
-                ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
-                : []),
-            ]}
-            onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
-          />
-        )}
-        {placementNote !== undefined && (
-          <>
-            {' '}
-            <span role="status">{placementNote}</span>
-          </>
-        )}
-      </>
-    )
+    card.phase === 'held'
+      ? placementOf({
+          workers: actions.workers ?? [],
+          selected,
+          steps,
+          requirements: plan.workerRequirements,
+          worksIn,
+          home: here === null || here.current.kind === 'local' ? device.This : here.current.home.name,
+          agentName: (id) => actions.agentName(id),
+        })
+      : null
+  const startProblem = placement?.problem
+  const from = fromOf(card)
   return (
     <TaskLaunch
       task={card.slug}
@@ -392,17 +345,19 @@ function PlanCard({
                   },
                 }),
           })}
-      {...(card.presetOffer === undefined && placement === undefined
+      {...(placement === null || !placement.shown
         ? {}
         : {
-            footNote: (
-              <>
-                {' '}
-                {placement} {card.presetOffer === undefined ? undefined : <Offer card={card} />}{' '}
-              </>
-            ),
+            runsOn: {
+              value: selected,
+              places: placement.places,
+              note: placement.note,
+              ...(startProblem === undefined ? {} : { problem: startProblem }),
+              onChange: (workerId: string) => setPlace({ planId: plan.id, workerId }),
+            },
           })}
-      onStart={() => actions.onStart(plan.id, selected === 'home' ? undefined : selected)}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
+      onStart={() => actions.onStart(plan.id, selected === HOME ? undefined : selected)}
       startDisabled={startProblem !== undefined}
     />
   )

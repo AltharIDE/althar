@@ -42,6 +42,54 @@
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Where it runs, beside where it works: the segmented control's track and height, its words, so the two read as a pair. */
+.place {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 190px;
+  padding: 0 9px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--segment-track);
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.place:hover,
+.place[data-state='open'] {
+  color: var(--t-1);
+  background: var(--field-hover, var(--n-3));
+}
+.place:active {
+  background: var(--pressed-paper);
+}
+.placeMark {
+  flex: none;
+  color: var(--t-3);
+}
+.placeName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.placeChevron {
+  flex: none;
+  color: var(--t-3);
+}
+/* What keeps it from starting there, across the head under both, as the line about where it works is. */
+.placeProblem {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
 }
 /* What the choice gives up, a line across the head under both. */
 .whereLine {

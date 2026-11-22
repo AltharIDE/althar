@@ -85,7 +85,7 @@ export const makeManagedCommands = (
     const checkout = helper ? input.checkout : undefined
     if (helper ? !helperAvailable(input.providerId, input.skills !== undefined, checkout !== undefined) : !available)
       return Promise.reject(
-        new Error(helper ? 'This worker cannot start the selected helper agent.' : 'Update this worker to start project commands.'),
+        new Error(helper ? 'Update this worker to start helpers on it.' : 'Update this worker to start project commands.'),
       )
     if (active.size >= MAX_COMMANDS || active.has(input.id)) return Promise.reject(new Error('This worker checkout has too many commands.'))
     if (

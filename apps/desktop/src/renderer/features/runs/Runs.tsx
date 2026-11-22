@@ -59,7 +59,7 @@ const runOf = (launch: Launch, now: string): RunTargetRun =>
   launch.ended !== null
     ? { state: 'ended', code: launch.ended.code, since: ago(launch.ended.at, new Date(now)) }
     : launch.url !== null
-      ? { state: 'running', url: addressOf(launch.url), since: running(launch.startedAt, now) }
+      ? { state: 'running', url: addressOf(launch.url, launch.workerId), since: running(launch.startedAt, now) }
       : Date.parse(now) - Date.parse(launch.startedAt) < STARTING_FOR
         ? { state: 'starting' }
         : { state: 'running', since: running(launch.startedAt, now) }

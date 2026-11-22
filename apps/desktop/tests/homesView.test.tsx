@@ -315,10 +315,24 @@ it('opens security key setup from the current paired home and says where it open
   const homes = { ...at.homes, enrollApprovalKey }
   const result = manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
   await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
-  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key…' }))
   expect(enrollApprovalKey).toHaveBeenCalledOnce()
-  expect(await screen.findByText('Security key setup is open in your browser.')).not.toBeNull()
+  expect(await screen.findByText('Finish setting up the key in your browser.')).not.toBeNull()
   expect(result.close).not.toHaveBeenCalled()
+})
+
+it('says why a security key couldn’t be set up, under the home, and tries again from there', async () => {
+  const at = fixture()
+  const enrollApprovalKey = vi.fn(async () => {}).mockRejectedValueOnce(new Error('The home didn’t answer.'))
+  const here: HomeState = { ...remote, current: { kind: 'https', home: paired } }
+  const homes = { ...at.homes, enrollApprovalKey }
+  manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
+  await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key…' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('The home didn’t answer.')
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(enrollApprovalKey).toHaveBeenCalledTimes(2)
+  expect(await screen.findByText('Finish setting up the key in your browser.')).not.toBeNull()
 })
 
 it('shows each home by its projects, live while its window is connected, and opens one there', async () => {

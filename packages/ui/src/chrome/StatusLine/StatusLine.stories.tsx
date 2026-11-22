@@ -54,6 +54,15 @@ type Story = StoryObj<typeof meta>
 export const AtRest: Story = {}
 
 /** One run, the person's: what shows as soon as Run is pressed. */
+/** A run on one of the home's workers: where it runs, in place of an address of Althar's own that says nothing. */
+export const OnAWorker: Story = {
+  args: {
+    items: [
+      { kind: 'run', id: 'web', name: 'bun run dev', phase: 'up', url: 'althar-preview://proc_1.proj_1/', on: 'Linux worker 3f9a2c' },
+    ],
+  },
+}
+
 export const Starting: Story = { args: { items: [{ kind: 'run', id: 'ios', name: 'iOS simulator', phase: 'starting' }] } }
 
 /** A narrow window: an address and what runs in a terminal give way first, a name keeps a few letters, how a run failed stays whole. */
