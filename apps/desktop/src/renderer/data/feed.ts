@@ -184,6 +184,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     ? [
         { key: keys.canvases(event.projectId), offScreen: false },
         { key: keys.canvas(event.aggregateId), offScreen: false },
+        // A first save makes the project's place for artifacts.
+        { key: keys.artifactsPlace(event.projectId), offScreen: false },
       ]
     : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).

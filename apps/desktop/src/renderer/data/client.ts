@@ -17,9 +17,12 @@ import {
   type TerminalChunk,
   type PlaceId,
   type StorageSize,
+  type ArtifactsHow,
+  type ArtifactsPlace,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
+  type RepositoryFolders,
   type SentCanvasComment,
   type CheckoutAnswer,
   type MoveOutcome,
@@ -267,6 +270,26 @@ export interface Client {
   readonly getCanvas: (canvasId: string) => Promise<CanvasDetail>
   /** A version's entry, as the window draws a document, a diagram or an SVG. */
   readonly readCanvasText: (canvasId: string, version: number) => Promise<CanvasText>
+  /** Where a project's artifacts go when saved to a repository: its place for them, or Althar's pick for the first save. */
+  readonly getArtifactsPlace: (projectId: string) => Promise<ArtifactsPlace>
+  /** One of a project's repositories' folders, where an artifact could be saved. */
+  readonly listRepositoryFolders: (projectId: string, repositoryId: string) => Promise<RepositoryFolders>
+  /** Sets the project's place for artifacts, or clears it. */
+  readonly setArtifactsHome: (
+    projectId: string,
+    home: { readonly repositoryId: string; readonly folder: string; readonly how: ArtifactsHow; readonly follow: boolean } | null,
+  ) => Promise<void>
+  /** Saves a canvas to a folder of its own in one of the project's repositories, or moves it there; its commit follows. */
+  readonly saveCanvas: (save: {
+    readonly canvasId: string
+    readonly repositoryId: string
+    readonly path: string
+    readonly how: ArtifactsHow
+    readonly follow: boolean
+    readonly makeHome?: boolean
+  }) => Promise<void>
+  /** Stops saving a canvas to its repository; what was committed stays there. */
+  readonly stopSavingCanvas: (canvasId: string) => Promise<void>
   /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
@@ -1111,6 +1134,22 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
+    getArtifactsPlace: (projectId) => settle(api.GetArtifactsPlace({ projectId })),
+    listRepositoryFolders: (projectId, repositoryId) => settle(api.ListRepositoryFolders({ projectId, repositoryId })),
+    setArtifactsHome: (projectId, home) => command((commandId) => api.SetArtifactsHome({ commandId, projectId, home })),
+    saveCanvas: (save) =>
+      command((commandId) =>
+        api.SaveCanvas({
+          commandId,
+          canvasId: save.canvasId,
+          repositoryId: save.repositoryId,
+          path: save.path,
+          how: save.how,
+          follow: save.follow,
+          ...(save.makeHome === true ? { makeHome: true } : {}),
+        }),
+      ),
+    stopSavingCanvas: (canvasId) => command((commandId) => api.StopSavingCanvas({ commandId, canvasId })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),

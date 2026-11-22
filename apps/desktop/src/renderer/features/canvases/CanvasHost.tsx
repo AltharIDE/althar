@@ -14,6 +14,7 @@ import { type CanvasSpot, canvasPlace, drop, gather, savePageComment, useComment
 import { ago } from '../../shared/time'
 import { useCovered } from '../browser/cover'
 import { boardsOfText, pinsOf, useGround } from './boards'
+import { SaveCanvas } from './SaveCanvas'
 
 /*
  * One of the project's canvases beside a conversation (ADR-104), on its
@@ -208,6 +209,9 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }
       comments={comments}
       onClose={onClose}
       {...(onBack === undefined ? {} : { onBack })}
+      {...(summary === undefined || version === null || error !== undefined
+        ? {}
+        : { extra: <SaveCanvas summary={summary} version={latest} /> })}
       fill={fill}
       loading={loading}
       {...(comment === undefined ? {} : { onComment: comment })}

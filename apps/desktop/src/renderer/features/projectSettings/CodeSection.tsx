@@ -6,6 +6,7 @@ import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { serviceOfProduct } from '../connections/ways'
 import { text as frontText, trackerIdOf, type Tracker } from '../project/front'
 import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
+import { ArtifactsGroup } from './ArtifactsGroup'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -185,6 +186,7 @@ export function CodeSection({
       <p className={s.quiet}>
         <LinkButton onClick={onManage}>{text.manage}</LinkButton>
       </p>
+      <ArtifactsGroup projectId={projectId} />
     </>
   )
 }
