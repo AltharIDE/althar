@@ -271,13 +271,15 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       yield* inputBatches.ready(thread.threadId)
       // From here to its prompt going out is the turn getting ready, which its timings keep (turnTimes.ts).
       const readying = yield* Clock.currentTimeMillis
-      // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
+      // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it. A session's
+      // first turn, its brief, takes up the lead picked while it started (`adopt`), though nothing else waits.
+      const briefing = running.adoptedLead === true && running.brief !== undefined && running.waitsForWords !== true
       const availableGoal = thread.role === 'task' && thread.helper === undefined ? yield* runnableGoal(thread.threadId) : null
       if (availableGoal !== null && availableGoal.rounds >= availableGoal.roundLimit)
         yield* endGoalRound(thread.threadId, availableGoal.revision, null)
       const goal = availableGoal !== null && availableGoal.rounds < availableGoal.roundLimit ? availableGoal : null
       const hasWork = () => (goal !== null ? Effect.succeed(true) : inputWaiting(thread.threadId))
-      if (running.nextLead !== undefined && (yield* hasWork())) {
+      if (running.nextLead !== undefined && (briefing || (yield* hasWork()))) {
         const next = running.nextLead
         if (next.agentId !== running.entry.definition.id) {
           if (!(yield* setLeadChoice(running, undefined, { after: next }))) return true
@@ -538,6 +540,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       if (!compacting) {
         running.brief = undefined
         running.waitsForWords = undefined
+        running.adoptedLead = undefined
         if (knowsTime && (brief !== undefined || timeNews !== null)) running.timeTold = { at: timeNow, zone }
       } else if (contextFull(before, thread.role === 'task')) running.compactAttempted = true
       running.turnRunning = true

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
+import { workerNameOf } from '@althar/contracts'
 import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -573,18 +574,18 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               thread.review !== null ||
               (transport._tag === 'InProcess' && definition.source !== 'bundled')
             )
-              return yield* refuse('This agent or task cannot run on the selected worker.')
+              return yield* refuse('This agent or task can’t run on a worker.')
             if (thread.repositories.length === 0 || thread.repositories.some((repository) => repository.local === 1))
-              return yield* refuse('A worker needs separate task worktrees.')
+              return yield* refuse('A worker needs the task in a worktree of its own, not Local.')
             const assets =
               !workerCanLoadSkills || skills === undefined || skills.given.length === 0
                 ? []
                 : yield* Effect.tryPromise({
                     try: () => workerSkillFiles(skills.folder),
-                    catch: () => refuse('Could not read the skills selected for this worker session.'),
+                    catch: () => refuse('Althar couldn’t read the skills chosen for it.'),
                   })
             if (thread.helper !== undefined) {
-              if (platform.openHelper === undefined) return yield* refuse('This worker cannot start the selected helper agent.')
+              if (platform.openHelper === undefined) return yield* refuse('This home can’t start helpers on a worker.')
               const directory = relative(thread.worktree, agentCwd).split(sep).join('/')
               remote = yield* platform.openHelper({
                 workerId: selectedWorker,
@@ -604,7 +605,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 path: string
               }>`SELECT id, path FROM workspaces WHERE task_id = ${thread.taskId} AND access = 'write'`
               const workspace = rows.find((row) => row.path === thread.worktree)
-              if (workspace === undefined) return yield* refuse('The task’s worker workspace is not ready.')
+              if (workspace === undefined) return yield* refuse(`Its folder on ${workerNameOf(selectedWorker)} isn’t ready yet.`)
               const grouped = thread.repositories.length > 1
               const root = grouped ? dirname(thread.worktree) : thread.worktree
               const repositories = []
@@ -613,14 +614,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                   const bound = rows.find((row) => row.path === repository.worktree)
                   const directory = basename(repository.worktree)
                   if (bound === undefined || dirname(repository.worktree) !== root || !WORKER_REPOSITORY_FOLDER.test(directory))
-                    return yield* refuse('The task’s worker repositories are not ready.')
+                    return yield* refuse(`Its repositories on ${workerNameOf(selectedWorker)} aren’t ready yet.`)
                   repositories.push({ workspaceId: bound.id, worktree: bound.path, directory })
                 }
               }
               const plans = yield* Effect.forEach(
                 grouped ? repositories.map((entry) => entry.workspaceId) : [workspace.id],
                 (workspaceId) => setups.workerPlan(thread.taskId, workspaceId).pipe(Effect.map((plan) => ({ workspaceId, plan }))),
-              ).pipe(Effect.mapError(() => refuse('Could not plan setup for the worker’s checkout.')))
+              ).pipe(Effect.mapError(() => refuse(`Althar couldn’t work out the setup for its folder on ${workerNameOf(selectedWorker)}.`)))
               const layouts = plans.flatMap(({ workspaceId, plan }) => (plan?.spec === undefined ? [] : [{ workspaceId, ...plan.spec }]))
               const setup = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
               remote = yield* platform.open({
@@ -704,7 +705,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 )).flat()
           const localTools = tools.server
           if (activeWorker !== undefined && localTools.type !== 'http')
-            return yield* new AgentStartFailed({ command: definition.name, reason: 'The worker needs the home’s HTTP tool grant.' })
+            return yield* new AgentStartFailed({ command: definition.name, reason: 'The home couldn’t give the worker Althar’s tools.' })
           const mcp =
             activeWorker === undefined || localTools.type !== 'http'
               ? localTools
@@ -800,8 +801,13 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
           source: 'runtime',
           severity: 'warning',
-          title: 'Some selected MCP servers are unavailable on this worker.',
-          description: unavailableMcp.join(', '),
+          // Named by the worker it started on: one server by its name, several listed.
+          ...(unavailableMcp.length === 1
+            ? { title: `${unavailableMcp[0]} isn’t on ${workerNameOf(selectedWorker ?? '')}.`, description: null }
+            : {
+                title: `${unavailableMcp.length} of its MCP servers aren’t on ${workerNameOf(selectedWorker ?? '')}.`,
+                description: unavailableMcp.join(', '),
+              }),
         })
       }
       const skillsUnable = selectedWorker !== null && !workerCanLoadSkills && (skills?.given.length ?? 0) > 0
@@ -810,7 +816,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           source: 'runtime',
           severity: 'warning',
           title: `${definition.name} started without its skills.`,
-          description: setUp.failed ?? 'This worker cannot load skills for this agent session yet.',
+          // On a worker, an agent that takes its skills from an environment variable has none, whatever the worker's version.
+          description:
+            setUp.failed ?? 'It can’t load skills on a worker. To give it its skills, run it on the home, or choose another lead.',
         })
       }
       // A skill this agent can't use is shown as a difference from the others, not hidden.
@@ -896,7 +904,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       Effect.onError(effect, (cause) => discard(connected, cause))
 
   /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-  const activate = (connected: Connected, brief: Brief, blockedInputs?: ReadonlySet<string>) => {
+  /**
+   * `adopt` is told of the session as it takes the thread, before anything else can reach it: a switch gives it the lead the
+   * person picked while it started, so its first turn runs on that.
+   */
+  const activate = (connected: Connected, brief: Brief, blockedInputs?: ReadonlySet<string>, adopt?: (running: Running) => void) => {
     // Once it is supervised, ending it is supervise's: before, a failure lets it go here.
     let supervised = false
     return Effect.gen(function* () {
@@ -982,6 +994,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         ...(asideNow.aside ? { aside: { sandbox: upFront === undefined ? null : upFrontSaid(upFront) } } : {}),
         ...(asideNow.unsaid ? { waitsForWords: true } : {}),
       }
+      adopt?.(running)
       threads.set(thread.threadId, running)
       // Stop descendants before the agent exits and they are reparented, including detached commands that never reported an output file.
       yield* Scope.addFinalizer(

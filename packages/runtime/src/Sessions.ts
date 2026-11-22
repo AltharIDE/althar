@@ -86,6 +86,7 @@ import {
   type TaskThread,
   type ThreadContext,
   accountOf,
+  modelNamed,
   optionValue,
   passedOnOf,
   settleEffort,
@@ -126,6 +127,20 @@ export {
   skillsSaid,
   upFrontSaid,
 } from './sessionState'
+
+/** A switch or a fresh session under way on a thread, and what the person picked for it meanwhile (`handovers`). */
+interface Handing {
+  /** The session on its way out, where there was one: what is picked shows on it while it still holds the thread. */
+  readonly from: Running | undefined
+  /** The agent taking the thread, and the model and effort it was asked to start on, where they were named. */
+  readonly agentId: string
+  readonly model: string | undefined
+  readonly effort: string | undefined
+  /** The lead the incoming session takes up before its first turn: its own agent's model or effort, or another agent back. */
+  pick: Running['nextLead']
+  /** What the incoming session took up as it took the thread. */
+  adopted: Running['nextLead']
+}
 
 export class Sessions extends Context.Service<
   Sessions,
@@ -236,6 +251,8 @@ export class Sessions extends Context.Service<
      */
     chooseLead(input: {
       readonly threadId: string
+      /** The agent it is a model or effort of, as the picker shows it: the one on the thread where not given. */
+      readonly agentId?: string
       readonly model?: string
       readonly effort?: string
     }): Effect.Effect<'later' | 'same', NoSession | Failure>
@@ -333,6 +350,14 @@ export class Sessions extends Context.Service<
         readonly usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string }
       }>
     >
+    /**
+     * A switch or a fresh session taking the thread over, from its start until the new session holds the thread, even where
+     * the one going out has already let it go: who leads its first turn, as the switch asked and as picked meanwhile. A
+     * model or effort chosen now (`chooseLead`) is that session's.
+     */
+    handingOver(
+      threadId: string,
+    ): Effect.Effect<Option.Option<{ readonly agentId: string; readonly model?: string; readonly effort?: string }>>
     /**
      * Decides something Althar does for the thread's session as one of its
      * own requests would be (ADR-013): by the rules, the coordinator or the
@@ -1230,6 +1255,94 @@ export class Sessions extends Context.Service<
         )
 
       /**
+       * Where a switch or a fresh session takes a thread, from the moment it begins until the new session holds it: the model
+       * or effort the person picks meanwhile is that session's (`pick`), whatever happens to the one on its way out, which may
+       * already be stopping or gone. The new session takes it up as it takes the thread (`adopting`), before its first turn.
+       */
+      const handovers = new Map<string, Handing>()
+
+      /** A switch or a fresh session begins: from here what is picked is the incoming one's, starting from `seed`. */
+      const handing = (
+        threadId: string,
+        from: Running | undefined,
+        to: { readonly agentId: string; readonly model: string | undefined; readonly effort: string | undefined },
+        seed: Running['nextLead'],
+      ): Handing => {
+        const holder: Handing = { from, ...to, pick: seed, adopted: undefined }
+        handovers.set(threadId, holder)
+        return holder
+      }
+
+      /** Done with, the switch made or given up: what is picked from here goes to whoever holds the thread. */
+      const handed = (threadId: string, holder: Handing) => {
+        if (handovers.get(threadId) === holder) handovers.delete(threadId)
+      }
+
+      /** The incoming session takes the thread with what was picked while it started, as the lead for its first turn. */
+      const adopting = (holder: Handing) => (running: Running) => {
+        handed(running.thread.threadId, holder)
+        holder.adopted = holder.pick
+        running.nextLead = holder.pick
+        running.adoptedLead = holder.pick !== undefined
+      }
+
+      /** What the session that took the thread was given as its lead, said on it, unless it has taken it up already. */
+      const adopted = (threadId: string, holder: Handing) =>
+        Effect.suspend(() => {
+          const pick = holder.adopted
+          const running = threads.get(threadId)
+          if (pick === undefined || running === undefined) return Effect.void
+          return setLeadChoice(running, pick, {
+            after: pick,
+            choice: { agentId: pick.agentId, model: pick.model ?? null, effort: pick.effort ?? null },
+          }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not say the lead a new session took up', cause)))
+        })
+
+      /**
+       * A switch that couldn't be made, its session carrying on: a pick of its own agent stays its lead, set between turns; one
+       * of the agent that didn't start goes with it.
+       */
+      const handedBack = (previous: Running, holder: Handing) =>
+        Effect.suspend(() => {
+          handed(previous.thread.threadId, holder)
+          const pick = holder.pick
+          if (pick === undefined || previous.stopping || threads.get(previous.thread.threadId) !== previous) return Effect.void
+          const kept =
+            pick.agentId === previous.entry.definition.id
+              ? Effect.andThen(
+                  setLeadChoice(previous, pick, {
+                    choice: { agentId: pick.agentId, model: pick.model ?? null, effort: pick.effort ?? null },
+                  }),
+                  Effect.forkIn(run(applyLead(previous)), sessionsScope),
+                )
+              : previous.nextLead === pick
+                ? setLeadChoice(previous, undefined, { after: pick, resolved: true })
+                : Effect.void
+          return Effect.ignore(kept)
+        })
+
+      /**
+       * A pick while a switch or a fresh session takes the thread over: the incoming session's lead for its first turn, of its
+       * own agent unless the picker named another (the agent going out, picked back, takes the thread again after). Shown on
+       * the session going out while it still holds the thread.
+       */
+      const chooseHanded = (input: { readonly agentId?: string; readonly model?: string; readonly effort?: string }, holder: Handing) =>
+        Effect.gen(function* () {
+          const agentId = input.agentId ?? holder.pick?.agentId ?? holder.agentId
+          const before = holder.pick?.agentId === agentId ? holder.pick : undefined
+          const model = input.model ?? before?.model
+          const effort = input.effort ?? before?.effort
+          const pick = { agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }
+          holder.pick = pick
+          const { from } = holder
+          if (from !== undefined && !from.stopping && threads.get(from.thread.threadId) === from)
+            yield* setLeadChoice(from, pick, { choice: { agentId, model: model ?? null, effort: effort ?? null } }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not say a lead picked while a session takes over', cause)),
+            )
+          return 'later' as const
+        })
+
+      /**
        * What the person chose of the same agent's model or effort is set on the agent, where nothing runs: the lead taken up as
        * chosen, whatever was chosen since while it was being set. A turn at work waits: it is set when the turn ends, or
        * between turns as what is said next is delivered (`deliver`).
@@ -1240,7 +1353,15 @@ export class Sessions extends Context.Service<
             Effect.gen(function* () {
               // Read under the lock, as what was chosen last: a turn that began, or was being delivered, while this waited has it.
               for (;;) {
-                if (running.turnRunning || running.leadHeld || running.stopping || threads.get(running.thread.threadId) !== running) return
+                // Being handed to another session, what was chosen is that one's (`handovers`), never set on this one on its way out.
+                if (
+                  running.turnRunning ||
+                  running.leadHeld ||
+                  running.stopping ||
+                  running.handover === 'under_way' ||
+                  threads.get(running.thread.threadId) !== running
+                )
+                  return
                 const next = running.nextLead
                 if (next === undefined || next.agentId !== running.entry.definition.id) return
                 yield* settleLead(running, next)
@@ -1775,7 +1896,7 @@ export class Sessions extends Context.Service<
           yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId, sessionId: running.sessionId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Model changed to ${model}.`,
+            title: `Model changed to ${modelNamed(definition, options, model)}.`,
           })
         })
 
@@ -1915,18 +2036,35 @@ export class Sessions extends Context.Service<
               input.about !== undefined && previous !== undefined
                 ? yield* standInFor(previous, thread.projectId, entry.definition.id, input.model, input.about, input.attemptId)
                 : undefined
-            // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish.
+            // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish,
+            // and so does a model or effort the person picks meanwhile. One picked as a delivery began this switch is its already.
+            const holder = handing(
+              input.threadId,
+              previous,
+              { agentId: entry.definition.id, model: input.model, effort: input.effort },
+              previousHandover === 'under_way' ? previous?.nextLead : undefined,
+            )
             if (previous !== undefined) previous.handover = 'under_way'
             return yield* Effect.gen(function* () {
               const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, standsIn)
               const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
               const brief = yield* Effect.gen(function* () {
                 if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+                const options = yield* connected.agent.options
+                const to = optionValue(options, entry.definition.options.model)
+                // The same agent again says what changed: its model, or nothing but a fresh session.
+                const same =
+                  previous === undefined || previous.entry.definition.id !== entry.definition.id
+                    ? undefined
+                    : was?.model != null && to !== null && was.model !== to
+                      ? `Switched from ${modelNamed(entry.definition, options, was.model)} to ${modelNamed(entry.definition, options, to)}.`
+                      : `Started ${entry.definition.name} afresh.`
                 yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
                   source: 'runtime',
                   severity: 'info',
                   title:
                     input.said ??
+                    same ??
                     (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
                   // Another model takes the thread: always shown, whatever made the switch (never a silent one).
                   ...(input.about === undefined ? {} : { about: input.about, ...(moved ? { handover: true } : {}) }),
@@ -1943,7 +2081,7 @@ export class Sessions extends Context.Service<
                   })
                 return yield* briefFor(thread, { kind: 'takeover', from })
               }).pipe(beforeTakingOver(connected))
-              return yield* activate(
+              const started = yield* activate(
                 connected,
                 {
                   text: brief,
@@ -1951,13 +2089,18 @@ export class Sessions extends Context.Service<
                   ...(input.byPerson === true ? { byPerson: true } : {}),
                 },
                 input.byPerson === true ? undefined : previous?.blockedInputs,
+                adopting(holder),
               )
+              yield* adopted(input.threadId, holder)
+              return started
             }).pipe(
               Effect.onError(() =>
                 Effect.suspend(() => {
+                  handed(input.threadId, holder)
                   if (previous === undefined || threads.get(input.threadId) !== previous || previous.stopping) return Effect.void
                   previous.handover = previousHandover ?? 'none'
-                  return Effect.asVoid(Queue.offer(previous.wake, undefined))
+                  // The lead carries on as it was, with what was picked of its own agent meanwhile.
+                  return Effect.andThen(handedBack(previous, holder), Effect.asVoid(Queue.offer(previous.wake, undefined)))
                 }),
               ),
             )
@@ -1965,8 +2108,10 @@ export class Sessions extends Context.Service<
         )
 
       /** Starts a replacement between turns when the agent lost its session or its work moved to another folder. */
-      const handOver = (previous: Running, reason: { readonly lost: string } | 'moved'): Effect.Effect<void, never, Store> =>
-        exclusive(
+      const handOver = (previous: Running, reason: { readonly lost: string } | 'moved'): Effect.Effect<void, never, Store> => {
+        // Where it is handed to, once that begins.
+        let holder: Handing | undefined
+        return exclusive(
           previous.thread.threadId,
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
@@ -1989,6 +2134,14 @@ export class Sessions extends Context.Service<
                 : yield* briefFor(thread, { kind: 'handover', lost: reason !== 'moved' })
             // Started afresh, a stand-in still stands in for the lead it was given.
             const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId, limits.sameModel))
+            // A model or effort the person picks while it starts is the fresh session's, as is one picked as this began.
+            const to = handing(
+              previous.thread.threadId,
+              previous,
+              { agentId: previous.entry.definition.id, model, effort },
+              previous.nextLead,
+            )
+            holder = to
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* Effect.andThen(
@@ -2013,24 +2166,29 @@ export class Sessions extends Context.Service<
                 starting: 'handover',
               },
               previous.blockedInputs,
+              adopting(to),
             )
+            yield* adopted(previous.thread.threadId, to)
           }),
         ).pipe(
           Effect.catchCause((cause) =>
             Effect.andThen(
               Effect.logWarning('Could not hand a session to a fresh one', cause),
               Effect.suspend(() => {
+                if (holder !== undefined) handed(previous.thread.threadId, holder)
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
                 // Lost, it can't carry on: it stops, and the person is told.
                 if (reason !== 'moved') return exclusive(previous.thread.threadId, cannotCarryOn(previous, reason.lost))
-                // Startup failed and already said why. Keep the messages queued for a later attempt in the new folder.
+                // Startup failed and already said why. Keep the messages queued for a later attempt in the new folder, and what
+                // was picked for it meanwhile.
                 previous.moved = true
                 previous.handover = 'none'
-                return Effect.void
+                return holder === undefined ? Effect.void : handedBack(previous, holder)
               }),
             ),
           ),
         )
+      }
 
       /**
        * A lost session that isn't started afresh: the turn's failure, said
@@ -2639,6 +2797,9 @@ export class Sessions extends Context.Service<
         chooseLead: (input) =>
           run(
             Effect.gen(function* () {
+              // While a switch or a fresh session takes the thread over, the pick is for that session, until it holds the thread.
+              const holder = handovers.get(input.threadId)
+              if (holder !== undefined) return yield* chooseHanded(input, holder)
               const running = threads.get(input.threadId)
               if (running === undefined || running.stopping) return yield* new NoSession({ threadId: input.threadId })
               const sql = yield* SqlClient.SqlClient
@@ -2646,12 +2807,15 @@ export class Sessions extends Context.Service<
                 Effect.gen(function* () {
                   const [now] = yield* sql<{ model: string | null; effort: string | null }>`
                 SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-                  const agentId = running.entry.definition.id
+                  // Of the agent it is on, unless the picker named another: that one takes over as what is said next is delivered.
+                  const agentId = input.agentId ?? running.entry.definition.id
+                  const own = agentId === running.entry.definition.id
+                  const on = own ? now : undefined
                   // What was chosen before and isn't set yet stands, but for what is chosen now.
                   const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
                   const model = input.model ?? before?.model
                   const effort = input.effort ?? before?.effort
-                  const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
+                  const same = own && (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
                   // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
                   // is set back after.
                   const next =
@@ -2666,8 +2830,8 @@ export class Sessions extends Context.Service<
                     !(yield* setLeadChoice(running, next, {
                       choice: {
                         agentId,
-                        model: model ?? now?.model ?? null,
-                        effort: effort ?? now?.effort ?? null,
+                        model: model ?? on?.model ?? null,
+                        effort: effort ?? on?.effort ?? null,
                       },
                     }))
                   )
@@ -2857,6 +3021,21 @@ export class Sessions extends Context.Service<
                   ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
                   ...(running.deliveryHeld === 'usage_limit' && running.usageOut !== undefined ? { usageOut: running.usageOut } : {}),
                 })
+          }),
+        handingOver: (threadId) =>
+          Effect.sync(() => {
+            const holder = handovers.get(threadId)
+            if (holder === undefined) return Option.none()
+            const { pick } = holder
+            // Another agent picked back takes the thread as picked; the incoming one starts as it was asked to, but for what is picked.
+            if (pick !== undefined && pick.agentId !== holder.agentId) return Option.some(pick)
+            const model = pick?.model ?? holder.model
+            const effort = pick?.effort ?? holder.effort
+            return Option.some({
+              agentId: holder.agentId,
+              ...(model === undefined ? {} : { model }),
+              ...(effort === undefined ? {} : { effort }),
+            })
           }),
         askPermission: (threadId, request) =>
           Effect.suspend(() => {

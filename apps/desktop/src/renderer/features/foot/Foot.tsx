@@ -1,4 +1,4 @@
-import type { Launch } from '@althar/contracts'
+import { type Launch, workerNameOf } from '@althar/contracts'
 import {
   Button,
   Icon,
@@ -40,6 +40,8 @@ export const text = {
   drawer: 'Runs and terminals drawer',
   lower: 'Lower',
   open: (address: string) => `Open ${address}`,
+  /** A run on a worker answers through the home, at no address of its own to name. */
+  openPreview: 'Open its preview',
   terminalHere: 'Open a terminal where it ran',
   help: 'Help me fix it',
   stop: 'Stop',
@@ -134,6 +136,7 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
         name: launch.label ?? launch.command,
         phase,
         ...(launch.url === null ? {} : { url: launch.url }),
+        ...(launch.workerId === undefined ? {} : { on: workerNameOf(launch.workerId) }),
         ...(phase === 'failed' ? { code: launch.ended?.code ?? null } : {}),
       }
     }),
@@ -248,6 +251,7 @@ function RunTitle({ launch, phase }: { launch: Launch; phase: RunPhase }) {
     name: launch.label ?? launch.command,
     phase,
     ...(launch.url === null ? {} : { url: launch.url }),
+    ...(launch.workerId === undefined ? {} : { on: workerNameOf(launch.workerId) }),
     ...(phase === 'failed' ? { code: launch.ended?.code ?? null } : {}),
   }
   return (
@@ -283,7 +287,13 @@ function RunActions({
   return (
     <>
       {phase === 'up' && url !== null && (
-        <IconButton icon="external" size="small" label={text.open(addressOf(url))} tooltip="above" onClick={() => onOpen(url)} />
+        <IconButton
+          icon="external"
+          size="small"
+          label={launch.workerId === undefined ? text.open(addressOf(url)) : text.openPreview}
+          tooltip="above"
+          onClick={() => onOpen(url)}
+        />
       )}
       {launch.workerId === undefined && (
         <IconButton

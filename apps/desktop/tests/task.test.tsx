@@ -2099,7 +2099,7 @@ describe('a task', () => {
     // The lead's model and effort, in the composer.
     await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
-    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' }))
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', effort: 'low' }))
     // Every model is one step away, whichever agent offers it.
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
     const browser = await screen.findByRole('dialog')
@@ -2107,7 +2107,7 @@ describe('a task', () => {
     // An agent that is signed out offers nothing.
     expect(within(browser).queryByText(/OpenCode/)).toBeNull()
     await userEvent.click(within(browser).getByRole('button', { name: 'Use Claude Sonnet' }))
-    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' }))
     expect(client.setEffort).toHaveBeenCalledTimes(1)
     // Another agent's model hands the task to that agent, on its own effort, with what the person says next: nothing happens until then.
     await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
@@ -2872,7 +2872,7 @@ describe('a task', () => {
     // Its own models change without waiting.
     await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
-    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'default' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
   })
 
   it('answers what the rules keep for the person, several as one stack', async () => {
@@ -3721,7 +3721,7 @@ describe('a task', () => {
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Claude Sonnet' }))
     // Asked, not answered, and already what the picker says.
-    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' }))
     expect(screen.getByRole('button', { name: /^Lead: Claude Sonnet/ })).toBeTruthy()
     // The header says the same, of the work the lead does.
     const standing = screen.getByText('Reviewing').parentElement
@@ -3750,7 +3750,7 @@ describe('a task', () => {
     held = { ...base.session!, nextLead: { agentId: 'claude-code', model: 'sonnet', effort: null } }
     // Back to what the lead is on, while the first is still being taken: it is sent, since the runtime holds the first.
     await pickFromDialog('Use Claude Opus')
-    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'opus' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' }))
     expect(screen.getByRole('button', { name: /^Lead: Claude Opus/ })).toBeTruthy()
     // The first one ends, out of order: the second is still what the picker says.
     await act(async () => ends[0]!())

@@ -123,7 +123,17 @@ const refusal = <A, E>(effect: Effect.Effect<A, E>) =>
 
 const notices = (threadId: string) =>
   Effect.map(items(threadId), (all) =>
-    all.flatMap((item) => (item.kind === 'notice' ? [{ title: String(item.content.title), description: item.content.description }] : [])),
+    all.flatMap((item) =>
+      item.kind === 'notice'
+        ? [
+            {
+              title: String(item.content.title),
+              description: item.content.description as string | undefined,
+              details: item.content.details as string | undefined,
+            },
+          ]
+        : [],
+    ),
   )
 
 /** A bun lockfile Bun can't read, listing packages that come from a git host. */
@@ -229,9 +239,14 @@ describe('Run it, at its edges', () => {
         `\nNot installed, as they come from outside its registries: ${Array.from({ length: 8 }, (_, n) => `pad-${n} (github:acme/pad-${n}#abc${n})`).join(', ')}, and 2 more. Trust fully installs them.`,
       )
       assert.isTrue(said.endsWith("\nTrust fully runs them as the team's code does."))
-      // Its line in the thread is the first, what it printed and what's missing below it.
-      const line = (yield* notices(many.threadId)).find((notice) => notice.title === first)
-      assert.strictEqual(line?.description, rest.join('\n'))
+      assert.isAbove(rest.length, 0)
+      // Its line in the thread says so, with what's missing; what the install printed folds under it, never in the line.
+      const line = (yield* notices(many.threadId)).find(
+        (notice) => notice.title === 'Runs PR #1 safely, but not everything installed with its install scripts off.',
+      )
+      assert.include(line?.description, 'Not installed, as they come from outside its registries: pad-0')
+      assert.isTrue(line?.description?.endsWith("Trust fully runs them as the team's code does."))
+      assert.isTrue(line?.details?.startsWith('$ bun install --frozen-lockfile --ignore-scripts'))
 
       const one = yield* reviewOf(projectId, coordinator, 2)
       const few = yield* reviews.runIt({ taskId: one.taskId, how: 'safe' })

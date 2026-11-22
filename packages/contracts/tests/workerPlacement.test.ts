@@ -2,7 +2,17 @@ import { Schema } from 'effect'
 import { assert, describe, it } from '@effect/vitest'
 
 import { ProjectWorker, WorkerSelection, type PlanStep } from '../src/Api'
-import { automaticWorker, workerName, workerPlanProblem, workerProblem, workerRepositoryLimit } from '../src/workerPlacement'
+import {
+  automaticWorker,
+  planUnfitWords,
+  workerName,
+  workerNameOf,
+  workerPlanProblem,
+  workerPlanUnfit,
+  workerProblem,
+  workerRepositoryLimit,
+  workerUnfit,
+} from '../src/workerPlacement'
 
 const lead = { key: 'implement', agentId: 'codex', model: null, skipped: false } satisfies PlanStep
 const worker = { workerId: `wrk_${'1'.repeat(32)}`, providers: ['codex'], busy: false } satisfies ProjectWorker
@@ -12,13 +22,16 @@ const requirements = { repositoryCount: 1, homeOnly: false, readOnly: false }
 
 describe('worker placement', () => {
   it('keeps home-only, review and direct-checkout tasks at home', () => {
-    assert.strictEqual(workerPlanProblem(undefined, undefined, [lead]), 'Update this home to check where this task can run.')
-    assert.strictEqual(workerPlanProblem({ ...requirements, homeOnly: true }, undefined, [lead]), 'This task stays on its home.')
+    assert.strictEqual(workerPlanProblem(undefined, undefined, [lead]), 'Update the home to run this task on a worker.')
+    assert.strictEqual(workerPlanProblem({ ...requirements, homeOnly: true }, undefined, [lead]), 'This task runs on the home.')
     assert.strictEqual(
       workerPlanProblem({ ...requirements, readOnly: true }, undefined, [lead]),
       'Reviews of pull requests run on the home.',
     )
-    assert.strictEqual(workerPlanProblem(requirements, 'checkout', [lead]), 'Use a separate worktree to run on a worker.')
+    assert.strictEqual(workerPlanProblem(requirements, 'checkout', [lead]), 'Choose Worktree to run it on a worker.')
+    // The window says the home by its name.
+    assert.strictEqual(planUnfitWords({ kind: 'review' }, 'This Mac'), 'Reviews of pull requests run on This Mac.')
+    assert.deepStrictEqual(workerPlanUnfit(requirements, 'checkout', [lead]), { kind: 'local' })
     assert.strictEqual(workerPlanProblem(requirements, undefined, [lead]), undefined)
   })
 
@@ -27,29 +40,33 @@ describe('worker placement', () => {
       { ...lead, key: 'review' },
       { ...lead, skipped: true },
     ] satisfies ReadonlyArray<PlanStep>
-    assert.strictEqual(workerPlanProblem(requirements, undefined, noLead), 'Choose a lead to run on a worker.')
+    assert.strictEqual(workerPlanProblem(requirements, undefined, noLead), 'Choose a lead to run it on a worker.')
     assert.strictEqual(
       workerPlanProblem({ ...requirements, repositoryCount: 0 }, undefined, [lead]),
-      'A worker needs a task with a repository.',
+      'A worker needs a repository to work in.',
     )
-    assert.strictEqual(workerProblem(worker, [lead], 2), 'A worker needs a task with one repository.')
+    assert.strictEqual(workerProblem(worker, [lead], 2), 'Linux worker 111111 takes one repository at a time.')
     assert.strictEqual(workerProblem(modern, [lead], 8), undefined)
-    assert.strictEqual(workerProblem(modern, [lead], 9), 'A worker can run up to 8 repositories in one task.')
+    assert.strictEqual(workerProblem(modern, [lead], 9), 'Linux worker 111111 takes up to 8 repositories at a time.')
     assert.strictEqual(workerRepositoryLimit(undefined, [lead]), 1)
     assert.strictEqual(workerRepositoryLimit(modern, noLead), 1)
     assert.strictEqual(workerRepositoryLimit({ ...modern, multiRepoProviders: ['claude-code'] }, [lead]), 1)
   })
 
   it('rejects disappeared, busy, exhausted and incompatible workers', () => {
-    assert.strictEqual(workerProblem(undefined, [lead]), 'This worker is unavailable for this project.')
-    assert.strictEqual(workerProblem({ ...worker, busy: true }, [lead]), 'This worker is already running a task.')
+    assert.strictEqual(workerProblem(undefined, [lead]), 'That worker isn’t connected to this project now.')
+    assert.strictEqual(workerProblem({ ...worker, busy: true }, [lead]), 'Linux worker 111111 is at work on another task.')
     for (const limit of ['freeDiskMib', 'freeMemoryMib'] as const)
       assert.strictEqual(
         workerProblem({ ...worker, capacity: { ...capacity, [limit]: 0 } }, [lead]),
-        'This worker has run out of workspace disk space or available memory.',
+        'Linux worker 111111 is out of disk space or memory.',
       )
-    assert.strictEqual(workerProblem(worker, []), 'Choose a lead to run on a worker.')
-    assert.strictEqual(workerProblem({ ...worker, providers: ['claude-code'] }, [lead]), 'This worker does not have the lead’s agent.')
+    assert.strictEqual(workerProblem(worker, []), 'Choose a lead to run it on a worker.')
+    assert.strictEqual(
+      workerProblem({ ...worker, providers: ['claude-code'] }, [lead]),
+      'Linux worker 111111 doesn’t have the lead’s agent.',
+    )
+    assert.deepStrictEqual(workerUnfit({ ...worker, providers: ['claude-code'] }, [lead]), { kind: 'agent', agentId: 'codex' })
     assert.strictEqual(automaticWorker([{ ...worker, busy: true }, worker], [lead], 2), undefined)
   })
 
@@ -75,6 +92,7 @@ describe('worker placement', () => {
     const decodeSelection = Schema.decodeUnknownSync(WorkerSelection)
     assert.deepStrictEqual(decodeWorker(worker), worker)
     assert.strictEqual(workerName(worker), 'Linux worker 111111')
+    assert.strictEqual(workerNameOf(worker.workerId), 'Linux worker 111111')
     assert.strictEqual(workerName(decodeWorker({ ...worker, capacity })), 'Linux worker 111111')
     assert.strictEqual(workerName(decodeWorker({ ...worker, capacity: { ...capacity, platform: 'macos' } })), 'Mac worker 111111')
     assert.strictEqual(workerName(decodeWorker({ ...worker, capacity: { ...capacity, platform: 'windows' } })), 'Windows worker 111111')
