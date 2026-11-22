@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, holdRuntime, launch, openFirstProject, say, startTask } from './support'
+import { chooseFolder, holdRuntime, launch, openFirstProject, say, startTask, still } from './support'
 
 /*
  * Going back to a project's tab, once it has been open, is instant: the
@@ -37,6 +37,18 @@ const conversation = (page: Page) => page.locator('section[aria-label="Conversat
 /** The scroller of the conversation that shows. */
 const scroller = (page: Page) => conversation(page).locator('xpath=ancestor::div[contains(@class, "scroll")][1]')
 
+/** Words actually in view, even if the thread draws extra paragraphs above and below the scroller. */
+const wordsInView = (page: Page) =>
+  scroller(page).evaluate((element) => {
+    const edge = element.getBoundingClientRect()
+    return (
+      [...element.querySelectorAll<HTMLElement>('section[aria-label="Conversation"] p')].find((paragraph) => {
+        const box = paragraph.getBoundingClientRect()
+        return paragraph.checkVisibility() && box.height > 0 && box.top >= edge.top && box.bottom <= edge.bottom
+      })?.innerText ?? ''
+    )
+  })
+
 test('going back to an open project shows the screen it kept, where the person left it, without reading it again', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const meridian = repository(home, 'meridian')
@@ -51,14 +63,16 @@ test('going back to an open project shows the screen it kept, where the person l
     // A busy board, and a long conversation with the coordinator.
     for (const title of ['Add a retry to checkout', 'Name the limits better', 'Log the refunds']) await startTask(page, title)
     const said = 16
-    for (let n = 1; n <= said; n += 1)
+    for (let n = 1; n <= said; n += 1) {
       await say(page, `Message ${n}: ${'what the person says about the checkout and its retries, at some length. '.repeat(6)}`)
-    await expect(
-      conversation(page)
-        .getByRole('article', { name: 'Coordinator' })
-        .filter({ hasText: `Message ${said}:` })
-        .last(),
-    ).toBeVisible()
+      await expect(
+        conversation(page)
+          .getByRole('article', { name: 'Coordinator' })
+          .filter({ hasText: `Message ${n}:` })
+          .last(),
+      ).toBeVisible()
+      await expect(conversation(page)).not.toHaveAttribute('aria-busy')
+    }
     // Every message answered: nothing queued, and no turn running. The composer's queue is the one that says so: a kept
     // screen's board, hidden or beside the conversation, says "Nothing queued" of its own whether a message waits or not.
     await expect(page.getByRole('region', { name: /^(Queued|\d+ queued)$/ })).toHaveCount(0)
@@ -91,11 +105,9 @@ test('going back to an open project shows the screen it kept, where the person l
     await expect(conversation(page)).not.toHaveAttribute('aria-busy')
     await scroller(page).evaluate((element) => (element.scrollTop = 400))
     await expect.poll(() => scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
-    const firstMessage = conversation(page)
-      .getByText(/^Message \d+:/)
-      .first()
-    await expect(firstMessage).toBeVisible()
-    const keptMessage = await firstMessage.innerText()
+    await still(page)
+    const keptWords = await wordsInView(page)
+    expect(keptWords).not.toBe('')
     await box.fill('Half a thought about')
     const left = await conversation(page).elementHandle()
     await tabs.getByRole('button', { name: /^halyard/ }).click()
@@ -108,7 +120,7 @@ test('going back to an open project shows the screen it kept, where the person l
     await tabs.getByRole('button', { name: /^meridian/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     // What was in view where the person left it: the thread draws only what is near the view (VirtualBlocks).
-    await expect(conversation(page)).toContainText(keptMessage)
+    await expect.poll(() => wordsInView(page)).toBe(keptWords)
     expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
     await expect(box).toHaveValue('Half a thought about')
     expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
