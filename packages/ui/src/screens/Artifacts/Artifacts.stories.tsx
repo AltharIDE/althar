@@ -241,3 +241,29 @@ export const Cards: Story = {
 export const CardsFiltered: Story = {
   args: { ...Cards.args, filter: { saved: false, commented: true } },
 }
+
+/** As cards, with one its own chat is still drawing the first version of, first. */
+export const CardsDrawing: Story = {
+  args: {
+    ...Cards.args,
+    canvases: [
+      {
+        id: 'task_mood',
+        name: '',
+        title: 'Mood board for the spring classes',
+        kind: 'boards',
+        version: 0,
+        by: '',
+        when: 'just now',
+        at: '2026-11-21T12:20:00.000Z',
+        openComments: 0,
+        drawing: true,
+      },
+      ...(Cards.args?.canvases ?? []),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('button', { name: /^Mood board for the spring classes/ })
+    await expect(within(card).getByText('Drawing the first version')).toBeVisible()
+  },
+}
