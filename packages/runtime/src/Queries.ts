@@ -1474,12 +1474,8 @@ export class Queries extends Context.Service<
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),
             ...(handing === undefined ? {} : { handover: true }),
-            nextLead: nextLeadOf(
-              Option.isSome(running)
-                ? running.value.nextLead
-                : // Let go by the one going out, the thread leads as the session taking it over will.
-                  handing,
-            ),
+            // Let go by the one going out, the thread leads as the session taking it over will.
+            nextLead: nextLeadOf(Option.isSome(running) ? running.value.nextLead : handing),
             standsIn:
               standsIn === undefined
                 ? null
