@@ -18,7 +18,7 @@ import { registerVirtualThread, type VirtualStop } from '../../lib/virtual'
  * block it stands after, so what follows it is spaced as it would be.
  *
  * What it keeps working: a reply streaming in place, the thread following its
- * bottom (useStickToBottom sees the column grow, as ever), a block that grows
+ * bottom, a block that grows
  * (measured again as it does), what the person has selected or has focus in
  * (kept drawn while they do, and every block a selection spans drawn as it is
  * copied, so Select All copies the whole thread), the navigator's stops and a
@@ -657,6 +657,11 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
             return true
           }
         return false
+      },
+      followResize: () => {
+        if (!showing(scroller)) return
+        down(scroller)
+        if (following.current) place.current = inView(scroller)
       },
       subscribe: (listener) => {
         listeners.add(listener)

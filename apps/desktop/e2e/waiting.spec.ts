@@ -72,7 +72,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await next.screenshot({ path: 'test-results/up-next-places-dark.png', scale: 'css', animations: 'disabled' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
     await sizeWindow(electronApp, page, 1440, 900)
-    await expect(next.getByRole('listitem').nth(1)).toContainText('Tidy the docs')
+    await expect(next.locator('[data-row]')).toContainText(['Check links', 'Tidy the docs'])
     await next.getByRole('button', { name: 'Tidy the docs', exact: true }).click()
     await toConversation(page)
 
