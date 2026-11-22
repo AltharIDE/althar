@@ -610,7 +610,7 @@ const playStall = async (
   }
   // Its first session in its worktree is lost, as claude-agent-acp drops one whose Claude Code process died, and it answers
   // the prompt as that did on 2 November 2026; the coordinator that plans it only passes the marker on.
-  if (session.markers.has('[lead:lost-once]') && !session.coordinator && !lostIn.has(session.cwd)) {
+  if (session.markers.has(session.coordinator ? '[coordinator:lost-once]' : '[lead:lost-once]') && !lostIn.has(session.cwd)) {
     lostIn.add(session.cwd)
     throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
   }
@@ -2011,6 +2011,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
+        if (session.markers.has('[lead:compact-lost]')) throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
         if (session.markers.has('[lead:compact-fails]')) {
           await update({
             sessionUpdate: 'tool_call',
@@ -2049,6 +2050,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
       }
+
+      // Spontaneous compaction may complete before a fresh usage figure reaches the client.
+      if (text.includes('[context-compacted]'))
+        await update({ sessionUpdate: 'compaction_update', compactionId: 'automatic', status: 'completed' })
 
       // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
