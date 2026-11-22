@@ -1,6 +1,6 @@
 import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
-import { Context, Layer } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 
 import { startupLayer } from './startup'
 
@@ -236,7 +236,10 @@ export const layer = (options: RuntimeLayerOptions) => {
         startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
-    Layer.tap((services) => Context.get(services, Sessions).recoverQueued),
+    Layer.tap((services) => {
+      const sessions = Context.get(services, Sessions)
+      return Effect.andThen(sessions.recoverQueued, sessions.recoverGoals)
+    }),
   )
 }
 

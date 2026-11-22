@@ -1320,6 +1320,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markTaskDone: vi.fn(async () => {}),
     keepTaskForLater: vi.fn(async () => {}),
     renameTask: vi.fn(async () => {}),
+    setThreadGoal: async () => null,
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     undoTurn: vi.fn(async () => ({ prompt: '', messages: [], restored: 0 })),

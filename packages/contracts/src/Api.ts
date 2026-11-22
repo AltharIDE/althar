@@ -1,4 +1,5 @@
 import { PairingInvitation, PairingTokenHash } from './pairing'
+import { GoalControl, ThreadGoal } from './goals'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -4166,6 +4167,7 @@ export const ThreadSnapshot = Schema.Struct({
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
   task: Schema.Struct({
     id: Schema.String,
+    goal: Schema.optional(Schema.NullOr(ThreadGoal)),
     title: Schema.String,
     description: Schema.String,
     /** What the person asked for, in their words, which its thread opens with; null for a task made before Althar kept it. */
@@ -5040,6 +5042,7 @@ const socketCalls = new Set<string>([
   'GetSearchFiles',
   'Watch',
   'Send',
+  'SetThreadGoal',
   'TakeBack',
   'StartTask',
   'StartPlan',
@@ -5926,6 +5929,17 @@ const WorkApi = RpcGroup.make(
       canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },
     Schema.Void,
+  ),
+  command(
+    'SetThreadGoal',
+    {
+      threadId: Schema.String,
+      control: GoalControl,
+      lead: Schema.optional(
+        Schema.Struct({ agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) }),
+      ),
+    },
+    Schema.NullOr(ThreadGoal),
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),

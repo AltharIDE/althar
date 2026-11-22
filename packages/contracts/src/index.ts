@@ -25,3 +25,5 @@ export * from './agentCatalog'
 
 export * from './pairing'
 export * from './workerPlacement'
+
+export * from './goals'
