@@ -120,11 +120,48 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
       })()`,
     )
     await chipIn('#first')
-    const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
-      electronApp,
-      `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,
-    )
-    await pressIn(electronApp, { x: chipBox.right - 18, y: chipBox.top + chipBox.height / 2 })
+    // The one under it has its `open` given another value, open all along: that opens nothing, and the chip stays where it
+    // can be pressed. A real press on its close closes the canvas.
+    await inCanvas(electronApp, `document.getElementById('second').setAttribute('open', 'still')`)
+    await chipIn('#first')
+    const pressClose = async () => {
+      const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
+        electronApp,
+        `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,
+      )
+      await pressIn(electronApp, { x: chipBox.right - 18, y: chipBox.top + chipBox.height / 2 })
+    }
+    await pressClose()
+    await expect(panel).toBeHidden()
+    // A page that opens its modals as it loads, the later in the page first, before the chip is there to hear them: the
+    // chip still goes inside the topmost, and its close still closes the canvas.
+    await page.getByRole('button', { name: 'Open Sign-in page beside the conversation' }).click()
+    await expect(panel).toBeVisible()
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('althar-chip')?.hidden === false`).catch(() => false))
+      .toBe(true)
+    await electronApp.evaluate(async ({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((one) => one.getURL().startsWith('althar-canvas://'))
+      if (contents === undefined) throw new Error('No canvas view.')
+      contents.debugger.attach('1.3')
+      await contents.debugger.sendCommand('Page.enable')
+      await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+        source: `addEventListener('DOMContentLoaded', () => {
+          const whole = 'width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0'
+          document.body.insertAdjacentHTML('beforeend', '<dialog id="loaded-first" style="' + whole + '">First in the page</dialog>' +
+            '<dialog id="loaded-second" style="' + whole + '">Second in the page</dialog>')
+          document.getElementById('loaded-second').showModal()
+          document.getElementById('loaded-first').showModal()
+        })`,
+      })
+      contents.reload()
+    })
+    await chipIn('#loaded-first')
+    await electronApp.evaluate(({ webContents }) => {
+      for (const one of webContents.getAllWebContents())
+        if (one.getURL().startsWith('althar-canvas://') && one.debugger.isAttached()) one.debugger.detach()
+    })
+    await pressClose()
     await expect(panel).toBeHidden()
 
     // The chart, from its line: a picture, its script never run.

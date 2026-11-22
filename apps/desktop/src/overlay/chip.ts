@@ -136,20 +136,22 @@ const install = (): Chip => {
     }
   }
   /**
-   * The page's modal dialogs open, in the order they opened, the topmost last: as the observer hears them open, in the
-   * order the page opened them, never the order they sit in the page. Two opened in one go, the later in the page first,
-   * are told apart so.
+   * The page's modal dialogs open, the likeliest topmost last: in the order the observer heard them open, never the order
+   * they sit in the page, so two opened in one go, the later in the page first, are told apart. An `open` that only changes
+   * its value, there before and still there, is no opening. It is a guess all the same, for those open before the chip was
+   * there to hear them, so `place` asks the browser where it can be pressed.
    */
   let modals: Array<Element> = []
   const heard = (records: ReadonlyArray<MutationRecord>) => {
     for (const record of records) {
       if (record.type !== 'attributes' || record.target === host) continue
       const target = record.target as Element
+      if (record.oldValue !== null && modal(target)) continue
       modals = modals.filter((one) => one !== target)
       if (modal(target)) modals.push(target)
     }
   }
-  const topmostModal = () => {
+  const openModals = () => {
     let open: Array<Element> = []
     try {
       open = [...document.querySelectorAll(':modal')].filter((one) => one !== host)
@@ -158,16 +160,21 @@ const install = (): Chip => {
     }
     // Any open before the chip was there to hear them came first, in the page's order: the ones it heard are above them.
     modals = [...open.filter((one) => !modals.includes(one)), ...modals.filter((one) => open.includes(one))]
-    return modals.at(-1) ?? null
+    return modals
   }
   /**
-   * In the page, over anything it draws: its top layer, where the page's own z-index can't reach above it, and above what
-   * the page puts there after it (`raise`). While a modal of the page's is open everything outside it is inert, so the chip
-   * goes inside the topmost one, and comes back out as it closes: it can be pressed whatever the page shows.
+   * Whether a press on the chip reaches it. Hitting passes through what a modal makes inert, never through what is only
+   * drawn over it, so it is the browser's own word on which modal is the topmost. Null where it can't tell: the chip isn't
+   * drawn, or is out of the view.
    */
-  const place = (raise = false) => {
-    if (!wanted) return
-    const parent = topmostModal() ?? document.documentElement
+  const pressable = () => {
+    const box = host.getBoundingClientRect()
+    const x = box.left + box.width / 2
+    const y = box.top + box.height / 2
+    if (box.width === 0 || box.height === 0 || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return null
+    return document.elementsFromPoint(x, y).includes(host)
+  }
+  const put = (parent: Element, raise: boolean) => {
     if (host.parentNode !== parent) parent.append(host)
     if (typeof host.showPopover !== 'function') return
     if (host.matches(':popover-open')) {
@@ -177,6 +184,28 @@ const install = (): Chip => {
     }
     host.showPopover()
   }
+  /**
+   * In the page, over anything it draws: its top layer, where the page's own z-index can't reach above it, and above what
+   * the page puts there after it (`raise`). While a modal of the page's is open everything outside it is inert, so the chip
+   * goes inside the topmost one, and comes back out as it closes: it can be pressed whatever the page shows. With more than
+   * one open, it tries the likeliest first and the others after, until one it can be pressed in.
+   */
+  const place = (raise = false) => {
+    if (!wanted) return
+    const open = openModals()
+    const likeliest = open.at(-1) ?? document.documentElement
+    if (open.length > 1)
+      for (const one of open.toReversed()) {
+        put(one, raise)
+        const reached = pressable()
+        if (reached === null) break
+        if (reached) {
+          modals = [...modals.filter((other) => other !== one), one]
+          return
+        }
+      }
+    put(likeliest, raise)
+  }
   host.setAttribute('popover', 'manual')
   // A page that rewrites its document, or takes the chip out, has it put back at once; one that opens or closes a dialog
   // has it go over the dialog, or inside it where it is modal, or back out.
@@ -185,7 +214,7 @@ const install = (): Chip => {
     if (!wanted) return
     const dialogs = records.some((one) => one.type === 'attributes' && one.target !== host)
     if (dialogs || !host.isConnected) place(dialogs)
-  }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] })
+  }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'], attributeOldValue: true })
   // A popover the page opens goes over the chip: it goes back over it.
   document.addEventListener(
     'toggle',

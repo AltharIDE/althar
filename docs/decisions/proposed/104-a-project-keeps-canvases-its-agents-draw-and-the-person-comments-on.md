@@ -664,8 +664,10 @@ design tool lays out frames.
   top layer, put back at once where the page takes it out or rewrites its
   document, back over any popover or dialog the page opens after it, inside
   the topmost of the page's modals while one is open (all else is inert
-  then), the one opened last, as it heard them open, and shown
-  again by the main process whenever things are quiet; its presses are
+  then): where several are, the one it heard open last is the likeliest,
+  but those opened before it came are unheard, so it takes the one a
+  press at its place reaches, since hitting passes through what is inert;
+  and shown again by the main process whenever things are quiet; its presses are
   heard as the ground's are. The window draws it over a
   document, a diagram or a picture. Comment on it, where the conversation
   has a draft, opens the canvas's comment on all of it, for that draft. Saving, downloading and
