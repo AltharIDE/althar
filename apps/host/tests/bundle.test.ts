@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { assembleBundle, copyDependencies, readReleaseKey } from '../src/updates/bundle'
+import { assembleBundle, copyDependencies, copyHostAssets, readReleaseKey } from '../src/updates/bundle'
 import { temporary } from './support'
 
 const pkg = (root: string, name: string, dependencies: Record<string, string> = {}) => {
@@ -25,6 +25,7 @@ describe('locked host dependency bundles', () => {
     const entry = fileURLToPath(new URL('../dist/althar-host.js', import.meta.url))
     const relocated = join(destination, 'althar-host.mjs')
     writeFileSync(relocated, readFileSync(entry))
+    await copyHostAssets(entry, destination)
     await copyDependencies(entry, destination, ['sharp'])
     const { stdout } = await promisify(execFile)(process.execPath, [relocated, '--help'])
     expect(stdout).toContain('althar-host')
@@ -61,6 +62,8 @@ describe('locked host dependency bundles', () => {
     const node = join(root, 'node/bin/node')
     mkdirSync(join(root, 'node/bin'), { recursive: true })
     writeFileSync(entry, 'host code')
+    mkdirSync(join(root, 'assets'))
+    writeFileSync(join(root, 'assets/verifier.js'), 'export const verifier = true')
     writeFileSync(join(root, 'LICENSE'), 'Host license')
     writeFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), 'Bundled notices')
     writeFileSync(node, 'node binary')
@@ -73,6 +76,7 @@ describe('locked host dependency bundles', () => {
     expect(readFileSync(join(destination, 'node/bin/node'), 'utf8')).toBe('node binary')
     expect(readFileSync(join(destination, 'node/LICENSE'), 'utf8')).toBe('Node license')
     expect(readFileSync(join(destination, 'dist/althar-host.js'), 'utf8')).toBe('host code')
+    expect(readFileSync(join(destination, 'dist/assets/verifier.js'), 'utf8')).toBe('export const verifier = true')
     expect(readFileSync(join(destination, 'node_modules/sharp/index.js'), 'utf8')).toBe('sharp')
     expect(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))).toMatchObject({ type: 'module', version: '1.2.3' })
     const recaptured = join(temporary(), 'release')
