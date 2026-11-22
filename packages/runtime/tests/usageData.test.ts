@@ -4,6 +4,7 @@ import { Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { Automations } from '../src/Automations'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -390,6 +391,95 @@ describe('usage data', () => {
       assert.deepStrictEqual(
         named(events, 'usage_limit_hit').map((event) => event.properties),
         [{ agent: 'codex' }, { agent: 'claude-code' }, { agent: 'claude-code' }, { agent: 'opencode' }],
+      )
+      yield* stop
+    }).pipe(Effect.provide(withUsage())),
+  )
+
+  it.live('counts integration products, imports and automation outcomes without their private details', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projectId = (yield* opened()).projectId as ProjectId
+      const { personId, systemId } = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const automations = yield* Automations
+      const automationId = yield* automations.make({
+        projectId,
+        actorId: personId,
+        definition: {
+          name: 'Private review',
+          prompt: 'Check the private project',
+          schedule: { every: 'week', days: [1], at: '09:00' },
+          zone: 'UTC',
+          lead: { agentId: 'codex', model: null },
+          work: { kind: 'review' },
+          allowEverything: false,
+          minutes: 30,
+          late: 'skip',
+        },
+      })
+      for (const product of ['github', 'private-service']) {
+        yield* fact({
+          aggregateType: 'connection',
+          aggregateId: product,
+          revision: 1,
+          type: 'connection.added',
+          actorId: personId,
+          payload: { product, url: 'https://private.test' },
+        })
+      }
+      yield* fact({
+        projectId,
+        aggregateType: 'task',
+        aggregateId: 'private-import',
+        revision: 1,
+        type: 'task.brought_in',
+        actorId: personId,
+      })
+
+      const at = yield* timestamp
+      const runs = [
+        { cause: 'now', state: 'made', event: 'ended', reported: 'made', subject: '' },
+        { cause: 'schedule', state: 'missed', event: 'missed', reported: 'missed', subject: '' },
+        { cause: 'schedule', state: 'skipped', event: 'skipped', reported: 'skipped', subject: '' },
+        { cause: 'now', state: 'made', event: 'ended', reported: 'made', subject: 'private child review' },
+        { cause: 'now', state: 'failed', event: 'ended', reported: 'private error message', subject: '' },
+      ]
+      for (const [index, run] of runs.entries()) {
+        const id = `occ_${String(index).padStart(32, '0')}`
+        yield* sql`INSERT INTO automation_occurrences
+          (id, project_id, automation_id, definition, cause, slot, subject, state, due_at, fired_at, ended_at)
+          VALUES (${id}, ${projectId}, ${automationId}, 1, ${run.cause}, ${id}, ${run.subject}, ${run.state}, ${at}, ${at}, ${at})`
+        yield* fact({
+          projectId,
+          aggregateType: 'automation_occurrence',
+          aggregateId: id,
+          revision: 1,
+          type: `automation_occurrence.${run.event}`,
+          actorId: systemId,
+          payload: { state: run.reported },
+        })
+      }
+      yield* fact({
+        projectId,
+        aggregateType: 'automation',
+        aggregateId: automationId,
+        revision: 2,
+        type: 'automation.paused_itself',
+        actorId: systemId,
+      })
+      yield* awaiting(events, (seen) => named(seen, 'automation_paused_after_failures').length === 1)
+      assert.deepStrictEqual(
+        events.filter(({ name }) => name.startsWith('automation_') || name === 'integration_connected' || name === 'work_imported'),
+        [
+          { name: 'automation_created', properties: {} },
+          { name: 'integration_connected', properties: { product: 'github' } },
+          { name: 'work_imported', properties: {} },
+          { name: 'automation_run_finished', properties: { trigger: 'now', outcome: 'made' } },
+          { name: 'automation_run_finished', properties: { trigger: 'schedule', outcome: 'missed' } },
+          { name: 'automation_run_finished', properties: { trigger: 'schedule', outcome: 'skipped' } },
+          { name: 'automation_paused_after_failures', properties: {} },
+        ],
       )
       yield* stop
     }).pipe(Effect.provide(withUsage())),
