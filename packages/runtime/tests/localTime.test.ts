@@ -136,7 +136,7 @@ describe('a lead', () => {
     ),
   )
 
-  it.effect('is told the time again in the turn after a compaction, which may have left its brief out', () =>
+  it.effect('is told the time again before its refreshed brief in the turn after compaction', () =>
     fromInstant(
       Date.parse('2025-11-19T08:05:00Z'),
       Effect.gen(function* () {
@@ -152,7 +152,10 @@ describe('a lead', () => {
         assert.strictEqual(compacted, COMPACT)
         yield* say(created.threadId, 'carry on')
         const after = (yield* prompts(created.threadId, 3))[2] ?? ''
-        assert.strictEqual(after, "(It is now Wednesday 19 November 2025, 13:35, Asia/Kolkata on the person's computer.)\n\ncarry on")
+        const [first, ...rest] = after.split('\n\n')
+        assert.strictEqual(first, "(It is now Wednesday 19 November 2025, 13:35, Asia/Kolkata on the person's computer.)")
+        assert.include(after, "When you have done the task, call Althar's finish_step tool")
+        assert.strictEqual(rest.at(-1), 'carry on')
       }).pipe(Effect.provide(runtime(':memory:', {}, { zone: () => ZONE }))),
     ),
   )
