@@ -74,6 +74,8 @@ export interface ComputersText {
   home: string
   /** Under the home's name: what a home is. */
   homeLine: string
+  /** Over a worker opened out, as Home is over the home. */
+  worker: string
   workers: string
   cloud: string
   add: string
@@ -111,6 +113,7 @@ export const computersText: ComputersText = {
   computers: 'Computers',
   home: 'Home',
   homeLine: 'Keeps your projects',
+  worker: 'Worker',
   workers: 'Workers',
   cloud: 'Cloud',
   add: 'Add a worker',
@@ -416,7 +419,7 @@ function WorkerSheet({
   const working = worker.state === 'working'
   return (
     <div className={tt.opened}>
-      <ControlDetail title={worker.name} onBack={onBack} text={{ back: t.computers }} aside={worker.kind ?? t.unknown}>
+      <ControlDetail title={worker.name} onBack={onBack} text={{ back: t.computers }} aside={t.worker}>
         <div className={s.body}>
           <div className={cx(tt.sheet, s.sheetGlance)}>
             <div className={s.sheetReadings}>

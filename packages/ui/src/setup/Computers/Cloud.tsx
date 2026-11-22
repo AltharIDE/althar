@@ -82,7 +82,8 @@ export interface CloudText {
   resets: (month: CloudMonth) => string
   whenItRuns: string
   autoTitle: string
-  autoNote: string
+  /** Under the switch, as it stands: what happens to a task that would wait. */
+  autoNote: (on: boolean) => string
   limitTitle: string
   limitNote: string
   noLimit: string
@@ -110,7 +111,7 @@ export const cloudText: CloudText = {
   resets: (month) => `Starts again on ${month.next}`,
   whenItRuns: 'When it runs',
   autoTitle: 'Run tasks here when they would wait',
-  autoNote: 'Off, a task runs here only when you send it.',
+  autoNote: (on) => (on ? 'A task that would wait for a computer starts here instead.' : 'A task runs here only when you send it.'),
   limitTitle: 'Monthly limit',
   limitNote: 'At the limit nothing new starts here; what runs finishes.',
   noLimit: 'No limit',
@@ -291,7 +292,7 @@ export function CloudPage({ use, onBack, onAuto, onLimit, onLeave, text }: Cloud
         <SettingList>
           <SettingSwitch
             title={t.autoTitle}
-            note={t.autoNote}
+            note={t.autoNote(use.auto)}
             glyph={<Icon name="play" size={14} />}
             checked={use.auto}
             onChange={onAuto}
