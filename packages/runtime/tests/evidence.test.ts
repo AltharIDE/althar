@@ -69,6 +69,15 @@ describe('the evidence a lead hands', () => {
       const evidence = [{ kind: 'screenshot' as const, caption: 'The desktop result', computer_capture: id, view: 'Desktop' }]
       const other = yield* Effect.flip(findComputerCapture('other-thread', id))
       assert.include(other.message, 'computer screenshot is unavailable')
+      // A capture is a screenshot of its own: not a recording, and not a worktree picture as well.
+      for (const wrong of [
+        { kind: 'recording', caption: 'The desktop result', computer_capture: id },
+        { kind: 'screenshot', caption: 'The desktop result', computer_capture: id, path: 'shots/after.png' },
+      ])
+        assert.include(
+          yield* callTool(lead, 'finish_step', { built: 'A retry.', summary: 'Checked the desktop.', evidence: [wrong] }),
+          'must name either a worktree picture or one computer screenshot captured in this task',
+        )
       yield* callTool(lead, 'finish_step', { built: 'A retry.', summary: 'Checked the desktop.', evidence })
       const [shot] = (yield* kept(threadId)).evidence ?? []
       assert.match((shot?.picture as { sha256?: string } | undefined)?.sha256 ?? '', /^[0-9a-f]{64}$/)

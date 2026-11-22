@@ -403,6 +403,9 @@ export const runtime = (
     readonly screenshot?: RuntimeOptions['screenshot']
     /** How the page beside a conversation is reached, where a test drives one; without, none can be. */
     readonly page?: RuntimeOptions['page']
+    /** How this computer's native apps are used, and what hears that a task's turn ended with it; without, the computer tool isn't served. */
+    readonly computer?: RuntimeOptions['computer']
+    readonly computerEnded?: RuntimeOptions['computerEnded']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
@@ -459,6 +462,8 @@ export const runtime = (
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
+    ...(more.computer === undefined ? {} : { computer: more.computer }),
+    ...(more.computerEnded === undefined ? {} : { computerEnded: more.computerEnded }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
