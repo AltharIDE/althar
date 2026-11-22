@@ -31,7 +31,7 @@ import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 import { useHomeState } from '../homes/useHomes'
-import { HOME, placementOf } from './runsOn'
+import { HOME, placementOf, runsOnText } from './runsOn'
 import s from './Card.module.css'
 
 /*
@@ -252,7 +252,10 @@ function PlanCard({
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   // Where it runs, while it is held: the home, or one of its workers (ADR-103). The runtime checks the choice again as it starts.
-  const here = useHomeState(useServices().host.homes)
+  const homes = useServices().host.homes
+  const here = useHomeState(homes)
+  // The home by the window's name for it: This Mac, or the remote home's own; until the window has read which, neither.
+  const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : here === null ? null : here.current.home.name
   const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: HOME })
   const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : HOME
   const placement =
@@ -263,7 +266,7 @@ function PlanCard({
           steps,
           requirements: plan.workerRequirements,
           worksIn,
-          home: here === null || here.current.kind === 'local' ? device.This : here.current.home.name,
+          home: homeName,
           agentName: (id) => actions.agentName(id),
         })
       : null
@@ -317,7 +320,7 @@ function PlanCard({
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
-      text={{ ruleNote: (_project, note) => note }}
+      text={{ ruleNote: (_project, note) => note, ...(homeName === null ? { useHome: () => runsOnText.useHome } : {}) }}
       // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-091).
       {...(worksIn === undefined
         ? {}

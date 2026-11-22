@@ -51,6 +51,10 @@ export const runsOnText = {
     }
   },
   note: (home: string) => `The setup and lead run on the worker, the review on ${home}.`,
+  /** The home, until the window has read which it is: a remote window mustn't say This Mac meanwhile. */
+  home: 'This home',
+  homeSaid: 'this home',
+  useHome: 'Use this home',
 }
 
 export interface Placement {
@@ -77,17 +81,19 @@ export const placementOf = ({
   readonly steps: ReadonlyArray<PlanStep>
   readonly requirements: WorkerPlanRequirements | undefined
   readonly worksIn: WorksIn | undefined
-  /** The home, as the window names it: This Mac, or the home's own name. */
-  readonly home: string
+  /** The home, as the window names it: This Mac, or the home's own name; null until the window knows which. */
+  readonly home: string | null
   readonly agentName: (id: string) => string
 }): Placement => {
+  const label = home ?? runsOnText.home
+  const said = home ?? runsOnText.homeSaid
   const repositories = requirements?.repositoryCount
   const best = automaticWorker(workers, steps, repositories)
   const chosen = workers.find((worker) => worker.workerId === selected)
   const plan = workerPlanUnfit(requirements, worksIn, steps)
   const problem = (() => {
     if (selected === HOME) return undefined
-    if (plan !== undefined) return planUnfitWords(plan, home)
+    if (plan !== undefined) return planUnfitWords(plan, said)
     if (selected === ANY) return best === undefined ? automaticWorkerUnavailable : undefined
     const unfit = workerUnfit(chosen, steps, repositories)
     return unfit === undefined ? undefined : workerUnfitWords(unfit, chosen === undefined ? workerNameOf(selected) : workerName(chosen))
@@ -97,7 +103,7 @@ export const placementOf = ({
   const shown = selected !== HOME || (workers.length > 0 && !never)
   const reports = selected === ANY || workers.some((worker) => worker.capacity !== undefined)
   const places: Array<LaunchPlace> = [
-    { value: HOME, label: home, kind: 'home' },
+    { value: HOME, label, kind: 'home' },
     ...(reports
       ? [
           {
@@ -128,5 +134,5 @@ export const placementOf = ({
       ? [{ value: selected, label: workerNameOf(selected), kind: 'worker' as const, disabled: true, hint: runsOnText.gone }]
       : []),
   ]
-  return { shown, places, note: plan === undefined ? runsOnText.note(home) : planUnfitWords(plan, home), problem }
+  return { shown, places, note: plan === undefined ? runsOnText.note(said) : planUnfitWords(plan, said), problem }
 }

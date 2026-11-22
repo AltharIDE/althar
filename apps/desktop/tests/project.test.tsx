@@ -17,6 +17,7 @@ import {
   coordinatorSnapshot,
   efforts,
   fakeClient,
+  fakeHost,
   items,
   models,
   project,
@@ -25,6 +26,7 @@ import {
   streamed,
 } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
+import type { HomeState, HomesHost } from '../src/homes'
 import { useSettingsOf, withServices, pickLayout } from './render'
 
 function Project({
@@ -707,6 +709,43 @@ describe('the Talk room', () => {
     expect(screen.getByRole('button', { name: 'Start' }).hasAttribute('disabled')).toBe(true)
     await userEvent.click(screen.getByRole('button', { name: 'Use This Mac' }))
     expect(screen.queryByRole('alert')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+  })
+
+  it('names the home neutrally in a remote window until the window has read which home it is', async () => {
+    const workerId = 'wrk_' + 'e'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const held = card({
+      phase: 'held',
+      plan: { ...plan, startsAt: null, worksIn: 'worktree', workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false } },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+    })
+    // The workers are in, and the window's read of its home hasn't answered yet.
+    let answer: (state: HomeState) => void = () => {}
+    const state = new Promise<HomeState>((resolve) => (answer = resolve))
+    const homes = { state: vi.fn(() => state), onState: () => () => {} } satisfies Partial<HomesHost>
+    withServices(<Project room={Room.Talk} />, client, fakeHost({ homes: homes as unknown as HomesHost }))
+    const button = await screen.findByRole('button', { name: 'Runs on: This home' })
+    expect(screen.queryByText('This Mac')).toBeNull()
+    await userEvent.click(button)
+    expect(screen.getByText('The setup and lead run on the worker, the review on this home.')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await act(async () =>
+      answer({
+        current: {
+          kind: 'ssh',
+          home: { id: `remote_${'1'.repeat(32)}`, name: 'studio', homeId: `home_${'2'.repeat(32)}`, ssh: { target: 'studio' } },
+        },
+        connection: 'connected',
+      }),
+    )
+    expect(await screen.findByRole('button', { name: 'Runs on: studio' })).toBeTruthy()
+    // Start still sends it to the home the window is on.
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
