@@ -352,7 +352,8 @@ export interface FakeAgentOptions {
    */
   readonly variants?: boolean
   /** Models offered by this fake, for routing between makers. */
-  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  /** `description` as an agent's own default says the model it stands for. */
+  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly description?: string }>
   /** Models it fails to put a session on the first time, as Claude Code does now and then when Anthropic doesn't confirm one. */
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
@@ -1740,7 +1741,11 @@ const modelOption = (session: SessionState, variants: boolean, models?: FakeAgen
               { value: 'large', name: 'Large', description: 'The most capable' },
               ...(variants ? [{ value: 'huge', name: 'Huge', description: 'Thinks the longest' }] : []),
             ]
-          : models.map((model) => ({ value: model.id, name: model.name })),
+          : models.map((model) => ({
+              value: model.id,
+              name: model.name,
+              ...(model.description === undefined ? {} : { description: model.description }),
+            })),
     },
   ],
 })

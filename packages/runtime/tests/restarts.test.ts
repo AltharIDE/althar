@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Duration, Effect, Exit, Layer } from 'effect'
+import { Cause, Duration, Effect, Exit, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Ids, newId } from '@althar/domain'
@@ -18,6 +18,8 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Limits } from '../src/Limits'
+import { standInOf } from '../src/standIn'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeAgents, notices, repository, runtime, until } from './support'
 
@@ -207,6 +209,42 @@ const turnsOf = (threadId: string) =>
   })
 
 describe('A step a restart stopped', () => {
+  it.live('carries on with a lead that stood in still standing in, for the lead it stood in for', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      // The lead on Codex took the step over from Claude Code's, which ended it twice without its report, until it is done.
+      const db = new DatabaseSync(file)
+      const [attempt] = db.prepare("SELECT id FROM node_attempts WHERE state = 'running'").all() as Array<{ id: string }>
+      const standsIn = JSON.stringify({
+        agentId: 'claude-code',
+        model: 'large',
+        effort: null,
+        accountId: null,
+        until: null,
+        why: 'stall',
+        attemptId: attempt?.id,
+      })
+      db.prepare(
+        `UPDATE record_events SET payload = json_set(payload, '$.standsIn', json(?)) WHERE aggregate_type = 'provider_session'
+          AND type = 'provider_session.starting' AND aggregate_id IN (SELECT id FROM provider_sessions WHERE thread_id = ?)`,
+      ).run(standsIn, task.threadId)
+      db.close()
+      yield* Effect.gen(function* () {
+        yield* until(sessionsOf(task.threadId), (rows) => rows.length === 2)
+        const sql = yield* SqlClient.SqlClient
+        const [last] = yield* sql<{ id: string; agentId: string }>`
+          SELECT id, agent_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+        assert.strictEqual(last?.agentId, 'codex')
+        assert.deepInclude(Option.getOrUndefined(yield* standInOf(last?.id ?? '', (yield* Limits).sameModel)) ?? {}, {
+          agentId: 'claude-code',
+          model: 'large',
+          why: 'stall',
+        })
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
   it.live('carries on by itself, on its lead, with one quiet line in the thread and nothing asked of the person', () =>
     Effect.gen(function* () {
       const file = store()

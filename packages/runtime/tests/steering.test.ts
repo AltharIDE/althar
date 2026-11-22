@@ -256,7 +256,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       )
       // It only stands in, as nearly out, until the window resets: not out at all, the lead given isn't back before then.
       const [, taker] = yield* sessionsOn(task.threadId)
-      assert.deepInclude(Option.getOrUndefined(yield* standInOf(taker?.id ?? '')) ?? {}, {
+      assert.deepInclude(Option.getOrUndefined(yield* standInOf(taker?.id ?? '', (yield* Limits).sameModel)) ?? {}, {
         agentId: 'claude-code',
         until: resetsAt,
         why: 'low',
