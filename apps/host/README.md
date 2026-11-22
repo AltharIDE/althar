@@ -21,7 +21,7 @@ node apps/host/dist/althar-host.js init --project /absolute/path/to/repository -
 node apps/host/dist/althar-host.js serve
 ```
 
-`init` registers a checkout that's already on the home machine. Pass `--project` again for each checkout you want to open. Keep the `homeId` and project IDs it prints. You can initialize again with the same profile to add projects while the service is stopped. The home keeps its identity and key.
+`init` registers a checkout that's already on the home machine. Pass `--project` again for each checkout you want to open. You can also leave it out and make projects from the desktop once it's connected: a home with none opens on its welcome. Keep the `homeId` and project IDs it prints. You can initialize again with the same profile to add projects while the service is stopped. The home keeps its identity and key.
 
 `serve` runs in the foreground. You can stop it with Ctrl-C. For a home that stays up on its own, install the service below.
 
@@ -87,7 +87,7 @@ althar-host pair --profile /path/to/profile
 
 In the desktop, open **Homes → Connect a home… → Pairing code**. Paste the code, check the destination, give the home a name and choose **Pair and open**. The home opens in its own window. Its projects stay on the server.
 
-A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. The paired connection opens existing projects and tasks. Set up a security key separately when you want to answer permission requests from that desktop.
+A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. The paired connection opens existing projects and tasks, and makes a project on the home, from a repository cloned there, one the home finds in `~/code`, `~/projects` and the like, or a new one. Set up a security key separately when you want to answer permission requests from that desktop.
 
 ```sh
 althar-host devices --profile /path/to/profile

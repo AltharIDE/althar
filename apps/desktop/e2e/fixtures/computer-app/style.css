@@ -1,0 +1,26 @@
+body {
+  font-family: system-ui;
+}
+
+input,
+button {
+  position: absolute;
+  width: 48%;
+  left: 26%;
+  height: 24%;
+  box-sizing: border-box;
+}
+
+input {
+  top: 18%;
+}
+
+button {
+  top: 52%;
+}
+
+output {
+  position: absolute;
+  top: 79%;
+  left: 26%;
+}

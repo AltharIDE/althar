@@ -1,4 +1,4 @@
-import { toolPhrase } from '@althar/contracts'
+import { ruleKindWords, toolPhrase } from '@althar/contracts'
 import type { AllowedBy, AlwaysScope, AttentionRequest, RuleKind } from '@althar/contracts'
 import { titleOf } from './callCommand'
 import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScope } from '@althar/ui'
@@ -15,15 +15,7 @@ import { serverBrand } from './mcpServers'
 
 export const text = {
   /** Each kind of request, as the scope of an always: "Yes, and always allow ___ in meridian". */
-  kinds: {
-    'default-branch': 'pushes to the default branch',
-    'force-push': 'force pushes',
-    'many-branches': 'pushes of every branch, tags or a pattern of branches',
-    'delete-branch': 'deleting branches that aren’t the task’s',
-    deploy: 'deploying and publishing',
-    outside: 'writing outside the task’s worktree',
-    speak: 'posting for you',
-  } satisfies Record<RuleKind, string>,
+  kinds: ruleKindWords satisfies Record<RuleKind, string>,
   /** A rule that let a request through, as its receipt says it. */
   prefix: (pattern: string) => `commands starting “${pattern}”`,
   exact: 'this exact command',

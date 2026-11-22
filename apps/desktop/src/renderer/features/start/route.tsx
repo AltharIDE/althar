@@ -30,6 +30,7 @@ function First() {
       model={start}
       accounts={accounts}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
+      onNew={() => void navigate({ to: '/new' })}
       home={() => <ShownHome />}
     />
   )

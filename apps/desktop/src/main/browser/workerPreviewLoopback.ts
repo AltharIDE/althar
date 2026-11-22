@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises'
 import type { WorkerPreviewResponse } from '@althar/contracts'
 
 export const PREVIEW_HEADER = 'x-althar-preview-session'
+/** What the browser shows where the run on the worker doesn't answer: what to look at. */
+const unavailable = 'This preview isn’t answering. Check in Althar that its run is still going.'
 const REMOTE_ORIGIN = 'http://localhost'
 const API_ORIGIN = new URL(REMOTE_ORIGIN)
 const HOPS = ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']
@@ -92,7 +94,7 @@ export const workerPreviewLoopback = async (
         signal: localSignal,
       })
       peer.on('error', () => {
-        if (!response.headersSent && !response.destroyed) response.writeHead(502).end('The worker preview is unavailable.')
+        if (!response.headersSent && !response.destroyed) response.writeHead(502).end(unavailable)
         else response.destroy()
       })
       peer.once('response', (result) => {
@@ -107,7 +109,7 @@ export const workerPreviewLoopback = async (
       incoming.once('error', () => peer.destroy())
       incoming.pipe(peer)
     })().catch(() => {
-      if (!response.headersSent && !response.destroyed) response.writeHead(502).end('The worker preview is unavailable.')
+      if (!response.headersSent && !response.destroyed) response.writeHead(502).end(unavailable)
       else response.destroy()
     })
   })

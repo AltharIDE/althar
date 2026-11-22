@@ -164,6 +164,11 @@ describe('a task’s lead', () => {
         'Also planned from this message, since you started, by other tasks: Segmented control: the selection slides',
       )
       assert.match(told?.body ?? '', /\(segmented-control-[a-z-]+\)/)
+      // Althar's own words for the lead, not relayed as the coordinator's, so its thread doesn't show them as something passed on.
+      assert.isTrue(told?.body.startsWith('Also planned'))
+      const relayed = yield* sql<{ one: number }>`
+        SELECT 1 AS one FROM thread_items WHERE thread_id = ${automations.threadId} AND kind = 'notice' AND content LIKE '%since you started%'`
+      assert.lengthOf(relayed, 0)
       // A lead that has had no brief yet gets it in its opening brief, not as a message too.
       assert.lengthOf(yield* heard(notStarted.threadId), 0)
     }).pipe(Effect.provide(runtime())),

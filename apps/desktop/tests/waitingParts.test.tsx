@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Holder, SessionSummary } from '@althar/contracts'
+import { type Holder, type SessionSummary, workerPreviewAddress } from '@althar/contracts'
 
 import { holdersWords, queuedOfWords, queuedWords } from '../src/renderer/shared/agents'
 import { titleOf } from '../src/renderer/shared/callCommand'
@@ -90,6 +90,12 @@ describe('what runs, and what waits', () => {
     expect(rows[1]).toMatchObject({ name: 'Marketing site', url: 'localhost:5320', since: '1h 5m', output: false })
     expect(runIdOf('run:proc_1')).toBe('proc_1')
     expect(runIdOf('bg-1')).toBeNull()
+  })
+
+  it('says a run on a worker opens its preview, and names the worker as where it runs', () => {
+    const workerId = 'wrk_' + '3'.repeat(32)
+    const [row] = pillOf([], [{ ...run, url: workerPreviewAddress('proj_' + 'a'.repeat(32), 'proc_' + 'b'.repeat(32)), workerId }], NOW)
+    expect(row).toMatchObject({ url: 'preview', on: 'Linux worker 333333' })
   })
 
   it('keeps a lead’s row and a run’s apart when they say one address, each stopping its own', () => {

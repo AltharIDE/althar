@@ -12,9 +12,10 @@ import { ago } from './time'
 /** The repositories found, read once a window. */
 export const foundKey = ['found-repositories'] as const
 
-export const useFound = () => {
+/** The repositories found; not looked for where `enabled` is false, as on a home too old to say. */
+export const useFound = (enabled = true) => {
   const { host } = useServices()
-  return useQuery({ queryKey: foundKey, queryFn: () => host.findRepositories(), staleTime: Infinity })
+  return useQuery({ queryKey: foundKey, queryFn: () => host.findRepositories(), staleTime: Infinity, enabled })
 }
 
 /** What else says which one it is: its branch, and when it was last worked on. */

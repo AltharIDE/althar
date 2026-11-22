@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
-import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { type GitFailed, RepositoryRefused } from './errors'
+import { free, landWhole } from './folderSetup'
 import { startRepository } from './git'
 import { slugify } from './Projects'
 
@@ -13,8 +13,9 @@ import { slugify } from './Projects'
  * a folder named after the project, in a folder the person chose, made a git
  * repository with a first commit. It is placed first, read without changing
  * anything, so the page can say where it will be; it is made only as the
- * project is. An empty folder of its name is used as it is; one with
- * anything in it is refused, as it may be someone's work.
+ * project is. An empty folder of its name is used; one with anything in
+ * it is refused, as it may be someone's work, as is a link, which would put
+ * it wherever that points.
  */
 
 /** Where a new repository would go: its folder's name and its path, inside `parent`. */
@@ -25,17 +26,6 @@ export interface Placed {
 
 /** The folder a project's name makes: northwind-ops, for Northwind Ops. */
 const folderName = (name: string) => slugify(name, '')
-
-/** Whether `path` holds nothing: no folder, or one with nothing in it. */
-const free = (path: string) => {
-  if (!existsSync(path)) return true
-  try {
-    return readdirSync(path).length === 0
-  } catch {
-    // A file of that name, or a folder that can't be read.
-    return false
-  }
-}
 
 /** The path as the file system has it, the way the projects name a repository's root. */
 const real = (path: string) => {
@@ -58,21 +48,25 @@ export const placeRepository = (parent: string, name: string): Effect.Effect<Pla
   })
 
 /**
- * Makes it: the folder, then the repository and its first commit. A folder
- * this made is taken away again if git fails in it, so trying again finds the
- * place free.
+ * Makes it: the repository and its first commit, in a folder of its own
+ * beside where it goes, moved in once it's whole and only where that is still
+ * free, as a clone is. Where git fails, or a clone of the name landed there
+ * first, only its own folder goes, so trying again finds the place as it was.
  */
 export const makeRepository = (parent: string, name: string): Effect.Effect<Placed, RepositoryRefused | GitFailed> =>
   Effect.gen(function* () {
     const placed = yield* placeRepository(parent, name)
-    const made = !existsSync(placed.path)
-    if (made) mkdirSync(placed.path, { recursive: true })
-    yield* startRepository(placed.path).pipe(
-      Effect.tapError(() =>
-        made
-          ? cleanUp(placed.path, 'where a new repository couldn’t be made')
-          : cleanUp(join(placed.path, '.git'), 'where a new repository couldn’t be made'),
-      ),
+    // The place itself is made where it isn't there yet, as a home's first place for projects is.
+    yield* Effect.sync(() => mkdirSync(dirname(placed.path), { recursive: true }))
+    yield* landWhole(
+      placed.path,
+      'making',
+      (staging) =>
+        Effect.andThen(
+          Effect.sync(() => mkdirSync(staging)),
+          startRepository(staging),
+        ),
+      () => new RepositoryRefused({ reason: 'taken', name: placed.name, parent }),
     )
     return { name: placed.name, path: real(placed.path) }
   })

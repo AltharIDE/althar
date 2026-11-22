@@ -20,6 +20,7 @@ import { ago, useNow } from '../../src/renderer/shared/time'
 import { servicesFor } from '../../tests/render'
 import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { type Beat, usePlayed } from './play'
+import { takeOutThread } from './takeOut'
 import {
   at,
   CODEX_THOUGHT,
@@ -48,6 +49,8 @@ const scenes = [
   { key: 'coordinator', label: 'Coordinator, live' },
   { key: 'three', label: 'Three streaming' },
   { key: 'busy', label: 'Busy task chat' },
+  { key: 'takeout', label: 'Queue take-out' },
+  { key: 'takeout-before', label: 'Queue take-out, before' },
 ] as const
 type Scene = (typeof scenes)[number]['key']
 
@@ -187,6 +190,22 @@ function TaskScene({ live, busy = false }: { live: boolean; busy?: boolean }) {
   )
 }
 
+/** A merge-queue send-back of a real pull request, at the end of a short task: as its line says it now, or as it said it before. */
+function TakeOutScene({ now }: { now: boolean }) {
+  const shown = useMemo(() => takeOutThread(now), [now])
+  const rounds = roundsOf(
+    { items: shown, turnRunning: false, openedAt: at(0), worktree: WORKTREE },
+    new Map(),
+    (iso) => ago(iso),
+    useNow(true),
+  )
+  return (
+    <Face>
+      <TaskThread rounds={rounds} versionOf={() => ''} threadId="lab-takeout" worktree={WORKTREE} session={session} />
+    </Face>
+  )
+}
+
 /** A long answer, for timing frames while three stream. */
 const longBeats: ReadonlyArray<Beat> = [{ think: CODEX_THOUGHT }, { say: LONG_ANSWER }]
 
@@ -225,6 +244,8 @@ function Lab() {
         {scene === 'task' && <TaskScene key="task" live={false} />}
         {scene === 'live' && <TaskScene key="live" live />}
         {scene === 'busy' && <TaskScene key="busy" live={false} busy />}
+        {scene === 'takeout' && <TakeOutScene key="takeout" now />}
+        {scene === 'takeout-before' && <TakeOutScene key="takeout-before" now={false} />}
         {scene === 'coordinator' && (
           <Face>
             <CoordinatorThread />

@@ -307,6 +307,19 @@ describe('what the person does on a task', () => {
     expect(client.setModel).not.toHaveBeenCalled()
   })
 
+  it('moves the session taking the thread over, not a start, where the lead going out has let the thread go', async () => {
+    const base = snapshot().session!
+    // The runtime's read in the gap of a switch: the old session gone, the new one not yet holding the thread.
+    const { result, client } = reading({
+      session: { ...base, held: false, handover: true, nextLead: { agentId: base.agentId, model: base.model, effort: base.effort } },
+    })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.choose({ agentId: base.agentId, model: 'gpt-6.1-sol', effort: 'low' }))
+    expect(client.startSession).not.toHaveBeenCalled()
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, model: 'gpt-6.1-sol' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, effort: 'low' })
+  })
+
   it('sends a pick back to the model the lead is on while another is held for its next turn', async () => {
     const base = snapshot().session!
     const { result, client } = reading({
@@ -314,7 +327,7 @@ describe('what the person does on a task', () => {
     })
     await waitFor(() => expect(result.current.snapshot).not.toBeNull())
     await act(() => result.current.choose({ agentId: base.agentId, model: 'opus', effort: 'high' }))
-    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'opus' })
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, model: 'opus' })
     expect(client.setEffort).not.toHaveBeenCalled()
   })
 
@@ -335,11 +348,11 @@ describe('what the person does on a task', () => {
     await waitFor(() => expect(view.result.current.snapshot).not.toBeNull())
     slow = true
     act(() => void view.result.current.choose({ ...on, model: 'sonnet' }))
-    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, model: 'sonnet' }))
     // The first is taken, and the thread isn't read again yet: still as it was, on the model the pick goes back to.
     await waitFor(() => expect(releases.length).toBeGreaterThan(0))
     act(() => void view.result.current.choose(on))
-    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'opus' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', agentId: base.agentId, model: 'opus' }))
     expect(client.setModel).toHaveBeenCalledTimes(2)
     slow = false
     await act(async () => releases.forEach((release) => release()))

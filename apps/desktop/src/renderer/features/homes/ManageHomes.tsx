@@ -1,5 +1,19 @@
 import { type RefObject, useEffect, useRef, useState } from 'react'
-import { Button, Dialog, Icon, IconButton, ListMotion, LiveDot, Menu, MenuItem, MenuSeparator, Problem, ProjectMark } from '@althar/ui'
+import {
+  Button,
+  Dialog,
+  Icon,
+  IconButton,
+  LinkButton,
+  ListMotion,
+  LiveDot,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  Problem,
+  ProjectMark,
+  Spinner,
+} from '@althar/ui'
 
 import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 import { kitInk } from '../../shared/inks'
@@ -164,6 +178,14 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       .then(() => homes.open(id, projectId))
       .catch(() => undefined)
   }
+  /** Its window, on New project. */
+  const openNew = (id: string) => {
+    onClose()
+    void saved
+      .settled()
+      .then(() => homes.openNew(id))
+      .catch(() => undefined)
+  }
   return (
     <Dialog
       title="Homes"
@@ -194,7 +216,13 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
                 </span>
               )}
             </div>
-            <Shelf projects={overview?.projects.local} local onOpen={(projectId) => open('local', projectId)} />
+            <Shelf
+              projects={overview?.projects.local}
+              local
+              onOpen={(projectId) => open('local', projectId)}
+              onWelcome={() => open('local')}
+              onNew={() => openNew('local')}
+            />
           </li>
           {saved.shown.map((home) => (
             <Home
@@ -207,6 +235,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
               onEdit={(what) => setEditing(what === null ? null : { id: home.id, what })}
               onRename={(name) => saved.rename(home, name)}
               onOpen={(projectId) => open(home.id, projectId)}
+              onNew={() => openNew(home.id)}
               onForget={() => {
                 setEditing(null)
                 saved.forget(home)
@@ -236,6 +265,14 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
   )
 }
 
+/** Setting up a security key for a home: in its menu, and the line under it while the browser has it. */
+export const keyText = {
+  setUp: 'Set up a security key…',
+  opening: 'Opening your browser…',
+  opened: 'Finish setting up the key in your browser.',
+  again: 'Try again',
+}
+
 /** Where a home stands, in a word or two: this window, its window and how it is connected, or when it was last opened. */
 const statusOf = (home: RemoteHome, live: Liveness, here: HomeState | null, overview: HomesOverview | null) => {
   if (live === 'down') return 'Disconnected'
@@ -254,6 +291,7 @@ function Home({
   onEdit,
   onRename,
   onOpen,
+  onNew,
   onForget,
 }: {
   home: RemoteHome
@@ -264,13 +302,26 @@ function Home({
   onEdit: (what: 'name' | 'connection' | null) => void
   onRename: (name: string) => void
   onOpen: (projectId?: string) => void
+  /** Its window, on New project. */
+  onNew: () => void
   onForget: () => void
 }) {
   const live = livenessOf(overview, home)
   const own = here !== null && here.current.kind !== 'local' && here.current.home.homeId === home.homeId
   const enrollKey = own && home.https !== undefined && live === 'live' ? homes.enrollApprovalKey : undefined
   const [copied, setCopied] = useState(false)
+  // A security key for this home's permission answers (ADR-089): set up in the browser, from a page the home serves.
   const [keySetup, setKeySetup] = useState<{ state: 'opening' | 'opened' | 'failed'; message: string } | null>(null)
+  const setUpKey =
+    enrollKey === undefined
+      ? undefined
+      : () => {
+          setKeySetup({ state: 'opening', message: keyText.opening })
+          void enrollKey().then(
+            () => setKeySetup({ state: 'opened', message: keyText.opened }),
+            (error: unknown) => setKeySetup({ state: 'failed', message: homeProblem(error) }),
+          )
+        }
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1600)
@@ -316,19 +367,9 @@ function Home({
           <MenuItem icon="plug" onSelect={() => onEdit('connection')}>
             Edit connection
           </MenuItem>
-          {enrollKey !== undefined && (
-            <MenuItem
-              icon="external"
-              disabled={keySetup?.state === 'opening'}
-              onSelect={() => {
-                setKeySetup({ state: 'opening', message: 'Opening security key setup…' })
-                void enrollKey().then(
-                  () => setKeySetup({ state: 'opened', message: 'Security key setup is open in your browser.' }),
-                  (error: unknown) => setKeySetup({ state: 'failed', message: homeProblem(error) }),
-                )
-              }}
-            >
-              Set up a security key
+          {setUpKey !== undefined && (
+            <MenuItem icon="lock" disabled={keySetup?.state === 'opening'} onSelect={setUpKey}>
+              {keyText.setUp}
             </MenuItem>
           )}
           <MenuItem
@@ -347,14 +388,33 @@ function Home({
         </Menu>
       </div>
       {keySetup?.state === 'failed' ? (
-        <Problem size="small">{keySetup.message}</Problem>
+        <Problem
+          size="small"
+          className={s.keyProblem}
+          {...(setUpKey === undefined
+            ? {}
+            : {
+                action: (
+                  <LinkButton onClick={setUpKey} className={s.keyAction}>
+                    {keyText.again}
+                  </LinkButton>
+                ),
+              })}
+        >
+          {keySetup.message}
+        </Problem>
       ) : (
-        keySetup !== null && <output>{keySetup.message}</output>
+        keySetup !== null && (
+          <output className={s.keyLine}>
+            {keySetup.state === 'opening' ? <Spinner size="small" /> : <Icon name="external" size={12} className={s.keyMark} />}
+            <span>{keySetup.message}</span>
+          </output>
+        )
       )}
       {editing === 'connection' ? (
         <Connection home={home} homes={homes} onDone={() => onEdit(null)} />
       ) : (
-        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} />
+        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} onWelcome={() => onOpen()} onNew={onNew} />
       )}
     </li>
   )
@@ -403,22 +463,34 @@ const doing = (working: number, yours: number) => {
   return working > 0 ? `${working} running` : 'Nothing running'
 }
 
-/** The projects on a home, each a press from being opened there. */
+/**
+ * The projects on a home, each a press from being opened there, and New
+ * project after them, opening its window on it; with none, a press opens its
+ * window on its welcome, to make one.
+ */
 function Shelf({
   projects,
   live = projects?.live === true,
   local = false,
   onOpen,
+  onWelcome,
+  onNew,
 }: {
   projects: HomeProjects | undefined
   live?: boolean
   local?: boolean
   onOpen: (projectId: string) => void
+  onWelcome: () => void
+  onNew: () => void
 }) {
   if (projects === undefined)
     return <p className={s.empty}>{local ? 'Its projects show here once a window on it opens.' : 'Open it to see its projects here.'}</p>
   if (projects.list.length === 0)
-    return <p className={s.empty}>{local ? 'Add a project and it shows here.' : 'Add a project on the host and it shows here.'}</p>
+    return (
+      <p className={s.empty}>
+        No projects yet. <LinkButton onClick={onWelcome}>New project</LinkButton>
+      </p>
+    )
   const alive = live && projects.live
   return (
     <ul className={s.shelf} data-rest={!alive || undefined}>
@@ -439,6 +511,14 @@ function Shelf({
           </button>
         </li>
       ))}
+      <li>
+        <button type="button" className={`${s.project} ${s.adding}`} onClick={onNew}>
+          <span className={s.addMark} aria-hidden="true">
+            <Icon name="plus" size={14} />
+          </span>
+          <span className={s.projectName}>New project</span>
+        </button>
+      </li>
     </ul>
   )
 }

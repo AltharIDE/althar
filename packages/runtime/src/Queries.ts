@@ -141,6 +141,10 @@ import { toolCallMoves } from './toolMoves'
 /** A card's offer of a preset, as its content takes it: none where there is none. */
 const offering = <A>(presetOffer: A | undefined) => (presetOffer === undefined ? {} : { presetOffer })
 
+/** Who a thread leads as from its next turn, as its summary says it: null where nothing waits. */
+const nextLeadOf = (lead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined) =>
+  lead === undefined ? null : { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null }
+
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 
@@ -1424,6 +1428,7 @@ export class Queries extends Context.Service<
             LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC`
           const running = yield* sessions.running(threadId)
+          const handing = Option.getOrUndefined(yield* sessions.handingOver(threadId))
           // The runtime's own session when it holds one, which a switch's newer, still-starting row is not; else the newest recorded one.
           const session = Option.isSome(running) ? (rows.find((row) => row.id === running.value.sessionId) ?? rows[0]) : rows[0]
           if (session === undefined) return null
@@ -1456,14 +1461,9 @@ export class Queries extends Context.Service<
             // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),
-            nextLead:
-              Option.isSome(running) && running.value.nextLead !== undefined
-                ? {
-                    agentId: running.value.nextLead.agentId,
-                    model: running.value.nextLead.model ?? null,
-                    effort: running.value.nextLead.effort ?? null,
-                  }
-                : null,
+            ...(handing === undefined ? {} : { handover: true }),
+            // Let go by the one going out, the thread leads as the session taking it over will.
+            nextLead: nextLeadOf(Option.isSome(running) ? running.value.nextLead : handing),
             standsIn:
               standsIn === undefined
                 ? null

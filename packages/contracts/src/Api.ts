@@ -1181,9 +1181,62 @@ export const FolderReading = Schema.Struct({
 })
 export type FolderReading = typeof FolderReading.Type
 
+/** A repository found on a home's disk where people keep code, by the grant it opens by and where it is as the person knows it (~/code/site). */
+export const HomeRepository = Schema.Struct({
+  grant: Schema.String,
+  name: Schema.String,
+  where: Schema.String,
+  /** The branch checked out, or null where none is. */
+  branch: Schema.NullOr(Schema.String),
+  /** When it was last worked on, as ms since the epoch. */
+  worked: Schema.Number,
+})
+export type HomeRepository = typeof HomeRepository.Type
+
+/**
+ * Where on a home a new project's code can come from and go, as the home
+ * finds it, for a window that can't show its folder picker there: the
+ * repositories in the usual places (~/code, ~/projects and the like), newest
+ * work first, and the folder a clone or a new repository goes in. Each by a
+ * grant the home made, so the window still names no path of its own.
+ */
+export const HomeFolders = Schema.Struct({
+  /** The places looked in that there are, as the person knows them. */
+  lookedIn: Schema.Array(Schema.String),
+  repositories: Schema.Array(HomeRepository),
+  /** Where a clone or a new repository goes: the folder most of those found are in, else the usual one, made when first used. */
+  place: Schema.Struct({ grant: Schema.String, where: Schema.String }),
+})
+export type HomeFolders = typeof HomeFolders.Type
+
+/** What a home's computer is, as it says when asked: for the window to say what it's on. */
+export const Machine = Schema.Struct({
+  /** As the system names itself: Ubuntu 24.04.1 LTS, macOS 26.1. */
+  system: Schema.String,
+  cores: Schema.Int,
+  /** In bytes. */
+  memory: Schema.Number,
+  /** The room on the disk projects go on, in bytes; null where it can't be read. */
+  disk: Schema.NullOr(Schema.Struct({ free: Schema.Number, size: Schema.Number })),
+  /** git's version (2.43.0), or null where it isn't installed. */
+  git: Schema.NullOr(Schema.String),
+})
+export type Machine = typeof Machine.Type
+
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
+
+/** Each kind of request in words, as an always answer keeps it: "Always allow ___", in the window and on the home's page. */
+export const ruleKindWords = {
+  'default-branch': 'pushes to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushes of every branch, tags or a pattern of branches',
+  'delete-branch': 'deleting branches that aren’t the task’s',
+  deploy: 'deploying and publishing',
+  outside: 'writing outside the task’s worktree',
+  speak: 'posting for you',
+} as const satisfies Record<RuleKind, string>
 
 /**
  * A command the person named: asked about, refused, or let through without
@@ -2168,6 +2221,15 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
  * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
@@ -2184,8 +2246,13 @@ export const NoticeItem = Schema.Struct({
     description: Schema.NullOr(Schema.String),
     /** What the line is built on, kept apart from it: a host's raw answer, pretty-printed, drawn folded under "Details". */
     details: Schema.optional(Schema.String),
-    /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
-    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+    /**
+     * Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. `at`, where
+     * given, is where the label starts in the title, for a label that also stands earlier in it ("test" in "test / linux").
+     */
+    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String, at: Schema.optional(Schema.Number) }))),
+    /** The failed checks the line names, such as the merge queue's: the end of each one's log, or why it couldn't be read, folded under it. */
+    logs: Schema.optional(Schema.Array(CheckLogShown)),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
@@ -2414,15 +2481,6 @@ export const CanvasItem = Schema.Struct({
     open: Schema.Boolean,
   }),
 })
-
-/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
-export const CheckLogShown = Schema.Struct({
-  name: Schema.String,
-  url: Schema.NullOr(Schema.String),
-  log: Schema.NullOr(Schema.String),
-  missing: Schema.NullOr(Schema.String),
-})
-export type CheckLogShown = typeof CheckLogShown.Type
 
 /**
  * Something heard from outside, written by someone else: a comment or a
@@ -3864,6 +3922,12 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /**
+   * A switch or a fresh session is taking the thread over, until it holds it, even after the one going out has let it go
+   * (`held` false then): a model or effort picked now is the incoming session's, sent as on a held thread, never as a start.
+   * `nextLead` is what that session leads as then.
+   */
+  handover: Schema.optional(Schema.Boolean),
   /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
@@ -5153,15 +5217,30 @@ const socketCalls = new Set<string>([
   'SwitchAgent',
   'SetModel',
   'SetEffort',
+  'SetAgent',
   'GetRepositoryScripts',
   'ReadLaunchPreview',
   'OpenLaunchPreviewSocket',
+  'ReadLaunchPreviewSocket',
   'WriteLaunchPreviewSocket',
   'CloseLaunchPreviewSocket',
   'PrepareWorkerSnapshot',
   'ReadWorkerSnapshotChunk',
   'ReleaseWorkerSnapshot',
   'ReadWorkerFile',
+  // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
+  // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
+  'FindHomeFolders',
+  'GetMachine',
+  'ListConnections',
+  'ListHostRepositories',
+  'GetRepositories',
+  'ReadFolder',
+  'PlaceRepository',
+  'MakeRepository',
+  'PrepareFolder',
+  'CloneRepository',
+  'OpenProject',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -5208,6 +5287,10 @@ const ProjectApi = RpcGroup.make(
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
+  /** Where on the home a new project's code can come from and go: what it finds where people keep code, and where a new one goes. */
+  call('FindHomeFolders', {}, HomeFolders),
+  /** What the home's computer is: its system, cores, memory, room and git. */
+  call('GetMachine', {}, Machine),
   /**
    * Where a new repository named after `name` would go, in the folder the
    * person chose by `grant`, read without making anything: refused where a
@@ -5683,11 +5766,17 @@ const ProjectApi = RpcGroup.make(
   /**
    * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
    * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
-   * said in the thread, and the lead stays as it was.
+   * said in the thread, and the lead stays as it was. `agentId` is the agent whose model it is, as the picker showed it: the
+   * one on the thread where left out; while another takes the thread over, the one going out takes it back.
    */
-  command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
+  command('SetModel', { threadId: Schema.String, agentId: Schema.optional(Schema.String), model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
-  command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
+  command('SetEffort', { threadId: Schema.String, agentId: Schema.optional(Schema.String), effort: Schema.String }, Schema.Void),
+  /**
+   * The thread's agent picked with nothing of its model or effort chosen, as `SetModel` is: the one on the thread picked back
+   * over another waiting to take over keeps the thread, as it is; the one going out, picked while another takes over, takes it back.
+   */
+  command('SetAgent', { threadId: Schema.String, agentId: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */
@@ -6130,8 +6219,8 @@ const WorkApi = RpcGroup.make(
     },
     Schema.Void,
   ),
-  /** The connections on this Mac, and the code hosts and trackers a person can connect. */
-  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
+  /** The connections on the home, and the code hosts and trackers a person can connect. */
+  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }).annotate(SocketAllowed, socketCanCall('ListConnections')),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
   command(
     'StartSignIn',
@@ -6620,6 +6709,11 @@ export const WorkerSnapshotApi = RpcGroup.make(
 
 export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
 export type Api = typeof Api
+
+/** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
+export const SOCKET_CALLS: ReadonlyArray<string> = [...Api.requests.values()]
+  .filter((rpc) => Context.get(rpc.annotations, SocketAllowed))
+  .map((rpc) => rpc._tag)
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
 

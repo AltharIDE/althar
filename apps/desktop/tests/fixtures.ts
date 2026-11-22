@@ -40,7 +40,10 @@ import type {
   ThreadSnapshot,
   Unfurl,
   WatchEvent,
+  ConnectionInfo,
+  HomeFolders,
 } from '@althar/contracts'
+import { SOCKET_CALLS } from '@althar/contracts'
 import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
@@ -1103,6 +1106,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    findHomeFolders: vi.fn(async () => homeFolders),
+    getMachine: vi.fn(async () => ({
+      system: 'Ubuntu 24.04.1 LTS',
+      cores: 8,
+      memory: 32 * 1024 ** 3,
+      disk: { free: 212 * 1000 ** 3, size: 512 * 1000 ** 3 },
+      git: '2.43.0',
+    })),
     bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -1214,6 +1225,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
     setEffort: vi.fn(async () => {}),
+    setAgent: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
@@ -1632,7 +1644,7 @@ export const streamed = (
 
 /**
  * A window on a Linux home of its own, reached over SSH (studio): main's word for the window's home, and the
- * connection the window has to it, whose role can't take workers out.
+ * connection the window has to it, with the calls a home says it may make today, which don't take workers out.
  */
 export const onLinuxHome = (name = 'studio') => {
   const home = { id: `remote_${'5'.repeat(32)}`, name, homeId: `home_${'6'.repeat(32)}`, ssh: { target: name } }
@@ -1647,6 +1659,7 @@ export const onLinuxHome = (name = 'studio') => {
     connect: vi.fn(async () => undefined),
     save: vi.fn(async () => undefined),
     open: vi.fn(async () => undefined),
+    openNew: vi.fn(async () => undefined),
     rename: vi.fn(async () => undefined),
     change: vi.fn(async () => undefined),
     forget: vi.fn(async () => undefined),
@@ -1658,6 +1671,7 @@ export const onLinuxHome = (name = 'studio') => {
     onOverview: vi.fn(off),
     onOpen: vi.fn(off),
     onProject: vi.fn(off),
+    onNewProject: vi.fn(off),
   }
   return {
     homes,
@@ -1667,6 +1681,34 @@ export const onLinuxHome = (name = 'studio') => {
       apiVersion: 1,
       appVersion: 'test',
       position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+      calls: SOCKET_CALLS,
     },
   }
+}
+
+/**
+ * A window's connection to a home on another computer, with the calls the
+ * home says it may make: today's, by default; none said, as a home from
+ * before it said, where `calls` is null.
+ */
+export const remoteConnection = (calls: ReadonlyArray<string> | null = SOCKET_CALLS): ConnectionInfo => {
+  const homeId = `home_${'1'.repeat(32)}`
+  return {
+    identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
+    hostDeviceId: `dev_${'3'.repeat(32)}`,
+    apiVersion: 1,
+    appVersion: 'fixture',
+    position: { homeId, cursor: 0, checkpoint: null },
+    ...(calls === null ? {} : { calls }),
+  }
+}
+
+/** What a home on another computer finds where its person keeps code, and where new code goes there. */
+export const homeFolders: HomeFolders = {
+  lookedIn: ['~/code'],
+  repositories: [
+    { grant: 'grant_site', name: 'site', where: '~/code/site', branch: 'main', worked: 1_700_000_000_000 },
+    { grant: 'grant_api', name: 'api', where: '~/code/api', branch: 'main', worked: 1_690_000_000_000 },
+  ],
+  place: { grant: 'grant_code', where: '~/code' },
 }

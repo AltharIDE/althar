@@ -31,6 +31,9 @@
 .thread > [data-rhythm='line'] + [data-rhythm='line'] {
   margin-top: 4px;
 }
+.thread > * + [data-rhythm='live'] {
+  margin-top: 16px;
+}
 
 /*
  * While the column a thread is in is dragged wider or narrower (its

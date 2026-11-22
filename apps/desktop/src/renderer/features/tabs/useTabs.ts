@@ -206,8 +206,9 @@ export const useTabs = (): TabsModel => {
     others: (projects ?? []).filter((project) => !open.includes(project.id)).map((project) => tabOf(project, yoursInProject(project.id))),
     current: onNew ? (draft?.id ?? null) : current,
     yours: (projects ?? []).reduce((sum, project) => sum + yoursInProject(project.id), 0),
-    // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs.
-    none: (projects !== null && projects.length === 0) || welcoming,
+    // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs. A
+    // new project under way on a home with none, as its welcome opens one, has its tab, and Home goes back to the welcome.
+    none: (projects !== null && projects.length === 0 && !onNew) || welcoming,
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
       if (id === null && kept?.home === false) store.change((was) => ({ ...was, home: true }))

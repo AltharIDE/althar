@@ -101,6 +101,26 @@ describe('its list', () => {
     expect(screen.queryByRole('button', { name: 'Stop docs' })).toBeNull()
   })
 
+  it('says a run on a worker opens its preview, with the worker as where it runs', () => {
+    const on = handlers()
+    render(
+      <RunButton
+        defaultOpen
+        targets={[
+          target('web', { run: { state: 'running', url: 'preview', on: 'Linux worker 3f9a2c', since: '3m' } }),
+          target('api', { run: { state: 'running', on: 'Linux worker 3f9a2c', since: '1m' } }),
+        ]}
+        {...on}
+      />,
+    )
+    const link = screen.getByTitle('Open preview')
+    expect(link.textContent).toBe('preview')
+    fireEvent.click(link)
+    expect(on.onOpen).toHaveBeenCalledWith('web')
+    expect(screen.getByText('on Linux worker 3f9a2c')).toBeInTheDocument()
+    expect(screen.getByText('Running on Linux worker 3f9a2c')).toBeInTheDocument()
+  })
+
   it('opens a long list on a field: it finds, and Enter runs the one pointed at', async () => {
     const on = handlers()
     const many = Array.from({ length: 12 }, (_, n) => target(`app${n}`))

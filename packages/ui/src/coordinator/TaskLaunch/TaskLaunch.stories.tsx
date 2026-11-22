@@ -12,8 +12,7 @@ import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { BlockerStands, TaskEnd, WorksIn } from '../../foundations/vocabulary'
-import { Select } from '../../primitives/Select/Select'
-import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
+import { TaskLaunch, type LaunchPick, type LaunchPlace, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
 function usePicker(
@@ -160,49 +159,76 @@ export const Held: Story = {
   },
 }
 
-export const HeldWithWorker: Story = {
+const PLACES: readonly LaunchPlace[] = [
+  { value: 'home', label: 'This Mac', kind: 'home' },
+  { value: 'auto', label: 'Any free worker', kind: 'any' },
+  { value: 'wrk_3f9a2c', label: 'Linux worker 3f9a2c', kind: 'worker', hint: '12 GB free' },
+  { value: 'wrk_b71e04', label: 'Linux worker b71e04', kind: 'worker', hint: 'At work', disabled: true },
+  { value: 'wrk_c0d2f8', label: 'Linux worker c0d2f8', kind: 'worker', hint: 'No Claude Code', disabled: true },
+]
+
+/** Held, where the home has workers: where it runs, beside where it works, a menu of the home and its workers. */
+export const HeldWithWorkers: Story = {
   render: function Render() {
-    const [worker, choose] = useState('home')
+    const [place, choose] = useState('home')
     return (
       <Launch
         held
         estimate={undefined}
-        footNote={
-          <>
-            <Select
-              label="Run on"
-              variant="filled"
-              value={worker}
-              options={[
-                { value: 'home', label: 'This home' },
-                { value: 'auto', label: 'Best available worker' },
-                { value: 'worker', label: 'Linux worker aaaaaa' },
-              ]}
-              onChange={choose}
-            />
-            {worker !== 'home' && (
-              <>
-                {' '}
-                <span role="status">Setup and lead run on the worker. Review runs on this home.</span>
-              </>
-            )}
-          </>
-        }
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: PLACES, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
       />
     )
   },
 }
 
-export const HeldWithAutomaticPlacement: Story = {
-  ...HeldWithWorker,
+/** Its menu open: each worker with how it stands at its row's end, one that can't take it greyed, and what a worker runs at its foot. */
+export const WorkersOpen: Story = {
+  ...HeldWithWorkers,
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Run on' }))
-    await userEvent.click(await within(document.body).findByRole('option', { name: 'Best available worker' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await expect(await within(document.body).findByRole('menuitemradio', { name: 'Linux worker b71e04' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
   },
 }
 
-export const HeldOnHome: Story = {
-  render: () => <Launch held estimate={undefined} footNote={<span role="status">A worker needs a task with one repository.</span>} />,
+/** Set to run on any free worker. */
+export const OnAnyFreeWorker: Story = {
+  ...HeldWithWorkers,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Any free worker' }))
+    await expect(within(canvasElement).getByRole('button', { name: 'Runs on: Any free worker' })).toBeInTheDocument()
+  },
+}
+
+/** The worker it was set to run on took another task: Start waits, and the line under the head goes back to the home. */
+export const WorkerTaken: Story = {
+  render: function Render() {
+    const [place, choose] = useState('wrk_3f9a2c')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{
+          value: place,
+          places: PLACES,
+          onChange: choose,
+          ...(place === 'home' ? {} : { problem: 'Linux worker 3f9a2c is at work on another task.' }),
+        }}
+        startDisabled={place !== 'home'}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Start' })).toBeDisabled()
+    await userEvent.click(c.getByRole('button', { name: 'Use This Mac' }))
+    await expect(c.getByRole('button', { name: 'Start' })).toBeEnabled()
+  },
 }
 
 const started = fn()
