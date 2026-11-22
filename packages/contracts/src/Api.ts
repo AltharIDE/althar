@@ -1,4 +1,4 @@
-import { PairingInvitation, PairingTokenHash } from './pairing'
+import { PairingCodeMade, PairingInvitation, PairingStatus, PairingTokenHash, PhoneAccess } from './pairing'
 import { GoalControl, ThreadGoal } from './goals'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
@@ -5054,6 +5054,10 @@ export const AttentionApi = RpcGroup.make(
 
 const socketCalls = new Set<string>([
   'IssueDevicePairing',
+  'CreatePairingCode',
+  'GetPairingStatus',
+  'GetPhoneAccess',
+  'SetPhoneAccess',
   'ListClientDevices',
   'RevokeConnectionDevice',
   'GetConnectionInfo',
@@ -5136,6 +5140,10 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
   command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  command('CreatePairingCode', {}, PairingCodeMade),
+  call('GetPairingStatus', { tokenHash: PairingTokenHash }, PairingStatus),
+  call('GetPhoneAccess', {}, PhoneAccess),
+  command('SetPhoneAccess', { on: Schema.Boolean }, PhoneAccess),
   command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(

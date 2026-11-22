@@ -1,13 +1,19 @@
-import { createHash, webcrypto } from 'node:crypto'
+import { createHash, randomBytes, webcrypto } from 'node:crypto'
 
 import {
+  API_VERSION,
   ApiError,
+  pairingLinkOf,
+  type PairingCodeMade,
+  type PairingStatus,
+  type PhoneAccess,
   PairingRegistration,
   PairingTokenHash,
   pairingRegistrationMessage,
   type PairingInvitation,
   type RegisteredClient,
 } from '@althar/contracts'
+import { encodePairingCode } from '@althar/transport-node'
 import { Clock, Context, Effect, Layer, Schema, Semaphore } from 'effect'
 
 import { ClientIdentities } from './ClientIdentities'
@@ -24,7 +30,26 @@ const refused = () =>
 interface Pending {
   readonly expiresAt: number
   publicKey?: string
+  /** The device it paired, once it did. */
+  deviceId?: string
 }
+
+/** Where phones reach the home, once its HTTPS listener is up: what a pairing code carries besides its token. */
+export interface PhoneReach {
+  readonly origin: string
+  readonly tlsKeyPin: string
+  /** The leaf certificate, DER as base64url. */
+  readonly tlsCertificate: string
+}
+
+/** Turns This Mac's listener for phones on or off, where the home can (the desktop's own): where it answers then, or null. */
+export type PhoneSwitch = (on: boolean) => Effect.Effect<PhoneReach | null, ApiError>
+
+const unreachable = () =>
+  new ApiError({
+    reason: 'PhonesCantReach',
+    message: 'Phones can’t reach this home yet. Let phones in, or configure its HTTPS access on the host, then make a code.',
+  })
 
 /** Invitations deliberately expire on restart; registered device identities persist in the home. */
 export class DevicePairings extends Context.Service<
@@ -33,6 +58,17 @@ export class DevicePairings extends Context.Service<
     issue(tokenHash: string): Effect.Effect<PairingInvitation, ApiError>
     complete(input: PairingRegistration): Effect.Effect<RegisteredClient, ApiError>
     revokeConnection(deviceId: string): Effect.Effect<void, ApiError>
+    /** A whole pairing code for a phone, its token made here: only its hash is kept. */
+    create(): Effect.Effect<PairingCodeMade, ApiError>
+    /** Whether a code made here is still waiting, ran out, or paired a device (and which). */
+    status(tokenHash: string): Effect.Effect<PairingStatus, ApiError>
+    /** Where phones reach the home, and whether it can be switched from a window. */
+    access(): Effect.Effect<PhoneAccess>
+    setAccess(on: boolean): Effect.Effect<PhoneAccess, ApiError>
+    /** The HTTPS listener says where it answers as it starts, and null as it stops. */
+    reachable(reach: PhoneReach | null): Effect.Effect<void>
+    /** The desktop's own home lets a window turn its listener on and off. */
+    switchable(change: PhoneSwitch, on: boolean): Effect.Effect<void>
   }
 >()('@althar/runtime/DevicePairings') {
   static readonly layer = Layer.effect(
@@ -42,6 +78,15 @@ export class DevicePairings extends Context.Service<
       const identities = yield* ClientIdentities
       const lock = yield* Semaphore.make(1)
       const invitations = new Map<string, Pending>()
+      let reach: PhoneReach | null = null
+      let change: PhoneSwitch | null = null
+      let on = false
+      const access = () =>
+        Effect.succeed<PhoneAccess>({
+          origin: reach?.origin ?? null,
+          switchable: change !== null,
+          on: change === null ? reach !== null : on,
+        })
       const issue = (given: string) =>
         Effect.gen(function* () {
           const hash = yield* Schema.decodeUnknownEffect(PairingTokenHash)(given).pipe(Effect.mapError(refused))
@@ -94,7 +139,42 @@ export class DevicePairings extends Context.Service<
           // Claim before the first durable write. The same key may retry a lost reply;
           // no second key can consume the invitation, including after an interrupted write.
           pending.publicKey = input.publicKey
-          return yield* identities.register({ name: input.name, publicKey: input.publicKey, role: 'socket' })
+          const device = yield* identities.register({ name: input.name, publicKey: input.publicKey, role: 'socket' })
+          pending.deviceId = device.deviceId
+          return device
+        }).pipe((effect) => lock.withPermit(effect))
+      const create = () =>
+        Effect.gen(function* () {
+          const at = reach
+          if (at === null) return yield* unreachable()
+          const token = randomBytes(32).toString('base64url')
+          const tokenHash = createHash('sha256').update(token).digest('hex')
+          const invitation = yield* issue(tokenHash)
+          const code = encodePairingCode({ ...invitation, protocol: 1, apiVersion: API_VERSION, ...at, token })
+          return { code, link: pairingLinkOf(code), tokenHash, expiresAt: invitation.expiresAt }
+        })
+      const status = (given: string) =>
+        Effect.gen(function* () {
+          const hash = yield* Schema.decodeUnknownEffect(PairingTokenHash)(given).pipe(Effect.mapError(refused))
+          const pending = invitations.get(hash)
+          if (pending?.deviceId !== undefined) {
+            const device = yield* identities.lookup(pending.deviceId)
+            if (device !== undefined && device.revokedAt === null) return { state: 'paired' as const, device }
+          }
+          if (pending === undefined || pending.expiresAt <= (yield* Clock.currentTimeMillis)) return { state: 'expired' as const }
+          return { state: 'waiting' as const, expiresAt: pending.expiresAt }
+        })
+      const setAccess = (wanted: boolean) =>
+        Effect.gen(function* () {
+          if (change === null)
+            return yield* new ApiError({
+              reason: 'Forbidden',
+              message: 'This home’s HTTPS access is set on its host: run althar-host configure-network there.',
+            })
+          reach = yield* change(wanted)
+          on = wanted
+          if (!wanted) invitations.clear()
+          return yield* access()
         }).pipe((effect) => lock.withPermit(effect))
       const revokeConnection = (deviceId: string) =>
         Effect.gen(function* () {
@@ -103,7 +183,24 @@ export class DevicePairings extends Context.Service<
             return yield* new ApiError({ reason: 'ClientNotFound', message: 'Choose a connection device registered on this home.' })
           yield* identities.revoke(deviceId)
         })
-      return DevicePairings.of({ issue, complete, revokeConnection })
+      return DevicePairings.of({
+        issue,
+        complete,
+        revokeConnection,
+        create,
+        status,
+        access,
+        setAccess,
+        reachable: (given) =>
+          Effect.sync(() => {
+            reach = given
+          }),
+        switchable: (given, wasOn) =>
+          Effect.sync(() => {
+            change = given
+            on = wasOn
+          }),
+      })
     }),
   )
 }
