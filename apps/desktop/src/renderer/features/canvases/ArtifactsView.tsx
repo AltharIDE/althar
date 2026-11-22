@@ -42,7 +42,13 @@ export const rowOf = (canvas: CanvasSummary, now = new Date()): ArtifactRow => (
 })
 
 /* How the view was last left, cards or the table and what Filter kept: coming back, it shows as it was. */
-let kept: { layout: ArtifactsLayout; filter: ArtifactsFilter } = { layout: 'cards', filter: { saved: false, commented: false } }
+const LEFT: { layout: ArtifactsLayout; filter: ArtifactsFilter } = { layout: 'cards', filter: { saved: false, commented: false } }
+let kept = LEFT
+
+/** Forgets how the view was last left, as a window opened afresh would: for tests. */
+export const forgetArtifactsView = () => {
+  kept = LEFT
+}
 
 /** An artifact its own chat is drawing the first version of, as its card and row show it. */
 export const drawingRowOf = (one: ArtifactDrawing, now = new Date()): ArtifactRow => ({

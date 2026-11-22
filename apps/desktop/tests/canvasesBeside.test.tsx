@@ -21,7 +21,7 @@ import { useTask } from '../src/renderer/features/task/useTask'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { keys } from '../src/renderer/data/reads'
 import { arrived, useCanvasArrivals } from '../src/renderer/features/canvases/arrivals'
-import { ArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
+import { ArtifactsView, forgetArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
 import { useDraftCanvasVersions } from '../src/renderer/features/canvases/draftVersions'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
@@ -46,7 +46,10 @@ const THREAD = `thr_${'a1'.repeat(16)}`
 const OWNER = `task_${'e5'.repeat(16)}`
 const DRAFT = `task:${THREAD}`
 
-afterEach(forgetComments)
+afterEach(() => {
+  forgetComments()
+  forgetArtifactsView()
+})
 
 const version = (number: number, over: Partial<CanvasVersionFacts> = {}): CanvasVersionFacts => ({
   number,
