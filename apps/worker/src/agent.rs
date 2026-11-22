@@ -10,9 +10,10 @@ use std::{
     time::Duration,
 };
 
+use prost::Message;
 use rustix::process::geteuid;
 use tokio::{
-    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex},
     net::TcpListener,
     net::unix::pipe::Receiver,
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -25,6 +26,10 @@ use tonic::{Streaming, transport::Channel};
 
 use crate::{
     PROTOCOL_VERSION,
+    agent_managed::ManagedCommands,
+    agent_setup::{
+        DESCRIPTOR_BYTES, OUTPUT_BYTES, WorkspaceSetup, run_workspace_setup, worker_environment,
+    },
     agent_tools::forward_tools,
     agent_workspace::{WorkspaceTransfer, workspace_patch},
     diagnostic::{DiagnosticJournal, read_credentials},
@@ -35,25 +40,25 @@ use crate::{
     wire::{
         AgentHomeFrame, AgentRunBytes, AgentRunExit, AgentRunOutcome, AgentRunReady, AgentRunStart,
         AgentSnapshotRequest, AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame,
-        AgentWorkerHeartbeat, AgentWorkerHello, agent_home_frame::Payload as HomeMessage,
-        agent_worker_frame::Payload as WorkerMessage,
+        AgentWorkerHeartbeat, AgentWorkerHello, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
+        agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
-const CHUNK_BYTES: usize = 2048;
+pub(crate) const CHUNK_BYTES: usize = 2048;
 const MAX_CAPABILITIES: usize = 32;
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-const STOP_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(4);
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(1);
 const MAX_LEASE: Duration = Duration::from_secs(8);
 const READY_MARKER: u8 = 1;
-const LOST_LEASE: u8 = 243;
-const COULD_NOT_START: u8 = 244;
+pub(crate) const LOST_LEASE: u8 = 243;
+pub(crate) const COULD_NOT_START: u8 = 244;
 const UNIT_LEASE: u8 = 0;
 const UNIT_INPUT: u8 = 1;
 
-type Failure = Box<dyn std::error::Error + Send + Sync>;
-type Sender = mpsc::Sender<AgentWorkerFrame>;
+pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type Sender = mpsc::Sender<AgentWorkerFrame>;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -134,6 +139,9 @@ impl AgentConfig {
                 capability: AgentWorkerCapability {
                     project_id: project_id.into(),
                     provider_id: provider_id.into(),
+                    workspace_setup: true,
+                    managed_commands: true,
+                    managed_preview: true,
                 },
                 executable,
                 args: fields.map(str::to_owned).collect(),
@@ -173,7 +181,7 @@ impl AgentConfig {
 
 async fn control_input(
     permit: &mut Receiver,
-    stdin: &mut ChildStdin,
+    stdin: &mut (impl AsyncWrite + Unpin),
     deadline: watch::Sender<u64>,
 ) -> io::Result<()> {
     let mut buffer = [0; CHUNK_BYTES];
@@ -218,6 +226,26 @@ async fn lease_expiry(mut deadline: watch::Receiver<u64>) {
 /// systemd supervises this guardian and the entire agent process tree. The
 /// agent receives only its ACP input and cannot inherit the lease pipe.
 pub async fn run_agent_unit(executable: &Path, args: &[OsString]) -> io::Result<ExitCode> {
+    run_guardian(executable, args, None).await
+}
+
+pub async fn run_agent_unit_with_setup(
+    executable: &Path,
+    args: &[OsString],
+    folder: &Path,
+    commands: &[OsString],
+) -> io::Result<ExitCode> {
+    let root = std::env::current_dir()?.canonicalize()?;
+    let relative = folder.strip_prefix(&root).map_err(io::Error::other)?;
+    let setup = WorkspaceSetup::new(&root, relative, commands.to_vec())?;
+    run_guardian(executable, args, Some(setup)).await
+}
+
+async fn run_guardian(
+    executable: &Path,
+    args: &[OsString],
+    setup: Option<WorkspaceSetup>,
+) -> io::Result<ExitCode> {
     let mut permit = Receiver::from_owned_fd(std::io::stdin().as_fd().try_clone_to_owned()?)?;
     {
         use std::io::Write as _;
@@ -229,25 +257,37 @@ pub async fn run_agent_unit(executable: &Path, args: &[OsString]) -> io::Result<
     if monotonic_ms() >= until {
         return Ok(ExitCode::from(LOST_LEASE));
     }
+    let (mut from_home, mut to_agent) = duplex(CHUNK_BYTES * 4);
+    let (deadline, until) = watch::channel(until);
+    tokio::select! {
+        biased;
+        _ = lease_expiry(until) => Ok(ExitCode::from(LOST_LEASE)),
+        _ = control_input(&mut permit, &mut from_home, deadline) => Ok(ExitCode::from(LOST_LEASE)),
+        exit = prepared_provider(executable, args, setup, &mut to_agent) => exit,
+    }
+}
+
+async fn prepared_provider(
+    executable: &Path,
+    args: &[OsString],
+    setup: Option<WorkspaceSetup>,
+    input: &mut (impl AsyncRead + Unpin),
+) -> io::Result<ExitCode> {
+    if let Some(setup) = setup {
+        use std::io::Write as _;
+        let result = run_workspace_setup(&setup).await.encode_to_vec();
+        let size = u16::try_from(result.len()).map_err(io::Error::other)?;
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(&size.to_le_bytes())?;
+        stdout.write_all(&result)?;
+        stdout.flush()?;
+    }
     let mut command = Command::new(executable);
-    command
+    worker_environment(&mut command)
         .args(args)
-        .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .kill_on_drop(true);
-    for name in [
-        "HOME",
-        "LANG",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_CACHE_HOME",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -259,19 +299,23 @@ pub async fn run_agent_unit(executable: &Path, args: &[OsString]) -> io::Result<
         .stdin
         .take()
         .ok_or_else(|| invalid("No agent input pipe"))?;
-    let (deadline, until) = watch::channel(until);
+    let copy = async {
+        tokio::io::copy(input, &mut stdin).await?;
+        stdin.shutdown().await
+    };
     tokio::select! {
-        biased;
-        _ = lease_expiry(until) => Ok(ExitCode::from(LOST_LEASE)),
         exit = child.wait() => {
             let code = exit?.code().filter(|code| *code != i32::from(LOST_LEASE) && *code != i32::from(COULD_NOT_START));
             Ok(ExitCode::from(code.and_then(|code| u8::try_from(code).ok()).unwrap_or(1)))
         },
-        _ = control_input(&mut permit, &mut stdin, deadline) => Ok(ExitCode::from(LOST_LEASE)),
+        copied = copy => {
+            copied?;
+            Ok(ExitCode::from(LOST_LEASE))
+        },
     }
 }
 
-async fn send(sender: &Sender, payload: WorkerMessage) -> io::Result<()> {
+pub(crate) async fn send(sender: &Sender, payload: WorkerMessage) -> io::Result<()> {
     sender
         .send(AgentWorkerFrame {
             payload: Some(payload),
@@ -341,12 +385,12 @@ impl Slot {
     }
 }
 
-struct AgentUnit {
-    name: String,
-    child: Child,
-    input: ChildStdin,
-    output: ChildStdout,
-    group: PathBuf,
+pub(crate) struct AgentUnit {
+    pub(crate) name: String,
+    pub(crate) child: Child,
+    pub(crate) input: ChildStdin,
+    pub(crate) output: ChildStdout,
+    pub(crate) group: PathBuf,
 }
 
 impl AgentUnit {
@@ -355,32 +399,64 @@ impl AgentUnit {
         provider: &Provider,
         cwd: &Path,
         journal: &DiagnosticJournal,
+        setup: Option<&WorkspaceSetup>,
     ) -> Result<Self, Failure> {
-        let name = unit_name(&run.run_id);
-        let mut child = Command::new("/usr/bin/systemd-run")
-            .args([
-                "--user",
-                "--quiet",
-                "--wait",
-                "--pipe",
-                "--collect",
-                "--expand-environment=no",
-                "--unit",
-                &name,
-                "--property=Type=exec",
-                "--property=KillMode=control-group",
-                "--property=TimeoutStopSec=2s",
-                "--property=Delegate=no",
-                "--property=NoNewPrivileges=yes",
-                "--property=UMask=0077",
-            ])
+        let mut args = Vec::new();
+        if let Some(setup) = setup {
+            args.push("--agent-unit-with-setup".into());
+            args.push(setup.folder.clone().into_os_string());
+            args.push(setup.commands.len().to_string().into());
+            args.extend(setup.commands.iter().cloned());
+        } else {
+            args.push("--agent-unit".into());
+        }
+        args.push(provider.executable.clone().into_os_string());
+        args.extend(provider.args.iter().map(OsString::from));
+        let unit = Self::open(unit_name(&run.run_id), cwd, &args, None).await?;
+        let recorded = unit
+            .group
+            .strip_prefix("/sys/fs/cgroup")
+            .map_err(io::Error::other)?;
+        let mut group = vec![b'/'];
+        group.extend(recorded.as_os_str().as_encoded_bytes());
+        journal.record_agent_group(&run.run_id, &group)?;
+        Ok(unit)
+    }
+
+    pub(crate) async fn open(
+        name: String,
+        cwd: &Path,
+        args: &[OsString],
+        parent: Option<&str>,
+    ) -> Result<Self, Failure> {
+        let mut command = Command::new("/usr/bin/systemd-run");
+        command.args([
+            "--user",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--expand-environment=no",
+            "--unit",
+            &name,
+            "--property=Type=exec",
+            "--property=KillMode=control-group",
+            "--property=TimeoutStopSec=2s",
+            "--property=Delegate=no",
+            "--property=NoNewPrivileges=yes",
+            "--property=UMask=0077",
+        ]);
+        if let Some(parent) = parent {
+            command.arg(format!("--property=Requisite={parent}"));
+            command.arg(format!("--property=PartOf={parent}"));
+            command.arg(format!("--property=After={parent}"));
+        }
+        let mut child = command
             .arg("--working-directory")
             .arg(cwd)
             .arg("--")
             .arg(std::env::current_exe()?)
-            .arg("--agent-unit")
-            .arg(&provider.executable)
-            .args(&provider.args)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .kill_on_drop(true)
@@ -415,7 +491,6 @@ impl AgentUnit {
         if !result.status.success() || !group.join("cgroup.events").is_file() {
             return Err(invalid("The agent worker needs systemd and cgroup v2").into());
         }
-        journal.record_agent_group(&run.run_id, &result.stdout)?;
         Ok(Self {
             name,
             child,
@@ -430,7 +505,7 @@ fn unit_name(run_id: &str) -> String {
     format!("althar-agent-{run_id}.service")
 }
 
-async fn stop_group(name: &str, group: &Path) -> bool {
+pub(crate) async fn stop_group(name: &str, group: &Path) -> bool {
     if !cgroup_empty(group) {
         let _ = timeout(
             STOP_TIMEOUT,
@@ -446,7 +521,7 @@ async fn stop_group(name: &str, group: &Path) -> bool {
     cgroup_empty(group)
 }
 
-fn local_deadline(until: Instant) -> u64 {
+pub(crate) fn local_deadline(until: Instant) -> u64 {
     monotonic_ms() + until.saturating_duration_since(Instant::now()).as_millis() as u64
 }
 
@@ -455,6 +530,59 @@ async fn unit_write(input: &mut (impl AsyncWrite + Unpin), data: &[u8]) -> io::R
     input.write_u8(UNIT_INPUT).await?;
     input.write_u16_le(size).await?;
     input.write_all(data).await
+}
+
+async fn renew_unit(
+    slot: &mut Slot,
+    input: &mut ChildStdin,
+    heartbeat: AgentWorkerHeartbeat,
+) -> Result<(), Failure> {
+    slot.acknowledge(heartbeat)?;
+    update_unit_lease(input, slot.until).await
+}
+
+pub(crate) async fn update_unit_lease(
+    input: &mut ChildStdin,
+    until: Instant,
+) -> Result<(), Failure> {
+    timeout_at(until, async {
+        input.write_u8(UNIT_LEASE).await?;
+        input.write_u64_le(local_deadline(until)).await
+    })
+    .await??;
+    Ok(())
+}
+
+async fn setup_result(output: &mut ChildStdout) -> Result<AgentWorkspaceSetupResult, Failure> {
+    let size = usize::from(output.read_u16_le().await?);
+    if size > OUTPUT_BYTES + 32 {
+        return Err(invalid("The setup output exceeded its limit").into());
+    }
+    let mut result = vec![0; size];
+    output.read_exact(&mut result).await?;
+    Ok(AgentWorkspaceSetupResult::decode(result.as_slice())?)
+}
+
+async fn wait_for_setup(
+    slot: &mut Slot,
+    unit: &mut AgentUnit,
+    run_id: &str,
+) -> Result<Option<AgentWorkspaceSetupResult>, Failure> {
+    let output = setup_result(&mut unit.output);
+    tokio::pin!(output);
+    loop {
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(slot.until) => return Err(invalid("The worker lost its lease during setup").into()),
+            _ = slot.send_heartbeat.tick() => slot.heartbeat().await?,
+            message = slot.incoming.message() => match message?.and_then(|frame| frame.payload) {
+                Some(HomeMessage::Heartbeat(heartbeat)) => renew_unit(slot, &mut unit.input, heartbeat).await?,
+                Some(HomeMessage::Stop(stop)) if stop.run_id == run_id => return Ok(None),
+                _ => return Err(invalid("The home sent an unexpected message during setup").into()),
+            },
+            result = &mut output => return Ok(Some(result?)),
+        }
+    }
 }
 
 async fn serve_agent(
@@ -472,6 +600,14 @@ async fn serve_agent(
         unit.input.write_u64_le(local_deadline(slot.until)),
     )
     .await??;
+    let setup = if run.setup.is_some() {
+        match wait_for_setup(slot, unit, &run.run_id).await? {
+            Some(result) => Some(result),
+            None => return Ok((AgentRunOutcome::Stopped, None)),
+        }
+    } else {
+        None
+    };
     timeout_at(
         slot.until,
         send(
@@ -480,12 +616,20 @@ async fn serve_agent(
                 run_id: run.run_id.clone(),
                 workspace_path: workspace_path.into(),
                 tools_port: u32::from(tools_port),
+                setup,
             }),
         ),
     )
     .await??;
     let mut buffer = [0; CHUNK_BYTES];
     let mut checkpoints = JoinSet::new();
+    let mut managed = ManagedCommands::new(
+        &run.run_id,
+        cwd,
+        &unit.name,
+        slot.outgoing.clone(),
+        slot.until,
+    );
     loop {
         tokio::select! {
             biased;
@@ -496,13 +640,11 @@ async fn serve_agent(
                     result??;
                 }
             }
+            result = managed.finished(), if managed.has_commands() => result?,
             message = slot.incoming.message() => match message?.and_then(|frame| frame.payload) {
                 Some(HomeMessage::Heartbeat(heartbeat)) => {
-                    slot.acknowledge(heartbeat)?;
-                    timeout_at(slot.until, async {
-                        unit.input.write_u8(UNIT_LEASE).await?;
-                        unit.input.write_u64_le(local_deadline(slot.until)).await
-                    }).await??;
+                    renew_unit(slot, &mut unit.input, heartbeat).await?;
+                    managed.renew(slot.until);
                 }
                 Some(HomeMessage::Input(input)) if input.run_id == run.run_id && !input.data.is_empty() && input.data.len() <= CHUNK_BYTES => {
                     timeout_at(slot.until, unit_write(&mut unit.input, &input.data)).await??;
@@ -511,6 +653,9 @@ async fn serve_agent(
                 Some(HomeMessage::Snapshot(request)) if request.run_id == run.run_id && checkpoints.is_empty() => {
                     checkpoints.spawn(send_snapshot(slot.outgoing.clone(), cwd.to_owned(), request));
                 }
+                Some(HomeMessage::ManagedStart(request)) => managed.start(request)?,
+                Some(HomeMessage::ManagedStop(request)) => managed.stop(request)?,
+                Some(HomeMessage::PreviewOpen(request)) => managed.preview(request, slot.channel.clone()),
                 _ => return Err(invalid("The home sent an invalid agent run message").into()),
             },
             count = unit.output.read(&mut buffer) => {
@@ -730,6 +875,18 @@ async fn execute(
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
+    let descriptor = if run.setup.is_some() {
+        match receive_setup(slot, run).await {
+            Ok(Some(setup)) => Some(setup),
+            Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
+            Err(error) => {
+                eprintln!("Could not receive the worker setup: {error}");
+                return Ok((AgentRunOutcome::StartFailed, None));
+            }
+        }
+    } else {
+        None
+    };
     let cwd = match stage_workspace(slot, run, path).await {
         Ok(Some(path)) => path,
         Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
@@ -738,7 +895,18 @@ async fn execute(
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
-    let mut unit = match AgentUnit::start(run, provider, &cwd, journal).await {
+    let setup = match descriptor
+        .as_ref()
+        .map(|given| WorkspaceSetup::from_wire(&cwd, given))
+        .transpose()
+    {
+        Ok(setup) => setup,
+        Err(error) => {
+            eprintln!("Could not prepare the worker setup: {error}");
+            return Ok((AgentRunOutcome::StartFailed, None));
+        }
+    };
+    let mut unit = match AgentUnit::start(run, provider, &cwd, journal, setup.as_ref()).await {
         Ok(unit) => unit,
         Err(error) => {
             eprintln!("Could not prepare the agent unit: {error}");
@@ -766,6 +934,39 @@ async fn execute(
         return Ok((AgentRunOutcome::Unconfirmed, None));
     }
     result
+}
+
+async fn receive_setup(
+    slot: &mut Slot,
+    run: &AgentRunStart,
+) -> Result<Option<AgentWorkspaceSetup>, Failure> {
+    let source = run
+        .setup
+        .as_ref()
+        .ok_or_else(|| invalid("The home did not describe its setup"))?;
+    let size = source.size as usize;
+    if size == 0 || size > DESCRIPTOR_BYTES || source.sha256.len() != 32 {
+        return Err(invalid("The home described an invalid worker setup").into());
+    }
+    let mut bytes = Vec::with_capacity(size);
+    while bytes.len() < size {
+        match slot.message().await? {
+            HomeMessage::SetupChunk(chunk)
+                if chunk.run_id == run.run_id
+                    && !chunk.data.is_empty()
+                    && chunk.data.len() <= CHUNK_BYTES
+                    && bytes.len() + chunk.data.len() <= size =>
+            {
+                bytes.extend_from_slice(&chunk.data)
+            }
+            HomeMessage::Stop(stop) if stop.run_id == run.run_id => return Ok(None),
+            _ => return Err(invalid("The home sent an invalid worker setup frame").into()),
+        }
+    }
+    if ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref() != source.sha256.as_slice() {
+        return Err(invalid("The worker setup digest changed").into());
+    }
+    Ok(Some(AgentWorkspaceSetup::decode(bytes.as_slice())?))
 }
 
 async fn stage_workspace(

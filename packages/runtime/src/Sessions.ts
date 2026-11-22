@@ -1430,6 +1430,7 @@ export class Sessions extends Context.Service<
         sessionFact,
         sessionsScope,
         sessionsSql,
+        setups,
         skillsConfig,
         stopGrace,
         stopTrees,

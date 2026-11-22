@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo } from 'react'
+import { workerPreviewTarget } from '@althar/contracts'
 
 import { useServices } from '../../data/services'
 import { usePreferences } from '../../shared/usePreferences'
@@ -51,6 +52,10 @@ export const useOpener = (owner: string | null, onShow?: () => void): PageOpener
         if (opened !== null) pages.known(opened)
       })
     }
-    return { run: beside, link: links === 'outside' ? outside : beside, links }
+    return {
+      run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outside(address)),
+      link: links === 'outside' ? outside : beside,
+      links,
+    }
   }, [owner, browser, links, onShow])
 }

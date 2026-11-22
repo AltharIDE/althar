@@ -1,7 +1,7 @@
 import { deepEqual, equal, ok, rejects } from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
@@ -15,8 +15,18 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
 import { makeAgentWorkerPool, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
 import { agentToolsMethod } from '../src/agentTools.ts'
+import { agentPreviewMethod } from '../src/agentPreviews.ts'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
-import { AgentHomeFrameSchema, AgentRunOutcome, AgentWorkerFrameSchema, type AgentWorkerFrame } from '../src/index.ts'
+import {
+  AgentHomeFrameSchema,
+  AgentPreviewRequestSchema,
+  AgentPreviewResponseSchema,
+  AgentRunOutcome,
+  AgentWorkerFrameSchema,
+  AgentWorkspaceSetupResultSchema,
+  type AgentPreviewRequest,
+  type AgentWorkerFrame,
+} from '../src/index.ts'
 import { AgentToolsRequestSchema, AgentToolsResponseSchema, type AgentToolsRequest } from '../src/gen/althar/worker/v1/control_pb.ts'
 import { workerCertificates } from './worker-certificates.ts'
 
@@ -92,6 +102,20 @@ const fixture = async (t: TestContext) => {
           },
         }
       },
+      preview: () => {
+        const { path, requestSerialize, responseDeserialize } = agentPreviewMethod
+        const call = client.makeBidiStreamRequest(path, requestSerialize, responseDeserialize, { deadline: Date.now() + 12_000 })
+        const frames = call[Symbol.asyncIterator]()
+        return {
+          call,
+          send: (payload: AgentPreviewRequest['payload']) =>
+            call.write(Buffer.from(toBinary(AgentPreviewRequestSchema, create(AgentPreviewRequestSchema, { payload })))),
+          read: async () => {
+            const next = await frames.next()
+            return next.done === true ? undefined : fromBinary(AgentPreviewResponseSchema, next.value).data
+          },
+        }
+      },
     }
   }
   return {
@@ -112,14 +136,23 @@ const fixture = async (t: TestContext) => {
   }
 }
 
-const hello = (id = workerId, journal = journalId): AgentWorkerFrame['payload'] => ({
+const hello = (id = workerId, journal = journalId, managedCommands = false): AgentWorkerFrame['payload'] => ({
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
     workerId: id,
     version: 1,
     journalId: journal,
-    capabilities: [{ $typeName: 'althar.worker.v1.AgentWorkerCapability', projectId, providerId }],
+    capabilities: [
+      {
+        $typeName: 'althar.worker.v1.AgentWorkerCapability',
+        projectId,
+        providerId,
+        workspaceSetup: false,
+        managedCommands,
+        managedPreview: managedCommands,
+      },
+    ],
   },
 })
 
@@ -129,6 +162,7 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   worker.send(hello())
   const greeting = await worker.read()
   equal(greeting?.case, 'hello')
+  await rejects(pool.start(workerId, placement, { setup: { directory: '', commands: ['true'] } }), /update this worker/i)
   deepEqual(
     pool.list(projectId).map(({ workerId, busy }) => ({ workerId, busy })),
     [{ workerId, busy: false }],
@@ -148,6 +182,10 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   })
   const agent = await pending
   equal(agent.workspacePath, '/private/worker/workspace')
+  await rejects(
+    agent.startCommand({ id: 'proc_' + '6'.repeat(32), directory: '', command: 'true', output: () => undefined }),
+    /update this worker/i,
+  )
   const input = Buffer.alloc(6000, 65)
   await agent.write(input)
   const chunks = []
@@ -170,6 +208,78 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
+})
+
+void test('managed output and stop stay attached to the selected task lease', { timeout: 15_000 }, async (t) => {
+  const { pool, connect, unassign } = await fixture(t)
+  const worker = connect()
+  worker.send(hello(workerId, journalId, true))
+  equal((await worker.read())?.case, 'hello')
+  const opening = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const { runId } = start.value
+  worker.send({
+    case: 'ready',
+    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId, workspacePath: '/private/worker/workspace', toolsPort: 0 },
+  })
+  const agent = await opening
+  const received: string[] = []
+  const pending = agent.startCommand({
+    id: 'proc_' + '6'.repeat(32),
+    directory: 'web app',
+    command: 'bun run dev',
+    output: (bytes) => {
+      received.push(Buffer.from(bytes).toString())
+    },
+  })
+  const command = await worker.read()
+  ok(command?.case === 'managedStart' && command.value.managed !== undefined)
+  const managed = command.value.managed
+  equal(managed.runId, runId)
+  equal(command.value.directory, 'web app')
+  equal(command.value.command, 'bun run dev')
+  worker.send({ case: 'managedReady', value: managed })
+  const process = await pending
+  worker.send({
+    case: 'managedOutput',
+    value: { $typeName: 'althar.worker.v1.AgentManagedOutput', managed, data: Buffer.from('Listening') },
+  })
+  ok(process.preview !== undefined)
+  const openingPreview = process.preview(5173)
+  const offer = await worker.read()
+  ok(offer?.case === 'previewOpen')
+  deepEqual(offer.value.managed, managed)
+  equal(offer.value.port, 5173)
+  const tunnel = worker.preview()
+  tunnel.send({ case: 'tunnelId', value: offer.value.tunnelId })
+  const duplex = await openingPreview
+  duplex.write(Buffer.from('GET / HTTP/1.0\r\n\r\n'))
+  equal(Buffer.from((await tunnel.read()) ?? []).toString(), 'GET / HTTP/1.0\r\n\r\n')
+  const response = once(duplex, 'data')
+  tunnel.send({ case: 'data', value: Buffer.from('HTTP preview') })
+  deepEqual(await response, [Buffer.from('HTTP preview')])
+  const replay = worker.preview()
+  replay.send({ case: 'tunnelId', value: offer.value.tunnelId })
+  await rejects(replay.read(), /no active preview/i)
+  const tunnelClosed = once(duplex, 'close').catch(() => [])
+  const stopping = process.stop()
+  const stop = await worker.read()
+  ok(stop?.case === 'managedStop')
+  deepEqual(stop.value, managed)
+  worker.send({ case: 'managedExit', value: { $typeName: 'althar.worker.v1.AgentManagedExit', managed, outcome: AgentRunOutcome.STOPPED } })
+  await stopping
+  await tunnelClosed
+  deepEqual(received, ['Listening'])
+  unassign()
+  await rejects(
+    agent.startCommand({ id: 'proc_' + '7'.repeat(32), directory: '', command: 'true', output: () => undefined }),
+    /no longer owns/i,
+  )
+  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  equal((await worker.read())?.case, 'stop')
+  worker.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+  equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
 
 void test('a claimed identity and a verified but unenrolled certificate cannot open an agent slot', { timeout: 15_000 }, async (t) => {
@@ -257,6 +367,53 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
 const native = fileURLToPath(new URL('../../../target/debug/althar-worker', import.meta.url))
 
 void test(
+  'the native guardian completes setup under its lease before it passes ACP bytes',
+  { timeout: 15_000, skip: process.platform !== 'linux' },
+  async (t) => {
+    const { root } = await fixture(t)
+    const folder = join(root, 'project folder')
+    mkdirSync(folder)
+    const child = spawn(
+      '/bin/sh',
+      [
+        '-c',
+        'cat | "$@"',
+        'setup-test',
+        native,
+        '--agent-unit-with-setup',
+        folder,
+        '1',
+        'printf staged > setup.log; printf setup-finished',
+        '/usr/bin/cat',
+      ],
+      { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+    t.after(() => child.kill())
+    const stopped = once(child, 'exit')
+    const output = child.stdout[Symbol.asyncIterator]()
+    equal((await output.next()).value?.[0], 1)
+    const lease = Buffer.alloc(8)
+    lease.writeBigUInt64LE(process.hrtime.bigint() / 1_000_000n + 6000n)
+    child.stdin.write(lease)
+    let setup = Buffer.alloc(0)
+    while (setup.length < 2 || setup.length < setup.readUInt16LE(0) + 2) {
+      const chunk = await output.next()
+      ok(!chunk.done)
+      setup = Buffer.concat([setup, chunk.value])
+    }
+    equal(setup.length, setup.readUInt16LE(0) + 2)
+    const result = fromBinary(AgentWorkspaceSetupResultSchema, setup.subarray(2))
+    equal(result.exitCode, 0)
+    equal(Buffer.from(result.outputTail).toString(), 'setup-finished')
+    equal(readFileSync(join(folder, 'setup.log'), 'utf8'), 'staged')
+    child.stdin.write(Buffer.from([1, 5, 0, 104, 101, 108, 108, 111]))
+    deepEqual((await output.next()).value, Buffer.from('hello'))
+    child.stdin.end()
+    deepEqual(await stopped, [243, null])
+  },
+)
+
+void test(
   'the native guardian gives the provider only its ACP data and exits without a lease',
   { timeout: 15_000, skip: process.platform !== 'linux' },
   async (t) => {
@@ -318,6 +475,15 @@ void test(
     writeFileSync(provider, '#!/bin/sh\nwhile IFS= read -r line; do printf \'%s\\n\' "$line" >> README.md; cat README.md; done\n', {
       mode: 0o700,
     })
+    const previewServer = join(root, 'preview.cjs')
+    writeFileSync(
+      previewServer,
+      `
+      const server = require('node:http').createServer((_request, response) => response.end('native preview'));
+      server.listen(0, '127.0.0.1', () => require('node:fs').writeFileSync('preview.port', String(server.address().port)));
+    `,
+    )
+    const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
     const tools = createServer((request, response) => {
       equal(request.headers.authorization, 'Bearer tool-token')
       response.end('home tools')
@@ -360,7 +526,12 @@ void test(
     const open = async () => {
       for await (const _ of setInterval(30, undefined, { signal: AbortSignal.timeout(8000) })) {
         if (child.exitCode !== null) throw new Error(stderr)
-        if (pool.list(projectId).some((slot) => !slot.busy)) return pool.start(workerId, placement, { checkout, toolPort })
+        if (pool.list(projectId).some((slot) => !slot.busy))
+          return pool.start(workerId, placement, {
+            checkout,
+            toolPort,
+            setup: { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
+          })
       }
       throw new Error(stderr || 'The native worker did not connect')
     }
@@ -368,6 +539,38 @@ void test(
     for (const data of ['first agent', 'next agent']) {
       const agent = await open()
       ok(agent.workspacePath.startsWith(workspaces + '/'))
+      equal(agent.setup?.exitCode, 0)
+      equal(Buffer.from(agent.setup?.outputTail ?? []).toString(), 'ready')
+      equal(readFileSync(join(agent.workspacePath, 'setup.log'), 'utf8'), 'worker-setup')
+      equal(existsSync(join(repo, 'setup.log')), false)
+      const commandOutput: Buffer[] = []
+      const build = await agent.startCommand({
+        id: 'proc_' + 'a'.repeat(32),
+        directory: '',
+        command: "cat setup.log; printf 'build failed' >&2; exit 7",
+        output: (bytes) => commandOutput.push(Buffer.from(bytes)),
+      })
+      equal((await build.exit).exitCode, 7)
+      equal(Buffer.concat(commandOutput).toString(), 'worker-setupbuild failed')
+      const service = await agent.startCommand({
+        id: 'proc_' + 'b'.repeat(32),
+        directory: '',
+        command: `${quote(process.execPath)} ${quote(previewServer)}`,
+        output: () => undefined,
+      })
+      const note = join(agent.workspacePath, 'preview.port')
+      for await (const _ of setInterval(25, undefined, { signal: AbortSignal.timeout(5_000) })) {
+        if (existsSync(note) && readFileSync(note, 'utf8') !== '') break
+      }
+      ok(service.preview !== undefined)
+      const socket = await service.preview(Number(readFileSync(note, 'utf8')))
+      socket.write('GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+      const chunks: Buffer[] = []
+      for await (const chunk of socket) chunks.push(Buffer.from(chunk))
+      ok(Buffer.concat(chunks).includes('native preview'))
+      socket.destroy()
+      await service.stop()
+      equal((await service.exit).outcome, AgentRunOutcome.STOPPED)
       const echoed = once(agent.output, 'data', { signal: AbortSignal.timeout(8000) })
       await agent.write(Buffer.from(data + '\n'))
       deepEqual(await echoed, [Buffer.from('Home source\n' + data + '\n')])

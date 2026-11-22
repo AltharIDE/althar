@@ -3,13 +3,14 @@ import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { Readable, Writable } from 'node:stream'
+import { Duplex, PassThrough, Readable, Writable } from 'node:stream'
 import { once } from 'node:events'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, type ThreadSnapshot } from '@althar/contracts'
 import { agents as registry } from '@althar/provider-adapters'
 import { fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
+import { AgentRunOutcome, type AgentManagedExit } from '@althar/worker-protocol'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -332,9 +333,19 @@ describe('a normal task assigned to a worker', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const workerId = 'wrk_' + '4'.repeat(32)
-        const workerPath = repository()
+        const homePath = repository()
+        writeFileSync(join(homePath, 'package.json'), JSON.stringify({ name: 'worker-task', dependencies: { fixture: 'file:./fixture' } }))
+        writeFileSync(join(homePath, 'bun.lock'), '')
+        const git = (...args: string[]) =>
+          execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd: homePath })
+        git('add', 'package.json', 'bun.lock')
+        git('commit', '--quiet', '-m', 'Add the project setup')
+        const workerPath = join(mkdtempSync(join(tmpdir(), 'althar-placed-checkout-')), 'worker')
+        git('clone', '--quiet', homePath, workerPath)
         let expectedProject: string | undefined
         const placed: Array<{ workspace: string; site: string }> = []
+        const managed: string[] = []
+        let managedStopped = 0
         let homeSandboxProbes = 0
         const homeAgents = Layer.effect(
           Agents,
@@ -364,9 +375,40 @@ describe('a normal task assigned to a worker', () => {
           agents: homeAgents,
           workers: {
             list: (projectId) => (projectId === expectedProject ? [{ workerId, providers: ['codex'], busy: false }] : []),
+            startCommand: (command) =>
+              Effect.gen(function* () {
+                assert.strictEqual(command.workerId, workerId)
+                assert.strictEqual(command.projectId, expectedProject)
+                assert.strictEqual(command.worktree, placed[0]?.site)
+                assert.strictEqual(command.directory, '')
+                managed.push(command.command)
+                command.output(Buffer.from('From the worker only.\nLocal: http://127.0.0.1:5173/\n'))
+                let outcome!: (result: AgentManagedExit) => void
+                const exit = new Promise<AgentManagedExit>((resolve) => {
+                  outcome = resolve
+                })
+                const stop = async () => {
+                  managedStopped += 1
+                  outcome({ $typeName: 'althar.worker.v1.AgentManagedExit', outcome: AgentRunOutcome.STOPPED })
+                }
+                yield* Effect.addFinalizer(() => Effect.promise(stop))
+                const preview = async (port: number) => {
+                  assert.strictEqual(port, 5173)
+                  const request = new PassThrough()
+                  const response = new PassThrough()
+                  request.once('data', (bytes: Buffer) => {
+                    assert.include(bytes.toString(), 'GET /page HTTP/1.1')
+                    response.end('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\nConnection: close\r\n\r\nworker')
+                  })
+                  return Duplex.from({ readable: response, writable: request })
+                }
+                return { exit, stop, preview }
+              }),
             open: (request) =>
               Effect.gen(function* () {
                 placed.push({ workspace: request.workspaceId, site: request.worktree })
+                assert.deepStrictEqual(request.setup, { directory: '', commands: ['bun install --frozen-lockfile'] })
+                writeFileSync(join(workerPath, 'staged'), 'from the worker setup')
                 const child = spawn('bun', [fakeAgentMain], { cwd: workerPath, stdio: ['pipe', 'pipe', 'ignore'] })
                 const exited = once(child, 'exit')
                 const stop = Effect.promise(async () => {
@@ -386,6 +428,7 @@ describe('a normal task assigned to a worker', () => {
                   },
                   path: workerPath,
                   toolPort: request.toolPort,
+                  setup: { code: 0, timedOut: false, output: 'Setup completed on the worker.' },
                   checkpoint: Effect.sync(() => {
                     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workerPath }).toString().trim()
                     const home = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: request.worktree }).toString().trim()
@@ -400,7 +443,7 @@ describe('a normal task assigned to a worker', () => {
               }),
           },
         })
-        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
         expectedProject = project.id
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
         assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), [
@@ -422,6 +465,32 @@ describe('a normal task assigned to a worker', () => {
           (thread) => permission(thread) !== undefined,
         )
         const decision = { attentionId: permission(approval)!.id, decision: 'allow' as const }
+        const run = yield* client.KeepRunnable({ commandId: commandId(), projectId: project.id, name: 'Build', command: 'touch home-leak' })
+        const startRun = () =>
+          client.RunProject({
+            commandId: commandId(),
+            projectId: project.id,
+            taskId: task.id,
+            threadId: task.threadId,
+            runnableId: run.id,
+          })
+        const launch = yield* startRun()
+        assert.strictEqual((yield* startRun()).id, launch.id)
+        assert.lengthOf(managed, 1)
+        assert.include(managed[0], 'touch home-leak')
+        assert.include((yield* client.ReadLaunchOutput({ id: launch.id })).text, 'From the worker only.')
+        assert.isFalse(existsSync(join(placed[0]!.site, 'home-leak')))
+        const runView = yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (view) =>
+          view.task.launches.some((one) => one.url !== null),
+        )
+        assert.match(runView.task.launches[0]?.url ?? '', /^althar-preview:\/\//)
+        const readPreview = { projectId: project.id, id: launch.id, method: 'GET' as const, path: '/page' }
+        const preview = yield* client.ReadLaunchPreview(readPreview)
+        assert.strictEqual(Buffer.from(preview.bodyBase64, 'base64').toString(), 'worker')
+        yield* Effect.flip(client.ReadLaunchPreview({ ...readPreview, projectId: 'proj_' + '0'.repeat(32) }))
+        yield* client.StopLaunch({ commandId: commandId(), id: launch.id })
+        yield* Effect.flip(client.ReadLaunchPreview(readPreview))
+        assert.strictEqual(managedStopped, 1)
         const socket = yield* connect('socket')
         const refused = yield* Effect.flip(socket.Answer({ ...decision, commandId: commandId() }))
         assert.strictEqual(refused.reason, 'PersonRequired')
@@ -436,6 +505,10 @@ describe('a normal task assigned to a worker', () => {
         assert.strictEqual(homeSandboxProbes, 0)
         assert.strictEqual(snapshot.task.worktree, placed[0]?.site)
         assert.isTrue(existsSync(join(workerPath, 'change.txt')))
+        assert.isFalse(existsSync(join(placed[0]!.site, 'node_modules')))
+        const setup = snapshot.items.filter((item) => item.kind === 'setup')
+        assert.lengthOf(setup, 1)
+        assert.include(JSON.stringify(setup[0]?.content), 'Setup completed on the worker.')
         assert.isUndefined(permission(snapshot))
       }),
     ),

@@ -55,7 +55,16 @@ it.live('opens the Desktop profile’s worker listener and exposes only workers 
             version: 1,
             workerId,
             journalId: 'wjn_' + '3'.repeat(32),
-            capabilities: [{ $typeName: 'althar.worker.v1.AgentWorkerCapability', projectId, providerId: 'codex' }],
+            capabilities: [
+              {
+                $typeName: 'althar.worker.v1.AgentWorkerCapability',
+                projectId,
+                providerId: 'codex',
+                workspaceSetup: false,
+                managedCommands: false,
+                managedPreview: false,
+              },
+            ],
           }),
         )
         assert.strictEqual(hello?.case, 'hello')

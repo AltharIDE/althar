@@ -624,7 +624,7 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('combobox', { name: 'Run on' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Linux worker aaaaaa' }))
-    expect(screen.getByText('Lead on the worker. Setup and review on this home.')).toBeTruthy()
+    expect(screen.getByText('Setup and lead run on the worker. Review runs on this home.')).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln1', workerId)
     await screen.findByText('This worker is already running a task.')

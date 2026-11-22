@@ -22,6 +22,7 @@ import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSn
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
+import { WorkerPreviewRequest, WorkerPreviewResponse } from './workerPreview'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -3678,6 +3679,7 @@ export const Launch = Schema.Struct({
   runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
   where: Schema.String,
+  workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
   /** The branch or pull request it runs a copy of, at a glance (feature/x, PR #12 · feature/x); none for the default branch or a task's. */
   branch: Schema.optional(Schema.NullOr(Schema.String)),
 })
@@ -5067,6 +5069,7 @@ const socketCalls = new Set<string>([
   'SetModel',
   'SetEffort',
   'GetRepositoryScripts',
+  'ReadLaunchPreview',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -6501,7 +6504,11 @@ export const AcpApi = RpcGroup.make(
   command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
+export const WorkerPreviewApi = RpcGroup.make(call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse)).middleware(
+  ClientAuthority,
+)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi)
 export type Api = typeof Api
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
@@ -6516,6 +6523,9 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         ConnectionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ConnectionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        WorkerPreviewApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerPreviewApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
       ),
     ),
   )

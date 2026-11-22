@@ -8,6 +8,7 @@ service WorkerControlService {
   rpc Connect(stream WorkerFrame) returns (stream HomeFrame);
   rpc RunAgent(stream AgentWorkerFrame) returns (stream AgentHomeFrame);
   rpc AgentTools(stream AgentToolsRequest) returns (stream AgentToolsResponse);
+  rpc AgentPreview(stream AgentPreviewRequest) returns (stream AgentPreviewResponse);
 }
 
 // Separate from the diagnostic exchange. One stream advertises one agent
@@ -22,6 +23,9 @@ message AgentWorkerFrame {
     AgentSnapshotResult snapshot = 6;
     AgentRunBytes patch = 7;
     AgentRunBytes commits = 8;
+    AgentManagedRef managed_ready = 9;
+    AgentManagedOutput managed_output = 10;
+    AgentManagedExit managed_exit = 11;
   }
 }
 
@@ -35,6 +39,10 @@ message AgentHomeFrame {
     AgentRunReconcile reconcile = 6;
     AgentRunBytes checkout = 7;
     AgentSnapshotRequest snapshot = 8;
+    AgentRunBytes setup_chunk = 9;
+    AgentManagedStart managed_start = 10;
+    AgentManagedRef managed_stop = 11;
+    AgentPreviewOpen preview_open = 12;
   }
 }
 
@@ -49,6 +57,9 @@ message AgentWorkerHello {
 message AgentWorkerCapability {
   string project_id = 1;
   string provider_id = 2;
+  bool workspace_setup = 3;
+  bool managed_commands = 4;
+  bool managed_preview = 5;
 }
 
 message AgentHomeHello {
@@ -58,7 +69,7 @@ message AgentHomeHello {
   uint32 lease_ms = 4;
 }
 
-// No command, arguments, path, or account credentials come from the home.
+// Provider executable, provider arguments, and account credentials stay on the worker.
 message AgentRunStart {
   string run_id = 1;
   string project_id = 2;
@@ -66,6 +77,19 @@ message AgentRunStart {
   string workspace_id = 4;
   AgentWorkspaceSource source = 5;
   bool tools = 6;
+  // The home's saved project setup, run from the staged task checkout.
+  AgentWorkspaceSetupSource setup = 7;
+}
+
+message AgentWorkspaceSetupSource {
+  uint32 size = 1;
+  bytes sha256 = 2;
+}
+
+message AgentWorkspaceSetup {
+  // The repository's relative project folder, or empty for its root.
+  string directory = 1;
+  repeated string commands = 2;
 }
 
 // A single Git bundle with one scoped snapshot ref, staged before launch.
@@ -80,6 +104,55 @@ message AgentRunReady {
   // The canonical absolute path of the leased workspace on the worker.
   string workspace_path = 2;
   uint32 tools_port = 3;
+  AgentWorkspaceSetupResult setup = 4;
+}
+
+message AgentWorkspaceSetupResult {
+  uint32 exit_code = 1;
+  bool timed_out = 2;
+  // A bounded tail of the command output, kept with the home’s setup record.
+  bytes output_tail = 3;
+}
+
+// Managed commands share the assigned task checkout. They have their own
+// process group and output stream and end when its workspace lease ends.
+message AgentManagedRef {
+  string run_id = 1;
+  string command_id = 2;
+}
+
+message AgentManagedStart {
+  AgentManagedRef managed = 1;
+  string directory = 2;
+  string command = 3;
+}
+
+message AgentManagedOutput {
+  AgentManagedRef managed = 1;
+  bytes data = 2;
+}
+
+message AgentManagedExit {
+  AgentManagedRef managed = 1;
+  AgentRunOutcome outcome = 2;
+  optional uint32 exit_code = 3;
+}
+
+message AgentPreviewOpen {
+  AgentManagedRef managed = 1;
+  string tunnel_id = 2;
+  uint32 port = 3;
+}
+
+message AgentPreviewRequest {
+  oneof payload {
+    string tunnel_id = 1;
+    bytes data = 2;
+  }
+}
+
+message AgentPreviewResponse {
+  bytes data = 1;
 }
 
 message AgentRunBytes {

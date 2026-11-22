@@ -174,8 +174,8 @@ choose its place again.
 | --- | --- | --- |
 | Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in a worktree for one repository |
 | Other roles | Coordinator, helpers, reviewers and pull request reviews | The home still runs them |
-| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker's installed toolchain and provider account, with Althar's built-in tools through the home |
-| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git commits and working changes returned to the home |
+| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker’s installed toolchain, provider account and project setup, with Althar’s built-in tools through the home |
+| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git changes, managed command output and private HTTP previews from the active task checkout |
 | Assignment | The task's own home | An available worker granted access to the project that advertises the lead's provider |
 
 The worker must eventually describe the OS, tools, workspace shapes and

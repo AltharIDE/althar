@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { decodePairingCode, prepareApprovalKeyEnrollment, preparePermissionApproval, signDeviceMessage } from '@althar/transport-node'
-import { PermissionApproval } from '@althar/contracts'
+import { ClientIdentity, PermissionApproval } from '@althar/contracts'
 import { connectionCredentials, type ProtectCredential } from './credentials'
 import { Effect, Schema } from 'effect'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
@@ -348,6 +348,51 @@ export const startHomeConnections = ({
     })
     return true
   }
+  const previewPort = async (owner: number, signal: AbortSignal): Promise<Electron.MessagePortMain> => {
+    const { current, connection, identity } = controller.state(owner)
+    if (current.kind === 'local' || connection !== 'connected' || identity === undefined)
+      throw new Error('Reconnect to the home to open its preview.')
+    const { home } = current
+    const key = home.https === undefined ? undefined : await credentials.load(home.id)
+    signal.throwIfAborted()
+    if (controller.state(owner).identity !== identity) throw new Error('The home connection changed.')
+    const { port1, port2 } = new MessageChannelMain()
+    return new Promise((resolve, reject) => {
+      try {
+        const client = connectHomeProcess(
+          fork,
+          home,
+          port1,
+          {
+            connected: (value) => {
+              const reported = Schema.decodeUnknownSync(ClientIdentity)(value)
+              if (reported.homeId !== identity.homeId || reported.deviceId !== identity.deviceId || reported.role !== identity.role)
+                throw new Error('The preview opened on a different home connection.')
+              resolve(port2)
+            },
+            disconnected: (problem) => {
+              port2.close()
+              reject(new Error(problem))
+            },
+          },
+          key,
+        )
+        signal.addEventListener(
+          'abort',
+          () => {
+            port2.close()
+            void Effect.runPromise(client.stop).catch(() => undefined)
+            reject(signal.reason)
+          },
+          { once: true },
+        )
+      } catch (error) {
+        port1.close()
+        port2.close()
+        reject(error)
+      }
+    })
+  }
   ipcMain.handle('althar:homes-reconnect', (event) => {
     const id = owner(event)
     if (controller.state(id).current.kind === 'local') return
@@ -376,6 +421,7 @@ export const startHomeConnections = ({
       }
     },
     connect,
+    previewPort,
     stopAll: async () => {
       controller.stopping()
       await setups.stop()

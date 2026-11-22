@@ -56,6 +56,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       write: async (chunk) => {
         written.push(chunk)
       },
+      startCommand: async () => assert.fail('No command expected'),
       stop: async () => {
         stopping += 1
         outcome(exit)
@@ -71,6 +72,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     }
     const pool: AgentWorkerPool = {
       connect: () => assert.fail('No transport fixture needed'),
+      connectPreview: () => assert.fail('No transport fixture needed'),
       openTools: () => undefined,
       list: () => [{ workerId: input.workerId, busy: false, capabilities: [{ projectId: input.projectId, providerId: input.providerId }] }],
       start: async (id, placement, options) => {
@@ -84,6 +86,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
           output: worker.output,
           exit: worker.exit,
           write: worker.write,
+          startCommand: worker.startCommand,
           stop: worker.stop,
           ownsRun: worker.ownsRun,
           readPatch: worker.readPatch,
