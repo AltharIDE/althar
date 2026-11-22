@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
@@ -58,16 +59,9 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
   )
   writeFileSync(join(repo, 'serve.js'), SERVER)
   writeFileSync(join(repo, 'held.js'), held(gate))
-  writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n.fixture-install\n')
   execFileSync('git', ['add', '.'], { cwd: repo, env: { ...process.env, ...author } })
   execFileSync('git', ['commit', '-q', '-m', 'Serve'], { cwd: repo, env: { ...process.env, ...author } })
-  const worktrees = join(home, 'worktrees')
-  /** The task's folder: the one folder of a repository's worktree under the project's. */
-  const folder = () => {
-    const project = readdirSync(worktrees).find((name) => !name.startsWith('.'))
-    const task = project === undefined ? undefined : readdirSync(join(worktrees, project)).find((name) => !name.startsWith('.'))
-    return project === undefined || task === undefined ? null : join(worktrees, project, task, 'meridian')
-  }
   const { electronApp, page } = await launch(home)
   const tabs = page.getByRole('navigation', { name: 'Projects' })
   /** Settings › Work on this computer, in the Settings tab. */
@@ -97,23 +91,39 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await expect(row.getByRole('combobox', { name: 'Remove finished tasks’ folders' })).toHaveText(/Only when I clean up/)
     await backToProject()
 
-    // A quick task that commits a change and finishes; Done settles it.
-    await say(page, `${TITLE} [coordinator:start] [lead:finish] [lead:edit]`)
+    // Have the lead commit its change explicitly before it finishes. Done settles the task.
+    await say(page, `${TITLE} [coordinator:start] [lead:commit] [lead:finish]`)
     await expect(work.getByText('Finished', { exact: true })).toBeVisible()
     await work.getByRole('button', { name: TITLE }).click()
     const header = page.getByRole('banner', { name: TITLE })
-    const kept = folder()
-    expect(kept).not.toBeNull()
-    expect(existsSync(kept ?? '')).toBe(true)
+    const database = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+    let kept: string
+    try {
+      const path = database
+        .prepare(`SELECT w.path FROM workspaces w JOIN tasks k ON k.id = w.task_id
+          WHERE k.title = ? AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL AND w.made_by IS NULL`)
+        .get(TITLE)?.path
+      if (typeof path !== 'string') throw new Error(`No writable worktree for ${TITLE}`)
+      kept = path
+    } finally {
+      database.close()
+    }
+    expect(execFileSync('git', ['show', 'HEAD:change.txt'], { cwd: kept, encoding: 'utf8' })).toBe('change\n')
+    const outputs = header.getByRole('radio', { name: /Outputs/ })
+    const change = page.getByText('change.txt', { exact: true })
+    await outputs.click()
+    await expect(change).toBeVisible()
+    await header.getByRole('radio', { name: /Conversation/ }).click()
     // An install it shares with a store outside it, a clone or a hardlink, frees nothing; what a package built there, it holds.
     const store = join(home, 'store')
     mkdirSync(store)
-    writeFileSync(join(store, 'pkg.node'), Buffer.alloc(64 * 1024 ** 2, 1))
-    const pkg = join(kept ?? '', 'node_modules', 'pkg')
+    writeFileSync(join(store, 'pkg.node'), Buffer.alloc(64 * 1024 ** 2, 1), { flush: true })
+    // Use a dedicated directory, so the package manager does not replace files that are part of the fixture.
+    const pkg = join(kept, '.fixture-install', 'pkg')
     mkdirSync(pkg, { recursive: true })
     if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'pkg.node'), join(pkg, 'pkg.node')])
     else linkSync(join(store, 'pkg.node'), join(pkg, 'pkg.node'))
-    writeFileSync(join(pkg, 'built.node'), Buffer.alloc(12 * 1024 ** 2, 2))
+    writeFileSync(join(pkg, 'built.node'), Buffer.alloc(12 * 1024 ** 2, 2), { flush: true })
     // Settling makes the folder eligible for sizing, so seed its install first.
     await header.getByRole('button', { name: 'Done' }).click()
     await expect(header.getByText('Done', { exact: true })).toBeVisible()
@@ -129,7 +139,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await page.keyboard.press('Escape')
     await row.getByRole('button', { name: 'Clean up' }).click()
     await expect(row.getByText(/^Freed 12 MB just now$/)).toBeVisible()
-    expect(existsSync(kept ?? '')).toBe(false)
+    expect(existsSync(kept)).toBe(false)
     await page.screenshot({ path: 'test-results/folders-2-freed.png', animations: 'disabled', scale: 'css' })
     await backToProject()
 
@@ -137,8 +147,8 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await expect(header).toBeVisible()
     await expect(page.getByText(/^Folder removed when you cleaned up/)).toBeVisible()
     await page.screenshot({ path: 'test-results/folders-3-thread.png', animations: 'disabled', scale: 'css' })
-    await page.getByRole('radio', { name: /Outputs/ }).click()
-    await expect(page.getByText('change.txt', { exact: true })).toBeVisible()
+    await outputs.click()
+    await expect(change).toBeVisible()
     await page.screenshot({ path: 'test-results/folders-4-outputs.png', animations: 'disabled', scale: 'css' })
     await page.getByRole('radio', { name: /Conversation/ }).click()
 
@@ -155,7 +165,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await expect(card.getByRole('button', { name: /^Open localhost:\d+$/ })).toBeVisible()
     await expect(header.getByText('Bringing its folder back')).toHaveCount(0)
     await expect(page.getByText('Folder back from its branch')).toBeVisible()
-    expect(existsSync(join(kept ?? '', 'node_modules', 'status'))).toBe(true)
+    expect(existsSync(join(kept, 'node_modules', 'status'))).toBe(true)
     await page.screenshot({ path: 'test-results/folders-6-back.png', animations: 'disabled', scale: 'css' })
     await card.getByRole('button', { name: /^Stop / }).click()
 
@@ -163,12 +173,12 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await thisComputer()
     await expect(row.getByRole('button', { name: 'Clean up' })).toBeEnabled()
     await row.getByRole('button', { name: 'Clean up' }).click()
-    await expect.poll(() => existsSync(kept ?? '')).toBe(false)
+    await expect.poll(() => existsSync(kept)).toBe(false)
     await backToProject()
     await expect(header).toBeVisible()
     await say(page, 'Add a dark theme too [lead:finish]')
     await expect(page.getByText('Folder back from its branch')).toHaveCount(2)
-    expect(existsSync(kept ?? '')).toBe(true)
+    expect(existsSync(kept)).toBe(true)
   } finally {
     await electronApp.close()
   }
