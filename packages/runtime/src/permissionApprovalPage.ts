@@ -110,14 +110,15 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     say(enrollment ? 'Althar couldn’t register this key. Start again from Homes in Althar.' : 'Althar couldn’t confirm this. Answer it again in Althar.', 'bad')
     button.hidden = true
   }
-  // What an always (never, for a denial) keeps, as the home will keep it: this command or host exactly, commands that
-  // start the same way, or a kind of request in words. The subject is the broker's, never the page's own reading.
+  // What an always (never, for a denial) keeps, as the home will keep it: this command or host exactly (a host and every
+  // host under it, for a never), commands that start the same way, or a kind of request in words. The subject and its
+  // reach are the broker's, never the page's own reading.
   const kinds = ${JSON.stringify(ruleKindWords)}
   const scopes = {
     exact: { lead: 'Exactly', none: 'Exactly this request' },
     prefix: { lead: 'Commands starting with', none: 'Commands that start like this one' },
   }
-  const scopeOf = (scope, remembered) => {
+  const scopeOf = (scope, remembered, under) => {
     const into = document.getElementById('scope')
     if (scope === 'kind') {
       const words = (remembered && kinds[remembered]) || remembered || 'Requests of this kind'
@@ -130,7 +131,8 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     }
     const subject = document.createElement('code')
     subject.textContent = remembered
-    into.append(scopes[scope].lead + ' ', subject)
+    if (under) into.append(subject, ' and every host under it')
+    else into.append(scopes[scope].lead + ' ', subject)
   }
   post('/view').then((approval) => {
     if (!enrollment) {
@@ -140,7 +142,7 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
       const always = approval.scope === 'exact' || approval.scope === 'prefix' || approval.scope === 'kind'
       show('decision', allow ? (always ? 'Always allow' : 'Allow once') : always ? 'Never allow' : 'Deny')
       if (always) {
-        scopeOf(approval.scope, approval.remembered)
+        scopeOf(approval.scope, approval.remembered, approval.under === true)
         reveal('scope')
         reveal('scopeName')
       }

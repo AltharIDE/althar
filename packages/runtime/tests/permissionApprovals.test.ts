@@ -121,6 +121,15 @@ describe('protected permission approvals', () => {
     await expect(approvals.verify(code, proof, 200)).rejects.toMatchObject({ reason: 'ApprovalRefused' })
   })
 
+  it('says where a never for a host refuses the hosts under it too, and an allow or a command’s never doesn’t', () => {
+    const { approvals } = fixture()
+    const under = (decision: 'allow' | 'reject', always: 'exact' | 'prefix', remembered: string) =>
+      approvals.view(approvals.begin(identity, { ...action, decision, always }, 'Reach it', remembered, 100, remembered), 200).under
+    expect(under('reject', 'exact', 'api.example.com')).toBe(true)
+    expect(under('allow', 'exact', 'api.example.com')).toBe(false)
+    expect(under('reject', 'exact', 'git push origin main')).toBe(false)
+  })
+
   it.each([
     { from: 'https://lookalike.example' },
     { rp: 'lookalike.example' },

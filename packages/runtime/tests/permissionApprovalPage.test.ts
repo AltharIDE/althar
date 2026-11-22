@@ -100,6 +100,15 @@ describe('the page that confirms a permission', () => {
     expect(document.querySelector('#scope code')?.textContent).toBe('api.example.com')
   })
 
+  it('shows that a never for a host refuses every host under it too, as the home says', async () => {
+    const host = { title: 'api.example.com', command: 'api.example.com', scope: 'exact', remembered: 'api.example.com' }
+    await open(false, approval({ ...host, decision: 'reject', under: true }))
+    expect(text('decision')).toBe('Never allow')
+    expect(text('scope')).toBe('api.example.com and every host under it')
+    expect(text('scope')).not.toContain('Exactly')
+    expect(document.querySelector('#scope code')?.textContent).toBe('api.example.com')
+  })
+
   it('shows how the commands a prefix never allows start', async () => {
     await open(false, approval({ decision: 'reject', scope: 'prefix', remembered: 'git push', reason: 'Push from the task’s branch.' }))
     expect(text('decision')).toBe('Never allow')
