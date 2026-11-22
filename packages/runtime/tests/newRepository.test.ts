@@ -123,31 +123,36 @@ describe('a new repository, made', () => {
     }),
   )
 
-  it.effect('is built beside where it goes and moved in whole: a clone that lands there first keeps it, and this takes only its own', () =>
-    Effect.gen(function* () {
-      const at = parent()
-      const there = join(at, 'tide-tables')
-      as('Ada')
-      // Held after its first commit, a clone of the same name lands where it goes.
-      afterEachCommit(`[ -e '${there}' ] || { mkdir '${there}' && echo theirs > '${there}/README.md'; }`)
-      assert.deepInclude(yield* Effect.flip(makeRepository(at, 'Tide Tables')), { reason: 'taken', name: 'tide-tables' })
-      // The clone's, as it landed: nothing of this one's in it, and this one's own folder gone.
-      assert.deepStrictEqual(readdirSync(there), ['README.md'])
-      assert.strictEqual(readFileSync(join(there, 'README.md'), 'utf8'), 'theirs\n')
-      assert.deepStrictEqual(readdirSync(at), ['tide-tables'])
-    }),
+  // Held by a git of the test's own, a shell script: none on Windows.
+  it.effect.skipIf(process.platform === 'win32')(
+    'is built beside where it goes and moved in whole: a clone that lands there first keeps it, and this takes only its own',
+    () =>
+      Effect.gen(function* () {
+        const at = parent()
+        const there = join(at, 'tide-tables')
+        as('Ada')
+        // Held after its first commit, a clone of the same name lands where it goes.
+        afterEachCommit(`[ -e '${there}' ] || { mkdir '${there}' && echo theirs > '${there}/README.md'; }`)
+        assert.deepInclude(yield* Effect.flip(makeRepository(at, 'Tide Tables')), { reason: 'taken', name: 'tide-tables' })
+        // The clone's, as it landed: nothing of this one's in it, and this one's own folder gone.
+        assert.deepStrictEqual(readdirSync(there), ['README.md'])
+        assert.strictEqual(readFileSync(join(there, 'README.md'), 'utf8'), 'theirs\n')
+        assert.deepStrictEqual(readdirSync(at), ['tide-tables'])
+      }),
   )
 
-  it.effect('takes an empty folder of its name, made since it was placed, as it would have before', () =>
-    Effect.gen(function* () {
-      const at = parent()
-      const there = join(at, 'tide-tables')
-      as('Ada')
-      afterEachCommit(`mkdir -p '${there}'`)
-      const made = yield* makeRepository(at, 'Tide Tables')
-      assert.strictEqual(made.path, there)
-      assert.strictEqual(log(there, '%s'), 'Initial commit')
-      assert.deepStrictEqual(readdirSync(at), ['tide-tables'])
-    }),
+  it.effect.skipIf(process.platform === 'win32')(
+    'takes an empty folder of its name, made since it was placed, as it would have before',
+    () =>
+      Effect.gen(function* () {
+        const at = parent()
+        const there = join(at, 'tide-tables')
+        as('Ada')
+        afterEachCommit(`mkdir -p '${there}'`)
+        const made = yield* makeRepository(at, 'Tide Tables')
+        assert.strictEqual(made.path, there)
+        assert.strictEqual(log(there, '%s'), 'Initial commit')
+        assert.deepStrictEqual(readdirSync(at), ['tide-tables'])
+      }),
   )
 })

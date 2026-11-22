@@ -1011,6 +1011,6 @@ it('says it couldn’t look on the home where finding its folders failed, rather
   })
   withServices(<Start onProject={() => {}} />, client, foldersOnHome(fakeHost(), client))
   await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
-  expect(await screen.findByText('Couldn’t look on this home just now', {}, { timeout: 5000 })).not.toBeNull()
+  expect(await screen.findByText('Couldn’t look on this home just now')).not.toBeNull()
   expect(screen.getByRole('button', { name: 'A folder on this home' })).not.toBeNull()
 })

@@ -7,6 +7,8 @@ import { MessageChannel } from 'node:worker_threads'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { Api, clientProtocol, emitterPort, type MessageSender } from '@althar/contracts'
+import { slashPath } from '@althar/testing'
+import { until } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Fiber, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -106,12 +108,6 @@ const afterEachCommit = (then: string) => {
   return withEnv({ PATH: `${bin}:${process.env.PATH ?? ''}` })
 }
 
-/** Waits until `ready`, a few seconds at most. */
-const until = (ready: () => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 400 && !ready(); tries++) yield* Effect.sleep(Duration.millis(25))
-  })
-
 /**
  * A home signed in to GitHub by the person there, with you/tidepool on it,
  * and a window on another computer talking to it: git reaches GitHub's
@@ -145,13 +141,14 @@ describe('making a project on a home from a window on another computer', () => {
         repositoryAt(join(home, 'code', 'api'))
         const client = yield* onHome(home)
         const found = yield* client.FindHomeFolders({})
-        assert.deepStrictEqual(found.lookedIn, ['~/code'])
+        // Said as the home's own system writes a path: ~\code on Windows.
+        assert.deepStrictEqual(found.lookedIn.map(slashPath), ['~/code'])
         assert.sameMembers(
-          found.repositories.map((one) => `${one.name} ${one.where} ${one.branch}`),
+          found.repositories.map((one) => `${one.name} ${slashPath(one.where)} ${one.branch}`),
           ['site ~/code/site main', 'api ~/code/api main'],
         )
         // New ones go beside them.
-        assert.strictEqual(found.place.where, '~/code')
+        assert.strictEqual(slashPath(found.place.where), '~/code')
         // Found again, each is the same grant: asking doesn't pile up grants.
         const again = yield* client.FindHomeFolders({})
         assert.deepStrictEqual(again.place.grant, found.place.grant)
@@ -252,38 +249,45 @@ describe('making a project on a home from a window on another computer', () => {
     ),
   )
 
-  it.live('starts empty and clones one name at once: the clone that lands first keeps it whole, and Start empty takes only its own', () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const home = temp('althar-home-')
-        const { window, connectionId } = yield* signedInHome(home)
-        const found = yield* window.FindHomeFolders({})
-        const there = join(firstPlace(home, process.platform), 'tidepool')
-        const held = join(temp('althar-held-'), 'held')
-        // Start empty, held at its first commit until the clone has landed where it goes.
-        yield* afterEachCommit(`touch '${held}'; i=0; while [ ! -e '${there}/.git' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done`)
-        const making = yield* Effect.forkScoped(Effect.flip(window.MakeRepository({ grant: found.place.grant, name: 'Tidepool' })))
-        yield* until(() => existsSync(held))
-        assert.isTrue(existsSync(held))
-        // Built in a folder of its own: where it goes is still free for the clone.
-        assert.isFalse(existsSync(there))
-        const cloned = yield* window.CloneRepository({
-          commandId: commandId(),
-          grant: found.place.grant,
-          from: { connectionId, path: ['you', 'tidepool'] },
-        })
-        assert.strictEqual(cloned.path, there)
-        const refused = yield* Fiber.join(making)
-        assert.match(refused.message, /tidepool/)
-        // The clone, whole: its history and origin, nothing of Start empty's, and no hidden folder left beside it.
-        assert.strictEqual(execFileSync('git', ['log', '--format=%s'], { cwd: there, encoding: 'utf8' }).trim(), 'First')
-        assert.strictEqual(
-          execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: there, encoding: 'utf8' }).trim(),
-          `${HOST}/you/tidepool.git`,
-        )
-        assert.deepStrictEqual(readdirSync(firstPlace(home, process.platform)), ['tidepool'])
-      }),
-    ),
+  // Held by a git of the test's own, a shell script: none on Windows.
+  it.live.skipIf(process.platform === 'win32')(
+    'starts empty and clones one name at once: the clone that lands first keeps it whole, and Start empty takes only its own',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const home = temp('althar-home-')
+          const { window, connectionId } = yield* signedInHome(home)
+          const found = yield* window.FindHomeFolders({})
+          const there = join(firstPlace(home, process.platform), 'tidepool')
+          const held = join(temp('althar-held-'), 'held')
+          // Start empty, held at its first commit until the clone has landed where it goes.
+          yield* afterEachCommit(`touch '${held}'; i=0; while [ ! -e '${there}/.git' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done`)
+          const making = yield* Effect.forkScoped(Effect.flip(window.MakeRepository({ grant: found.place.grant, name: 'Tidepool' })))
+          yield* until(
+            Effect.sync(() => existsSync(held)),
+            Boolean,
+            'Start empty held at its first commit',
+          )
+          assert.isTrue(existsSync(held))
+          // Built in a folder of its own: where it goes is still free for the clone.
+          assert.isFalse(existsSync(there))
+          const cloned = yield* window.CloneRepository({
+            commandId: commandId(),
+            grant: found.place.grant,
+            from: { connectionId, path: ['you', 'tidepool'] },
+          })
+          assert.strictEqual(cloned.path, there)
+          const refused = yield* Fiber.join(making)
+          assert.match(refused.message, /tidepool/)
+          // The clone, whole: its history and origin, nothing of Start empty's, and no hidden folder left beside it.
+          assert.strictEqual(execFileSync('git', ['log', '--format=%s'], { cwd: there, encoding: 'utf8' }).trim(), 'First')
+          assert.strictEqual(
+            execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: there, encoding: 'utf8' }).trim(),
+            `${HOST}/you/tidepool.git`,
+          )
+          assert.deepStrictEqual(readdirSync(firstPlace(home, process.platform)), ['tidepool'])
+        }),
+      ),
   )
 
   it.live('grants no more than it found: a repository alone, and a place that only takes new code', () =>
@@ -299,7 +303,7 @@ describe('making a project on a home from a window on another computer', () => {
         const client = yield* onHome(home)
         const found = yield* client.FindHomeFolders({})
         assert.deepStrictEqual(
-          found.repositories.map((one) => one.where),
+          found.repositories.map((one) => slashPath(one.where)),
           ['~/code'],
         )
         // New code goes in a usual place of its own, never the home a checkout is in.
@@ -396,12 +400,13 @@ describe('the home’s folders', () => {
       const second = yield* find
       assert.deepStrictEqual(second, first)
       assert.strictEqual(made, 2)
-      assert.strictEqual(first.place.where, '~/projects')
+      assert.strictEqual(slashPath(first.place.where), '~/projects')
     }),
   )
 
   it('go in ~/projects on Linux and ~/Projects elsewhere, where there is no usual place yet', () => {
-    assert.strictEqual(firstPlace('/home/you', 'linux'), '/home/you/projects')
-    assert.strictEqual(firstPlace('/Users/you', 'darwin'), '/Users/you/Projects')
+    // Joined as the home's own system joins a path: it's the computer the home runs on.
+    assert.strictEqual(firstPlace('/home/you', 'linux'), join('/home/you', 'projects'))
+    assert.strictEqual(firstPlace('/Users/you', 'darwin'), join('/Users/you', 'Projects'))
   })
 })
