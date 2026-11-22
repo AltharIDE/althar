@@ -222,7 +222,7 @@ describe('automatic usage takeover by model', () => {
       assert.include(taken, 'Carry on with the task from where it stands')
       const notices = (yield* items(task.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
       assert.lengthOf(notices, 1)
-      assert.include(notices[0]?.content.title, 'Claude Strong on Fake opencode takes the work over until then.')
+      assert.include(notices[0]?.content.title, 'Claude Strong on Fake opencode takes the work over.')
       assert.notInclude(notices[0]?.content.title, 'a different model')
       yield* noCall
     }).pipe(
@@ -930,6 +930,31 @@ describe('whether a lead is spent', () => {
   )
 })
 
+describe('whether a lead with no account named is spent', () => {
+  it.live('is until the earliest reset read of its accounts, a reading without one last', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const [first] = yield* accounts.of('codex')
+      const work = yield* accounts.add({ agentId: 'codex', name: 'Work', folder: mkdtempSync(join(tmpdir(), 'althar-spent-')) })
+      const resetsAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+      const sql = yield* SqlClient.SqlClient
+      const read = (accountId: string, window: Record<string, unknown>) =>
+        sql`INSERT INTO plan_usage_readings ${sql.insert({
+          accountId,
+          agentId: 'codex',
+          source: 'agent',
+          windows: JSON.stringify([{ kind: 'weekly', usedPercent: 100, ...window }]),
+          observedAt: new Date().toISOString(),
+        })}`
+      // Both out of room: the first read with no reset, the second with one in two hours.
+      yield* read(first!.id, {})
+      yield* read(work.id, { resetsAt })
+      const spent = Option.getOrUndefined(yield* (yield* Limits).spent({ agentId: 'codex', accountId: null, model: sol.id }))
+      assert.deepInclude(spent ?? {}, { agentId: 'codex', accountId: work.id, resetsAt, until: resetsAt })
+    }).pipe(Effect.provide(withAgents({}))),
+  )
+})
+
 describe('a stand-in on its lead’s own agent, giving the thread back to a model turned off there', () => {
   it.live('gives it to the same model through another agent, and says so', () =>
     Effect.gen(function* () {
@@ -940,14 +965,15 @@ describe('a stand-in on its lead’s own agent, giving the thread back to a mode
         threadId: task.threadId,
         agentId: 'codex',
         model: weak.id,
-        standsIn: { agentId: 'codex', model: sol.id, effort: null, accountId: null, until: null, why: 'limit' },
+        standsIn: { agentId: 'codex', model: sol.id, effort: 'high', accountId: null, until: null, why: 'limit' },
       })
       yield* (yield* Models).setModelBlocked({ agentId: 'codex', model: sol.id, blocked: true })
       assert.isTrue(yield* sessions.giveBack({ threadId: task.threadId, sessionId }))
       assert.include(yield* lines(task.threadId), 'GPT Strong is turned off for Fake codex: it carries on through Fake opencode.')
       // It takes the thread over from the next turn, as any lead given back to another agent does.
       const live = yield* sessions.running(task.threadId)
-      assert.deepStrictEqual(Option.getOrUndefined(live)?.nextLead, { agentId: 'opencode', model: goSol.id })
+      // With the effort it was given.
+      assert.deepStrictEqual(Option.getOrUndefined(live)?.nextLead, { agentId: 'opencode', model: goSol.id, effort: 'high' })
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
       const on = yield* until(agentsOn(task.threadId), (rows) => rows.length > 1)
       assert.deepStrictEqual(on.at(-1), { agentId: 'opencode', model: goSol.id })

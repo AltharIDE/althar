@@ -932,7 +932,9 @@ export class Limits extends Context.Service<
               if (Option.isNone(room) || room.value.leftPercent > 0) return Option.none<Out>()
               empty.push(room.value)
             }
-            const [first] = empty.toSorted((a, b) => Date.parse(a.resetsAt ?? '') - Date.parse(b.resetsAt ?? ''))
+            // The earliest reset read first; a reading without one last.
+            const resetOf = (room: Room) => (room.resetsAt === null ? Number.POSITIVE_INFINITY : Date.parse(room.resetsAt))
+            const [first] = empty.toSorted((a, b) => resetOf(a) - resetOf(b))
             if (first === undefined) return Option.none<Out>()
             const until = first.resetsAt ?? new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
             return Option.some<Out>({ agentId: lead.agentId, accountId: first.accountId, resetsAt: first.resetsAt, until })

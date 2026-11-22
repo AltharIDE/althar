@@ -11,7 +11,8 @@ const kept: StandIn = {
   model: 'opencode-go/kimi',
   effort: 'high',
   accountId: 'acc_go',
-  until: '2026-11-29T00:00:00.000Z',
+  // Only kept, never read here: any time does.
+  until: '2020-01-01T00:00:00.000Z',
   why: 'low',
 }
 const lead = { agentId: 'opencode', model: 'opencode-go/sol', effort: 'medium' }

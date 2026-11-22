@@ -436,11 +436,12 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
             resetsAt: out?.resetsAt ?? null,
             now: yield* Clock.currentTimeMillis,
             ...(step === undefined ? {} : { step }),
-            // Another lead stands in until this one's reset (standIn.ts); the same on another account just carries on.
+            // Another model stands in until this one's reset (standIn.ts); the same model, on another agent or account, just
+            // carries on as the lead, as a stand-in on the task's own model isn't one (`forTask`).
             to: {
               ...(yield* limits.named(next.agentId, model, to)),
               ownWork: next.ownWork,
-              standsIn: next.agentId !== agentId || model !== currentModel,
+              standsIn: !(yield* limits.sameModel)({ agentId: next.agentId, model }, { agentId, model: currentModel }),
               ...('otherModel' in next && next.otherModel === true && fromNamed.model !== null ? { otherModel: true } : {}),
             },
           })
@@ -570,10 +571,11 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
               from,
               resetsAt,
               now: yield* Clock.currentTimeMillis,
-              // Another lead stands in until this one's reset, and gives the thread back then (standIn.ts, `holds`).
+              // Another model stands in until this one's reset, and gives the thread back then (standIn.ts, `holds`); the
+              // same model elsewhere just carries on as the lead (`forTask`).
               to: {
                 ...(yield* limits.named(next.agentId, model, to)),
-                standsIn: next.agentId !== agentId || model !== currentModel,
+                standsIn: !(yield* limits.sameModel)({ agentId: next.agentId, model }, { agentId, model: currentModel }),
                 ...('otherModel' in next && next.otherModel === true && fromNamed.model !== null ? { otherModel: true } : {}),
               },
             }),

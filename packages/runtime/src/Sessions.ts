@@ -2910,14 +2910,13 @@ export class Sessions extends Context.Service<
                   if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
                   const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
                   if (standsIn === undefined || standsIn.agentId !== asked?.agentId || standsIn.model !== asked.model) return undefined
-                  const next =
-                    way.kind === 'elsewhere'
+                  // The effort it was given goes with it either way, as `routed` keeps a session's.
+                  const next = {
+                    ...(way.kind === 'elsewhere'
                       ? { agentId: way.to.agentId, ...(way.to.model === null ? {} : { model: way.to.model }) }
-                      : {
-                          agentId: standsIn.agentId,
-                          ...(standsIn.model === null ? {} : { model: standsIn.model }),
-                          ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
-                        }
+                      : { agentId: standsIn.agentId, ...(standsIn.model === null ? {} : { model: standsIn.model }) }),
+                    ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
+                  }
                   return (yield* setLeadChoice(running, next, { onlyIfEmpty: true })) ? standsIn : undefined
                 }),
               )

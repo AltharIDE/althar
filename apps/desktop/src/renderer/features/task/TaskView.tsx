@@ -94,6 +94,7 @@ import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { localText } from '../../shared/local'
 import { LocalPlace } from '../../shared/LocalPlace'
+import { StandInPlace } from '../../shared/StandInPlace'
 import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
@@ -902,6 +903,8 @@ export function TaskView({
   // Its lead changed from its next turn, by the picker, the team dialog or a tool: the picker shows who leads it then, and so does the header.
   const pending: Choice | null = session === null || !session.held ? null : upcomingOn(session)
   // What the person just picked, shown until the runtime has it (or has refused it): at once, before anything is asked of the agent.
+  // Handed the task by a usage limit, the lead stands in for the one the task was given, which takes it back at its reset.
+  const standIn = session?.held === true && waiting === null && moving === null && pending === null ? (session.standsIn ?? null) : null
   const choice =
     session === null || !session.held
       ? taking === null
@@ -1506,6 +1509,14 @@ export function TaskView({
                 value={choice}
                 onChange={choose}
                 {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
+              />
+            )}
+            {standIn !== null && (
+              <StandInPlace
+                given={named(standIn.agentId, standIn.model).name}
+                until={standIn.until}
+                why={standIn.why}
+                onPutBack={() => choose({ agentId: standIn.agentId, model: standIn.model, effort: standIn.effort })}
               />
             )}
             {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-096). */}
