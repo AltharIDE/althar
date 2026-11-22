@@ -447,7 +447,7 @@ describe('automatic usage takeover by model', () => {
       const task = yield* startTask()
       const limits = yield* Limits
       const models = yield* Models
-      // On GPT Strong through OpenCode Go, as GPT-6.2 Sol was: Codex offers the same model, Claude Code a stronger one.
+      // On GPT Strong through OpenCode Go: Codex offers the same model, Claude Code a stronger one.
       const input = { besides: ['opencode'], projectId: task.projectId, planned: { agentId: 'opencode', model: goSol.id } }
       const same = yield* limits.free(input)
       assert.deepInclude(same, { agentId: 'codex', model: sol.id })

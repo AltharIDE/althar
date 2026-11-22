@@ -136,7 +136,7 @@ export class AutoModels extends Context.Service<
             })),
           )
           if (lighter === undefined) return switched
-          // The same model on another agent with room comes before a lighter one (the person's note of 21 November): the step
+          // The same model on another agent with room comes before a lighter one: the step
           // stays on its model here, and goes to that agent once this plan is nearly out, as Limits ranks the same model first.
           const elsewhere = yield* limits
             .free({

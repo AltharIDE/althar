@@ -2099,7 +2099,7 @@ export class Sessions extends Context.Service<
       /**
        * Where a session asked for on a model the person turned off for its agent starts: the same model through another
        * agent with room, never another model unasked; only where none has it, the agent's strongest other model. Either way
-       * the thread says so plainly (the person's note of 21 November). One already on the thread is left as it is.
+       * the thread says so plainly. One already on the thread is left as it is.
        */
       const routed = <
         I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
