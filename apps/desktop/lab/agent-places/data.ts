@@ -1,20 +1,24 @@
-import type { BoardCall, BoardSnapshot, BoardTask, WorkPlaces } from '@althar/contracts'
+import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 import { Brand, type LoadGlance, type LoadPoint, type LoadRow, MemoryPressure, ProjectInk } from '@althar/ui'
 
 import { lanesOf, type Lanes } from '../../src/renderer/features/board/lanes'
 import { card } from '../../tests/fixtures'
 
 /*
- * What the lab draws from: the home's workers, this Mac first. Each has its
- * agents (the runtime's `WorkPlaces`: how many work, its number, a number
- * lowered for now and each agent's task), how hard it works (`GetLoad`), and
- * whether it can be reached. Meridian's board waits on them in Up next. Made
+ * What the lab draws from: the window's home and its workers, the home first.
+ * The home is this Mac, or a home the window is connected to (studio), and is
+ * a worker too. Each worker has its agents (the runtime's `WorkPlaces`: how
+ * many work, its number, a number lowered for now and each agent's task), how
+ * hard it works (`GetLoad`), whether it can be reached, and what it is. Made
  * up, and the same on every load: the runtime knows this Mac's agents and
  * load, and only a worker's id, its agents and whether it is busy (#1120).
  */
 
+/** Where the window is: on this computer's own home, or connected to studio. */
+export type Pov = 'local' | 'remote'
+
 export const SCENES = [
-  { key: 'memory', label: 'This Mac lowered' },
+  { key: 'memory', label: 'The home lowered' },
   { key: 'full', label: 'All at work' },
   { key: 'down', label: 'A worker offline' },
   { key: 'calm', label: 'Room to spare' },
@@ -58,13 +62,23 @@ export interface Places {
   readonly machine: Machine
 }
 
-/** A computer the home runs work on: this Mac, or one enrolled. */
+export type Provider = 'Claude Code' | 'Codex'
+
+/** A computer the home runs work on: the home itself, this Mac, or one enrolled. */
 export interface Worker extends Places {
   readonly id: string
   readonly name: string
   /** This Mac, the computer the window is on. */
   readonly here: boolean
+  /** The window's home: it keeps the projects and runs the coordinator. */
+  readonly home: boolean
   readonly system: 'macOS' | 'Linux'
+  /** Where the home reaches it; this Mac has none of its own. */
+  readonly address: string | null
+  /** The agents signed in on it, which it can run. */
+  readonly providers: readonly Provider[]
+  /** Althar's version on it. */
+  readonly version: string
   /** How hard it works, now: shares of the whole. */
   readonly cpu: number
   readonly memory: number
@@ -176,7 +190,11 @@ interface Draft {
   id: string
   name: string
   here?: boolean
+  home?: boolean
   system?: Worker['system']
+  address?: string
+  providers?: Provider[]
+  version?: string
   machine: Machine
   agents: Agent[]
   cpu: number
@@ -189,7 +207,11 @@ const worker = (draft: Draft): Worker => ({
   id: draft.id,
   name: draft.name,
   here: draft.here ?? false,
+  home: draft.home ?? false,
   system: draft.system ?? 'Linux',
+  address: draft.address ?? null,
+  providers: draft.providers ?? ['Claude Code', 'Codex'],
+  version: draft.version ?? '0.9.4',
   configured: draft.machine.count,
   atOnce: draft.lowered?.atOnce ?? draft.machine.count,
   why: draft.lowered?.why ?? null,
@@ -202,7 +224,7 @@ const worker = (draft: Draft): Worker => ({
 })
 
 /** The home's workers, this Mac first; crowded, a bigger Mac, more workers, long names and long titles. Alone, this Mac only. */
-export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
+const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
   const a = (key: TaskKey, role?: Role, doing?: Doing) => agentOf(key, crowded, role, doing)
   const mac: Machine = crowded ? { count: 8, memory: 64, cores: 20 } : { count: 5, memory: 32, cores: 14 }
   const box: Machine = { count: 4, memory: 64, cores: 16 }
@@ -212,6 +234,7 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worke
       id: 'here',
       name: 'This Mac',
       here: true,
+      home: true,
       system: 'macOS',
       machine: mac,
       agents,
@@ -220,9 +243,20 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worke
       ...(lowered ? { lowered } : {}),
     })
   const buildBox = (agents: Agent[], cpu: number, memory: number, rest: Partial<Draft> = {}) =>
-    worker({ id: 'build-box', name: 'build-box', machine: box, agents, cpu, memory, ...rest })
+    worker({ id: 'build-box', name: 'build-box', address: 'build-box.tail9c2e.ts.net', machine: box, agents, cpu, memory, ...rest })
   const macMini = (agents: Agent[], cpu: number, memory: number, rest: Partial<Draft> = {}) =>
-    worker({ id: 'mac-mini', name: 'mac-mini', system: 'macOS', machine: mini, agents, cpu, memory, ...rest })
+    worker({
+      id: 'mac-mini',
+      name: 'mac-mini',
+      system: 'macOS',
+      address: 'mac-mini.tail9c2e.ts.net',
+      providers: ['Claude Code'],
+      machine: mini,
+      agents,
+      cpu,
+      memory,
+      ...rest,
+    })
   // Crowded: two more, one with a long name.
   const more = (agents: [Agent[], Agent[]], offline = false) =>
     crowded
@@ -230,6 +264,8 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worke
           worker({
             id: 'gpu',
             name: 'gpu-box',
+            address: 'gpu-box.tail9c2e.ts.net',
+            providers: ['Codex'],
             machine: { count: 6, memory: 128, cores: 32 },
             agents: agents[0],
             cpu: 0.44,
@@ -238,6 +274,8 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worke
           worker({
             id: 'frankfurt',
             name: 'ci-runner-frankfurt-02.internal',
+            address: 'ci-runner-frankfurt-02.internal:7443',
+            version: '0.9.2',
             machine: { count: 3, memory: 32, cores: 8 },
             agents: agents[1],
             cpu: 0.58,
@@ -306,23 +344,33 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worke
   return alone ? all.slice(0, 1) : all
 }
 
-/** What the runtime gives the board today, for the take as built: this Mac's agents. */
-const workPlacesOf = (places: Places): WorkPlaces => ({
-  busy: places.agents.length,
-  atOnce: places.atOnce,
-  configured: places.configured,
-  offline: false,
-  holders: places.agents.map((one) => ({
-    taskId: one.taskId,
-    title: one.title,
-    threadId: `th-${one.taskId}`,
-    kept: one.doing === 'background',
-    agentId: one.agent === 'Codex' ? 'codex' : 'claude-code',
-    role: one.role,
-    reason: one.doing,
-    running: [],
-  })),
-})
+/** studio, a home on a server the window is connected to, a worker too: in this Mac's place, its agents and load. */
+export const STUDIO = { name: 'studio', address: 'studio.tail9c2e.ts.net', version: '0.9.3', latest: '0.9.4' } as const
+
+/**
+ * The window's home and its workers, the home first, and This Mac, among them or not. On studio, the server takes
+ * this Mac's place, and the mac-mini serves this computer only; this Mac is one of studio's workers only where it
+ * is lent.
+ */
+export const workersOf = (scene: Scene, crowded: boolean, alone: boolean, pov: Pov, lent: boolean): { workers: Worker[]; mac: Worker } => {
+  const local = localOf(scene, crowded, alone)
+  if (pov === 'local') return { workers: local, mac: local[0]! }
+  const [mac, ...rest] = local
+  const studio: Worker = {
+    ...mac!,
+    id: 'studio',
+    name: STUDIO.name,
+    here: false,
+    system: 'Linux',
+    address: STUDIO.address,
+    version: STUDIO.version,
+    machine: { count: 6, memory: 32, cores: 8 },
+    configured: 6,
+    atOnce: mac!.why === null ? 6 : mac!.atOnce,
+  }
+  const lentMac: Worker = { ...mac!, home: false, agents: [], cpu: 0.14, memory: 0.46, atOnce: mac!.configured, why: null }
+  return { workers: [studio, ...rest.filter((one) => one.id !== 'mac-mini'), ...(lent ? [lentMac] : [])], mac: lentMac }
+}
 
 /* ---- what waits for an agent ----------------------------------------------------------- */
 
@@ -378,7 +426,7 @@ const permission: BoardCall = {
 }
 
 /** Meridian's board: what runs there on any worker, what waits in Up next for an agent, a plan, a call and something settled. */
-export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[], asBuilt: boolean): Lanes => {
+export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[]): Lanes => {
   const here = workers[0]!
   const queued = { busy: here.agents.length, atOnce: here.atOnce }
   const mine = workers.flatMap((one) => one.agents).filter((one) => one.project === 'Meridian')
@@ -431,8 +479,6 @@ export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[],
     tasks: [...running, ...line, planned, ship, settled],
     calls: [permission],
     settledTotal: 1,
-    // As built, the board draws the banner from this Mac's; a take takes them away.
-    ...(asBuilt ? { workPlaces: workPlacesOf(here) } : {}),
   } as BoardSnapshot
   return lanesOf(snapshot)
 }
@@ -451,20 +497,18 @@ const historyTo = (to: LoadPoint, seed: number): LoadPoint[] =>
     return { cpu, work: Math.min(cpu, Math.max(0, to.work * k + grain(i, seed) * 0.03)) }
   })
 
-/** What else of Althar's runs on this Mac and has no agent at work: each project's coordinator, and Althar itself. */
-const NO_AGENT: readonly LoadRow[] = [
-  {
-    id: 'coordinator',
-    title: 'Coordinator',
-    project: 'Meridian',
-    agent: 'Claude Code',
-    mark: Brand.ClaudeCode,
-    cpu: 0.01,
-    memory: '0.3 GB',
-    processes: 2,
-  },
-  { id: 'althar', title: 'Althar', opens: false, cpu: 0.03, memory: '0.6 GB', processes: 6 },
-]
+/** What else of Althar's runs and has no agent at work: at the home, each project's coordinator; on this Mac, Althar itself. */
+const COORDINATOR: LoadRow = {
+  id: 'coordinator',
+  title: 'Coordinator',
+  project: 'Meridian',
+  agent: 'Claude Code',
+  mark: Brand.ClaudeCode,
+  cpu: 0.01,
+  memory: '0.3 GB',
+  processes: 2,
+}
+const ALTHAR: LoadRow = { id: 'althar', title: 'Althar', opens: false, cpu: 0.03, memory: '0.6 GB', processes: 6 }
 
 /** Each task's share of the CPU and the memory it holds, made up but steady. */
 const SHARE: Record<TaskKey, { cpu: number; memory: number }> = {
@@ -499,7 +543,9 @@ export const loadOf = (worker: Worker): LoadGlance => {
       processes: worker.agents.filter((other) => other.taskId === one.taskId).length * 4,
     })
   }
-  const rows = [...byTask.values(), ...(worker.here ? NO_AGENT : [])].toSorted((a, b) => b.cpu - a.cpu)
+  const rows = [...byTask.values(), ...(worker.home ? [COORDINATOR] : []), ...(worker.here || worker.home ? [ALTHAR] : [])].toSorted(
+    (a, b) => b.cpu - a.cpu,
+  )
   const work = Math.min(
     worker.cpu,
     rows.reduce((sum, row) => sum + row.cpu, 0),

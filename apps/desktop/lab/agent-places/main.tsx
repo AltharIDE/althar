@@ -3,7 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
@@ -14,74 +14,61 @@ import {
   ControlFoot,
   ControlFootStart,
   ControlSheet,
-  Icon,
   IconButton,
-  KeepAwake,
   LinkButton,
   ProjectTabs,
-  SettingList,
   SettingsLayout,
-  SettingsNav,
-  SettingSwitch,
 } from '@althar/ui'
 
 import { ServicesProvider } from '../../src/renderer/data/services'
 import { BoardView } from '../../src/renderer/features/board/BoardView'
 import { QuickCards } from '../../src/renderer/features/settings/QuickCards'
-import { GROUPS, sectionText } from '../../src/renderer/features/settings/sections'
 import { text as settingsText } from '../../src/renderer/features/settings/text'
 import { usePreferences } from '../../src/renderer/shared/usePreferences'
 import { agents, fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
+import { bar, quick } from './base'
 import { boardOf, loadOf, NOW, PROJECTS, type Scene, SCENES, waitingOf, type Worker, workersOf } from './data'
-import { A, B, C } from './takes/takes'
-import type { Ctx, Take } from './takes/types'
-import { ZERO } from './takes/zero'
+import { AddWorker } from './settings/pieces'
+import { TAKES } from './settings/takes'
+import type { Ctx, Place, Take } from './types'
 import s from './lab.module.css'
 
 /*
- * The agent places lab (README.md): where the home's workers and their agents
- * live once the board's banner over Up next goes, this Mac first, around This
- * Mac (what the CPU and MEM meter opens), the Homes chip and the Agents at
- * once slider, on the app's own board, the kit's own window bar and its own
- * settings, with no runtime. The bar along the bottom, or its keys, swaps in
- * place: the take (0 as built, A B C), the scene (Q W E R), crowded (K), this
- * Mac alone (M), a narrow window (N), the Settings tab (S), dark (D), and
- * whether what the take opens stays open as they change (O). G opens the
- * quick settings.
+ * The agent places lab (README.md), its third round: Settings once the home
+ * has workers. The base is what was picked (the home's popover with the
+ * other workers under it, the quick settings' slider with a line a worker);
+ * the takes are Settings, from this computer's own home or from studio, a
+ * home the window is connected to. The bar along the bottom, or its keys,
+ * swaps in place: the take (A B C), the window on studio (H), the scene
+ * (Q W E R), crowded (K), the home alone (M), a narrow window (N), the board
+ * or Settings (S), dark (D); G opens the quick settings, P the home's popover.
  */
 
-const TAKES: readonly Take[] = [ZERO, A, B, C]
 const SCENE_KEYS = ['q', 'w', 'e', 'r'] as const
 
 const params = () => new URLSearchParams(location.search)
 const read = () => {
   const now = params()
   return {
-    d: TAKES.find((one) => one.key === now.get('d'))?.key ?? A.key,
+    d: TAKES.find((one) => one.key === now.get('d'))?.key ?? 'a',
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
-    o: now.get('o') !== '0',
+    h: now.get('h') === '1',
+    l: now.get('l') === '1',
     k: now.get('k') === '1',
     m: now.get('m') === '1',
     n: now.get('n') === '1',
     dark: now.get('theme') === 'dark',
-    screen: (now.get('screen') === 'settings' ? 'settings' : 'board') as 'board' | 'settings',
+    screen: (now.get('screen') === 'board' ? 'board' : 'settings') as 'board' | 'settings',
+    sec: now.get('sec'),
+    w: now.get('w'),
   }
 }
 type State = ReturnType<typeof read>
 
-/** What the take opens, as the lab loads or the take changes: nothing as built, on Settings, or with O off. */
-const openedBy = (state: State) => {
-  const take = TAKES.find((one) => one.key === state.d)!
-  const on = state.o && take !== ZERO && state.screen === 'board'
-  const forced = params().get('open')
-  const opens = forced === 'peek' || forced === 'homes' || forced === 'quick' ? forced : take.opens
-  return { peek: on && opens === 'peek', homes: on && opens === 'homes', quick: (on || forced === 'quick') && opens === 'quick' }
-}
-
 if (params().get('shot') === '1') document.documentElement.dataset.shot = ''
 
-function Gear({ ctx, take, onAll }: { ctx: Ctx; take: Take; onAll: () => void }) {
+function Gear({ ctx, onAll }: { ctx: Ctx; onAll: () => void }) {
   const preferences = usePreferences()
   return (
     <ControlCenter
@@ -92,10 +79,7 @@ function Gear({ ctx, take, onAll }: { ctx: Ctx; take: Take; onAll: () => void })
     >
       <div className={s.quick}>
         <QuickCards preferences={preferences} sounds={[]} onSection={onAll} />
-        <ControlSheet>
-          {take.slider(ctx, true)}
-          {take.quick?.(ctx)}
-        </ControlSheet>
+        <ControlSheet>{quick(ctx)}</ControlSheet>
       </div>
       <ControlFoot>
         <ControlFootStart>
@@ -118,62 +102,34 @@ function Gear({ ctx, take, onAll }: { ctx: Ctx; take: Take; onAll: () => void })
   )
 }
 
-function SettingsScreen({ ctx, take }: { ctx: Ctx; take: Take }) {
+function SettingsScreen({ ctx, take, place, go }: { ctx: Ctx; take: Take; place: Place; go: (place: Place) => void }) {
   const preferences = usePreferences()
+  const page = take.page(ctx, place, go) ?? take.page(ctx, take.at(ctx, null), go)!
   return (
     <SettingsLayout
-      section="this-mac"
-      title={sectionText['this-mac'].title}
+      section={place.section}
+      title={page.title}
+      {...(page.lede === undefined ? {} : { lede: page.lede })}
       side={
         <>
           <QuickCards side preferences={preferences} sounds={[]} onSection={() => undefined} />
-          <SettingsNav
-            label="Settings"
-            groups={GROUPS.map((group) => group.map((id) => ({ id, title: sectionText[id].title, icon: sectionText[id].icon })))}
-            value="this-mac"
-            onChange={() => undefined}
-          />
+          {take.side(ctx, place, go)}
         </>
       }
     >
-      <SettingList>
-        <KeepAwake
-          on
-          onChange={() => undefined}
-          onBattery={false}
-          onBatteryChange={() => undefined}
-          text={{ title: settingsText.awakeTitle, note: settingsText.awakeNote }}
-        />
-        {take.slider(ctx, false)}
-        <SettingSwitch title={settingsText.loadTitle} glyph={<Icon name="load" size={15} />} checked onChange={() => undefined} />
-        <SettingSwitch
-          title={settingsText.atLoginTitle}
-          note={settingsText.atLoginNote}
-          glyph={<Icon name="automation" size={15} />}
-          checked={false}
-          onChange={() => undefined}
-        />
-        <SettingSwitch
-          title={settingsText.pauseAllTitle}
-          note={settingsText.pauseAllNote}
-          glyph={<Icon name="hold" size={15} />}
-          checked={false}
-          onChange={() => undefined}
-        />
-      </SettingList>
-      {take.settings?.(ctx)}
+      {page.body}
     </SettingsLayout>
   )
 }
 
 function Lab() {
   const [state, setStateNow] = useState(read)
-  // Each worker's own number, where the person moved its slider.
+  // Each worker's own number, where the person moved its slider, and those taking no new tasks.
   const [own, setOwn] = useState<Record<string, number | null>>({})
-  const [open, setOpen] = useState(() => openedBy(read()))
+  const [paused, setPaused] = useState<ReadonlySet<string>>(new Set())
+  const [open, setOpen] = useState({ peek: params().get('open') === 'peek', quick: params().get('open') === 'quick' })
+  const [adding, setAdding] = useState(params().get('open') === 'add')
   const [said, setSaid] = useState<string | null>(null)
-  // Settings opened on a worker's number: scrolled to once drawn.
-  const focus = useRef<string | null>(null)
   const services = useMemo(() => servicesFor(fakeClient().client, fakeHost()), [])
   const take = TAKES.find((one) => one.key === state.d)!
 
@@ -183,6 +139,8 @@ function Lab() {
     url.set('d', merged.d)
     url.set('p', merged.p)
     for (const [key, on] of [
+      ['h', merged.h],
+      ['l', merged.l],
       ['k', merged.k],
       ['m', merged.m],
       ['n', merged.n],
@@ -191,14 +149,17 @@ function Lab() {
       else url.delete(key)
     if (merged.dark) url.set('theme', 'dark')
     else url.delete('theme')
-    if (merged.screen === 'settings') url.set('screen', 'settings')
+    if (merged.screen === 'board') url.set('screen', 'board')
     else url.delete('screen')
-    if (merged.o) url.delete('o')
-    else url.set('o', '0')
+    for (const [key, value] of [
+      ['sec', merged.sec],
+      ['w', merged.w],
+    ] as const)
+      if (value === null) url.delete(key)
+      else url.set(key, value)
     url.delete('open')
     history.replaceState(null, '', `?${url.toString()}`)
-    if (next.p !== undefined || next.k !== undefined) setOwn({})
-    setOpen(openedBy(merged))
+    if (next.p !== undefined || next.k !== undefined || next.h !== undefined) setOwn({})
     setStateNow(merged)
   }
 
@@ -207,56 +168,68 @@ function Lab() {
   }, [state.dark])
 
   // The scene's workers, with the person's own numbers where they moved a slider: lowered for now still lowers it.
-  const workers = useMemo(
-    () =>
-      workersOf(state.p, state.k, state.m).map((one): Worker => {
-        const n = own[one.id]
-        if (n === undefined) return one
-        const configured = n ?? one.machine.count
-        return { ...one, configured, atOnce: one.why === null ? configured : Math.min(one.atOnce, configured) }
-      }),
-    [state.p, state.k, state.m, own],
-  )
-  const here = workers[0]!
+  const { workers, mac } = useMemo(() => {
+    const mine = (one: Worker): Worker => {
+      const n = own[one.id]
+      if (n === undefined) return one
+      const configured = n ?? one.machine.count
+      return { ...one, configured, atOnce: one.why === null ? configured : Math.min(one.atOnce, configured) }
+    }
+    const found = workersOf(state.p, state.k, state.m, state.h ? 'remote' : 'local', state.l)
+    return { workers: found.workers.map(mine), mac: mine(found.mac) }
+  }, [state.p, state.k, state.m, state.h, state.l, own])
+  const home = workers[0]!
   const waiting = useMemo(() => waitingOf(workers, state.k), [workers, state.k])
   // Drawn again only when what it shows changes: the board moves its cards on a new one.
-  const lanes = useMemo(() => boardOf(workers, waiting, state.d === ZERO.key), [workers, waiting, state.d])
-  const loads = useMemo(() => new Map(workers.map((one) => [one.id, loadOf(one)])), [workers])
-
-  useEffect(() => {
-    if (focus.current === null || state.screen !== 'settings') return
-    document.getElementById(`worker-${focus.current}`)?.scrollIntoView({ block: 'center' })
-    focus.current = null
-  })
+  const lanes = useMemo(() => boardOf(workers, waiting), [workers, waiting])
+  const loads = useMemo(() => new Map([...workers, mac].map((one) => [one.id, loadOf(one)])), [workers, mac])
 
   const say = (what: string) => {
     setSaid(what)
-    setTimeout(() => setSaid((was) => (was === what ? null : was)), 2200)
+    setTimeout(() => setSaid((was) => (was === what ? null : was)), 2600)
   }
   const titleOf = (id: string) =>
     workers.flatMap((one) => one.agents).find((one) => one.taskId === id)?.title ?? waiting.find((one) => one.taskId === id)?.title ?? id
 
   const ctx: Ctx = {
+    pov: state.h ? 'remote' : 'local',
     workers,
-    here,
-    load: loads.get(here.id)!,
+    home,
+    mac,
+    load: loads.get(home.id)!,
     loadOf: (worker) => loads.get(worker.id) ?? loadOf(worker),
     waiting,
     most: MOST_AT_ONCE,
     setCount: (id, n) => setOwn((was) => ({ ...was, [id]: n })),
+    taking: (id) => !paused.has(id),
+    setTaking: (id, on) =>
+      setPaused((was) => {
+        const next = new Set(was)
+        if (on) next.delete(id)
+        else next.add(id)
+        return next
+      }),
+    lent: state.l,
+    setLent: (on) => set({ l: on }),
     onOpen: (id) => say(`Opens ${titleOf(id)}`),
     say,
-    peek: { open: open.peek, set: (on) => setOpen((was) => ({ ...was, peek: on, ...(on ? { homes: false, quick: false } : {}) })) },
-    homes: { open: open.homes, set: (on) => setOpen((was) => ({ ...was, homes: on, ...(on ? { peek: false, quick: false } : {}) })) },
-    quick: { open: open.quick, set: (on) => setOpen((was) => ({ ...was, quick: on, ...(on ? { peek: false, homes: false } : {}) })) },
+    peek: { open: open.peek, set: (on) => setOpen((was) => ({ ...was, peek: on, ...(on ? { quick: false } : {}) })) },
+    quick: { open: open.quick, set: (on) => setOpen((was) => ({ ...was, quick: on, ...(on ? { peek: false } : {}) })) },
     settings: (worker) => {
-      setOpen({ peek: false, homes: false, quick: false })
-      if (worker !== undefined) focus.current = worker
-      set({ screen: 'settings' })
+      setOpen({ peek: false, quick: false })
+      const at = take.at(ctx, worker ?? null)
+      set({ screen: 'settings', sec: at.section, w: at.worker })
+      if (worker !== undefined)
+        requestAnimationFrame(() => document.getElementById(`worker-${worker}`)?.scrollIntoView({ block: 'center' }))
     },
+    add: () => setAdding(true),
   }
 
-  const boardKey = `${state.d}-${state.p}-${state.k}-${state.m}-${state.n}-${here.configured}`
+  // Where Settings is: as the address says, or where the take opens.
+  const place: Place = state.sec === null ? take.at(ctx, null) : { section: state.sec, worker: state.w }
+  const go = (next: Place) => set({ sec: next.section, w: next.worker })
+
+  const boardKey = `${state.p}-${state.k}-${state.m}-${state.h}-${state.n}-${home.configured}`
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -264,16 +237,20 @@ function Lab() {
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
       const found = TAKES.find((one) => one.kbd === key)
-      if (found !== undefined) return set({ d: found.key })
+      if (found !== undefined) return set({ d: found.key, sec: null, w: null })
       const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
+      if (key === 'h') return set({ h: !state.h, sec: null, w: null })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'm') return set({ m: !state.m })
       if (key === 'n') return set({ n: !state.n })
       if (key === 'd') return set({ dark: !state.dark })
-      if (key === 'o') return set({ o: !state.o })
       if (key === 's') return set({ screen: state.screen === 'board' ? 'settings' : 'board' })
       if (key === 'g') ctx.quick.set(!open.quick)
+      if (key === 'p') {
+        if (state.screen !== 'board') set({ screen: 'board' })
+        ctx.peek.set(!open.peek)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -304,8 +281,8 @@ function Lab() {
               lights="space"
               end={
                 <>
-                  {take.bar(ctx)}
-                  <Gear ctx={ctx} take={take} onAll={() => ctx.settings()} />
+                  {bar(ctx)}
+                  <Gear ctx={ctx} onAll={() => ctx.settings()} />
                 </>
               }
             />
@@ -321,18 +298,29 @@ function Lab() {
                   />
                 </div>
               ) : (
-                <SettingsScreen ctx={ctx} take={take} />
+                <SettingsScreen ctx={ctx} take={take} place={place} go={go} />
               )}
             </div>
           </div>
         </div>
+        {adding && <AddWorker ctx={ctx} onClose={() => setAdding(false)} />}
         <div className={s.bar} role="toolbar" aria-label="Takes">
           {TAKES.map((one) => (
-            <button key={one.key} type="button" aria-pressed={state.d === one.key} onClick={() => set({ d: one.key })} title={one.idea}>
+            <button
+              key={one.key}
+              type="button"
+              aria-pressed={state.d === one.key}
+              onClick={() => set({ d: one.key, sec: null, w: null })}
+              title={one.idea}
+            >
               <kbd>{one.kbd.toUpperCase()}</kbd>
               {one.label}
             </button>
           ))}
+          <span className={s.rule} />
+          <button type="button" aria-pressed={state.h} onClick={() => set({ h: !state.h, sec: null, w: null })}>
+            <kbd>H</kbd>Window on studio
+          </button>
           <span className={s.rule} />
           {SCENES.map((one, i) => (
             <button key={one.key} type="button" aria-pressed={state.p === one.key} onClick={() => set({ p: one.key })}>
@@ -345,23 +333,20 @@ function Lab() {
             <kbd>K</kbd>Crowded
           </button>
           <button type="button" aria-pressed={state.m} onClick={() => set({ m: !state.m })}>
-            <kbd>M</kbd>Only this Mac
+            <kbd>M</kbd>Home alone
           </button>
           <button type="button" aria-pressed={state.n} onClick={() => set({ n: !state.n })}>
             <kbd>N</kbd>Narrow
           </button>
           <button
             type="button"
-            aria-pressed={state.screen === 'settings'}
+            aria-pressed={state.screen === 'board'}
             onClick={() => set({ screen: state.screen === 'board' ? 'settings' : 'board' })}
           >
-            <kbd>S</kbd>Settings
+            <kbd>S</kbd>Board
           </button>
           <button type="button" aria-pressed={state.dark} onClick={() => set({ dark: !state.dark })}>
             <kbd>D</kbd>Dark
-          </button>
-          <button type="button" aria-pressed={state.o} onClick={() => set({ o: !state.o })}>
-            <kbd>O</kbd>Keep open
           </button>
           <span className={s.gap} />
           <span className={s.idea} title={take.idea}>

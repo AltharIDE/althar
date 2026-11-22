@@ -2,10 +2,11 @@ import { percent } from '../../../../packages/ui/src/chrome/LoadMeter/load'
 import { isLowered, type Places, type Why, type Worker } from './data'
 
 /*
- * What the takes say, as little as each needs. On screen an agent place is an
- * agent, as the slider already counts them ("Agents at once"); a computer the
- * home runs work on is a worker, as the person calls it and the plan card's
- * Run on already says ("Linux worker").
+ * What the lab says, as little as each place needs. On screen an agent place
+ * is an agent, as the slider already counts them ("Agents at once"); a
+ * computer the home runs work on is a worker, as the person calls it and the
+ * plan card's Run on already says ("Linux worker"); the home is where the
+ * projects live, as the Homes chip already says.
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
@@ -17,9 +18,10 @@ export const words = {
   agents: 'Agents',
   workers: 'Workers',
   otherWorkers: 'Other workers',
-  runningHere: 'Running on This Mac',
+  runningOn: (name: string) => `Running on ${name}`,
   atOnce: 'Agents at once',
   offline: 'Offline',
+  home: 'Home',
 
   /** How many work, of the number. */
   of: (places: Places) => `${places.agents.length} of ${places.configured}`,
@@ -46,4 +48,34 @@ export const words = {
 
   /** The default's mark on a worker's slider, by its name. */
   mark: (worker: Worker) => `${worker.machine.count} · default`,
+
+  /* ---- Settings ---- */
+
+  /** What the computer is. */
+  computer: (worker: Worker) => `${worker.system} · ${worker.machine.cores} cores · ${worker.machine.memory} GB`,
+  /** Taking no new tasks: what runs there finishes. */
+  notTaking: 'Takes no new tasks',
+  takeTitle: 'Take new tasks',
+  takeNote: 'Off, what runs there finishes and nothing new starts.',
+  add: 'Add a worker',
+  addTitle: (home: string) => `Add a worker to ${home}`,
+  addNote: 'Run this on the computer you’re adding.',
+  addWaiting: 'Waiting for it to join…',
+  remove: 'Remove this worker',
+  /** This Mac lent to a home it isn't: one of its workers too. */
+  lend: (home: string) => `Run ${home}’s tasks on This Mac`,
+  lendNote: 'This Mac’s agents at once are shared with this computer’s own projects.',
+  update: (version: string) => `Update to ${version}`,
+  facts: {
+    computer: 'Computer',
+    address: 'Address',
+    agents: 'Signed in',
+    version: 'Althar',
+    devices: 'Opened from',
+  },
+  /** The devices a home on a server is opened from. */
+  devices: 'This Mac · iPhone, 2 days ago',
+  /** The home, in a line: what it keeps. */
+  homeNote: (home: Worker) =>
+    home.here ? 'Keeps your projects and runs the coordinator' : `Keeps these projects and runs the coordinator`,
 }

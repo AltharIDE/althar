@@ -1,0 +1,121 @@
+/* what is off, in the danger colour, as the chip says a dropped home */
+.danger {
+  color: var(--danger);
+}
+
+/* a worker's row: brought into view when Settings opens on it */
+.rowWrap {
+  scroll-margin: 80px;
+}
+.rowWrap + .rowWrap,
+.rowWrap + * {
+  border-top: 1px solid var(--line);
+}
+/* the bar's own CPU and MEM, at the row's end, a step apart as they are in the bar */
+.gauges {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 22px;
+  margin-right: 4px;
+}
+
+/* opened in place: what it is, then its settings, set in under its words */
+.well {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px 2px;
+  border-radius: 10px;
+  background: var(--hover-paper);
+}
+.facts {
+  font-size: 12px;
+}
+.version {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* a worker's page: its readings beside what it is */
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.readings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* taking it out, apart at the foot */
+.foot {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+/* C: the side in two, the home's and This Mac's, each under its name */
+.split {
+  display: grid;
+  gap: 18px;
+}
+.part {
+  display: grid;
+  gap: 6px;
+}
+.partHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--t-2);
+}
+.partHead svg {
+  flex-shrink: 0;
+  color: var(--t-3);
+}
+.partName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.partQuiet {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--t-4);
+}
+
+/* Add a worker: the line to run, to copy, and the wait */
+.command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 8px;
+  background: var(--hover-paper);
+}
+.line {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--t-3);
+}

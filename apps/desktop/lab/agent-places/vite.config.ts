@@ -4,8 +4,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
 
 /*
- * The agent places lab: where agents at once and the places in use live, by
- * This Mac, beside the Settings slider and in Up next, drawn on the app's own
+ * The agent places lab: where the home's workers and their agents live, and
+ * Settings for the home and its workers, drawn on the app's own
  * board and the kit's own bar and settings, with no runtime (README.md).
  */
 export default defineConfig({

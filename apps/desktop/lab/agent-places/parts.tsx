@@ -5,6 +5,7 @@ import {
   BrandMark,
   ChromeButton,
   Gauge,
+  Icon,
   type LoadGlance,
   type LoadPoint,
   type LoadRow,
@@ -18,16 +19,17 @@ import { heldSteps, percent, STEPS, strained } from '../../../../packages/ui/src
 import m from '../../../../packages/ui/src/chrome/LoadMeter/LoadMeter.module.css'
 import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
 import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../packages/ui/src/fixtures/plan'
+import h from '../../src/renderer/features/homes/Homes.module.css'
 import { SLOTS, type Worker } from './data'
-import type { Ctx } from './takes/types'
+import type { Ctx } from './types'
 import { words } from './words'
 import s from './parts.module.css'
 
 /*
  * The bar and This Mac as the kit draws them (`LoadMeter`, `LoadPeek`, their
  * own styles), drawn for any worker: its trace, CPU and Memory, its Agents in
- * their form, what runs on it, and a foot. Takes put the home's other workers
- * around it.
+ * their form, what runs on it, and a foot. The base puts the home's other
+ * workers under it; Settings draws a worker's readings on its page.
  */
 
 const t = loadPeekText
@@ -55,14 +57,28 @@ export function Gauges({ load }: { load: LoadGlance }) {
   )
 }
 
-/** The bar's end before the gear: Homes (or what a take puts there), the meter and what it opens, plan usage. */
-export function Bar({ ctx, homes, children }: { ctx: Ctx; homes?: ReactNode; children: ReactNode }) {
+/** The Homes chip as built: Homes on this computer's own home; the home's name where the window is connected to one. */
+function HomesChip({ ctx }: { ctx: Ctx }) {
+  const open = () => ctx.say('Opens the homes menu, as it is')
+  if (ctx.pov === 'local') return <ChromeButton icon="plug" label="Homes" compact onClick={open} />
+  return (
+    <span className={h.chipRow}>
+      <button type="button" className={h.chip} title={ctx.home.address ?? ''} onClick={open}>
+        <Icon name="home" size={13} />
+        <span className={h.chipName}>{ctx.home.name}</span>
+      </button>
+    </span>
+  )
+}
+
+/** The bar's end before the gear: Homes, the home's meter and what it opens, plan usage. */
+export function Bar({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
   return (
     <>
-      {homes ?? <ChromeButton icon="plug" label="Homes" compact onClick={() => ctx.say('Opens the homes menu, as it is')} />}
+      <HomesChip ctx={ctx} />
       <span className={m.meter}>
         <Popover
-          label="This Mac’s load"
+          label={`${ctx.home.name}’s load`}
           placement="below"
           align="end"
           width={300}
@@ -96,8 +112,7 @@ export function SplitBar({ total, ours }: { total: number; ours: number }) {
   )
 }
 
-function Trace({ points }: { points: readonly LoadPoint[] }) {
-  const width = 276
+function Trace({ points, width = 276 }: { points: readonly LoadPoint[]; width?: number }) {
   const height = 40
   const pad = 1.5
   const from = Math.max(0, SLOTS - points.length)
@@ -221,6 +236,37 @@ export function ShowInBar({ ctx }: { ctx: Ctx }) {
   )
 }
 
+/** A worker's trace, CPU, Memory and Agents, as This Mac's popover draws them; out of reach, since when and what waits for it. */
+export function Readings({ worker, load, waiting = 0, width }: { worker: Worker; load: LoadGlance; waiting?: number; width?: number }) {
+  if (worker.offline !== null)
+    return (
+      <p className={s.away}>
+        <span className={s.danger}>{words.away(worker)}.</span> {words.holding(worker)} to come back.
+      </p>
+    )
+  return (
+    <>
+      <div className={lp.trace}>
+        <Trace points={load.history} {...(width === undefined ? {} : { width })} />
+        <span className={lp.axis} aria-hidden="true">
+          <span>{t.ago}</span>
+          <span>{t.now}</span>
+        </span>
+      </div>
+      <div className={lp.machine}>
+        <Figure name={t.cpu} figure={t.percent(percent(load.cpu))} total={load.cpu} ours={load.work ?? 0} />
+        <Figure
+          name={t.memory}
+          figure={t.memoryFigure(load.memoryUsed, load.memoryTotal)}
+          total={load.memory}
+          ours={load.workMemory ?? 0}
+        />
+        <AgentsReading worker={worker} waiting={waiting} />
+      </div>
+    </>
+  )
+}
+
 /**
  * A worker as This Mac's popover draws it: its name, the trace, CPU, Memory and Agents, what runs on it, and a foot.
  * `between` goes between the readings and what runs; `after` after it. Out of reach, a line says since when and what
@@ -257,31 +303,7 @@ export function Peek({
         <h2 className={lp.heading}>{worker.name}</h2>
         {side !== undefined && <span className={s.side}>{side}</span>}
       </span>
-      {worker.offline !== null ? (
-        <p className={s.away}>
-          <span className={s.danger}>{words.away(worker)}.</span> {words.holding(worker)} to come back.
-        </p>
-      ) : (
-        <>
-          <div className={lp.trace}>
-            <Trace points={load.history} />
-            <span className={lp.axis} aria-hidden="true">
-              <span>{t.ago}</span>
-              <span>{t.now}</span>
-            </span>
-          </div>
-          <div className={lp.machine}>
-            <Figure name={t.cpu} figure={t.percent(percent(load.cpu))} total={load.cpu} ours={load.work ?? 0} />
-            <Figure
-              name={t.memory}
-              figure={t.memoryFigure(load.memoryUsed, load.memoryTotal)}
-              total={load.memory}
-              ours={load.workMemory ?? 0}
-            />
-            <AgentsReading worker={worker} waiting={waiting} />
-          </div>
-        </>
-      )}
+      <Readings worker={worker} load={load} waiting={waiting} />
       {between}
       {worker.offline === null && <Running ctx={ctx} load={load} close={close} title={running} />}
       {after}

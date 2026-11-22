@@ -3,7 +3,7 @@
   color: var(--danger);
 }
 
-/* ---- A: the other workers under This Mac ---- */
+/* ---- the other workers under the home, in its popover ---- */
 .worker {
   align-items: start;
 }
@@ -62,22 +62,7 @@
   color: var(--t-3);
 }
 
-/* ---- B: the chip's menu, and a worker opened from it ---- */
-/* where another worker's popover hangs from: the chip's end, taking no room */
-.anchor {
-  width: 0;
-  height: 26px;
-  margin-left: -6px;
-  padding: 0;
-  pointer-events: none;
-}
-.foot {
-  margin: 0 -12px;
-  padding: 10px 12px 8px;
-  border-top: 1px solid var(--line);
-}
-
-/* ---- C: each worker under This Mac's slider ---- */
+/* ---- each worker under the home's slider, in the quick settings ---- */
 .atSlider {
   display: flex;
   flex-direction: column;

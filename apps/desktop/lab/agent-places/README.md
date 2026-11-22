@@ -1,29 +1,47 @@
-# The agent places lab
+# Agent places lab
 
-Where the home's workers and their agents live once the board's banner over Up next ("2 of 5 agent places in use · Temporarily limited to 1") goes. A home runs work on several workers, this Mac among them: this Mac's CPU and memory come first, and the other workers' health (reachable or not, their load, their agents) comes second. On screen an agent place is an agent, as the slider already counts them ("Agents at once"), and a computer the home runs work on is a worker, as the plan card's "Run on" already says.
+Where the home's workers and their agents live, once the board's banner over Up next ("2 of 5 agent places in use ·
+Temporarily limited to 1") goes. Drawn on the app's own board, the kit's own window bar and its own Settings, with
+made-up workers and no runtime. Lab only: nothing here ships.
 
-Every take draws only with the kit's real parts: This Mac as the `LoadPeek` styles draw it, the bar's own `Gauge`, the Homes chip's real `Menu` and styles, and the real `AgentsAtOnce`, on the app's own board (`BoardView`), window bar (`ProjectTabs`, `PlanGauge`), quick settings (`ControlCenter`, `QuickCards`) and Settings (`SettingsLayout`), from the tests' fixtures, with no runtime. Up next keeps nothing: its cards already say their place in line.
+Run it from `apps/desktop`: `../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts`, then open
+<http://localhost:6161>.
 
-```bash
-cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts
-```
+## The base, as picked
 
-At `http://localhost:6161`. The bar along the bottom, or its keys, swaps in place:
+From the last round, A + C:
 
-- **0** as built; **A B C** the takes (below)
-- **Q W E R** the scene: this Mac lowered to 1 until memory frees up and every worker full, 3 tasks wait; all at work everywhere, 3 wait; build-box offline for 12 minutes with 2 tasks waiting for it, and mac-mini lowered for its CPU; room to spare
-- **K** crowded (a bigger Mac, two more workers, one with a long name, long titles); **M** only this Mac; **N** a narrow window; **S** Settings; **D** dark; **O** keeps what the take opens open as the rest changes; **G** the quick settings
+- The bar's CPU and MEM meter opens the home's popover: its load, its Agents beside CPU and Memory, and the other
+  workers under its readings, each with the bar's own meters, opening in place to what runs there.
+- The quick settings: the home's Agents at once, saying what is so now, and a line a worker under it.
 
-Every slider moves its worker's number live. `?shot=1` turns motion off for a headless shot.
+Up next keeps nothing.
 
-## The takes
+## This round: Settings for the home and its workers
 
-In every take, This Mac (what the CPU and MEM meter opens) keeps its load as built and adds Agents beside CPU and Memory, in their form ("Agents 2 of 5", and under it "1 at a time until memory frees up", "3 tasks waiting"), and each worker has its own Agents at once in Settings under "Other workers", saying only what is off. They differ in where the other workers show.
+Work on this Mac holds this Mac only. Each take shows Settings from this computer's own home, and from studio, a home
+on a server the window is connected to (H).
 
-- **A · Under This Mac.** In This Mac's popover, between its readings and what runs on it: each other worker a row with the bar's own CPU and MEM meters and how many of its agents work ("4 of 4"); what is off in a line ("Offline for 12 min · 2 tasks wait for it", in the danger colour; "1 at a time until the CPU frees up"). A row opens in place to what runs there and its number, with Change to its slider in Settings.
-- **B · In Homes.** The Homes chip's menu lists the workers first, This Mac at the top, each with how many of its agents work and a line: what is off, or its CPU and memory. An offline worker shows on the chip itself, as a home whose connection dropped does. This Mac opens This Mac; another worker opens the same popover drawn for it, from the chip, with its own Agents at once slider at its foot.
-- **C · At the slider.** The quick settings' Agents at once is this Mac's ("This Mac · 1 at a time until memory frees up"), and under it a line a worker, with how many of its agents work and what is off, then what waits; pressed, a worker's number in Settings, where each says what it runs now.
+- **A · Workers section.** One new section: the home first, then each worker, a row with its health at the end that
+  opens in place to what it is (computer, address, agents signed in, Althar's version) and its settings (Agents at
+  once, Take new tasks, Remove). On studio, studio's row has its update and the devices it's opened from, and This
+  Mac can be lent to it.
+- **B · A page each.** The side lists the computers, the home first and This Mac last; each is a page with its
+  readings beside what it is, then its settings. Work on this Mac becomes This Mac's page.
+- **C · Home and This Mac.** The side splits in two: the home's settings (Agents, MCP servers, Skills, Code hosts,
+  Tasks, Pull requests, Workers) under its name, and This Mac's own (This Mac, Notifications, Appearance, Editor and
+  browser) under it. Connected to studio, what's under studio's name is studio's.
 
-## What the lab assumes
+## Keys
 
-The runtime gives this Mac's agents (`WorkPlaces`) and load (`GetLoad`), and of another worker only its id, its agents and whether it is busy (`ProjectWorker`). The lab makes up workers' names, systems, load, numbers and being out of reach; why a number is lowered (the pressure check knows, but doesn't say); and what waits in the other projects. A long popover scrolls in the lab, short of its own bar.
+A B C the take · H the window on studio · Q W E R the scene (the home lowered, all at work, a worker offline, room to
+spare) · K crowded · M the home alone · N narrow · S the board · D dark · G the quick settings · P the home's popover.
+
+The address keeps where you are (`?d=b&h=1&sec=w:studio`); `open=peek`, `open=quick` or `open=add` opens one as the
+page loads, and `shot=1` stills motion for a screenshot.
+
+## Made up
+
+Workers' names, systems, addresses, load and versions; studio; a worker taking no new tasks; lending This Mac to
+another home; the line that adds a worker; why a number is lowered. The runtime knows this Mac's agents and load, and
+only a worker's id, the agents it can run and whether it is busy.
