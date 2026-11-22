@@ -338,6 +338,142 @@ describe('Bitbucket Cloud’s releases', () => {
     }
   }
 
+  it.effect('distinguishes paused, running, passed, stopped and failed pipelines and only lists waits for the requested tag', () =>
+    Effect.gen(function* () {
+      const tag = 'v0.7.0'
+      const run = (build_number: number, state: unknown, ref: unknown = tag, hash: unknown = HEAD) => ({
+        uuid: `pipeline-${build_number}`,
+        build_number,
+        state,
+        target: { ref_name: ref, commit: { hash } },
+      })
+      const { host, sent } = cloud([
+        [
+          'GET',
+          `${API}/pipelines?target.ref_name=${tag}&sort=-created_on&pagelen=20`,
+          {
+            json: {
+              values: [
+                run(1, { name: 'IN_PROGRESS', stage: { name: 'PAUSED' } }),
+                run(2, { name: 'RUNNING' }),
+                run(3, { name: 'COMPLETED', result: { name: 'SUCCESSFUL' } }),
+                run(4, { name: 'COMPLETED', result: { name: 'STOPPED' } }),
+                run(5, { name: 'COMPLETED' }, tag, null),
+                run(6, null, 'another-tag'),
+                run(7, null, null),
+              ],
+            },
+          },
+        ],
+        [
+          'GET',
+          `${API}/pipelines/1/steps?pagelen=100`,
+          {
+            json: {
+              values: [
+                { uuid: 'unnamed', trigger: { type: 'manual' } },
+                { uuid: 'finished', trigger: { type: 'manual' }, state: { name: 'COMPLETED' } },
+                { uuid: 'automatic', state: { name: 'PENDING' } },
+              ],
+            },
+          },
+        ],
+      ])
+      const out = yield* host.runs(repo, tag)
+      assert.deepStrictEqual(
+        out.map(({ id, state, sha, gates }) => [id, state, sha, gates.map(({ name }) => name)]),
+        [
+          ['1', 'queued', HEAD, ['a manual step']],
+          ['2', 'running', HEAD, []],
+          ['3', 'passed', HEAD, []],
+          ['4', 'cancelled', HEAD, []],
+          ['5', 'failed', null, []],
+        ],
+      )
+      assert.deepStrictEqual(
+        sent.filter(({ url }) => url.includes('/steps')).map(({ url }) => url),
+        [`${API}/pipelines/1/steps?pagelen=100`],
+      )
+    }),
+  )
+
+  it.effect('uses a discovered tag without rewriting it and treats a missing tag as absent', () =>
+    Effect.gen(function* () {
+      const tag = 'release/7'
+      const { host, sent } = cloud([
+        ['GET', `${API}/refs/tags/release%2F7`, { json: { name: tag, target: { hash: HEAD } } }],
+        ['GET', `${API}/refs/tags/missing`, { status: 404, json: { error: { message: 'Not found' } } }],
+        ['DELETE', `${API}/refs/tags/missing`, { status: 404, json: { error: { message: 'Not found' } } }],
+      ])
+      assert.deepStrictEqual(yield* host.pushTag(repo, { name: tag, commit: HEAD }), {
+        name: tag,
+        commit: HEAD,
+        url: `${repo.webUrl}/src/release%2F7`,
+      })
+      const taken = yield* Effect.flip(host.pushTag(repo, { name: tag, commit: OTHER }))
+      assert.include(taken.message, 'Moving a tag must be asked for')
+      assert.isNull(yield* host.release(repo, 'missing'))
+      yield* host.deleteTag(repo, 'missing')
+      assert.deepStrictEqual(
+        sent.map(({ method }) => method),
+        ['GET', 'GET', 'GET', 'DELETE'],
+      )
+    }),
+  )
+
+  it.effect('resolves the branch tip and replaces an existing tag only when movement was requested', () =>
+    Effect.gen(function* () {
+      const tag = 'v0.7.0'
+      const { host, sent } = cloud([
+        ['GET', `${API}/commit/release%2F7`, { json: { hash: HEAD } }],
+        ['GET', `${API}/refs/tags/${tag}`, { json: { name: tag, target: { hash: OTHER } } }],
+        ['DELETE', `${API}/refs/tags/${tag}`, { status: 204 }],
+        ['POST', `${API}/refs/tags`, { status: 201, json: { name: tag, target: { hash: HEAD } } }],
+      ])
+      const commit = yield* host.commitOf(repo, 'release/7')
+      assert.strictEqual(commit, HEAD)
+      assert.deepInclude(yield* host.pushTag(repo, { name: tag, commit, move: true }), { name: tag, commit })
+      assert.deepStrictEqual(
+        sent.slice(2).map(({ method, url, body }) => [method, url, body]),
+        [
+          ['DELETE', `${API}/refs/tags/${tag}`, undefined],
+          ['POST', `${API}/refs/tags`, { name: tag, target: { hash: HEAD } }],
+        ],
+      )
+    }),
+  )
+
+  it.effect('rereads a tag created concurrently and accepts it only at the requested commit', () =>
+    Effect.gen(function* () {
+      for (const commit of [HEAD, OTHER, null]) {
+        let reads = 0
+        const { host, sent } = cloud([
+          [
+            'GET',
+            `${API}/refs/tags/v0.7.0`,
+            () =>
+              reads++ === 0 || commit === null
+                ? { status: 404, json: { error: { message: 'Not found' } } }
+                : { json: { name: 'v0.7.0', target: { hash: commit } } },
+          ],
+          ['POST', `${API}/refs/tags`, { status: 400, json: { error: { message: 'Tag already exists' } } }],
+        ])
+        const result = yield* Effect.result(host.pushTag(repo, { name: 'v0.7.0', commit: HEAD }))
+        if (commit === HEAD) {
+          assert.strictEqual(result._tag, 'Success')
+          if (result._tag === 'Success') assert.strictEqual(result.success.commit, HEAD)
+        } else {
+          assert.strictEqual(result._tag, 'Failure')
+          if (result._tag === 'Failure') assert.include(result.failure.message, commit === null ? 'Tag already exists' : commit.slice(0, 8))
+        }
+        assert.deepStrictEqual(
+          sent.map(({ method }) => method),
+          ['GET', 'POST', 'GET'],
+        )
+      }
+    }),
+  )
+
   it.effect('puts the files in Downloads once each, and links the manual step that only the person runs', () =>
     Effect.gen(function* () {
       const there = [{ name: 'Althar-0.7.0.zip', size: 3, links: { self: { href: 'https://bitbucket.org/d/zip' } } }]

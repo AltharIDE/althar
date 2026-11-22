@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { useState } from 'react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useRef, useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Finder, type FinderProps, type FoundRow } from '../src/chrome/Finder/Finder'
+import { SearchDialog } from '../src/chrome/Finder/SearchDialog'
 import { ACROSS, RECENT, RETRY } from '../src/fixtures/finder'
 
 function open(props: Partial<FinderProps> = {}) {
@@ -136,5 +137,45 @@ describe('Finder', () => {
     const { dialog, onClose } = open()
     fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('the Finder dialog', () => {
+  it('leaves Escape to the search field, then restores focus to the control that opened it', async () => {
+    const close = vi.fn()
+    function Window() {
+      const [shown, setShown] = useState(false)
+      const box = useRef<HTMLDivElement>(null)
+      const scrim = useRef<HTMLDivElement>(null)
+      return (
+        <>
+          <button type="button" onClick={() => setShown(true)}>
+            Open Finder
+          </button>
+          {shown && (
+            <SearchDialog title="Finder" onClose={close} box={box} scrim={scrim} className="box" overlayClassName="scrim" style={{}}>
+              <input aria-label="Search tasks" />
+              <button type="button" onClick={() => setShown(false)}>
+                Close Finder
+              </button>
+            </SearchDialog>
+          )}
+        </>
+      )
+    }
+    render(<Window />)
+    const opener = screen.getByRole('button', { name: 'Open Finder' })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'Finder' })
+    const search = within(dialog).getByRole('textbox', { name: 'Search tasks' })
+    search.focus()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(close).not.toHaveBeenCalled()
+    expect(search).toHaveFocus()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close Finder' }))
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(screen.queryByRole('dialog', { name: 'Finder' })).not.toBeInTheDocument()
   })
 })
