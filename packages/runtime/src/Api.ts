@@ -98,6 +98,7 @@ import { localTasksIn } from './local'
 import { PARENT_KEPT, tellOf, toldOf } from './forks'
 import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
+import { homeWorkers } from './homeWorkers'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
@@ -2599,6 +2600,15 @@ export const handlers = apiLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlaces: () => api(busy.places),
+      GetWorkers: () => api(homeWorkers(config.workers)),
+      RemoveWorker: ({ commandId, workerId }) =>
+        once(
+          commandId,
+          config.workers?.revoke === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+            : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+        ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,8 @@ import { EdgeSpot } from '@althar/ui'
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
+import { keys } from '../src/renderer/data/reads'
+import { ServicesProvider } from '../src/renderer/data/services'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
 import { isSection, type Section, SECTIONS, sectionOf, type SettingsFocus } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
@@ -20,13 +22,14 @@ import {
   connectionList,
   fakeClient,
   fakeHost,
+  onLinuxHome,
   fakePagesHost,
   githubConnection,
   models,
   skillCard,
   withoutOpenCode,
 } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
 
 /*
  * Althar's settings: the quick settings, from the gear at the end of the
@@ -51,12 +54,14 @@ function Quick({ onSettings = vi.fn() }: { onSettings?: (section: Section | null
 
 /* The Settings tab on a section, as its route has it: the agents asked again as it opens. */
 function Settings({ at = 'agents', onSection }: { at?: Section; onSection?: (section: Section, focus?: SettingsFocus) => void }) {
-  const [place, setPlace] = useState<{ section: Section; focus?: SettingsFocus }>({ section: at })
+  const [place, setPlace] = useState<{ section: Section; focus?: SettingsFocus; worker?: string }>({ section: at })
   return (
     <SettingsPage
       start={useStart({ recheck: true })}
       section={place.section}
       {...(place.focus === undefined ? {} : { focus: place.focus })}
+      {...(place.worker === undefined ? {} : { worker: place.worker })}
+      onComputer={(worker) => setPlace(worker === null ? { section: 'computers' } : { section: 'computers', worker })}
       onSection={(section, focus) => {
         onSection?.(section, focus)
         setPlace(focus === undefined ? { section } : { section, focus })
@@ -183,6 +188,91 @@ describe('the quick settings', () => {
     expect(soundToPutBack(null, [], 'linux')).toBe(SYSTEM_SOUND)
   })
 
+  it('say at the number when fewer agents may work for now, and why, and move the load popover’s number with it', async () => {
+    const { client } = fakeClient({
+      getPlaces: vi.fn(async () => ({ busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 })),
+    })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 5, atOnce: 1, why: 'memory' })
+    // At the lowered number, nothing is fewer: the note is the number's own again.
+    await userEvent.keyboard('{Home}')
+    expect(within(panel).queryByText(/at a time until/)).toBeNull()
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 1, atOnce: 1, why: null })
+  })
+
+  it('put the load popover’s agents back as they were, fewer for now and why, when a change can’t be kept', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    // Hold the runtime's next reading back, so what shows is what the change put back, not a fresh read.
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{Home}')
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual(lowered)
+    expect(within(panel).getByText('1 at a time until memory frees up')).toBeTruthy()
+  })
+
+  it('put the popover’s agents back to what was last kept when several changes on their way can’t be', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    // Two changes, to 3 and then 2, both still on their way.
+    const refusals: Array<() => void> = []
+    vi.mocked(client.setAgentsAtOnce).mockImplementation(
+      () => new Promise<void>((_, reject) => void refusals.push(() => reject(new Error('disk full')))),
+    )
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(vi.mocked(client.setAgentsAtOnce).mock.calls.map(([n]) => n)).toEqual([3, 2])
+    expect(services.cache.getQueryData(keys.places)).toMatchObject({ configured: 2 })
+    // Both refused, in order: the popover goes back to what was kept, not to the first change's 3.
+    for (const refuse of refusals) refuse()
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual(lowered)
+    expect(within(panel).getByText('1 at a time until memory frees up')).toBeTruthy()
+  })
+
+  it('put the popover’s agents at the number kept when a later change on its way can’t be', async () => {
+    const lowered = { busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }
+    const { client } = fakeClient({ getPlaces: vi.fn(async () => lowered) })
+    const services = servicesFor(client)
+    render(<ServicesProvider value={services}>{<Quick />}</ServicesProvider>)
+    const panel = await quick()
+    expect(await within(panel).findByText('1 at a time until memory frees up')).toBeTruthy()
+    vi.mocked(client.getPlaces).mockImplementation(() => new Promise(() => undefined))
+    const answers: Array<{ keep: () => void; refuse: () => void }> = []
+    vi.mocked(client.setAgentsAtOnce).mockImplementation(
+      () =>
+        new Promise<void>((resolve, reject) => void answers.push({ keep: () => resolve(), refuse: () => reject(new Error('disk full')) })),
+    )
+    const count = within(panel).getByRole('slider', { name: 'Agents at once' })
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    // The change to 3 is kept, the one to 2 isn't: 3 it is, still fewer for now and why.
+    answers[0]?.keep()
+    await Promise.resolve()
+    answers[1]?.refuse()
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    expect(services.cache.getQueryData(keys.places)).toEqual({ ...lowered, configured: 3 })
+  })
+
   it('take another number of agents at once, step by step, and say when it can’t be kept', async () => {
     const { client } = fakeClient()
     withServices(<Quick />, client)
@@ -280,6 +370,7 @@ describe('the Settings tab', () => {
         'Code hosts and trackers',
         'Tasks',
         'Pull requests',
+        'Computers',
         'Work on this Mac',
         'Notifications',
         'Appearance',
@@ -317,6 +408,7 @@ describe('the Settings tab', () => {
       'code-hosts',
       'tasks',
       'pull-requests',
+      'computers',
       'this-mac',
       'notifications',
       'appearance',
@@ -561,6 +653,110 @@ describe('the Settings tab', () => {
     await userEvent.click(load)
     expect(host.setPreference).toHaveBeenLastCalledWith('showLoad', false)
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('lists the home and its workers, opens one out, and takes one out at once once the person says so', async () => {
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
+    const free = {
+      workerId: `wrk_${'1'.repeat(32)}`,
+      connected: true,
+      busy: false,
+      capacity,
+      providers: ['codex'],
+      projects: [{ id: 'p1', name: 'Meridian' }],
+      task: null,
+    }
+    const working = {
+      ...free,
+      workerId: `wrk_${'2'.repeat(32)}`,
+      busy: true,
+      task: { taskId: 't1', threadId: 'thr_1', title: 'Fix the login redirect', project: 'Meridian' },
+    }
+    const away = { workerId: `wrk_${'3'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null }
+    let workers = [free, working, away]
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, workers })),
+      removeWorker: vi.fn(async (id: string) => {
+        workers = workers.filter((one) => one.workerId !== id)
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    // The home, with its agents as its popover has them, and each worker where it stands.
+    expect(await within(page).findByText('Keeps your projects')).toBeTruthy()
+    const tile = await within(page).findByRole('button', { name: /Linux worker 111111/ })
+    expect(tile.textContent).toContain('Linux · arm64 · 8 cores')
+    expect(tile.textContent).toContain('Free')
+    expect(tile.textContent).toContain('12.4 GB')
+    expect(within(page).getByRole('button', { name: /Linux worker 222222/ }).textContent).toContain('Fix the login redirect · Meridian')
+    expect(within(page).getByRole('button', { name: /Linux worker 333333/ }).textContent).toContain('Offline')
+
+    // Opened out: what it is, the agents it can run and its projects; taken out once the person says so, off the list at once.
+    await userEvent.click(tile)
+    expect(await within(page).findByRole('heading', { name: 'Linux worker 111111' })).toBeTruthy()
+    expect(within(page).getByText('Meridian')).toBeTruthy()
+    await userEvent.click(within(page).getByRole('button', { name: 'Remove Linux worker 111111' }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Remove Linux worker 111111?' })).getByRole('button', { name: 'Remove' }),
+    )
+    expect(client.removeWorker).toHaveBeenCalledWith(free.workerId)
+    expect(within(page).queryByRole('button', { name: /Linux worker 111111/ })).toBeNull()
+    expect(within(page).getByRole('button', { name: /Linux worker 222222/ })).toBeTruthy()
+
+    // One at work keeps its task: its Remove waits for it.
+    await userEvent.click(within(page).getByRole('button', { name: /Linux worker 222222/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('in a window on a Linux home over SSH, name that home, give its own commands, and leave Remove to a paired device', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = {
+      workerId: `wrk_${'6'.repeat(32)}`,
+      connected: true,
+      busy: false,
+      capacity: { platform: 'linux', architecture: 'x64', cpuCores: 4, freeMemoryMib: 8_000, freeDiskMib: 50_000 },
+      providers: ['codex'],
+      projects: [],
+      task: null,
+    } as const
+    const { client } = fakeClient({ connection: studio.connection, getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    // Its load, agents and workers are studio's: it goes by that name, never This Mac.
+    expect(await within(page).findByRole('button', { name: /^studio/ })).toBeTruthy()
+    expect(within(page).queryByText('This Mac')).toBeNull()
+    await userEvent.click(within(page).getByRole('button', { name: /Linux worker 666666/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(page).getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeTruthy()
+    await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })
+    expect(within(adding).getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeTruthy()
+    expect(within(adding).queryByText(/althar workers enroll/)).toBeNull()
+    expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
+  })
+
+  it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
+    const worker = { workerId: `wrk_${'4'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null }
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+      removeWorker: vi.fn(async () => {
+        throw new ApiError({ reason: 'WorkerNotRemoved', message: 'The worker ledger is busy.' })
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 444444/ }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Remove Linux worker 444444' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }))
+    expect(await alert()).toBe('The worker ledger is busy.')
+    expect(await within(page).findByRole('button', { name: /Linux worker 444444/ })).toBeTruthy()
+
+    // The home takes workers already: adding one is enrolling it, then starting it.
+    await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(within(adding).queryByText(/althar workers configure/)).toBeNull()
+    expect(within(adding).getByText(/althar workers enroll/)).toBeTruthy()
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

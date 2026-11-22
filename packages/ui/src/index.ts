@@ -139,7 +139,16 @@ export * from './chrome/PlanGauge/PlanPeek'
 export { type PlanAccount, type PlanAgent, type PlanWindow, UsageTone, usageTone } from './chrome/PlanGauge/plan'
 export * from './chrome/LoadMeter/LoadMeter'
 export * from './chrome/LoadMeter/LoadPeek'
-export { type LoadGlance, type LoadPoint, type LoadRow } from './chrome/LoadMeter/load'
+export {
+  type AgentsWhy,
+  fewerOf,
+  type LoadAgents,
+  type LoadGlance,
+  type LoadPoint,
+  type LoadRow,
+  type LoadWorker,
+  type WorkerState,
+} from './chrome/LoadMeter/load'
 export * from './composer/Composer/Composer'
 export * from './composer/Comments/Comments'
 export * from './composer/ContextRing/ContextRing'
@@ -265,6 +274,8 @@ export * from './setup/ToolTiles/SkillSheet'
 export * from './setup/ToolTiles/AddServerDialog'
 export * from './setup/ToolTiles/AddSkillDialog'
 export * from './setup/ControlCenter/ControlCenter'
+export * from './setup/Computers/Computers'
+export * from './setup/Computers/Cloud'
 export * from './setup/ProjectIdentity/ProjectIdentity'
 export * from './setup/ProjectNotes/ProjectNotes'
 export * from './setup/EmptyState/EmptyState'

@@ -210,11 +210,15 @@ describe('an agent out of usage', () => {
       const before = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Earlier' })
       yield* sessions.start({ threadId: before.threadId, agentId: 'codex', model: 'large' })
       yield* sessions.stop(before.threadId)
+      // No other agent offers the lead's own model, which would come first.
+      const models = yield* Models
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      for (const agentId of ['codex', 'opencode']) yield* models.setModelBlocked({ agentId, model: 'small', blocked: true })
       yield* start
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'))
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(yield* said(task.threadId), [
-        `Small on Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake codex takes the work over until then.`,
+        `Small on Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Large on Fake codex, a different model, takes the work over until then.`,
         'implement: Did the task.',
         'The task ends on its branch.',
       ])
@@ -500,27 +504,32 @@ describe('an agent out of usage', () => {
   })
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
-  const reviewerOut = Effect.gen(function* () {
-    // Make the replacement model known before a takeover can be selected.
-    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
-    const sessions = yield* Sessions
-    const projects = yield* Projects
-    const limits = yield* Limits
-    const { projectId, task, start } = yield* planned(
-      [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
-      'Retry the checkout [lead:finish] [review:pass]',
-    )
-    const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
-    yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
-    yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
-    yield* until(
-      Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
-      (outs) => outs.length === 1,
-    )
-    yield* start
-    yield* until(cardOf(projectId), (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'))
-    return yield* said(task.threadId)
-  })
+  const reviewerOut = reviewerOutUntil('ready')
+  function reviewerOutUntil(end: 'ready' | 'waits', leadModel: string | null = null) {
+    return Effect.gen(function* () {
+      // Make the replacement model known before a takeover can be selected.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      const sessions = yield* Sessions
+      const projects = yield* Projects
+      const limits = yield* Limits
+      const { projectId, task, start } = yield* planned(
+        [lead('claude-code', leadModel), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
+      yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
+      yield* until(
+        Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
+        (outs) => outs.length === 1,
+      )
+      yield* start
+      yield* until(cardOf(projectId), (cards) =>
+        cards.some((card) => card.taskId === task.taskId && (end === 'ready' ? card.phase === 'ready' : card.waits != null)),
+      )
+      return yield* said(task.threadId)
+    })
+  }
 
   it.live('starts a planned reviewer that is out on the next free agent instead, other than the lead’s', () => {
     const back = Date.now() + HOUR
@@ -538,12 +547,76 @@ describe('an agent out of usage', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
       const lines = yield* reviewerOut
+      // Large, not Small, which is the lead itself: a review by the lead checks nothing.
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake claude-code takes the review over, with the review by the same maker.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake claude-code takes the review over, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
+
+  it.live('never gives a review to the lead itself, even where it is the only one free: the review waits', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      // Large turned off on Claude Code: Small there, the lead itself, is the only model with room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'large', blocked: true })
+      const lines = yield* reviewerOutUntil('waits')
+      assert.notMatch(lines.join('\n'), /takes the review over/)
+      assert.match(lines.join('\n'), /Fake codex ran out of usage during the review/)
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
+  })
+
+  it.live('never gives a review to the lead on its agent’s Default, as the model that Default names', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      // The lead runs Claude Code's Default, which is Large; Small turned off, Large is the only model with room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'small', blocked: true })
+      const lines = yield* reviewerOutUntil('waits', 'default')
+      assert.notMatch(lines.join('\n'), /takes the review over/)
+    }).pipe(
+      Effect.provide(
+        withAgents(
+          {
+            codex: { outOfUsage: { until: back } },
+            'claude-code': {
+              models: [
+                { id: 'default', name: 'Default (recommended)', description: 'Large' },
+                { id: 'small', name: 'Small' },
+                { id: 'large', name: 'Large' },
+              ],
+            },
+          },
+          ['opencode'],
+        ),
+      ),
+    )
+  })
+
+  it.live('never starts a reviewer whose model is turned off on the lead’s own model, its agent’s only other one', () =>
+    Effect.gen(function* () {
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      // The lead is Small on Codex; its reviewer, Large on Codex, is turned off there, and no other agent has room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'codex', model: 'large', blocked: true })
+      const { task, start } = yield* planned(
+        [lead('codex', 'small'), { key: 'review', agentId: 'codex', model: 'large', skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      yield* start
+      // The review waits on the person, saying why it can't start.
+      const sql = yield* SqlClient.SqlClient
+      const [asked] = yield* until(
+        sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck'`,
+        (rows) => rows.length > 0,
+      )
+      assert.include(asked?.payload ?? '', 'A review never goes to the lead it reviews')
+      assert.notInclude((yield* said(task.threadId)).join('\n'), 'review: The change holds.')
+      // No reviewer started at all, so none on Small, the lead's own model.
+      const reviewers = yield* sql<{ model: string | null }>`
+        SELECT s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
+      assert.deepStrictEqual(reviewers, [])
+    }).pipe(Effect.provide(withAgents({}, ['claude-code', 'opencode']))),
+  )
 
   it.live('never moves work to an agent paid per use: it waits for the reset instead', () => {
     const back = Date.now() + HOUR
@@ -586,7 +659,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
+        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })

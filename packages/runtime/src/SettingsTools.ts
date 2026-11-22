@@ -22,6 +22,7 @@ import {
   type SettingChanger,
   UsageLimit,
   WorksIn,
+  type HomeWorker,
 } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -37,6 +38,7 @@ import { Connections } from './Connections'
 import { BranchNotFound } from './errors'
 import { coAuthorOn, setCoAuthor } from './credit'
 import { FolderCleanup } from './FolderCleanup'
+import { homeWorkers } from './homeWorkers'
 import { Instance } from './Instance'
 import { Models } from './Models'
 import { notesOf } from './notes'
@@ -834,6 +836,32 @@ export class SettingsTools extends Context.Service<
             }),
         },
         {
+          id: 'althar/computers',
+          title: 'Computers',
+          scope: 'althar',
+          note: "Where the home's agents run: the home, and the workers it runs tasks on, one task at a time each. Adding a worker and removing one are the person's.",
+          fields: {},
+          read: () =>
+            Effect.gen(function* () {
+              const { enabled, workers } = yield* homeWorkers((yield* RuntimeConfig).workers)
+              const projects = (worker: HomeWorker) =>
+                worker.projects.length === 0 ? 'no projects' : worker.projects.map(({ name }) => name).join(', ')
+              const where = (worker: HomeWorker) =>
+                !worker.connected
+                  ? 'offline'
+                  : worker.task !== null
+                    ? `at work on ${worker.task.title} (${worker.task.project})`
+                    : worker.busy
+                      ? 'at work'
+                      : 'free'
+              return {
+                workers: enabled
+                  ? workers.map((worker) => `${worker.workerId}: ${where(worker)}; may work on ${projects(worker)}`)
+                  : 'This home takes no workers.',
+              }
+            }),
+        },
+        {
           id: 'althar/this-mac',
           title: 'Work on this computer',
           scope: 'althar',
@@ -1524,6 +1552,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   uninstallSkill: 'person: removing a skill is the person’s',
   // althar/code-hosts
   disconnect: 'person: connections and their sign-ins',
+  // althar/computers
+  removeWorker: "person: taking a worker out of the home revokes its certificate, the person's (althar/computers says so)",
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',
