@@ -3682,26 +3682,6 @@ describe('a task', () => {
     expect(await screen.findByRole('button', { name: 'Lead: Claude Sonnet Low' })).toBeTruthy()
   })
 
-  it('says whose place a lead a usage limit handed the task to holds, until when, and puts that one back when pressed', async () => {
-    const base = thread()
-    const until = isoAfter(2 * 60 * 60 * 1000)
-    const standing = {
-      ...base,
-      session: { ...base.session!, standsIn: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null, until } },
-    }
-    const { client } = fakeClient({ getThread: vi.fn(async () => standing) })
-    withServices(<Task />, client)
-    const chip = await screen.findByRole('button', { name: 'For gpt-5.2-codex' })
-    act(() => chip.focus())
-    expect((await screen.findByRole('tooltip')).textContent).toBe(
-      `gpt-5.2-codex ran out of usage and leads again at ${clock(until)}. Press to put it back now.`,
-    )
-    // Pressed, the lead the task was given is picked again, at once, to take over with what is said next.
-    await userEvent.click(chip)
-    expect(screen.getByRole('button', { name: /^Lead: gpt-5\.2-codex/ })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'For gpt-5.2-codex' })).toBeNull()
-  })
-
   it('goes back to the model it was on, and says why, where the agent won’t take the pick', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread()),

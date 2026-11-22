@@ -76,7 +76,7 @@ import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
-import type { StandIn } from './standIn'
+import { type StandIn, modelIdOf, standInOf } from './standIn'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 import { stuckWhyOf, summarize } from './words'
@@ -1505,10 +1505,12 @@ export class Runs extends Context.Service<
           const { implement, review: plannedReview } = yield* stepsOf(on.run)
           const planned = on.step === 'review' ? plannedReview : implement
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          // One standing in on another model than the step's own: the step's own model comes first, its own lead included.
+          const own = planned?.model != null && failed.model !== null && modelIdOf(planned.model) !== modelIdOf(failed.model)
           return yield* limits.free({
             besides: [failed.agentId],
             projectId: on.run.projectId,
-            from: failed,
+            from: own ? planned : failed,
             ...(planned === undefined ? {} : { planned }),
             ...(other === undefined ? {} : { other }),
           })
@@ -2399,15 +2401,30 @@ export class Runs extends Context.Service<
           }
           // Another agent for the plan's lead, out or nearly out as it starts, only stands in for it: the plan's lead takes the
           // task back once it has usage again (standIn.ts), as one handed on while it runs does.
-          const standsIn = instead === undefined || implement === undefined ? undefined : yield* standInForPlan(run, implement)
+          const startingOn = { agentId: instead?.agentId ?? auto?.agentId ?? wanted, model: auto?.model ?? chosen }
+          // Started again on what the thread's last session was on, as after a restart, a stand-in still stands in.
+          const standsIn =
+            instead === undefined || implement === undefined
+              ? yield* standingAgain(run.threadId, startingOn)
+              : yield* standInForPlan(run, implement)
           return yield* sessions.start({
             threadId: run.threadId,
-            agentId: instead?.agentId ?? auto?.agentId ?? wanted,
-            ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
+            agentId: startingOn.agentId,
+            ...(startingOn.model === null ? {} : { model: startingOn.model }),
             ...(thinks === null ? {} : { effort: thinks }),
             ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
             ...(standsIn === undefined ? {} : { standsIn }),
           })
+        })
+
+      /** Who the thread's last session stood in for, where it was on the agent and model starting now, and still does. */
+      const standingAgain = (threadId: string, on: { readonly agentId: string; readonly model: string | null }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ id: string; agentId: string; model: string | null }>`
+            SELECT id, agent_id, model FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          if (last === undefined || last.agentId !== on.agentId || (on.model !== null && last.model !== on.model)) return undefined
+          return Option.getOrUndefined(yield* standInOf(last.id))
         })
 
       /**

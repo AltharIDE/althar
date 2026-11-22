@@ -233,6 +233,21 @@ export const noReportWords = (input: {
   return `${name(input.from)} ended twice without a report. ${name(input.to)} takes ${work} over.`
 }
 
+/**
+ * What a thread says when the model work was given is turned off for its agent: it carries on through another agent that
+ * has it, or, where none has, which model it goes on instead.
+ */
+export const routeWords = (input: {
+  readonly from: { readonly agent: string; readonly model: string | null }
+  /** Where it carries on: the same model through another agent, or (`otherModel`) another model where none has it. */
+  readonly to?: { readonly agent: string; readonly model: string | null; readonly otherModel?: boolean }
+}): string => {
+  const off = `${input.from.model ?? 'Its model'} is turned off for ${input.from.agent}`
+  if (input.to === undefined) return `${off}, and no other agent with room offers it.`
+  if (input.to.otherModel !== true) return `${off}: it carries on through ${input.to.agent}.`
+  return `${off}, and no other agent with room offers it, so ${whoWords(input.to)}, a different model, takes the work over.`
+}
+
 /** Words that open a sentence. */
 export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
@@ -338,6 +353,18 @@ export class Limits extends Context.Service<
      * choose to spend their money, so that is a call of theirs.
      */
     canTakeOver(choices: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>): Effect.Effect<boolean, Failure>
+    /**
+     * Where work on the agent's model can run: there, unless the person turned the model off for the agent; then the same
+     * model through another agent with room (`elsewhere`), or, where none has it, `none`.
+     */
+    route(input: {
+      readonly agentId: string
+      readonly model: string | null
+      readonly projectId: string
+    }): Effect.Effect<
+      { readonly kind: 'here' } | { readonly kind: 'elsewhere'; readonly to: Takeover } | { readonly kind: 'none' },
+      Failure
+    >
     /**
      * The strongest free model on the agent, using the takeover ranking.
      * Same-agent account rotation preserves the plan's selected model.
@@ -609,7 +636,9 @@ export class Limits extends Context.Service<
             if (model !== undefined && isAgentDefault(model)) return []
             return keysOf(agent.definition, model ?? { id, name: id.slice(id.lastIndexOf('/') + 1) })
           })()
-          const found: Array<Takeover & { low: boolean; sameMaker: boolean; sameModel: boolean; score: number; preferred: boolean }> = []
+          const found: Array<
+            Takeover & { low: boolean; sameMaker: boolean; sameModel: boolean; isOther: boolean; score: number; preferred: boolean }
+          > = []
           for (const entry of agents.list) {
             const agentId = entry.definition.id
             if (
@@ -673,6 +702,11 @@ export class Limits extends Context.Service<
               if (room === undefined || accountId === undefined || (input.withRoom === true && room)) continue
               const sameModel =
                 model.id !== null && keysOf(entry.definition, { id: model.id, name: model.name }).some((key) => fromKeys.includes(key))
+              // The other step itself, on its agent and model: a review by the lead, or a lead by its reviewer, checks nothing.
+              const isOther =
+                input.other !== undefined &&
+                agentId === input.other.agentId &&
+                (input.other.model === null || model.id === null || model.id === input.other.model)
               found.push({
                 agentId,
                 model: model.id,
@@ -680,7 +714,9 @@ export class Limits extends Context.Service<
                 accountId,
                 sameMaker: fromMaker !== null && (maker === null || maker === fromMaker),
                 sameModel,
-                ...(fromKeys.length > 0 && !sameModel ? { otherModel: true } : {}),
+                isOther,
+                // Said to be another model only where it is known: an agent's own default may be the same one.
+                ...(fromKeys.length > 0 && !sameModel && model.id !== null ? { otherModel: true } : {}),
                 low: room,
                 score,
                 preferred: model.id === preferred || (preferred === null && model.id === offered?.model),
@@ -698,6 +734,7 @@ export class Limits extends Context.Service<
           // only where none of its ways has room. Every one found has some left: one with none isn't found.
           return found.toSorted(
             (a, b) =>
+              Number(a.isOther) - Number(b.isOther) ||
               Number(b.sameModel) - Number(a.sameModel) ||
               Number(a.ownWork) - Number(b.ownWork) ||
               Number(a.low) - Number(b.low) ||
@@ -891,6 +928,22 @@ export class Limits extends Context.Service<
                   accountId: first.accountId,
                   ...(first.otherModel === true ? { otherModel: true } : {}),
                 }
+          }),
+        route: (input) =>
+          Effect.gen(function* () {
+            if (input.model === null) return { kind: 'here' as const }
+            // Read as it is kept, not from the agent's models: asking the agent isn't started for it, and a list a moment
+            // stale (as Codex's can be) never moves a lead that is fine where it is.
+            const [off] = yield* sql<{ model: string }>`
+              SELECT model FROM model_blocks WHERE agent_id = ${input.agentId} AND model = ${input.model}`
+            if (off === undefined) return { kind: 'here' as const }
+            // Turned off there: the same model through another agent with room, never another model unasked.
+            const same = (yield* ranked({ projectId: input.projectId, from: input, besides: [input.agentId] })).find((one) => one.sameModel)
+            if (same === undefined) return { kind: 'none' as const }
+            return {
+              kind: 'elsewhere' as const,
+              to: { agentId: same.agentId, model: same.model, ownWork: same.ownWork, accountId: same.accountId },
+            }
           }),
         choices: (input) => choices(input),
         canTakeOver: (list) => canTakeOver(list),

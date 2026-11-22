@@ -164,6 +164,10 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
   const insteadOf = (run: RunRow, planned: PlanStep, step: keyof typeof outStep = planned.key, quiet = false) =>
     Effect.gen(function* () {
       if ((yield* usageLimitOfRun(run)) !== 'move') return undefined
+      // Its model turned off or gone on the planned agent and offered by another: it starts there as the lead, not as a
+      // stand-in for a way it can't take (Sessions' `routed`).
+      const way = yield* limits.route({ agentId: planned.agentId, model: planned.model ?? null, projectId: run.projectId })
+      if (way.kind === 'elsewhere') return undefined
       const out = yield* limits.out(planned.agentId, run.projectId)
       const low = Option.isSome(out)
         ? Option.none<Room>()

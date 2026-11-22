@@ -54,7 +54,7 @@ import {
   tailOf,
   uncoloured,
 } from './leftRunning'
-import { Limits, backWords } from './Limits'
+import { Limits, backWords, routeWords } from './Limits'
 import { type KeptLineComment, withLineComments } from './lineComments'
 import { Live } from './Live'
 import { noteServerStatus } from './mcpHealth'
@@ -1436,7 +1436,7 @@ export class Sessions extends Context.Service<
       const locks = makeKeyedLock()
       const exclusive = locks.withLock
 
-      const start = (input: {
+      const startOn = (input: {
         readonly threadId: string
         readonly agentId: string
         readonly model?: string
@@ -1833,7 +1833,7 @@ export class Sessions extends Context.Service<
       const backFrom = (standsIn: StandIn, projectId: string) =>
         isBack(standsIn, (one) => (one.accountId === null ? limits.out(one.agentId, projectId) : limits.outAccount(one.accountId)))
 
-      const switchAgent = (input: {
+      const switchOn = (input: {
         readonly threadId: string
         readonly agentId: string
         readonly model?: string
@@ -2076,6 +2076,80 @@ export class Sessions extends Context.Service<
           },
         ),
       )
+
+      /**
+       * Where a session asked for on a model the person turned off for its agent starts: the same model through another
+       * agent with room, never another model unasked; only where none has it, the agent's strongest other model. Either way
+       * the thread says so plainly (the person's note of 21 November). One already on the thread is left as it is.
+       */
+      const routed = <
+        I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
+      >(
+        input: I,
+      ) =>
+        Effect.gen(function* () {
+          if (threads.has(input.threadId)) return { input, said: undefined }
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
+          if (thread === undefined) return { input, said: undefined }
+          const way = yield* limits.route({ agentId: input.agentId, model: input.model ?? null, projectId: thread.projectId })
+          if (way.kind === 'here') return { input, said: undefined }
+          const from = yield* limits.named(input.agentId, input.model ?? null)
+          const { model: _model, accountId: _account, ...rest } = input
+          if (way.kind === 'elsewhere') {
+            const to = yield* limits.named(way.to.agentId, way.to.model)
+            const moved = {
+              ...rest,
+              agentId: way.to.agentId,
+              accountId: way.to.accountId,
+              ...(way.to.model === null ? {} : { model: way.to.model }),
+            } as I
+            return { input: moved, said: routeWords({ from, to }) }
+          }
+          const instead = yield* limits.modelFor({ agentId: input.agentId, projectId: thread.projectId })
+          const to = instead === null ? undefined : yield* limits.named(input.agentId, instead)
+          const kept = {
+            ...rest,
+            ...(input.accountId === undefined ? {} : { accountId: input.accountId }),
+            ...(instead === null ? {} : { model: instead }),
+          } as I
+          return { input: kept, said: routeWords({ from, ...(to === undefined ? {} : { to: { ...to, otherModel: true } }) }) }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logWarning('Could not read where a model runs; starting as asked', cause), { input, said: undefined }),
+          ),
+        )
+
+      /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
+      const start = (asked: Parameters<typeof startOn>[0]) =>
+        Effect.gen(function* () {
+          const { input, said } = yield* routed(asked)
+          const sessionId = yield* startOn(input)
+          if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
+          return sessionId
+        })
+
+      /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
+      const switchAgent = (asked: Parameters<typeof switchOn>[0]) =>
+        Effect.gen(function* () {
+          const { input, said } = yield* routed(asked)
+          const sessionId = yield* switchOn(input)
+          if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
+          return sessionId
+        })
+
+      const sayRouted = (threadId: string, sessionId: string, said: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+          if (thread === undefined) return
+          yield* addItem({ projectId: thread.projectId, threadId, sessionId }, 'notice', {
+            source: 'runtime',
+            severity: said.includes('a different model') || said.includes('no other agent') ? 'warning' : 'info',
+            title: said,
+            handover: true,
+          })
+        })
 
       const startLast = (threadId: string, recovering?: string) =>
         Effect.gen(function* () {

@@ -40,8 +40,75 @@ export type StandIn = typeof StandIn.Type
 
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(StandIn))
 
-/** Who the session stands in for, while it still does; none where it was started as chosen, or chosen for since. */
+/** A model's id as agents share it, without its provider: OpenCode Go's `opencode-go/gpt-6.2-sol` is Codex's `gpt-6.2-sol`. */
+export const modelIdOf = (model: string) => model.slice(model.lastIndexOf('/') + 1).toLowerCase()
+
+/** Who leads a task as last chosen: the plan's lead, or a pick of lead made on its thread since, whichever came last. */
+const taskLeadOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [plan] = yield* sql<{ agentId: string | null; model: string | null; effort: string | null; sequence: number | null }>`
+      SELECT json_extract(s.value, '$.agentId') AS agent_id, json_extract(s.value, '$.model') AS model,
+        json_extract(s.value, '$.effort') AS effort,
+        (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'task_plan' AND f.aggregate_id = p.id
+          AND (f.type = 'task_plan.proposed' OR (f.type = 'task_plan.changed' AND json_extract(f.payload, '$.leadChanged') IS NOT NULL)))
+          AS sequence
+      FROM provider_sessions ps JOIN threads t ON t.id = ps.thread_id AND t.kind = 'task'
+      JOIN task_plans p ON p.task_id = t.task_id AND p.state IN ('proposed', 'accepted'), json_each(p.parameters, '$.steps') s
+      WHERE ps.id = ${sessionId} AND json_extract(s.value, '$.key') = 'implement'
+      ORDER BY p.proposed_at DESC LIMIT 1`
+    const [pick] = yield* sql<{ choice: string; sequence: number }>`
+      SELECT json_extract(f.payload, '$.choice') AS choice, f.sequence FROM record_events f
+      JOIN provider_sessions s ON s.id = f.aggregate_id
+      WHERE s.thread_id = (SELECT thread_id FROM provider_sessions WHERE id = ${sessionId})
+        AND f.aggregate_type = 'provider_session' AND f.type = 'provider_session.lead_choice_changed'
+        AND json_extract(f.payload, '$.choice') IS NOT NULL
+      ORDER BY f.sequence DESC LIMIT 1`
+    const picked =
+      pick === undefined ? undefined : (JSON.parse(pick.choice) as { agentId: string; model?: string | null; effort?: string | null })
+    if (picked !== undefined && (plan?.agentId == null || (pick?.sequence ?? 0) > (plan.sequence ?? 0)))
+      return { agentId: picked.agentId, model: picked.model ?? null, effort: picked.effort ?? null }
+    return plan?.agentId == null ? undefined : { agentId: plan.agentId, model: plan.model, effort: plan.effort }
+  })
+
+/**
+ * Who a stand-in stands in for, read against the task's lead as it is now: none where it is on the task's own model, as
+ * it then is the lead, through another agent; and the task's lead where it stood in for another model (one the task no
+ * longer has, or a stand-in before it), so the thread goes back to the lead the task has.
+ */
+export const forTask = (
+  standsIn: StandIn,
+  on: string | null,
+  lead: { readonly agentId: string; readonly model: string | null; readonly effort: string | null } | undefined,
+): StandIn | undefined => {
+  if (lead?.model == null) return standsIn
+  const own = modelIdOf(lead.model)
+  if (on !== null && modelIdOf(on) === own) return undefined
+  if (standsIn.model !== null && modelIdOf(standsIn.model) === own) return standsIn
+  return {
+    ...standsIn,
+    agentId: lead.agentId,
+    model: lead.model,
+    effort: lead.effort,
+    accountId: lead.agentId === standsIn.agentId ? standsIn.accountId : null,
+  }
+}
+
+/**
+ * Who the session stands in for, while it still does; none where it was started as chosen, or chosen for since, or is on
+ * the task's own model (`forTask`).
+ */
 export const standInOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const kept = yield* keptStandInOf(sessionId)
+    if (Option.isNone(kept)) return kept
+    const [session] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
+    return Option.fromNullishOr(forTask(kept.value, session?.model ?? null, yield* taskLeadOf(sessionId)))
+  })
+
+/** Who the session was started standing in for, while that holds: as kept, before it is read against the task's lead. */
+const keptStandInOf = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [row] = yield* sql<{ standsIn: string | null }>`

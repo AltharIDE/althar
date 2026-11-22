@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
 import { Limits, whenWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -27,6 +28,12 @@ import { knownModels } from './knownModels'
 
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>) =>
   Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each })))
+
+/** No other agent offers Claude Code's Large, so one standing in for it is on another model. */
+const onlyClaudeHasLarge = Effect.gen(function* () {
+  const models = yield* Models
+  for (const agentId of ['codex', 'opencode']) yield* models.setModelBlocked({ agentId, model: 'large', blocked: true })
+})
 
 /** The notices a thread says, in order. */
 const said = (threadId: string) =>
@@ -104,6 +111,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const queries = yield* Queries
@@ -119,7 +127,7 @@ describe('a task’s lead out of usage outside a step', () => {
       // Said as it happens: the model that ran out and its agent, until when, and who takes over only until then.
       assert.include(
         handed,
-        `Large on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
+        `Large on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Small on Fake codex, a different model, takes over until then.`,
       )
       // The window shows it in the thread, where the passive lines of a limit stay out of it.
       assert.include(
@@ -165,6 +173,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -191,6 +200,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -218,6 +228,7 @@ describe('a task’s lead out of usage outside a step', () => {
     let refuse = false
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -263,6 +274,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -295,6 +307,7 @@ describe('a task’s planned lead already out of usage as its step starts', () =
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const sessions = yield* Sessions
       const projects = yield* Projects
       const limits = yield* Limits
@@ -329,6 +342,8 @@ describe('a step handed on after it ended twice without its report', () => {
   it.effect('goes back to the lead the task was given once that step is done, for the next turn', () =>
     Effect.gen(function* () {
       yield* knownModels
+      // Taken over on Large elsewhere, the step would stay there: on the task's own model, it isn't standing in.
+      yield* onlyClaudeHasLarge
       const sessions = yield* Sessions
       const { projectId, task, start } = yield* planned('claude-code', 'large', 'Fix the heading. [lead:finish]')
       yield* start

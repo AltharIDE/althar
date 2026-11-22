@@ -21,6 +21,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { standInOf } from '../src/standIn'
 import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until, withWork } from './support'
 
 const claude = { id: 'claude-strong', name: 'Claude Strong' }
@@ -117,7 +118,11 @@ const withAgents = (
   )
 }
 
-const startTask = (title = 'Continue the work [lead:finish]', reviewer?: string) =>
+const startTask = (
+  title = 'Continue the work [lead:finish]',
+  reviewer?: string,
+  lead: { readonly agentId: string; readonly model: string } = { agentId: 'claude-code', model: claude.id },
+) =>
   Effect.gen(function* () {
     const models = yield* Models
     yield* until(models.catalog, (catalog) => catalog.every((agent) => !agent.probing))
@@ -137,7 +142,7 @@ const startTask = (title = 'Continue the work [lead:finish]', reviewer?: string)
       taskId: task.taskId,
       actorId: instance.personId,
       steps: [
-        { key: 'implement', agentId: 'claude-code', model: claude.id, skipped: false },
+        { key: 'implement', agentId: lead.agentId, model: lead.model, skipped: false },
         ...(reviewer === undefined
           ? []
           : [{ key: 'review' as const, agentId: reviewer, model: reviewer === 'codex' ? sol.id : third.id, skipped: false }]),
@@ -736,4 +741,101 @@ describe('automatic usage takeover by model', () => {
       },
     )
   }
+})
+
+describe('a lead whose model the person turned off for its agent', () => {
+  const lines = (threadId: string) =>
+    Effect.map(items(threadId), (all) =>
+      all.flatMap((item) => (item.kind === 'notice' ? [(item.content as { title?: string }).title ?? ''] : [])),
+    )
+
+  it.live('starts on the same model through another agent, as the lead, and the thread says so', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
+      yield* (yield* Models).setModelBlocked({ agentId: 'opencode', model: goSol.id, blocked: true })
+      yield* task.start
+      const [on] = yield* until(agentsOn(task.threadId), (rows) => rows.length > 0)
+      assert.deepStrictEqual(on, { agentId: 'codex', model: sol.id })
+      assert.include(yield* lines(task.threadId), 'GPT Strong is turned off for Fake opencode: it carries on through Fake codex.')
+      // It is the task's lead there, not a stand-in for a way it can't take: nothing gives it back.
+      assert.isNull((yield* (yield* Queries).thread(task.threadId)).session?.standsIn ?? null)
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
+  it.live('goes on another model only where no agent with room offers it, and says that plainly', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
+      const models = yield* Models
+      yield* models.setModelBlocked({ agentId: 'opencode', model: goSol.id, blocked: true })
+      yield* models.setModelBlocked({ agentId: 'codex', model: sol.id, blocked: true })
+      yield* task.start
+      const [on] = yield* until(agentsOn(task.threadId), (rows) => rows.length > 0)
+      assert.deepStrictEqual(on, { agentId: 'opencode', model: third.id })
+      assert.include(
+        yield* lines(task.threadId),
+        'GPT Strong is turned off for Fake opencode, and no other agent with room offers it, so DeepSeek Strong on Fake opencode, a different model, takes the work over.',
+      )
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+})
+
+describe('a stand-in read against the task’s lead', () => {
+  const standingIn = (on: ModelChoice & { readonly model: string }, given: ModelChoice) =>
+    Effect.gen(function* () {
+      const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
+      const sessionId = yield* (yield* Sessions).start({
+        threadId: task.threadId,
+        agentId: on.agentId,
+        model: on.model,
+        standsIn: { ...given, effort: null, accountId: null, until: new Date(Date.now() + 3_600_000).toISOString() },
+      })
+      return Option.getOrUndefined(yield* standInOf(sessionId))
+    })
+
+  it.live('isn’t one on the task’s own model, whoever it was started standing in for', () =>
+    Effect.gen(function* () {
+      // GPT Strong on Codex, kept as standing in for another model, while the task's lead is GPT Strong on OpenCode Go.
+      assert.isUndefined(yield* standingIn({ agentId: 'codex', model: sol.id }, { agentId: 'opencode', model: third.id }))
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
+  it.live('stands in for the task’s lead where it was kept standing in for another model, so that lead comes back', () =>
+    Effect.gen(function* () {
+      const standsIn = yield* standingIn({ agentId: 'claude-code', model: claude.id }, { agentId: 'codex', model: weak.id })
+      assert.deepInclude(standsIn, { agentId: 'opencode', model: goSol.id, accountId: null })
+      // One standing in for the task's lead stays as it was.
+      assert.deepInclude(yield* standingIn({ agentId: 'claude-code', model: claude.id }, { agentId: 'opencode', model: goSol.id }), {
+        agentId: 'opencode',
+        model: goSol.id,
+      })
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+})
+
+describe('a stand-in on another model that ends twice without its report', () => {
+  it.live('hands the step to the task’s own model, before another with more room', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
+      const accounts = yield* Accounts
+      const sql = yield* SqlClient.SqlClient
+      // OpenCode Go nearly out as the step starts: Claude Strong stands in, the only model with room but GPT Weak.
+      const [account] = yield* accounts.of('opencode')
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: account!.id,
+        agentId: 'opencode',
+        source: 'agent',
+        windows: JSON.stringify([{ kind: 'weekly', usedPercent: 96, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      yield* task.start
+      // Claude Strong ends twice without a report: the step goes back to GPT Strong, nearly out as it is, not to GPT Weak.
+      const on = yield* until(agentsOn(task.threadId), (rows) => rows.length > 1)
+      assert.deepStrictEqual(on.slice(0, 2), [
+        { agentId: 'claude-code', model: claude.id },
+        { agentId: 'opencode', model: goSol.id },
+      ])
+    }).pipe(
+      Effect.provide(withAgents({ 'claude-code': { noReport: true }, codex: { models: [weak] }, opencode: { models: [goSol, third] } })),
+    ),
+  )
 })

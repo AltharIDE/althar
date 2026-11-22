@@ -542,9 +542,10 @@ describe('an agent out of usage', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
       const lines = yield* reviewerOut
+      // Large, not Small, which is the lead itself: a review by the lead checks nothing.
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake claude-code takes the review over, with the review by the same maker.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake claude-code takes the review over, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
