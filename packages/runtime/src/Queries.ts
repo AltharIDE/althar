@@ -879,7 +879,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           name: text(content, 'name'),
           title: text(content, 'title'),
           canvasKind:
-            canvasKind === 'markdown' || canvasKind === 'mermaid' || canvasKind === 'svg' || canvasKind === 'picture' ? canvasKind : 'html',
+            canvasKind === 'markdown' ||
+            canvasKind === 'mermaid' ||
+            canvasKind === 'svg' ||
+            canvasKind === 'picture' ||
+            canvasKind === 'boards'
+              ? canvasKind
+              : 'html',
           version: typeof version === 'number' ? version : 1,
           note: note === '' ? null : note,
           action: text(content, 'action') === 'opened' ? 'opened' : 'published',

@@ -190,7 +190,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose }: Canvas
   // Its words are only waited for once there is a version to read them from: a canvas that can't be read says why.
   const loading = detail.isPending || (drawsText && version !== null && text.isPending)
   const error = detail.isError ? messageOf(detail.error) : drawsText && text.isError ? messageOf(text.error) : undefined
-  const fill = kind === 'html' || kind === 'picture' || kind === 'svg'
+  const fill = kind === 'html' || kind === 'boards' || kind === 'picture' || kind === 'svg'
   return (
     <CanvasPanel
       name={summary?.name ?? ''}

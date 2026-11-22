@@ -42,12 +42,12 @@ import {
   Lock,
   LongArrowDownLeft,
   MediaImage,
-  MouseButtonLeft,
   Microphone,
   NavArrowDown,
   NavArrowLeft,
   NavArrowRight,
   NavArrowUp,
+  OneFingerSelectHandGesture,
   OpenNewWindow,
   Page,
   Palette,
@@ -220,7 +220,7 @@ export const ICONS = {
   /** Moving around a canvas by dragging it. */
   hand: DragHandGesture,
   /** Using a board as the page it is: its links and buttons take the press. */
-  use: MouseButtonLeft,
+  use: OneFingerSelectHandGesture,
   /** A commit, as git keeps what was saved to a repository. */
   commit: GitCommit,
   /** What something is, explained where it is pointed at. */

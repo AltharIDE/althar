@@ -113,10 +113,12 @@ export interface Ground {
   readonly clear: () => void
 }
 
-/** Room between boards on a page, between pages' rows, and round what is fitted, in the boards' own pixels and the view's. */
+/** Room between boards, in the boards' own pixels; and round what is fitted, in the view's. */
 const GAP = 96
-const ROW_GAP = 720
 const PAD = 56
+/** Room over a line of boards for their names, and over a page for its name, in the view's pixels. */
+const NAME_ROOM = 34
+const PAGE_ROOM = 84
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 4
 /** Below this, the boards' names would be smaller than the boards: they go, and the pages' names stay. */
@@ -145,6 +147,7 @@ const STYLE = `
   .althar-name b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .althar-name span { color: var(--t-4, #999); font-variant-numeric: tabular-nums; flex: none; }
   .althar-board[data-chosen] .althar-name { color: ${VIOLET}; }
+  .althar-board[data-narrow] .althar-name span { display: none; }
   .althar-row-name { position: absolute; left: 0; transform-origin: 0 100%; transform: scale(calc(1 / var(--z)));
     font-size: 15px; line-height: 20px; font-weight: 600; color: var(--t-1, #222); white-space: nowrap; cursor: pointer; }
   .althar-row-name:hover { color: ${VIOLET}; }
@@ -234,6 +237,8 @@ const install = (): Ground => {
   let pan = { x: 0, y: 0 }
   /* Fitted since it was last moved: a view that grows or shrinks fits again. */
   let fitted = true
+  /* Whether the person has chosen a board yet: only then is it marked. */
+  let picked = false
   let seq = 0
   let events: Array<{ readonly seq: number; readonly event: GroundEvent }> = []
   let waiting: Array<() => void> = []
@@ -262,54 +267,109 @@ const install = (): Ground => {
   const all = () => pages.flatMap((page, p) => page.boards.map((def, b) => ({ page: p, board: b, def })))
   const exists = (at: GroundAt) => pages[at.page]?.boards[at.board] !== undefined
 
-  /** The boards shown and where each is in the world: a row a page, or the one board. */
+  /** The room fitting has: the view, less its margin and the names over the boards. */
+  const above = () => (state.view === 'every' && state.page === -1 && pages.length > 1 ? PAGE_ROOM : 28)
+  const room = () => ({ width: Math.max(1, window.innerWidth - PAD * 2), height: Math.max(1, window.innerHeight - PAD * 2 - above()) })
+
+  /**
+   * Where each board goes, its page's boards in lines of `columns`, a page
+   * under the one before, with room over each line for the boards' names and
+   * over each page for its own, at the zoom they will be seen at.
+   */
+  const arrange = (
+    sections: ReadonlyArray<{ readonly page: number; readonly boards: ReadonlyArray<number> }>,
+    columns: number,
+    zoom: number,
+  ) => {
+    const spots: Array<{ readonly page: number; readonly board: number; readonly x: number; readonly y: number }> = []
+    const titles: Array<{ readonly page: number; readonly y: number }> = []
+    const between = Math.max(GAP, NAME_ROOM / zoom)
+    const titled = sections.length > 1
+    let y = 0
+    let right = 0
+    for (const [at, section] of sections.entries()) {
+      const page = pages[section.page]
+      if (page === undefined) continue
+      if (titled) {
+        if (at > 0) y += Math.max(GAP * 2, (PAGE_ROOM + NAME_ROOM) / zoom)
+        titles.push({ page: section.page, y })
+      }
+      for (let start = 0; start < section.boards.length; start += columns) {
+        if (start > 0) y += between
+        let x = 0
+        let tallest = 0
+        for (const board of section.boards.slice(start, start + columns)) {
+          const def = page.boards[board]
+          if (def === undefined) continue
+          spots.push({ page: section.page, board, x, y })
+          x += def.width + GAP
+          tallest = Math.max(tallest, def.height)
+        }
+        right = Math.max(right, x - GAP)
+        y += tallest
+      }
+    }
+    return { spots, titles, width: Math.max(1, right), height: Math.max(1, y) }
+  }
+
+  /** The lines the boards go in: as many to a line as shows them largest in the view, at least one. */
+  const plan = (sections: ReadonlyArray<{ readonly page: number; readonly boards: ReadonlyArray<number> }>) => {
+    const most = Math.max(1, ...sections.map((one) => one.boards.length))
+    const space = room()
+    const zoomOf = (box: { readonly width: number; readonly height: number }) =>
+      clamp(Math.min(space.width / box.width, space.height / box.height, 1), MIN_ZOOM, MAX_ZOOM)
+    let best: { readonly made: ReturnType<typeof arrange>; readonly zoom: number } | null = null
+    for (let columns = 1; columns <= most; columns += 1) {
+      // Twice: the room for names depends on the zoom, which depends on the room.
+      const first = arrange(sections, columns, zoomOf(arrange(sections, columns, 1)))
+      const zoom = zoomOf(first)
+      const made = arrange(sections, columns, zoom)
+      if (best === null || zoomOf(made) > best.zoom + 1e-4) best = { made, zoom: zoomOf(made) }
+    }
+    return best?.made ?? arrange(sections, 1, 1)
+  }
+
+  /** The boards shown and where each is in the world: a page's, every page's, or the one board. */
   const layout = () => {
     world.replaceChildren()
     const made: Array<Placed> = []
-    const shown =
+    const sections =
       state.view === 'one'
-        ? [{ page: state.board.page, only: state.board.board }]
-        : state.page === -1
-          ? pages.map((_, p) => ({ page: p, only: -1 }))
-          : [{ page: clamp(state.page, 0, pages.length - 1), only: -1 }]
-    let y = 0
-    for (const row of shown) {
-      const page = pages[row.page]
-      if (page === undefined) continue
-      if (state.page === -1 && state.view === 'every') {
-        const title = document.createElement('div')
-        title.className = 'althar-row-name'
-        title.textContent = page.name
-        title.dataset.page = String(row.page)
-        title.style.top = `${y}px`
-        title.style.translate = '0 calc(-100% - 34px / var(--z))'
-        world.append(title)
-      }
-      let x = 0
-      let tallest = 0
-      for (const [b, def] of page.boards.entries()) {
-        if (row.only !== -1 && b !== row.only) continue
-        const node = document.createElement('div')
-        node.className = 'althar-board'
-        node.style.cssText = `left:${x}px;top:${y}px;width:${def.width}px;height:${def.height}px;--w:${def.width}`
-        const label = document.createElement('div')
-        label.className = 'althar-name'
-        const title = document.createElement('b')
-        title.textContent = def.name
-        const size = document.createElement('span')
-        size.textContent = `${def.width} × ${def.height}`
-        label.append(title, size)
-        const content = PICTURE.test(def.file) ? document.createElement('img') : document.createElement('iframe')
-        content.src = addressOf(def.file)
-        if (content instanceof HTMLIFrameElement) content.title = def.name
-        else content.alt = def.name
-        node.append(label, content)
-        world.append(node)
-        made.push({ page: row.page, board: b, def, x, y, node, frame: content })
-        x += def.width + GAP
-        tallest = Math.max(tallest, def.height)
-      }
-      y += tallest + ROW_GAP
+        ? [{ page: state.board.page, boards: [state.board.board] }]
+        : (state.page === -1 ? pages.map((_, p) => p) : [clamp(state.page, 0, pages.length - 1)]).map((p) => ({
+            page: p,
+            boards: (pages[p]?.boards ?? []).map((_, b) => b),
+          }))
+    const { spots, titles } = plan(sections)
+    for (const title of titles) {
+      const node = document.createElement('div')
+      node.className = 'althar-row-name'
+      node.textContent = pages[title.page]?.name ?? ''
+      node.dataset.page = String(title.page)
+      node.style.top = `${title.y}px`
+      node.style.translate = '0 calc(-100% - 34px / var(--z))'
+      world.append(node)
+    }
+    for (const spot of spots) {
+      const def = pages[spot.page]?.boards[spot.board]
+      if (def === undefined) continue
+      const node = document.createElement('div')
+      node.className = 'althar-board'
+      node.style.cssText = `left:${spot.x}px;top:${spot.y}px;width:${def.width}px;height:${def.height}px;--w:${def.width}`
+      const label = document.createElement('div')
+      label.className = 'althar-name'
+      const title = document.createElement('b')
+      title.textContent = def.name
+      const size = document.createElement('span')
+      size.textContent = `${def.width} × ${def.height}`
+      label.append(title, size)
+      const content = PICTURE.test(def.file) ? document.createElement('img') : document.createElement('iframe')
+      content.src = addressOf(def.file)
+      if (content instanceof HTMLIFrameElement) content.title = def.name
+      else content.alt = def.name
+      node.append(label, content)
+      world.append(node)
+      made.push({ page: spot.page, board: spot.board, def, x: spot.x, y: spot.y, node, frame: content })
     }
     placed = made
     chosen()
@@ -317,7 +377,10 @@ const install = (): Ground => {
 
   const chosen = () => {
     for (const one of placed)
-      one.node.toggleAttribute('data-chosen', state.view === 'every' && one.page === state.board.page && one.board === state.board.board)
+      one.node.toggleAttribute(
+        'data-chosen',
+        picked && state.view === 'every' && one.page === state.board.page && one.board === state.board.board,
+      )
   }
 
   const bounds = () => {
@@ -338,18 +401,20 @@ const install = (): Ground => {
     world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${state.zoom})`
     world.style.setProperty('--z', String(state.zoom))
     world.toggleAttribute('data-small', state.zoom < NAMES_FROM)
+    // A board too narrow on screen for its name and its size keeps its name.
+    for (const one of placed) one.node.toggleAttribute('data-narrow', one.def.width * state.zoom < 260)
     redraw()
   }
 
   /** Fits what shows into the view, with room for the names over it; never larger than its own size. */
   const fit = () => {
     const box = bounds()
-    const room = { width: Math.max(1, window.innerWidth - PAD * 2), height: Math.max(1, window.innerHeight - PAD * 2 - 28) }
-    const zoom = clamp(Math.min(room.width / box.width, room.height / box.height, 1), MIN_ZOOM, MAX_ZOOM)
+    const space = room()
+    const zoom = clamp(Math.min(space.width / box.width, space.height / box.height, 1), MIN_ZOOM, MAX_ZOOM)
     state = { ...state, zoom }
     pan = {
       x: (window.innerWidth - box.width * zoom) / 2 - box.left * zoom,
-      y: (window.innerHeight - box.height * zoom) / 2 - box.top * zoom + 14,
+      y: (window.innerHeight - box.height * zoom) / 2 - box.top * zoom + above() / 2,
     }
     fitted = true
     apply()
@@ -523,6 +588,7 @@ const install = (): Ground => {
       return
     }
     state = { ...state, board: { page: part.placed.page, board: part.placed.board } }
+    picked = true
     chosen()
     taken = part
     redraw()
@@ -611,9 +677,13 @@ const install = (): Ground => {
     spaceHeld = false
     showTool()
   })
+  // A view that grows or shrinks lays its boards out again for its new shape, where they were fitted to it.
   window.addEventListener('resize', () => {
-    if (fitted) fit()
-    else redraw()
+    if (!fitted) return redraw()
+    taken = null
+    outlined = null
+    layout()
+    fit()
   })
 
   /* ——— What the main process asks ——— */
@@ -631,6 +701,7 @@ const install = (): Ground => {
     }
     if (change.board !== undefined && exists(change.board)) {
       state = { ...state, board: change.board }
+      picked = true
       if (state.view === 'one') relayout = refit = true
       else if (state.page !== -1 && state.page !== change.board.page) state = { ...state, page: change.board.page }
       chosen()
@@ -649,6 +720,7 @@ const install = (): Ground => {
       const here = list.findIndex((one) => one.page === state.board.page && one.board === state.board.board)
       const next = list[clamp(here + change.step, 0, list.length - 1)]
       if (next !== undefined && (next.page !== state.board.page || next.board !== state.board.board)) {
+        picked = true
         state = { ...state, board: { page: next.page, board: next.board }, ...(state.page !== -1 ? { page: next.page } : {}) }
         relayout = state.view === 'one' || state.page !== -1
         refit = state.view === 'one'
