@@ -141,6 +141,9 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
+    // As cards first; as a list, one table.
+    await expect(page.getByRole('list', { name: 'The project’s artifacts' }).getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
+    await page.getByRole('radiogroup', { name: 'Show as' }).getByRole('radio', { name: 'List' }).click()
     const table = page.getByRole('table', { name: 'The project’s artifacts' })
     await expect(table.getByRole('row')).toHaveCount(4)
     const directionsRow = table.getByRole('row').filter({ hasText: 'Sign-in, three directions' })
@@ -184,7 +187,8 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByText('First directions')).toBeVisible()
     const answer = page.getByRole('paragraph').filter({ hasText: 'The repository also has' })
-    await answer.scrollIntoViewIfNeeded()
+    // The streamed answer gives way to the kept one: scrolled to once it stays.
+    await expect(async () => await answer.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()
     await expect(doc).toBeInViewport()
     await shoot(page, electronApp, page, 'test-results/aside-canvas-beside.png')
     await answer.getByRole('button', { name: 'Open README.md' }).click()

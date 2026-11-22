@@ -109,6 +109,12 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await panel.getByRole('button', { name: /^Pages: / }).click()
     await page.getByRole('menuitemradio', { name: /^Directions/ }).click()
     await expect.poll(() => frames(electronApp)).toBe(4)
+    // Its boards are counted as they're laid out, before their pages have loaded.
+    await expect
+      .poll(() =>
+        inCanvas<boolean>(electronApp, `document.querySelector('iframe')?.contentDocument?.querySelector('[data-part="go"]') != null`),
+      )
+      .toBe(true)
     await pressIn(electronApp, await partOf(electronApp, 'go'))
     const field = page.getByRole('textbox', { name: 'Comment on button.go' })
     await expect(field).toBeVisible()
@@ -131,7 +137,9 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await shoot(page, electronApp, page, 'test-results/boards-artifacts.png')
     await card.click()
     await expect(page.getByRole('complementary', { name: 'Gift a class' })).toBeVisible()
+    await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
     await expect.poll(() => frames(electronApp)).toBe(4)
+    await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
     // And back to every artifact.
     await page.getByRole('complementary', { name: 'Gift a class' }).getByRole('button', { name: /^Back/ }).click()
     await expect(cards).toBeVisible()
