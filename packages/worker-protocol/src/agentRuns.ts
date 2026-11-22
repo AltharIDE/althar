@@ -274,10 +274,19 @@ const validSetupResult = (current: Run, result: AgentWorkspaceSetupResult | unde
   )
 }
 
+export type AgentWorkerConnection = 'connected' | 'disconnected'
+
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
-export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
+export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: (outcome: AgentWorkerConnection) => void) => {
   const slots = new Map<string, Slot>()
   const previews = makePreviewTunnels()
+  const reportConnection = (outcome: AgentWorkerConnection): void => {
+    try {
+      connectionChanged?.(outcome)
+    } catch {
+      // Reporting must never interrupt worker execution or cleanup.
+    }
+  }
 
   const connect = (call: ServerDuplexStream<Buffer, Buffer>, homeId: string, enrolledWorker: () => string | undefined): void => {
     let slot: Slot | undefined
@@ -320,7 +329,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (closed) return
       closed = true
       clearTimeout(timer)
-      if (slot !== undefined && slots.get(slot.workerId) === slot) slots.delete(slot.workerId)
+      if (slot !== undefined && slots.get(slot.workerId) === slot) {
+        slots.delete(slot.workerId)
+        reportConnection('disconnected')
+      }
       if (run !== undefined) {
         clearTimeout(run.starting)
         clearTimeout(run.stopping)
@@ -475,15 +487,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         () => run?.id === id && ownsRun(run),
         send,
         (message) => fail(status.INVALID_ARGUMENT, message),
-        (providerId, withSkills, withCheckout) =>
-          slot?.capabilities.some(
-            (cap) =>
-              cap.projectId === placement.projectId &&
-              cap.providerId === providerId &&
-              cap.helperAgents &&
-              (!withSkills || cap.helperSkillFiles) &&
-              (!withCheckout || cap.helperCheckouts),
-          ) === true,
+        (providerId, withSkills, withCheckout) => {
+          const cap = slot?.capabilities.find((each) => each.projectId === placement.projectId && each.providerId === providerId)
+          if (cap === undefined) return 'agent'
+          // What it lacks is what a newer worker reports it can do.
+          return cap.helperAgents && (!withSkills || cap.helperSkillFiles) && (!withCheckout || cap.helperCheckouts) ? undefined : 'update'
+        },
         capability?.managedPreview === true
           ? {
               open: (commandId, port, active, signal) =>
@@ -642,6 +651,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
+          reportConnection('connected')
           sendControl({
             case: 'hello',
             value: create(AgentHomeHelloSchema, {

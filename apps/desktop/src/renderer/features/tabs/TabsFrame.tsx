@@ -5,7 +5,6 @@ import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room
 
 import { useServices } from '../../data/services'
 import { HomeButton } from '../homes/HomeConnections'
-import { showHomes } from '../homes/useHomes'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
 import { SearchNotice } from '../finder/SearchNotice'
@@ -112,7 +111,7 @@ function TabsBar({
   quick: boolean
   onQuick: (open: boolean) => void
 }) {
-  const { host, client } = useServices()
+  const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
   const online = useOnline()
@@ -166,7 +165,7 @@ function TabsBar({
       onClose={tabs.close}
       onReorder={tabs.reorder}
       onOpen={tabs.open}
-      onNewProject={client.connection === undefined ? tabs.newProject : showHomes}
+      onNewProject={tabs.newProject}
       end={
         <>
           <HomeButton />
@@ -217,8 +216,10 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
   // A project Manage homes asked for, in this window or another's: its tab, and the window on it.
   const showProject = useEffectEvent((projectId: string) => tabs.open(projectId))
-  const { host: frameHost } = useServices()
+  const showNew = useEffectEvent(() => tabs.newProject())
+  const { host: frameHost, client } = useServices()
   useEffect(() => frameHost.homes?.onProject(showProject), [frameHost.homes])
+  useEffect(() => frameHost.homes?.onNewProject(showNew), [frameHost.homes])
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // Where dictation said from anywhere goes, chosen from its pill.
@@ -227,9 +228,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState(false)
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
   const [quick, setQuick] = useState(false)
-  const { select, current, newProject: createProject, none, openSettings } = tabs
-  const { client } = useServices()
-  const newProject = client.connection === undefined ? createProject : showHomes
+  const { select, current, newProject, none, openSettings } = tabs
   const { open: settingsOpen, current: onSettings } = tabs.settings
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
@@ -282,8 +281,15 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         setUsage((open) => !open)
         return
       }
-      // Before there is a project, the first screen has ⌘N for a folder of its own.
-      if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+      // Before there is a project, this computer's first screen has ⌘N for a folder of its own; another computer's home's
+      // welcome goes into New project, as its ways in do.
+      if (
+        commandDown(event) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'n' &&
+        (!none || client.connection !== undefined)
+      ) {
         event.preventDefault()
         newProject()
         return
@@ -310,7 +316,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home, client])
   return (
     <CarriedBack.Provider value={back}>
       <CarriedPlace.Provider value={openPlacing}>

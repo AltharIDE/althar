@@ -9,7 +9,7 @@ import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess,
 import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
-import { homeController } from './controller'
+import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
@@ -45,13 +45,15 @@ export const startHomeConnections = ({
   open,
   log,
   protect,
+  usage,
 }: {
   readonly protect: ProtectCredential
   readonly profile: string
   readonly entry: string
   readonly mine: (contents: WebContents) => boolean
-  readonly open: (home: WindowHome, projectId?: string) => void
+  readonly open: (home: WindowHome, projectId?: string, fresh?: boolean) => void
   readonly log: (message: string) => void
+  readonly usage: (event: HomeUsageEvent) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
   const approvals = new Map<number, AbortController>()
@@ -140,6 +142,7 @@ export const startHomeConnections = ({
     changed: tell,
     overviewChanged,
     glances,
+    usage,
   })
   // A home being set up over SSH: one for the whole app, told to every window as it goes.
   const source = releaseSource()
@@ -221,7 +224,9 @@ export const startHomeConnections = ({
     return controller.overview()
   })
   ipcMain.handle('althar:homes-save', (event, check: unknown, name: unknown) => controller.save(owner(event), check, name))
-  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown) => controller.open(owner(event), id, projectId))
+  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown, fresh: unknown) =>
+    controller.open(owner(event), id, projectId, fresh),
+  )
   ipcMain.handle('althar:homes-rename', (event, id: unknown, name: unknown) => controller.rename(owner(event), id, name))
   ipcMain.handle('althar:homes-change', (event, id: unknown, check: unknown) => controller.change(owner(event), id, check))
   ipcMain.handle('althar:homes-forget', (event, id: unknown) => {

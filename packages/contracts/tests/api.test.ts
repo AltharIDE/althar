@@ -25,6 +25,8 @@ import {
   type SentImage,
   SentFiles,
   SentImages,
+  SOCKET_CALLS,
+  socketCanCall,
   TaskCard,
   ThreadItem,
   WatchEvent,
@@ -487,6 +489,8 @@ describe('the API', () => {
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
+              FindHomeFolders: () => Effect.die('unused'),
+              GetMachine: () => Effect.die('unused'),
               LookElsewhere: () => Effect.die('unused'),
               BringIn: () => Effect.die('unused'),
               PlaceRepository: () => Effect.die('unused'),
@@ -555,6 +559,7 @@ describe('the API', () => {
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
+              SetAgent: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),
               SetModelBlocked: () => Effect.die('unused'),
@@ -901,4 +906,14 @@ describe('the API', () => {
       }),
     ),
   )
+})
+
+describe('the calls a socket may make', () => {
+  it('are those marked for it, whichever way they were marked, as a home tells its window', () => {
+    for (const tag of SOCKET_CALLS) assert.isTrue(socketCanCall(tag), tag)
+    for (const tag of ['ListProjects', 'WatchFrom', 'FindHomeFolders', 'CloneRepository', 'OpenProject']) assert.include(SOCKET_CALLS, tag)
+    // Putting a repository on a host, a project's tracker, and the person's word stay with the person's own window.
+    for (const tag of ['PublishRepository', 'ListRepositoryOwners', 'SetProjectTracker', 'ListContainers', 'Answer'])
+      assert.notInclude(SOCKET_CALLS, tag)
+  })
 })

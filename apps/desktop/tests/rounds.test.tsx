@@ -252,6 +252,13 @@ describe('a task’s thread in rounds', () => {
       links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
       details: '{\n  "status": 200\n}',
     })
+    // A merge-queue send-back's failed jobs' logs reach its line too, to fold under it; its words stay one short line.
+    const logs = [{ name: 'test', url: 'https://ci/1', log: 'FAIL limit.test.ts', missing: null }]
+    const taken = items.notice({ source: 'runtime', title: 'The merge queue took PR #1 out: test failed.', logs }, null)
+    expect(asked([...answered, items.step(), when(taken, 50)]).find((block) => block.kind === 'althar')).toMatchObject({
+      text: 'The merge queue took PR #1 out: test failed.',
+      logs,
+    })
     // What the coordinator passed on is waited on as well, after a report too.
     const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
     expect(asked([...answered, items.step(), when(passed, 50)]).map((block) => block.kind)).toEqual(['you', 'round', 'relayed', 'waiting'])
@@ -513,6 +520,67 @@ describe('a task’s thread in rounds, on its screen', () => {
     withServices(<Task />, client)
     return client
   }
+
+  it('links each check a merge-queue send-back names to its own page, its logs folded under the line', async () => {
+    // "test / linux" has no page and comes first; "out" stands in the line's words too: each link goes where it says it is.
+    const title = 'The merge queue took PR #1 out: test / linux, test and out failed.'
+    show([
+      items.you('Ship it'),
+      items.says('Shipped.'),
+      items.notice(
+        {
+          source: 'runtime',
+          title,
+          links: [
+            { label: 'PR #1', url: 'https://ci/pr/1', at: 21 },
+            { label: 'test', url: 'https://ci/test', at: title.indexOf(', test') + 2 },
+            { label: 'out', url: 'https://ci/out', at: title.indexOf('and out') + 4 },
+          ],
+          logs: [{ name: 'test', url: 'https://ci/test', log: 'FAIL limit.test.ts', missing: null }],
+        },
+        null,
+      ),
+    ])
+    const line = (await screen.findByRole('link', { name: 'PR #1' })).closest('p, div') as HTMLElement
+    expect(line.textContent).toContain(title)
+    const links = within(line).getAllByRole('link')
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['PR #1', 'https://ci/pr/1'],
+      ['test', 'https://ci/test'],
+      ['out', 'https://ci/out'],
+    ])
+    // The test linked is the check's own, after "test / linux", whose words stay plain.
+    expect(line.innerHTML).toContain('out: test / linux, <a')
+    expect(screen.queryByText('FAIL limit.test.ts')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Logs' }))
+    expect(await screen.findByText(/FAIL limit\.test\.ts/)).toBeTruthy()
+  })
+
+  it('links the second of two checks of one name where only it has a page, never the first', async () => {
+    const title = 'The merge queue took PR #1 out: test and test failed.'
+    show([
+      items.you('Ship it'),
+      items.says('Shipped.'),
+      items.notice(
+        {
+          source: 'runtime',
+          title,
+          links: [
+            { label: 'PR #1', url: 'https://ci/pr/1', at: 21 },
+            { label: 'test', url: 'https://ci/test-2', at: title.lastIndexOf('test') },
+          ],
+        },
+        null,
+      ),
+    ])
+    const line = (await screen.findByRole('link', { name: 'PR #1' })).closest('p, div') as HTMLElement
+    expect(
+      within(line)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href')),
+    ).toEqual(['https://ci/pr/1', 'https://ci/test-2'])
+    expect(line.innerHTML).toContain('out: test and <a')
+  })
 
   it('shows what the coordinator passed on on the person’s side, in a line and the rest on a click', async () => {
     show([

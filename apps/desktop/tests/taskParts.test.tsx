@@ -69,11 +69,13 @@ describe('a task’s parts', () => {
     withServices(<Task />, client, fakeHost({ saveWorkerSnapshot }))
     const popover = await parts()
     await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
-    await userEvent.click(await popover.findByRole('button', { name: 'Save a local copy' }))
+    // Where it works is the worker, not the home's copy of its folder.
+    expect(popover.getByText('Linux worker 111111')).toBeTruthy()
+    await userEvent.click(await popover.findByRole('button', { name: 'Copy to this Mac…' }))
     expect(saveWorkerSnapshot).toHaveBeenCalledWith({ projectId: base.project.id, taskId: base.task.id })
-    expect(popover.getByRole('button', { name: 'Saving local copy…' })).toHaveProperty('disabled', true)
+    expect(popover.getByRole('button', { name: 'Copying…' })).toHaveProperty('disabled', true)
     finish()
-    expect(await popover.findByRole('button', { name: 'Save a local copy' })).toBeTruthy()
+    expect(await popover.findByRole('button', { name: 'Copy to this Mac…' })).toBeTruthy()
   })
 
   it('moves a running task to Local from its folder’s row, and asks before switching a branch of the person’s own', async () => {

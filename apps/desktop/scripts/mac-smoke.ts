@@ -2,6 +2,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { chromium, type Page } from '@playwright/test'
 
@@ -68,7 +69,7 @@ tryTo('Claude Code', () => runAs(join(modules, '@anthropic-ai', `claude-agent-sd
  * The speech engine's addon is Node-API, so the app's Node loads it as
  * Electron's utility process does. Signed ad hoc, nothing in the app has a
  * team for library validation to match, so the Node, which may load only
- * its own team's libraries, can't load the engine's (Electron's processes
+ * its own team's libraries, can't load the native addons (Electron's processes
  * may load any there): it is loaded with a copy of the Node that may.
  */
 // codesign describes a signature on stderr.
@@ -86,7 +87,7 @@ const loader = (() => {
     `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>${keys.map((key) => `<key>com.apple.security.cs.${key}</key><true/>`).join('')}</dict></plist>\n`,
   )
   execFileSync('codesign', ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', entitlements, copy], { stdio: 'pipe' })
-  process.stdout.write('The app is signed ad hoc: the speech engine is loaded with a copy of its Node that may load any library.\n')
+  process.stdout.write('The app is signed ad hoc: native addons are loaded with a copy of its Node that may load any library.\n')
   return copy
 })()
 tryTo('the speech engine loads', () =>
@@ -94,6 +95,14 @@ tryTo('the speech engine loads', () =>
     '-e',
     "console.log(typeof require(process.argv[1]).OfflineRecognizer === 'function' ? 'yes' : 'no')",
     join(modules, 'sherpa-onnx-node'),
+  ]),
+)
+tryTo('the computer-use driver loads', () =>
+  runAs(loader, [
+    '--input-type=module',
+    '-e',
+    'if (typeof (await import(process.argv[1])).CuaDriver.create !== "function") process.exit(1); console.log("yes")',
+    pathToFileURL(join(modules, '@trycua', 'cua-driver', 'dist', 'index.js')).href,
   ]),
 )
 

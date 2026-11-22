@@ -27,7 +27,7 @@ import {
   lagLogged,
   watchLag,
 } from '@althar/runtime'
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
 import { keepCompiledNow } from '../compileCache'
@@ -40,6 +40,8 @@ import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
 import { pagesWith } from './pages'
+import { computerWith } from './computer'
+import type { ComputerDone, ComputerOwner } from '@althar/runtime/computerBridge'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -137,6 +139,7 @@ const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
 /* What the lead and the coordinator ask of the page beside their conversation, which the main process answers (pages.ts). */
 const pages = pagesWith((message) => parent.postMessage(message))
+const computer = computerWith((message) => parent.postMessage(message))
 
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
@@ -196,6 +199,8 @@ const options = {
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
   page: pages.ask,
+  computer: computer.ask,
+  computerEnded: (owner: ComputerOwner) => parent.postMessage({ type: 'computer-turn-ended', owner }),
   editors: {
     list: () =>
       device === undefined
@@ -273,6 +278,7 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
         }
       : undefined
+  const fakeCompactionIdle = Number(process.env.ALTHAR_FAKE_COMPACTION_IDLE_MS)
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
@@ -295,6 +301,7 @@ const program = Effect.gen(function* () {
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
+          ...(fakeCompactionIdle > 0 ? { idle: { compaction: Duration.millis(fakeCompactionIdle) } } : {}),
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
@@ -304,7 +311,9 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot })
+  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot }, (outcome) => {
+    parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+  })
   const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
   const context = yield* startup(
     'services',
@@ -365,7 +374,9 @@ const program = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning('The private local API could not start', error)),
     )
   yield* Effect.forkScoped(
-    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+    Stream.runForEach(Context.get(context, UsageData).events, ({ event, at }) =>
+      Effect.sync(() => parent.postMessage({ type: 'usage', usage: event, usageAt: at })),
+    ),
   )
   // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
   yield* Effect.forkScoped(
@@ -488,6 +499,7 @@ parent.on('message', (message) => {
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
+  if (data?.type === 'computer-done' && data.requestId !== undefined) computer.answer(data.requestId, data as unknown as ComputerDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port, data.role === 'internal' ? 'internal' : 'window')
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)

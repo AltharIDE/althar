@@ -163,6 +163,13 @@ describe('a lead waiting for an external condition', () => {
         yield* ready(task.projectId, task.taskId)
         assert.lengthOf(yield* turns(task.threadId), 2)
         assert.lengthOf(yield* held(task.taskId), 0)
+        // The thread says the wait is over in a line; what Althar tells the lead isn't shown as the person's message.
+        assert.isTrue((yield* notices(task.threadId)).some((one) => one.title === 'Done waiting: Check the deployment'))
+        const sql = yield* SqlClient.SqlClient
+        const said = yield* sql<{
+          content: string
+        }>`SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind IN ('user_message', 'notice')`
+        assert.isFalse(said.some((row) => row.content.includes('external wait resolved')))
       }).pipe(Effect.provide(withQueries(':memory:', { holds: gate }))),
     )
   })

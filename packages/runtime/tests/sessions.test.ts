@@ -398,7 +398,7 @@ describe('sessions', () => {
       assert.strictEqual((yield* session(sessionId))?.model, 'large')
       yield* sessions.setModel({ threadId: created.threadId, model: 'small' })
       assert.strictEqual((yield* session(sessionId))?.model, 'small')
-      assert.deepStrictEqual((yield* threadItems(created.threadId)).at(-1)?.content.title, 'Model changed to small.')
+      assert.deepStrictEqual((yield* threadItems(created.threadId)).at(-1)?.content.title, 'Model changed to Small.')
     }).pipe(Effect.provide(runtime())),
   )
 

@@ -83,6 +83,8 @@ import {
   type LineComment,
   type FolderHeld,
   type FolderReading,
+  type HomeFolders,
+  type Machine,
   type MadeRepository,
   type PreparedFolder,
   type HostRepository,
@@ -174,6 +176,10 @@ export interface Client {
   readonly listProjectWorkers: (projectId: string) => Promise<ReadonlyArray<ProjectWorker>>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** Where on the home a new project's code can come from and go, as the home finds it: for a window on another computer. */
+  readonly findHomeFolders: () => Promise<HomeFolders>
+  /** What the home's computer is: its system, cores, memory, room and git. */
+  readonly getMachine: () => Promise<Machine>
   /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
   readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
   /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
@@ -307,9 +313,12 @@ export interface Client {
       readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
-  readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
+  /** The thread's model, of `agentId` as the picker showed it: the one on the thread where left out. */
+  readonly setModel: (input: { readonly threadId: string; readonly agentId?: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
-  readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
+  readonly setEffort: (input: { readonly threadId: string; readonly agentId?: string; readonly effort: string }) => Promise<void>
+  /** The thread's agent picked with nothing of its own chosen: picked back over another waiting to take over, it keeps the thread. */
+  readonly setAgent: (input: { readonly threadId: string; readonly agentId: string }) => Promise<void>
   /** The models each agent offers, and its efforts, as far as they are known. */
   readonly getModels: () => Promise<ReadonlyArray<AgentModels>>
   /** The person's default effort for one of an agent's models: every session on it starts there. */
@@ -1040,7 +1049,8 @@ export const connect = async (
       ? rawApi
       : new Proxy(rawApi, {
           get(target, tag, receiver): unknown {
-            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+            // What the home says this connection may call, where it says; else what this app's own contracts allow a socket.
+            if (typeof tag === 'string' && tag in target && !(connection?.calls?.includes(tag) ?? socketCanCall(tag)))
               return () =>
                 Effect.fail(
                   new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
@@ -1054,6 +1064,8 @@ export const connect = async (
     listProjects: () => settle(api.ListProjects()),
     listProjectWorkers: (projectId) => settle(api.ListProjectWorkers({ projectId })),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    findHomeFolders: () => settle(api.FindHomeFolders({})),
+    getMachine: () => settle(api.GetMachine({})),
     lookElsewhere: (at) => settle(api.LookElsewhere(at)),
     bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
@@ -1139,6 +1151,7 @@ export const connect = async (
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
     setEffort: (input) => command((commandId) => api.SetEffort({ commandId, ...input })),
+    setAgent: (input) => command((commandId) => api.SetAgent({ commandId, ...input })),
     getModels: () => settle(api.GetModels({})),
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
@@ -1488,3 +1501,12 @@ export const receivePort = (
     target.addEventListener('message', onMessage)
     signal?.addEventListener('abort', aborted, { once: true })
   })
+
+/**
+ * Whether this window may make a call: any, on this computer's own runtime;
+ * on another computer's home, what the home says its connection may. A home
+ * from before it said is taken to allow none of what came since, such as
+ * making projects from a window: its window offers no more than it can do.
+ */
+export const canCall = (client: Pick<Client, 'connection'>, tag: string) =>
+  client.connection === undefined || (client.connection.calls?.includes(tag) ?? false)

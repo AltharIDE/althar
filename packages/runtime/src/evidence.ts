@@ -36,6 +36,7 @@ export const EvidenceGiven = Schema.Struct({
   kind: Schema.Literals(EVIDENCE_KINDS),
   caption: Schema.String,
   path: Schema.optional(Schema.String),
+  computer_capture: Schema.optional(Schema.String),
   command: Schema.optional(Schema.String),
   exit_code: Schema.optional(Schema.Int),
   output: Schema.optional(Schema.String),
@@ -84,15 +85,15 @@ export interface KeptEvidence {
 }
 
 /** A picture evidence names, found and read, before it is kept. */
-interface Found {
+interface FoundPicture {
   /** Its bytes; null for one too large to keep. */
   readonly bytes: Uint8Array | null
   readonly size: number
   readonly name: string
-  /** Where it is, from the worktree it's in: so it needn't be committed. */
-  readonly worktree: string
-  readonly file: string
 }
+
+type FoundInWorktree = FoundPicture & { readonly worktree: string; readonly file: string }
+type Found = FoundInWorktree | (FoundPicture & { readonly worktree: null; readonly file: null })
 
 /** A text's end, up to EVIDENCE_TEXT_KEPT characters, from a line; and how many lines before it went. */
 export const textKept = (whole: string): { readonly text: string; readonly dropped: number } => {
@@ -149,7 +150,34 @@ const findPicture = (path: string, worktrees: ReadonlyArray<string>, where = 'th
  * worktree, a command says what it ran. Pictures are read now and kept
  * later, once the step is taken.
  */
-export const readEvidence = (given: ReadonlyArray<EvidenceGiven>, worktrees: ReadonlyArray<string>) =>
+export const findComputerCapture = (threadId: string, capture: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const artifacts = yield* Artifacts
+    const [picture] = yield* sql<{ sha256: string; size: number; mediaType: string }>`
+      SELECT a.sha256, a.size, a.media_type FROM thread_items i
+      JOIN artifact_links l ON l.subject_id = i.id AND l.project_id = i.project_id AND l.subject_type = 'thread_item'
+      JOIN artifacts a ON a.id = l.artifact_id AND a.project_id = i.project_id AND a.kind = 'image'
+      WHERE i.id = ${capture} AND i.thread_id = ${threadId}
+        AND i.kind = 'pictures' AND json_extract(i.content, '$.source') = 'computer'
+      LIMIT 1
+    `.pipe(Effect.mapError(() => refuse('Althar could not find that computer screenshot.')))
+    const bytes = picture === undefined || picture.size > PICTURE_KEPT ? null : yield* artifacts.read(picture.sha256)
+    if (picture === undefined || bytes === null) return yield* refuse('That computer screenshot is unavailable in this task.')
+    return {
+      bytes,
+      size: bytes.length,
+      name: picture.mediaType === 'image/jpeg' ? 'computer.jpg' : 'computer.png',
+      worktree: null,
+      file: null,
+    } satisfies Found
+  })
+
+export const readEvidence = <R = never>(
+  given: ReadonlyArray<EvidenceGiven>,
+  worktrees: ReadonlyArray<string>,
+  findCapture?: (id: string) => Effect.Effect<Found, ToolRefused, R>,
+) =>
   Effect.gen(function* () {
     if (given.length > EVIDENCE_MOST)
       return yield* refuse(`That's ${given.length} pieces of evidence; Althar keeps up to ${EVIDENCE_MOST}. Keep what shows the most.`)
@@ -157,6 +185,12 @@ export const readEvidence = (given: ReadonlyArray<EvidenceGiven>, worktrees: Rea
     for (const [index, piece] of given.entries()) {
       const which = `Evidence ${index + 1}`
       if (piece.caption.trim() === '') return yield* refuse(`${which} needs a caption: a line on what it shows.`)
+      if (piece.computer_capture !== undefined) {
+        if (piece.kind !== 'screenshot' || piece.path !== undefined || findCapture === undefined)
+          return yield* refuse(`${which} must name either a worktree picture or one computer screenshot captured in this task.`)
+        read.push({ given: piece, found: yield* findCapture(piece.computer_capture) })
+        continue
+      }
       if (PICTURED.includes(piece.kind)) {
         if (piece.path === undefined || piece.path.trim() === '')
           return yield* refuse(`${which} is a ${piece.kind}: give the picture’s path in the worktree, in \`path\`.`)
@@ -210,7 +244,7 @@ export const readShown = (given: ReadonlyArray<PictureGiven>, worktrees: Readonl
       return yield* refuse(
         `That's ${given.length} pictures; Althar shows up to ${SHOWN_MOST} at once. Show what matters most, or show them in turns.`,
       )
-    const read: Array<{ readonly caption: string; readonly found: Found & { readonly bytes: Uint8Array } }> = []
+    const read: Array<{ readonly caption: string; readonly found: FoundInWorktree & { readonly bytes: Uint8Array } }> = []
     for (const [index, piece] of given.entries()) {
       const which = `Picture ${index + 1}`
       if (piece.caption.trim() === '') return yield* refuse(`${which} needs a caption: a line on what it shows.`)
@@ -261,7 +295,10 @@ export const shownOf = (value: unknown): ReadonlyArray<ShownPicture> =>
 
 /** The files evidence names, by worktree: left out of what must be committed. */
 export const evidenceFiles = (read: ReadonlyArray<{ readonly found: Found | null }>) =>
-  read.flatMap((piece) => (piece.found === null ? [] : [{ worktree: piece.found.worktree, file: piece.found.file }]))
+  read.flatMap((piece) => {
+    const found = piece.found
+    return found === null || found.worktree === null || found.file === null ? [] : [{ worktree: found.worktree, file: found.file }]
+  })
 
 /**
  * The pictures a task's lead handed as evidence, by their paths in their

@@ -5,6 +5,7 @@ import { checkedPosition } from './checkedWatch'
 import { tabsStoreOf } from '../features/tabs/store'
 import { makeRouter } from '../router'
 import { connect } from './client'
+import { foldersOnHome } from './homeConnection'
 import { follow } from './feed'
 import { onModelsRead, readModelsAhead } from './models'
 import { makeQueryClient, reads } from './reads'
@@ -48,7 +49,8 @@ export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeSt
   const position =
     home !== undefined && home.current.kind !== 'local' ? checkedPosition(listed?.position, home.current.home.homeId) : listed?.cursor
   const feed = follow(client, cache, position)
-  const services: Services = { client, host, cache, feed }
+  // On another computer's home, a new project's folders are the home's own.
+  const services: Services = { client, host: client.connection === undefined ? host : foldersOnHome(host, client), cache, feed }
   const router = makeRouter({ client, cache })
   // Each model's room follows from which agents are signed in and which models are offered.
   onModelsRead(client, () => void cache.invalidateQueries({ queryKey: ['modelRooms'] }))

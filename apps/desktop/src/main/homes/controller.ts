@@ -30,14 +30,23 @@ interface WindowState {
   readonly generation: number
   readonly page: number
 }
+export type HomeUsageEvent =
+  | { readonly name: 'home_pairing'; readonly properties: { readonly outcome: 'paired' | 'failed' | 'cancelled' } }
+  | { readonly name: 'home_ssh_check'; readonly properties: { readonly outcome: 'verified' | 'failed' | 'cancelled' } }
+  | {
+      readonly name: 'home_connection'
+      readonly properties: { readonly transport: 'ssh' | 'https'; readonly outcome: 'connected' | 'failed' | 'disconnected' }
+    }
 export interface HomeControllerOptions {
   readonly store: ReturnType<typeof homeStore>
   readonly pair?: (code: string, name: string, signal: AbortSignal) => Promise<RemoteHome>
   readonly inspect: (target: SshHomeTarget, signal: AbortSignal) => Promise<HostStatus>
-  readonly open: (home: WindowHome, projectId?: string) => void
+  /** Its window, opened or brought forward: on a project where one is given, or on New project where `fresh`. */
+  readonly open: (home: WindowHome, projectId?: string, fresh?: boolean) => void
   readonly changed: (owner: number, state: HomeState) => void
   /** What the chip's menu and Manage homes show changed: the saved homes, a window and how it stands, or a home's projects. */
   readonly overviewChanged?: () => void
+  readonly usage?: (event: HomeUsageEvent) => void
   readonly glances?: HomeGlances
   readonly now?: () => number
 }
@@ -61,6 +70,7 @@ export const homeController = ({
   open,
   changed,
   overviewChanged = () => {},
+  usage = () => {},
   glances,
   now = Date.now,
 }: HomeControllerOptions) => {
@@ -162,14 +172,17 @@ export const homeController = ({
       const stop = new AbortController()
       inspecting.set(owner, stop)
       activeInspections.add(stop)
+      let paired = false
       try {
         const home = await pair(code, label, stop.signal)
         await store.save(home)
+        paired = true
         overviewChanged()
         if (accepting && !stop.signal.aborted && windows.get(owner)?.page === page) open({ kind: 'https', home })
       } finally {
         activeInspections.delete(stop)
         if (inspecting.get(owner) === stop) inspecting.delete(owner)
+        usage({ name: 'home_pairing', properties: { outcome: paired ? 'paired' : stop.signal.aborted ? 'cancelled' : 'failed' } })
       }
     },
     inspect: async (owner: number, value: unknown): Promise<CheckedHome> => {
@@ -182,6 +195,7 @@ export const homeController = ({
       const stop = new AbortController()
       inspecting.set(owner, stop)
       activeInspections.add(stop)
+      let verified = false
       try {
         const status = Schema.decodeUnknownSync(statusSchema)(await inspect(target, stop.signal))
         if (stop.signal.aborted || !windows.has(owner)) throw notAvailable()
@@ -189,10 +203,12 @@ export const homeController = ({
           throw new Error(`This host uses API ${status.apiVersion}; this app uses API ${API_VERSION}. Update them before connecting.`)
         const checkId = randomUUID()
         checks.set(checkId, { owner, target, status, expires: now() + 5 * 60_000 })
+        verified = true
         return { checkId, ...status, target: target.target }
       } finally {
         activeInspections.delete(stop)
         if (inspecting.get(owner) === stop) inspecting.delete(owner)
+        usage({ name: 'home_ssh_check', properties: { outcome: verified ? 'verified' : stop.signal.aborted ? 'cancelled' : 'failed' } })
       }
     },
     connect: async (owner: number, checkId: unknown, name: unknown) => {
@@ -226,20 +242,20 @@ export const homeController = ({
       })
       overviewChanged()
     },
-    open: async (owner: number, id: unknown, project?: unknown) => {
+    open: async (owner: number, id: unknown, project?: unknown, fresh?: unknown) => {
       available()
       if (!windows.has(owner)) throw new Error('This window is no longer open.')
       const projectId = projectIdOf(project)
       const page = windows.get(owner)?.page
       if (id === 'local') {
-        open({ kind: 'local' }, projectId)
+        open({ kind: 'local' }, projectId, fresh === true)
         return
       }
       const home = (await store.list()).find((one) => one.id === id)
       if (home === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
       if (accepting && windows.get(owner)?.page === page) {
         opening(home)
-        open({ kind: home.https === undefined ? 'ssh' : 'https', home }, projectId)
+        open({ kind: home.https === undefined ? 'ssh' : 'https', home }, projectId, fresh === true)
       }
     },
     rename: async (owner: number, id: unknown, name: unknown) => {
@@ -306,12 +322,22 @@ export const homeController = ({
       )
         throw new Error('The home returned an unexpected identity or authority.')
       update(owner, { current: previous.state.current, connection: 'connected', identity }, generation)
+      if (previous.state.connection === 'connecting')
+        usage({ name: 'home_connection', properties: { transport: previous.state.current.kind, outcome: 'connected' } })
       return true
     },
     disconnected: (owner: number, generation: number, problem = 'The home disconnected. Reconnect to see its latest state.') => {
       const previous = windows.get(owner)
       if (previous === undefined || previous.generation !== generation || previous.state.current.kind === 'local') return
       update(owner, { current: previous.state.current, connection: 'disconnected', problem }, generation)
+      if (accepting && (previous.state.connection === 'connecting' || previous.state.connection === 'connected'))
+        usage({
+          name: 'home_connection',
+          properties: {
+            transport: previous.state.current.kind,
+            outcome: previous.state.connection === 'connecting' ? 'failed' : 'disconnected',
+          },
+        })
     },
     isCurrent: (owner: number, generation: number) => accepting && windows.get(owner)?.generation === generation,
     /** The window's check is called off: the form changed, or closed. What it reads of its home stays live. */

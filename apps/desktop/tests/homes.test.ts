@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { removeTreeSync } from '@althar/testing'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { homeController } from '../src/main/homes/controller'
+import { homeController, type HomeUsageEvent } from '../src/main/homes/controller'
 import { homeGlances, reportedProjects } from '../src/main/homes/glances'
 import { homeName, homeStore, homeTarget } from '../src/main/homes/store'
 import { homePartition, remoteExternalUrl } from '../src/main/homes/policy'
@@ -138,15 +138,15 @@ describe('managing saved homes', () => {
   const fixture = (inspect = async (_target: unknown) => status) => {
     let at = 1_000
     const profile = temporary()
-    const opened: Array<{ home: WindowHome; projectId?: string }> = []
+    const opened: Array<{ home: WindowHome; projectId?: string; fresh?: true }> = []
     const told: Array<{ owner: number; name: string }> = []
     let overviews = 0
     const glances = homeGlances({ profile, now: () => at, writeAfter: 0, wanted: () => controller.wanted() })
     const controller = homeController({
       store: homeStore(profile),
       inspect,
-      open: (home, projectId) => {
-        opened.push({ home, ...(projectId === undefined ? {} : { projectId }) })
+      open: (home, projectId, fresh) => {
+        opened.push({ home, ...(projectId === undefined ? {} : { projectId }), ...(fresh === true ? { fresh } : {}) })
       },
       changed: (owner, state) => {
         if (state.current.kind === 'ssh') told.push({ owner, name: state.current.home.name })
@@ -292,12 +292,21 @@ describe('managing saved homes', () => {
     expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' }, projectId: 'althar' })
     await expect(at.controller.open(1, home.id, '../../etc')).rejects.toThrow('project')
   })
+  it('opens a home on New project, and only where it was asked for in so many words', async () => {
+    const at = fixture()
+    const home = await at.saved()
+    await at.controller.open(1, home.id, undefined, true)
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'ssh', home }, fresh: true })
+    await at.controller.open(1, 'local', undefined, 'yes')
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' } })
+  })
 })
 
 describe('home confirmations', () => {
   const fixture = (inspect = async () => status) => {
     let at = 0
     const opened: WindowHome[] = []
+    const events: HomeUsageEvent[] = []
     const controller = homeController({
       store: homeStore(temporary()),
       inspect,
@@ -305,6 +314,7 @@ describe('home confirmations', () => {
         opened.push(home)
       },
       changed: () => {},
+      usage: (event) => void events.push(event),
       now: () => at,
     })
     controller.register(1, { kind: 'local' })
@@ -312,6 +322,7 @@ describe('home confirmations', () => {
     return {
       controller,
       opened,
+      events,
       advance: (milliseconds: number) => {
         at += milliseconds
       },
@@ -350,6 +361,15 @@ describe('home confirmations', () => {
     expect(at.controller.state(3).connection).toBe('connected')
     at.controller.disconnected(3, next.generation)
     expect(at.controller.state(3).connection).toBe('disconnected')
+    const failed = at.controller.begin(3)
+    at.controller.disconnected(3, failed.generation, 'private error from user@fixture')
+    at.controller.disconnected(3, failed.generation)
+    expect(at.events).toEqual([
+      { name: 'home_ssh_check', properties: { outcome: 'verified' } },
+      { name: 'home_connection', properties: { transport: 'ssh', outcome: 'connected' } },
+      { name: 'home_connection', properties: { transport: 'ssh', outcome: 'disconnected' } },
+      { name: 'home_connection', properties: { transport: 'ssh', outcome: 'failed' } },
+    ])
     const saved = (await at.controller.list())[0]!
     await at.controller.open(1, saved.id)
     expect(at.opened.at(-1)).toEqual(current)
@@ -400,6 +420,54 @@ describe('home confirmations', () => {
     at.controller.closed(1)
     finish(status)
     await expect(checking).rejects.toThrow('expired')
+    expect(incompatible.events).toEqual([{ name: 'home_ssh_check', properties: { outcome: 'failed' } }])
+    expect(at.events).toEqual([{ name: 'home_ssh_check', properties: { outcome: 'cancelled' } }])
+  })
+
+  it('reports pairing outcomes and counts a verified HTTPS window connection separately', async () => {
+    const events: HomeUsageEvent[] = []
+    const home: RemoteHome = {
+      id: remote().id,
+      name: 'Private home',
+      homeId,
+      https: {
+        origin: 'https://private.test',
+        homeId,
+        deviceId: identity.deviceId,
+        tlsKeyPin: '7'.repeat(64),
+        tlsCertificate: 'certificate',
+      },
+    }
+    const controller = homeController({
+      store: homeStore(temporary()),
+      inspect: async () => status,
+      pair: async (code, _name, signal) => {
+        if (code === 'expired') throw new Error('This pairing code expired.')
+        if (code === 'cancelled')
+          return new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('Pairing was cancelled.')), { once: true })
+          })
+        return home
+      },
+      open: () => {},
+      changed: () => {},
+      usage: (event) => void events.push(event),
+    })
+    controller.register(1, { kind: 'local' })
+    await expect(controller.pair(1, 'expired', 'Private home')).rejects.toThrow('expired')
+    const cancelled = controller.pair(1, 'cancelled', 'Private home')
+    controller.cancel(1)
+    await expect(cancelled).rejects.toThrow('cancelled')
+    await controller.pair(1, 'current', 'Private home')
+    controller.register(2, { kind: 'https', home })
+    const { generation } = controller.begin(2)
+    expect(controller.connected(2, generation, identity)).toBe(true)
+    expect(events).toEqual([
+      { name: 'home_pairing', properties: { outcome: 'failed' } },
+      { name: 'home_pairing', properties: { outcome: 'cancelled' } },
+      { name: 'home_pairing', properties: { outcome: 'paired' } },
+      { name: 'home_connection', properties: { transport: 'https', outcome: 'connected' } },
+    ])
   })
 })
 
