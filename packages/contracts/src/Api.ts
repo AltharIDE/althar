@@ -16,6 +16,7 @@ import {
 } from './identities'
 
 import {
+  ArtifactDrawing,
   ArtifactsHow,
   ArtifactsPlace,
   CanvasDetail,
@@ -4194,6 +4195,11 @@ export const ThreadSnapshot = Schema.Struct({
     /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
     scratch: Schema.optional(Schema.Boolean),
     /**
+     * An artifact's own chat (ADR-104, "Talking to an artifact"): the canvas it is about, or null while it draws its first
+     * version. It opens as the artifact, never as a task. Absent for any other task.
+     */
+    artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
+    /**
      * Its changes, where it holds several (a task is a conversation plus parts, "The header lists every change"): each by
      * name and branch, the change it is stacked on or waits for, its pull request's link, whether commits wait for Ship on
      * it, and the helper at work on it. Absent with one change, whose row is the worktree's and its pull request's.
@@ -5032,6 +5038,7 @@ const socketCalls = new Set<string>([
   'ReadOutput',
   'ReadDocument',
   'ListCanvases',
+  'ListArtifactsDrawing',
   'GetCanvas',
   'ReadCanvasText',
   'FindCode',
@@ -5408,6 +5415,8 @@ const ProjectApi = RpcGroup.make(
   call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
   /** A project's canvases (ADR-104), each with its latest version, newest first; archived ones only where asked. */
   call('ListCanvases', { projectId: Schema.String, archived: Schema.optional(Schema.Boolean) }, Schema.Array(CanvasSummary)),
+  /** A project's artifacts whose own chat is drawing their first version, newest first: each shows among its artifacts at once. */
+  call('ListArtifactsDrawing', { projectId: Schema.String }, Schema.Array(ArtifactDrawing)),
   /** One of a project's canvases whole: its versions, and the comments sent on it. */
   call('GetCanvas', { canvasId: Schema.String }, CanvasDetail),
   /** A version's entry as the window draws it, for a document, a diagram or an SVG: its words, read from the artifact store. */
@@ -5479,6 +5488,12 @@ const ProjectApi = RpcGroup.make(
       chat: Schema.optional(Schema.Boolean),
       /** The id the window made for it, as a project's may be: an aside's pill is keyed by it from the moment + is pressed. */
       taskId: Schema.optional(Schema.String),
+      /**
+       * With `chat`, an artifact's own chat (ADR-104, "Talking to an artifact") rather than an aside: about the canvas by its
+       * id, or a new artifact it draws first with null. It is never listed as a task or an aside, nor waits on the person. An
+       * artifact has one: asked again for a canvas that has one open, the runtime answers with that one.
+       */
+      artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
     },
     TaskSummary,
   ),

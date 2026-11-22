@@ -1379,6 +1379,8 @@ export const handlers = apiLayer(
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
+      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"): none until the runtime keeps them.
+      ListArtifactsDrawing: () => Effect.succeed([]),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
       GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
       ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),

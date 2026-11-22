@@ -322,7 +322,8 @@ export type SentCanvasComment = typeof SentCanvasComment.Type
 
 /** Who published a version: the task whose lead it was, or the coordinator. */
 export const CanvasBy = Schema.Struct({
-  role: Schema.Literals(['lead', 'coordinator']),
+  /** A task's lead, the coordinator, or the artifact's own chat (`ArtifactChat`). */
+  role: Schema.Literals(['lead', 'coordinator', 'chat']),
   taskId: Schema.NullOr(Schema.String),
   /** The task's title, as it is now; null for the coordinator. */
   taskTitle: Schema.NullOr(Schema.String),
@@ -447,6 +448,28 @@ export const CanvasSaved = Schema.Struct({
 export type CanvasSaved = typeof CanvasSaved.Type
 
 /** A canvas in its project's list: its latest version and what is open on it. */
+/**
+ * An artifact's own conversation (ADR-104, "Talking to an artifact"): a chat whose part is the artifact, where anyone who opens
+ * it talks about it or has it changed. It is never a task on the board nor an aside: no lanes, no states, nothing waiting on the
+ * person. Its agent changes the artifact as any lead does, by publishing a new version; the lead that drew it still can too.
+ */
+export const ArtifactChat = Schema.Struct({ taskId: Schema.String, threadId: Schema.String })
+export type ArtifactChat = typeof ArtifactChat.Type
+
+/**
+ * An artifact whose own chat is drawing its first version: started by the coordinator (`start_artifact`) or from the Artifacts
+ * view, it shows among the project's artifacts from the moment it starts, before it has a canvas.
+ */
+export const ArtifactDrawing = Schema.Struct({
+  taskId: Schema.String,
+  threadId: Schema.String,
+  projectId: Schema.String,
+  /** What it is, as whoever started it named it. */
+  title: Schema.String,
+  startedAt: Schema.String,
+})
+export type ArtifactDrawing = typeof ArtifactDrawing.Type
+
 export const CanvasSummary = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -458,6 +481,8 @@ export const CanvasSummary = Schema.Struct({
   archived: Schema.Boolean,
   /** Where it is saved in git; null or absent where it lives in Althar only. */
   saved: Schema.optional(Schema.NullOr(CanvasSaved)),
+  /** Its own conversation, once someone has talked to it; null or absent before. */
+  chat: Schema.optional(Schema.NullOr(ArtifactChat)),
 })
 export type CanvasSummary = typeof CanvasSummary.Type
 

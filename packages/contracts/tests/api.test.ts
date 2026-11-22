@@ -624,6 +624,7 @@ describe('the API', () => {
               ReadOutput: () => Effect.die('unused'),
               ReadDocument: () => Effect.die('unused'),
               ListCanvases: () => Effect.succeed([]),
+              ListArtifactsDrawing: () => Effect.succeed([]),
               GetCanvas: () => Effect.die('unused'),
               ReadCanvasText: () => Effect.die('unused'),
               FindCode: () => Effect.die('unused'),
