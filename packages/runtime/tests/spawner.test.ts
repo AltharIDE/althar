@@ -60,6 +60,8 @@ describe('a command started apart', () => {
   })
 
   it("runs a few at a time, and the person's never waits behind the background's, all on one thread", async () => {
+    // The runner starts lazily. Establish it even when this test runs first.
+    expect((await startApart(node('')).result).code).toBe(0)
     const before = runnersMade()
     const folder = mkdtempSync(join(tmpdir(), 'althar-spawner-'))
     // Every place of the background's taken by one that holds it until its gate opens; then one more of the background's.
@@ -69,13 +71,16 @@ describe('a command started apart', () => {
     const background = startApart(node(`require('node:fs').writeFileSync(${JSON.stringify(mark)}, '')`))
     // The person's starts at once, in places of its own, while the background's waits for one of its own to come free.
     const person = startApart({ ...node("process.stdout.write('first')"), first: true })
-    expect((await person.result).stdout).toBe('first')
-    expect(existsSync(mark)).toBe(false)
-    writeFileSync(gates[0] ?? '', '')
-    await background.result
-    expect(existsSync(mark)).toBe(true)
-    for (const gate of gates.slice(1)) writeFileSync(gate, '')
-    await Promise.all(holding.map((one) => one.result))
+    try {
+      expect((await person.result).stdout).toBe('first')
+      expect(existsSync(mark)).toBe(false)
+      writeFileSync(gates[0]!, '')
+      await background.result
+      expect(existsSync(mark)).toBe(true)
+    } finally {
+      for (const gate of gates) writeFileSync(gate, '')
+      await Promise.all([...holding, background].map((one) => one.result))
+    }
     expect(runnersMade() - before).toBe(0)
   })
 

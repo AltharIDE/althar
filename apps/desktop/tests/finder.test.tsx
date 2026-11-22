@@ -144,6 +144,26 @@ describe('search across Althar', () => {
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(draftOf(draftKey.coordinator('p1')).text).toBe('why merge main?'))
   })
+  it('asks the home for related passages when the palette switches to a question', async () => {
+    const pull = doc({ id: 'link:pull', kind: 'pull', title: 'Keep checkout receipts', ref: '845', url: 'https://example.com/pull/845' })
+    const getSearchDocuments = vi.fn(async (_after: string | undefined, search?: { text: string; matchAny?: boolean }) => ({
+      documents: search?.matchAny === true && search.text === 'receipts #845' ? [pull] : [],
+      next: null,
+      indexed: true,
+    }))
+    windowAt({ getSearchDocuments })
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    fireEvent.change(field, { target: { value: 'Where are the receipts for #845?' } })
+    await userEvent.keyboard('{Tab}')
+    expect(field.getAttribute('placeholder')).toContain('Ask')
+    await within(dialog).findByRole('option', { name: /Keep checkout receipts/ })
+    expect(getSearchDocuments).toHaveBeenLastCalledWith(
+      undefined,
+      { text: 'receipts #845', kinds: ['said', 'note', 'issue', 'pull', 'task'], matchAny: true },
+      expect.any(AbortSignal),
+    )
+  })
   it('chooses the top hit once the results show, not a row of the list typed over', async () => {
     windowAt()
     const dialog = await open()

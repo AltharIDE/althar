@@ -95,6 +95,8 @@ test('sends usage data while its switch is on, named events only, and nothing on
     const usage = page.getByRole('main').getByRole('switch', { name: 'Usage data' })
     await usage.click()
     await expect(usage).toHaveAttribute('aria-checked', 'false')
+    const saved = () => page.evaluate(async () => ((await window.althar.preferences()) as { usageData: boolean }).usageData)
+    await expect.poll(saved).toBe(false)
     await page.screenshot({ path: 'test-results/settings-usage-data.png', animations: 'disabled' })
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     const before = fake.requests.length
@@ -104,6 +106,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .click()
     const off = fake.events.length
     await startTask(page, 'Name the limits better')
+    await expect(page.getByRole('article', { name: 'Name the limits better' }).getByText('Ready', { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /Open task/ })).toHaveCount(2)
     expect(fake.requests.slice(before)).toEqual([])
 
@@ -112,6 +115,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
     await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
     await usage.click()
     await expect(usage).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(saved).toBe(true)
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     await page
       .getByRole('navigation', { name: 'Projects' })
@@ -119,8 +123,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .click()
     await startTask(page, 'Log the refunds')
     const started = () => fake.events.slice(off).filter((event) => event.event === 'task_started')
-    await expect.poll(() => started().length).toBeGreaterThan(0)
-    expect(started()).toHaveLength(1)
+    await expect.poll(started).toHaveLength(1)
   } finally {
     await electronApp.close()
     await fake.close()

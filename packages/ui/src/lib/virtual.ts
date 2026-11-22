@@ -25,6 +25,8 @@ export interface VirtualThread {
   readonly bring: (key: string, offset: number) => void
   /** Draws the block that holds an item, by the item's id, and scrolls to it; whether one does. */
   readonly bringItem: (itemId: string) => boolean
+  /** Keeps the bottom in view when the scroller's contents outside the blocks change size. */
+  readonly followResize: () => void
   /** Hears when what it holds or where it is changes; returns the way to stop hearing. */
   readonly subscribe: (listener: () => void) => () => void
 }

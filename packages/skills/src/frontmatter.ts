@@ -9,8 +9,10 @@ export interface Frontmatter {
 /** The YAML block between the leading `---` lines, and the Markdown after it; null when there is none or it is not a mapping. */
 export const parseFrontmatter = (text: string): Frontmatter | null => {
   const lines = text.replace(/^﻿/, '').replaceAll('\r\n', '\n').split('\n')
-  if (lines[0]?.trim() !== '---') return null
-  const end = lines.findIndex((line, at) => at > 0 && line.trim() === '---')
+  const opening = lines[0]?.trimEnd()
+  if (opening?.trimStart() !== '---') return null
+  // A more deeply indented rule can be part of a multiline YAML value.
+  const end = lines.findIndex((line, at) => at > 0 && line.trimEnd() === opening)
   if (end < 0) return null
   let data: unknown
   try {

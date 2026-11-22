@@ -49,23 +49,34 @@ export interface Allowance {
   readonly resetAt?: string
 }
 
+const numberHeader = (headers: Headers, ...names: ReadonlyArray<string>): number | undefined => {
+  for (const name of names) {
+    const value = headers.get(name)
+    if (value !== null && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value)
+  }
+  return undefined
+}
+
+const isoDate = (milliseconds: number): string | undefined => {
+  const date = new Date(milliseconds)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
+}
+
+const quotaResetAt = (headers: Headers, now: number): string | undefined => {
+  const reset = numberHeader(headers, 'x-ratelimit-reset', 'ratelimit-reset')
+  // A time in seconds since the epoch (GitHub's, GitLab's), or the seconds left (Bitbucket's).
+  return reset === undefined ? undefined : isoDate(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000)
+}
+
 /** The numbers a service's rate-limit headers carry, under either of the names services use. */
 export const allowanceHeaders = (headers: Headers, now: number): Omit<Allowance, 'counted'> => {
-  const number = (...names: ReadonlyArray<string>) => {
-    for (const name of names) {
-      const value = headers.get(name)
-      if (value !== null && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value)
-    }
-    return undefined
-  }
-  const limit = number('x-ratelimit-limit', 'ratelimit-limit')
-  const remaining = number('x-ratelimit-remaining', 'ratelimit-remaining')
-  const reset = number('x-ratelimit-reset', 'ratelimit-reset')
+  const limit = numberHeader(headers, 'x-ratelimit-limit', 'ratelimit-limit')
+  const remaining = numberHeader(headers, 'x-ratelimit-remaining', 'ratelimit-remaining')
+  const resetAt = quotaResetAt(headers, now)
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(remaining === undefined ? {} : { remaining }),
-    // A time in seconds since the epoch (GitHub's, GitLab's), or the seconds left (Bitbucket's).
-    ...(reset === undefined ? {} : { resetAt: new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString() }),
+    ...(resetAt === undefined ? {} : { resetAt }),
   }
 }
 
@@ -231,16 +242,17 @@ export const messageOf = (body: string, fallback: string): string => plainError(
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
-  const after = Number(headers.get('retry-after'))
-  if (headers.has('retry-after') && Number.isFinite(after)) return new Date(now + after * 1000).toISOString()
-  // GitHub's and GitLab's reset is a time, in seconds since the epoch; Bitbucket's is the seconds left until it.
-  const resetHeader = headers.has('x-ratelimit-reset') ? 'x-ratelimit-reset' : 'ratelimit-reset'
-  const reset = Number(headers.get(resetHeader))
-  if (headers.has(resetHeader) && Number.isFinite(reset))
-    return new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString()
-  const resetMs = Number(headers.get('x-ratelimit-requests-reset'))
-  if (headers.has('x-ratelimit-requests-reset') && Number.isFinite(resetMs)) return new Date(resetMs).toISOString()
-  return undefined
+  const after = headers.get('retry-after')
+  if (after !== null) {
+    // Retry-After accepts delay-seconds or an HTTP-date, which starts with a weekday.
+    const retryAt = /^\d+$/.test(after)
+      ? isoDate(now + Number(after) * 1000)
+      : /^[a-z]{3}/i.test(after)
+        ? isoDate(Date.parse(after))
+        : undefined
+    if (retryAt !== undefined) return retryAt
+  }
+  return quotaResetAt(headers, now) ?? isoDate(numberHeader(headers, 'x-ratelimit-requests-reset') ?? NaN)
 }
 
 /** Classifies an answer that isn't a success; `fallback` is what it says where the answer has no words of its own. */

@@ -17,7 +17,8 @@ export interface Printer {
 export const printer = (threadId: string): Printer => {
   let streaming = false
   let thinking = false
-  let waiting: string | undefined
+  const waiting = new Map<string, Extract<LiveEvent, { _tag: 'AttentionNeeded' }>>()
+  const currentQuestion = () => Array.from(waiting.values()).at(-1)
   const tools = new Map<string, string>()
   // What it left running that has been said: where it answers, and how it ended.
   const said = new Set<string>()
@@ -29,6 +30,8 @@ export const printer = (threadId: string): Printer => {
     thinking = false
     return `${before}${text}\n`
   }
+  const question = ({ title, reason }: Extract<LiveEvent, { _tag: 'AttentionNeeded' }>) =>
+    line(`? ${title}\n  ${reason} Answer with /allow or /reject [reason].`)
 
   const print = (event: LiveEvent): string => {
     // What Althar runs of the project itself, its terminals, what the plans have left, and the computer's connection, are the window's to show, not a thread's.
@@ -71,11 +74,16 @@ export const printer = (threadId: string): Printer => {
           })
           .join('')
       case 'AttentionNeeded':
-        waiting = event.attentionId
-        return line(`? ${event.title}\n  ${event.reason} Answer with /allow or /reject [reason].`)
-      case 'AttentionClosed':
-        if (waiting === event.attentionId) waiting = undefined
-        return event.outcome === 'withdrawn' ? line('? The question was withdrawn.') : ''
+        waiting.delete(event.attentionId)
+        waiting.set(event.attentionId, event)
+        return question(event)
+      case 'AttentionClosed': {
+        const wasCurrent = currentQuestion()?.attentionId === event.attentionId
+        waiting.delete(event.attentionId)
+        const closed = event.outcome === 'withdrawn' ? line('? The question was withdrawn.') : ''
+        const next = wasCurrent ? currentQuestion() : undefined
+        return next === undefined ? closed : closed + question(next)
+      }
       case 'Agent': {
         const agent = event.event
         switch (agent._tag) {
@@ -123,7 +131,7 @@ export const printer = (threadId: string): Printer => {
   return {
     print,
     get waiting() {
-      return waiting
+      return currentQuestion()?.attentionId
     },
   }
 }

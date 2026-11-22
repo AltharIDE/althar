@@ -4852,6 +4852,8 @@ export const FinderQuery = Schema.Struct({
   text: Schema.String.check(Schema.isMaxLength(500)),
   projectId: Schema.optional(Schema.String),
   kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+  /** Find related documents that contain at least one of the search words. */
+  matchAny: Schema.optional(Schema.Boolean),
 })
 export type FinderQuery = typeof FinderQuery.Type
 

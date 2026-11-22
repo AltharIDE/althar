@@ -29,7 +29,13 @@ export const issuePairing = (options: HostOptions) =>
         })
       const files = yield* networkFiles(options, network)
       files.key.fill(0)
-      const { api } = yield* apiClient(yield* openLocalConnection(options.profile))
+      const connection = yield* openLocalConnection(options.profile)
+      const { api } = yield* apiClient(connection)
+      if (connection.networkFingerprint !== files.networkFingerprint)
+        return yield* new HostError({
+          code: 'InvalidConfig',
+          message: 'Direct access settings have changed. Restart the host before creating a pairing code.',
+        })
       const token = randomBytes(32).toString('base64url')
       const invitation = yield* api.IssueDevicePairing({
         commandId: commandId(),
