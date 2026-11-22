@@ -20,7 +20,12 @@ export interface Controls {
   readonly show: (
     pages: ReadonlyArray<GroundPage>,
     state: GroundState,
-    chip: { readonly title: string; readonly onOpen: () => void; readonly onClose: () => void } | null,
+    chip: {
+      readonly title: string
+      readonly onOpen: () => void
+      readonly onClose: () => void
+      readonly onComment?: () => void
+    } | null,
   ) => void
   /** Whether a key is theirs: every key in a menu of theirs, and those that press or move between them where one has the keyboard. */
   readonly owns: (event: KeyboardEvent) => boolean

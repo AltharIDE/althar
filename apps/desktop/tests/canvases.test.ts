@@ -289,12 +289,13 @@ describe('the window’s calls about canvases', () => {
     call('althar:canvas-ground', mine, 'nope', { view: 'one' })
     expect(changed).toHaveBeenCalledTimes(1)
     // Beside a conversation, the name its chip shows in its own view, or none; anything else is let go.
-    call('althar:canvas-chip', mine, THREAD, 'Gift a class')
-    expect(chipped).toHaveBeenLastCalledWith(THREAD, 'Gift a class')
+    call('althar:canvas-chip', mine, THREAD, { title: 'Gift a class', comment: true })
+    expect(chipped).toHaveBeenLastCalledWith(THREAD, { title: 'Gift a class', comment: true })
     call('althar:canvas-chip', mine, THREAD, null)
     expect(chipped).toHaveBeenLastCalledWith(THREAD, null)
-    call('althar:canvas-chip', mine, THREAD, 42)
-    call('althar:canvas-chip', mine, 'nope', 'Gift a class')
+    call('althar:canvas-chip', mine, THREAD, 'Gift a class')
+    call('althar:canvas-chip', mine, THREAD, { title: 'Gift a class' })
+    call('althar:canvas-chip', mine, 'nope', { title: 'Gift a class', comment: false })
     expect(chipped).toHaveBeenCalledTimes(2)
     const pin = { n: 1, page: 'Checkout', board: 'Desktop', selector: 'button.go', answered: false, draft: true }
     expect(await call('althar:canvas-pins', mine, THREAD, [pin])).toEqual([1])

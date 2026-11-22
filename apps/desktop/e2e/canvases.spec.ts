@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { canvasView, inCanvas, shoot } from './canvasViews'
+import { canvasView, inCanvas, pressIn, shoot } from './canvasViews'
 import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
 
 /*
@@ -74,6 +74,22 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     expect((await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-page-beside.png')
     await shoot(page, electronApp, panel, 'test-results/canvas-page-panel.png')
+
+    // The page rewrites its document and lays something of its own over all of it: its chip is still there, over it all,
+    // and its close still closes the canvas.
+    await inCanvas(
+      electronApp,
+      `document.documentElement.innerHTML = '<body><div style="position:fixed;inset:0;z-index:2147483647;background:#0003"></div><p>Rewritten</p></body>'`,
+    )
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('althar-chip')?.isConnected === true`).catch(() => false))
+      .toBe(true)
+    const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
+      electronApp,
+      `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,
+    )
+    await pressIn(electronApp, { x: chipBox.right - 18, y: chipBox.top + chipBox.height / 2 })
+    await expect(panel).toBeHidden()
 
     // The chart, from its line: a picture, its script never run.
     await page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' }).click()

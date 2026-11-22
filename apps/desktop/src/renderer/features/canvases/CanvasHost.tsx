@@ -160,7 +160,11 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
     [kind, sent, pinned],
   )
   // Its chip's Open and close, beside a conversation, as the view that draws it says them.
-  const pressed = useRef<{ readonly open: (() => void) | undefined; readonly close: () => void }>({ open: undefined, close: onClose })
+  const pressed = useRef<{ readonly open: (() => void) | undefined; readonly close: () => void; readonly comment: () => void }>({
+    open: undefined,
+    close: onClose,
+    comment: () => undefined,
+  })
   const ground = useBoards({
     threadId,
     canvasId: open.canvasId,
@@ -168,7 +172,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
     draft,
     pinned,
     shown: version === null ? null : { version: version.number, title: version.title },
-    onChip: (key) => (key === 'open' ? pressed.current.open?.() : pressed.current.close()),
+    onChip: (key) => (key === 'open' ? pressed.current.open?.() : key === 'comment' ? pressed.current.comment() : pressed.current.close()),
     onVersion: (step) => {
       if (version === null) return
       const to = version.number + step
@@ -241,15 +245,20 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
           },
     [summary, navigate],
   )
-  // Beside a conversation, a canvas of boards or a page draws what it is in its own view: told its name, and heard back.
+  // Beside a conversation, a canvas of boards or a page draws what it is in its own view: told its name, and whether it takes a
+  // comment on all of it into the conversation's draft, and heard back.
   const chipTitle = actionsIn === undefined && (kind === 'boards' || kind === 'html') ? (version?.title ?? null) : null
+  // It takes one where the conversation has a draft to keep it in, as the panel's own Comment does.
+  const chipComments = draft !== null && summary !== undefined && version !== null && !detail.isError
   useEffect(() => {
     if (chipTitle === null) return
-    host.canvases?.chip?.(threadId, chipTitle)
+    host.canvases?.chip?.(threadId, { title: chipTitle, comment: chipComments })
     return () => host.canvases?.chip?.(threadId, null)
-  }, [host.canvases, threadId, chipTitle])
+  }, [host.canvases, threadId, chipTitle, chipComments])
+  // Comment pressed on a chip its own view draws: the panel's comment on all of it opens, for the conversation's draft.
+  const [commentAsked, setCommentAsked] = useState(0)
   useEffect(() => {
-    pressed.current = { open: toArtifact, close: onClose }
+    pressed.current = { open: toArtifact, close: onClose, comment: () => setCommentAsked((n) => n + 1) }
   })
   // A page's chip is heard here; a canvas of boards' through its ground's keys.
   const page = kind === 'html'
@@ -260,6 +269,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
             if (key !== threadId || news.kind !== 'key') return
             if (news.key === 'open') pressed.current.open?.()
             if (news.key === 'close') pressed.current.close()
+            if (news.key === 'comment') pressed.current.comment()
           })
         : undefined,
     [host.canvases, threadId, page],
@@ -307,7 +317,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
           })}
       fill={fill}
       loading={loading}
-      {...(comment === undefined ? {} : { onComment: comment })}
+      {...(comment === undefined ? {} : { onComment: comment, commentAsked })}
       {...(error === undefined ? {} : { error })}
       {...(inRoom && (kind === 'html' || kind === 'boards') && host.canvases !== undefined
         ? { onReload: () => host.canvases?.reload(threadId) }
@@ -416,7 +426,7 @@ function useBoards({
   /** The version showing now: what a part pointed at now is on. */
   shown: { readonly version: number; readonly title: string } | null
   /** Its chip's Open and close, beside a conversation, drawn by the ground beside its zoom. */
-  onChip: (key: 'open' | 'close') => void
+  onChip: (key: 'open' | 'close' | 'comment') => void
   onVersion: (step: -1 | 1) => void
 }) {
   const views = useServices().host.canvases
@@ -446,7 +456,7 @@ function useBoards({
     },
     key: (key) => {
       if (key === 'escape') return setWriting(null)
-      if (key === 'open' || key === 'close') return onChip(key)
+      if (key === 'open' || key === 'close' || key === 'comment') return onChip(key)
       onVersion(key === 'older' ? -1 : 1)
     },
   })

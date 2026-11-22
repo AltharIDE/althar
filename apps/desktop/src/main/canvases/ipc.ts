@@ -97,11 +97,15 @@ export const handleCanvases = (
     const asked = groundChangeOf(change)
     if (conversation !== null && asked !== null) canvases.change(conversation, asked)
   })
-  ipcMain.on('althar:canvas-chip', (event, key: unknown, title: unknown) => {
+  ipcMain.on('althar:canvas-chip', (event, key: unknown, chip: unknown) => {
     from(event)
     const conversation = keyOf(key)
-    if (conversation === null || (title !== null && typeof title !== 'string')) return
-    canvases.chip(conversation, title === null ? null : title.slice(0, 200))
+    if (conversation === null) return
+    if (chip === null) return canvases.chip(conversation, null)
+    if (typeof chip !== 'object' || chip === null) return
+    const { title, comment } = chip as { title?: unknown; comment?: unknown }
+    if (typeof title !== 'string' || typeof comment !== 'boolean') return
+    canvases.chip(conversation, { title: title.slice(0, 200), comment })
   })
   ipcMain.handle('althar:canvas-pins', (event, key: unknown, pins: unknown) => {
     from(event)

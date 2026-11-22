@@ -84,10 +84,16 @@ interface View {
   wanted: Partial<GroundState>
   /** The pins the window last asked for. */
   pins: ReadonlyArray<GroundPin>
-  /** Beside a conversation, the name its chip shows (its ground's, or a page's own); null for none. */
-  chip: string | null
+  /** Beside a conversation, what its chip shows (its ground's, or a page's own); null for none. */
+  chip: Chip | null
   /** The load whose chip is heard, for a page: one loop a load. */
   chipHeard: number
+}
+
+/** A canvas's chip beside a conversation: its name, and whether it takes a comment on all of it there. */
+interface Chip {
+  readonly title: string
+  readonly comment: boolean
 }
 
 /** The isolated world the ground runs in: neither the page's (0) nor Electron's for a preload (999). */
@@ -194,7 +200,7 @@ export const startCanvases = (options: CanvasesOptions) => {
   }
 
   /* Each conversation's chip, as the window last asked: a view made after the ask, or made again, takes it. */
-  const chips = new Map<string, string | null>()
+  const chips = new Map<string, Chip>()
 
   const make = (key: string, window: BrowserWindow, target: CanvasTarget): View => {
     const view = new WebContentsView({
@@ -372,25 +378,28 @@ export const startCanvases = (options: CanvasesOptions) => {
     one.chipHeard = load
     let seq = shown.seq
     while (live(one, load)) {
-      const news = await run<{ readonly seq: number; readonly events: ReadonlyArray<'open' | 'close'> }>(
+      const news = await run<{ readonly seq: number; readonly events: ReadonlyArray<'open' | 'close' | 'comment'> }>(
         one,
         `globalThis.__altharChip.next(${seq})`,
       ).catch(() => null)
       if (news === null || !live(one, load)) return
       seq = news.seq
       for (const key of news.events) send(one, { kind: 'key', key })
+      // Quiet a while: shown again, where the page took it away or covered it, as the window still asks for it.
+      if (news.events.length === 0 && one.chip !== null)
+        void run(one, `globalThis.__altharChip?.show(${JSON.stringify(one.chip)})`).catch(() => undefined)
     }
   }
 
-  /** Beside a conversation, what a canvas of boards or a page draws in its own view of what it is: its name, or none. */
-  const chip = (key: string, title: string | null) => {
-    if (title === null) chips.delete(key)
-    else chips.set(key, title)
+  /** Beside a conversation, what a canvas of boards or a page draws in its own view of what it is, or none. */
+  const chip = (key: string, asked: Chip | null) => {
+    if (asked === null) chips.delete(key)
+    else chips.set(key, asked)
     const one = views.get(key)
-    if (one === undefined || one.view.webContents.isDestroyed() || one.chip === title) return
-    one.chip = title
+    if (one === undefined || one.view.webContents.isDestroyed() || JSON.stringify(one.chip) === JSON.stringify(asked)) return
+    one.chip = asked
     if (one.target.boards === true)
-      void run(one, `globalThis.__altharGround?.set(${JSON.stringify({ chip: title })})`).catch(() => undefined)
+      void run(one, `globalThis.__altharGround?.set(${JSON.stringify({ chip: asked })})`).catch(() => undefined)
     else if (one.loads > 0) void pageChip(one, one.loads)
   }
 

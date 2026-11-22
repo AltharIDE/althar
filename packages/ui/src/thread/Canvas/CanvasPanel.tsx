@@ -107,6 +107,8 @@ export interface CanvasPanelProps {
    * canvas. The words are kept as it opens, so typing the comment, which moves the selection, doesn't change what it is on.
    */
   onComment?: (body: string, on: string | null) => void
+  /** Asks for a comment on it from outside the panel (a chip its own view draws): each new count opens the comment. */
+  commentAsked?: number
   /** The words selected in the canvas, which a comment would be on; null for none. */
   selected?: string | null
   /** Comments already sent on the canvas, any version. */
@@ -149,6 +151,7 @@ export function CanvasPanel({
   onVersion,
   newer = null,
   onComment,
+  commentAsked = 0,
   selected = null,
   comments = [],
   onReload,
@@ -169,6 +172,13 @@ export function CanvasPanel({
   const [writing, setWriting] = useState(false)
   // What the comment is on, as Comment was pressed.
   const [aimed, setAimed] = useState<string | null>(null)
+  // Asked from outside (a chip the canvas's own view draws): the comment opens, as Comment opens it.
+  const [askedSeen, setAskedSeen] = useState(commentAsked)
+  if (askedSeen !== commentAsked) {
+    setAskedSeen(commentAsked)
+    setAimed(selected)
+    setWriting(true)
+  }
   const older = version > 1
   const later = version < latest
   const actions = (

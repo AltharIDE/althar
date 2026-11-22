@@ -69,3 +69,15 @@ export const shoot = async (page: Page, electronApp: ElectronApplication, of: Lo
     for (const one of document.querySelectorAll('img[data-drawn]')) one.remove()
   })
 }
+
+/** A press in the canvas's view, as the person's mouse makes one. */
+export const pressIn = (electronApp: ElectronApplication, at: { readonly x: number; readonly y: number }) =>
+  electronApp.evaluate(({ webContents }, point) => {
+    const contents = webContents.getAllWebContents().find((one) => one.getURL().startsWith('althar-canvas://'))
+    if (contents === undefined) throw new Error('No canvas view.')
+    const x = Math.round(point.x)
+    const y = Math.round(point.y)
+    contents.sendInputEvent({ type: 'mouseMove', x, y })
+    contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+  }, at)

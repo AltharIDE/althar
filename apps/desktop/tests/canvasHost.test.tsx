@@ -417,6 +417,32 @@ describe('a page canvas', () => {
     download: vi.fn(async () => ({ kind: 'cancelled' as const })),
   })
 
+  it('beside a conversation, has its chip drawn in its own view, whose Open, Comment and close are the panel’s', async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
+    let listen: ((threadId: string, news: never) => void) | null = null
+    const canvases: CanvasesHost = {
+      ...views(),
+      chip: vi.fn(),
+      onGround: (listener) => {
+        listen = listener as never
+        return () => (listen = null)
+      },
+    }
+    const { client } = canvasClient(page())
+    const { onClose } = show(client, { canvases })
+    // Told its name, and that the conversation has a draft to keep a comment on all of it in.
+    await waitFor(() => expect(canvases.chip).toHaveBeenLastCalledWith(THREAD, { title: 'Sign-in page', comment: true }))
+    expect(screen.queryByRole('button', { name: 'Open Sign-in page' })).toBeNull()
+    // Comment pressed on it opens the comment on all of it, which goes to the conversation's draft.
+    act(() => listen?.(THREAD, { kind: 'key', key: 'comment' } as never))
+    const field = await screen.findByRole('textbox')
+    await userEvent.type(field, 'Calmer{Enter}')
+    expect(commentsOf(DRAFT)).toMatchObject([{ note: 'Calmer', on: { kind: 'canvas', canvasId: CANVAS, version: 1 } }])
+    act(() => listen?.(THREAD, { kind: 'key', key: 'close' } as never))
+    expect(onClose).toHaveBeenCalled()
+    measured.mockRestore()
+  })
+
   it('is laid over the panel’s place at its version, moved as the place does, and loaded again when asked', async () => {
     let place = box(640, 120, 640, 700)
     const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => place)

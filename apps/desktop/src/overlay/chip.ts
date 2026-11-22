@@ -1,8 +1,12 @@
 /*
  * A page canvas's chip beside a conversation (ADR-104): what it is, floating
  * on it, as a canvas of boards' ground draws it beside its zoom, never in the
- * conversation's header. Its name opens the artifact itself; its × closes
- * the canvas. Nothing of Althar's window can be drawn over the page's own
+ * conversation's header. Its name opens the artifact itself; Comment, where
+ * the conversation has a draft, writes a comment on the whole of it there;
+ * its × closes the canvas. It sits in the page's top layer, over anything
+ * the page draws, and goes back where the page takes it away; the main
+ * process shows it again whenever things are quiet, in case. Nothing of
+ * Althar's window can be drawn over the page's own
  * view, so the main process runs this in an isolated world of the page, as
  * it runs the ground in a canvas of boards': it draws in a closed shadow root
  * over the page, which the page's own scripts can't reach, and the main
@@ -12,14 +16,16 @@
  */
 
 export interface Chip {
-  /** Shows the chip with the canvas's name, or takes it away with null; the news so far. */
-  readonly show: (title: string | null) => { readonly seq: number }
+  /** Shows the chip with the canvas's name, and Comment where it takes one, or takes it away with null; the news so far. */
+  readonly show: (chip: { readonly title: string; readonly comment: boolean } | null) => { readonly seq: number }
   /** What was pressed after `seq`: at once where something was, else once it is, or after a while with nothing. */
-  readonly next: (seq: number) => Promise<{ readonly seq: number; readonly events: ReadonlyArray<'open' | 'close'> }>
+  readonly next: (seq: number) => Promise<{ readonly seq: number; readonly events: ReadonlyArray<Pressed> }>
 }
 
-/** How long `next` waits with nothing pressed before it answers anyway. */
-const QUIET_MS = 20_000
+type Pressed = 'open' | 'comment' | 'close'
+
+/** How long `next` waits with nothing pressed before it answers anyway: the main process shows it again then. */
+const QUIET_MS = 4_000
 
 const STYLE = `
   :host { all: initial !important; position: fixed !important; top: 12px !important; right: 12px !important;
@@ -41,12 +47,13 @@ const STYLE = `
   button:focus-visible { outline: 1.5px solid var(--signal); outline-offset: 1px; }
   .name { gap: 6px; padding: 0 8px 0 6px; max-width: 260px; }
   .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .close { width: 28px; color: var(--t-3); }
-  .close:hover { color: var(--t-1); }
+  .close, .comment { width: 28px; color: var(--t-3); }
+  .close:hover, .comment:hover { color: var(--t-1); }
+  .comment[hidden] { display: none; }
   svg { flex: none; color: var(--t-3); }
 `
 
-/* The kit's icons, as it draws them (iconoir's Palette, Expand and Xmark): the canvas, opening it, and closing it. */
+/* The kit's icons, as it draws them (iconoir's Palette, Expand, ChatPlusIn and Xmark): the canvas, opening it, a comment, closing it. */
 const ICON = (d: string, size = 14) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`
 const CANVAS = ICON(
@@ -55,6 +62,9 @@ const CANVAS = ICON(
 const OPEN = ICON(
   '<path d="M9 9L4 4M4 4V8M4 4H8"/><path d="M15 9L20 4M20 4V8M20 4H16"/><path d="M9 15L4 20M4 20V16M4 20H8"/><path d="M15 15L20 20M20 20V16M20 20H16"/>',
   12,
+)
+const COMMENT = ICON(
+  '<path d="M9 12H12M15 12H12M12 12V9M12 12V15"/><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 13.8214 2.48697 15.5291 3.33782 17L2.5 21.5L7 20.6622C8.47087 21.513 10.1786 22 12 22Z"/>',
 )
 const CLOSE = ICON(
   '<path d="M6.75827 17.2426L12.0009 12M17.2435 6.75736L12.0009 12M12.0009 12L6.75827 6.75736M12.0009 12L17.2435 17.2426"/>',
@@ -75,19 +85,26 @@ const install = (): Chip => {
   name.innerHTML = CANVAS
   name.append(words)
   name.insertAdjacentHTML('beforeend', OPEN)
+  const comment = document.createElement('button')
+  comment.type = 'button'
+  comment.className = 'comment'
+  comment.setAttribute('aria-label', 'Comment')
+  comment.title = 'Comment'
+  comment.innerHTML = COMMENT
+  comment.hidden = true
   const close = document.createElement('button')
   close.type = 'button'
   close.className = 'close'
   close.setAttribute('aria-label', 'Close')
   close.title = 'Close'
   close.innerHTML = CLOSE
-  chip.append(name, close)
+  chip.append(name, comment, close)
   root.append(style, chip)
 
   let seq = 0
-  let events: Array<{ readonly seq: number; readonly event: 'open' | 'close' }> = []
+  let events: Array<{ readonly seq: number; readonly event: Pressed }> = []
   let waiting: Array<() => void> = []
-  const tell = (event: 'open' | 'close') => {
+  const tell = (event: Pressed) => {
     seq += 1
     events.push({ seq, event })
     if (events.length > 20) events = events.slice(-20)
@@ -98,6 +115,7 @@ const install = (): Chip => {
   // A press is the chip's alone: the page under it never sees it.
   for (const [button, event] of [
     [name, 'open'],
+    [comment, 'comment'],
     [close, 'close'],
   ] as const)
     button.addEventListener('click', (pressed) => {
@@ -106,14 +124,30 @@ const install = (): Chip => {
     })
   host.addEventListener('pointerdown', (pressed) => pressed.stopPropagation())
 
+  let wanted = false
+  /** In the page, over anything it draws: its top layer, where the page's own z-index can't reach above it. */
+  const place = () => {
+    if (!wanted) return
+    if (!host.isConnected) document.documentElement.append(host)
+    if (typeof host.showPopover !== 'function') return
+    if (!host.matches(':popover-open')) host.showPopover()
+  }
+  host.setAttribute('popover', 'manual')
+  // A page that rewrites its document, or takes the chip out, has it put back at once.
+  new MutationObserver(() => {
+    if (wanted && !host.isConnected) place()
+  }).observe(document, { childList: true, subtree: true })
+
   return {
-    show: (title) => {
-      // A page that rewrites its document takes the chip with it: it goes back.
-      if (!host.isConnected) document.documentElement.append(host)
-      host.hidden = title === null
-      words.textContent = title ?? ''
-      name.title = title === null ? '' : `Open ${title}`
-      name.setAttribute('aria-label', title === null ? '' : `Open ${title}`)
+    show: (shown) => {
+      wanted = shown !== null
+      host.hidden = shown === null
+      words.textContent = shown?.title ?? ''
+      name.title = shown === null ? '' : `Open ${shown.title}`
+      name.setAttribute('aria-label', shown === null ? '' : `Open ${shown.title}`)
+      comment.hidden = shown?.comment !== true
+      if (shown === null && typeof host.hidePopover === 'function' && host.isConnected && host.matches(':popover-open')) host.hidePopover()
+      place()
       return { seq }
     },
     next: (after) =>

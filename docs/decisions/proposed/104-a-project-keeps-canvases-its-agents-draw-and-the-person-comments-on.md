@@ -660,9 +660,12 @@ design tool lays out frames.
   name, which opens the artifact itself, a comment on the whole of it
   where it takes one, and its close). A canvas of boards draws the chip
   beside its zoom, in its ground; a page draws it in its own view, from a
-  small script in an isolated world (src/overlay/chip.ts), whose presses
-  the main process hears as it hears the ground's; the window draws it
-  over a document, a diagram or a picture. Saving, downloading and
+  small script in an isolated world (src/overlay/chip.ts), in the page's
+  top layer, put back at once where the page takes it out or rewrites its
+  document, and shown again by the main process whenever things are quiet;
+  its presses are heard as the ground's are. The window draws it over a
+  document, a diagram or a picture. Comment on it, where the conversation
+  has a draft, opens the canvas's comment on all of it, for that draft. Saving, downloading and
   stepping through versions are the artifact's, done in its room. No line
   of facts: only a newer version than the one shown is said over it, with
   Show.

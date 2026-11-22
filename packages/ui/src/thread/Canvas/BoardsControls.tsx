@@ -82,7 +82,7 @@ export interface BoardsControlsProps {
   onZoom: (zoom: BoardsZoom) => void
   onTool: (tool: BoardsTool) => void
   /** Beside a conversation: what it is, after the zoom; its name opens the artifact itself. */
-  chip?: { readonly title: string; readonly onOpen: () => void; readonly onClose: () => void } | null
+  chip?: { readonly title: string; readonly onOpen: () => void; readonly onClose: () => void; readonly onComment?: () => void } | null
   text?: Partial<BoardsControlsText>
 }
 
@@ -199,7 +199,15 @@ export function BoardsControls({
           </MenuItem>
           <MenuItem onSelect={() => onZoom(2)}>{t.percent(2)}</MenuItem>
         </Menu>
-        {chip !== null && <CanvasChip title={chip.title} onOpen={chip.onOpen} onClose={chip.onClose} bare />}
+        {chip !== null && (
+          <CanvasChip
+            title={chip.title}
+            onOpen={chip.onOpen}
+            onClose={chip.onClose}
+            {...(chip.onComment === undefined ? {} : { comment: { pressed: false, onPress: chip.onComment } })}
+            bare
+          />
+        )}
       </div>
       <div className={cx(s.float, s.floatTools)} role="toolbar" aria-label={t.tools}>
         {TOOLS.map((one) => (
