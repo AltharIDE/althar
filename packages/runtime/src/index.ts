@@ -65,5 +65,6 @@ export { lagLogged, watchLag } from './lag'
 export { DevicePairings } from './DevicePairings'
 
 export { listenNetworkApi, type NetworkApiOptions } from './networkApi'
+export { ApprovalCredentials } from './permissionApprovals'
 export { type ProjectWorker, type WorkerExecution, type WorkerExecutionPlatform } from './workerExecution'
 export { acceptWorkerPatch, prepareWorkerWorkspace } from './workerWorkspace'

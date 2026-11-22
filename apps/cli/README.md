@@ -58,6 +58,36 @@ In an attached session, `/quit`, Ctrl-C and a closed terminal disconnect your vi
 
 If the connection fails while creating a task, reuse the printed `--command-id cmd_…` with the same options to recover the creation receipt. For an existing task, use its thread ID. The terminal shows the latest 100 items, up to 65,536 characters each. Use the desktop for older history and files.
 
+## Connect a worker to the Desktop home
+
+The Desktop app can use the same Linux workers as a standalone Linux home.
+The worker connects to Desktop's built-in home, where your project and its task
+history already live. Use a worker certificate issued by the CA you configure
+for this home. Keep the worker and home private keys on their respective machines.
+[Worker certificates and routes](../host/README.md#native-worker-diagnostic)
+
+Use the CLI under the same OS account and with the same profile and worktree
+paths as Desktop. Enable the private local API with `ALTHAR_API_SOCKET=1` when
+starting Desktop so the CLI can look up that home's identity and projects.
+
+```sh
+node dist/althar.js workers configure --address "$PRIVATE_IP" \
+  --ca "$TLS/home-ca.pem" --certificate "$TLS/home.pem" --key "$TLS/home.key"
+node dist/althar.js inspect
+node dist/althar.js workers enroll --certificate "$TLS/worker.pem" --project "$PROJECT_ID"
+```
+
+Restart Desktop after changing the listener configuration. Enrollment prints
+the home and worker IDs for the worker's connection arguments. Use the name on
+the home certificate and port 6770 by default. The worker appears in **Run on**
+when a held plan can use it. To cut off a certificate, use
+`workers revoke --worker <id>`. To turn off the listener, use `workers disable`
+and restart Desktop. [Start an agent on the worker](../host/README.md#run-an-althar-task-on-a-separate-worker)
+
+For an outbound worker relay on both machines, give `workers configure` the
+home link file with `--relay <file>` and leave its address at the default
+`127.0.0.1`. The worker connects with its own relay credentials. [Relay setup](../../packages/worker-protocol/README.md#outbound-worker-relay)
+
 ## Work on it
 
 Run these from `apps/cli`.
@@ -70,3 +100,42 @@ Run these from `apps/cli`.
 | `bun run verify` | Runs the checks and coverage, as CI does |
 
 See the [CLI architecture](ARCHITECTURE.md) for where the pieces live.
+
+
+### Save a file made on the worker
+
+While a worker task is running, you can bring back a build output or log by
+giving its path inside the task checkout. This works even for ignored or
+untracked files. Use the running Desktop profile and the thread ID printed by
+`attach`. You can also give `--project` and `--task`. For a secondary
+repository, add `--workspace` with that checkout's ID.
+
+```sh
+node dist/althar.js workers fetch-file --thread "$THREAD_ID" \
+  --path dist/report.json --out "$PWD/report.json"
+```
+
+For a Linux home, add `--ssh my-vps --home "$HOME_ID"` with the home ID
+from `inspect`. Use any SSH options from [Attach to a running home](#attach-to-a-running-home).
+The output is saved on the computer that runs the CLI.
+
+The runner accepts regular files up to 16 MiB inside the checkout. It verifies
+the file before saving it under the name you choose. If that name already
+exists, choose another one.
+
+
+### Run a check on this computer
+
+`workers test-copy` saves a fresh Git copy and runs the command you put
+after `--` in it. The copy includes staged and unstaged edits and untracked
+files. Use `--workspace` to choose a different repository in the task.
+
+```sh
+node dist/althar.js workers test-copy --thread "$THREAD_ID" \
+  --into "$PWD" -- node --test
+```
+
+Use a project you trust when running its code on this computer. The command
+uses your local toolchain. The CLI prints the copy’s path and keeps it even
+if the command fails or you stop it. It leaves the original checkouts alone.
+Use the same SSH flags as `fetch-file` when your home is on another computer.

@@ -88,6 +88,24 @@ it('fails closed for a changed home, actor, device, authority, API or checked po
   }
 })
 
+it('forwards permission confirmation only through the desktop bridge when it is available', async () => {
+  const at = await server(info)
+  const confirm = vi.fn(async () => {})
+  const client = await connect(at.port, identity, confirm)
+  try {
+    await client.answer({ attentionId: 'permission', decision: 'allow', always: 'exact' })
+    expect(confirm).toHaveBeenCalledExactlyOnceWith({
+      commandId: expect.stringMatching(/^cmd_[0-9a-f]{32}$/),
+      attentionId: 'permission',
+      decision: 'allow',
+      always: 'exact',
+    })
+    expect(at.called.mock.calls).toEqual([['GetConnectionInfo']])
+  } finally {
+    await client.close()
+  }
+})
+
 it('loads the home while its checked change feed remains open', async () => {
   const at = await server(info)
   const client = await connect(at.port, identity)

@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { assert, it } from '@effect/vitest'
 import { Agents } from '@althar/runtime'
@@ -86,6 +87,16 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       assert.strictEqual(unknownProject._tag, 'HostError')
       yield* assign(projectId)
       assert.deepStrictEqual(last(), { projectId, workerId })
+      assert.throws(() => parseOptions(['revoke-worker', '--worker-id', workerId, '--project-id', 'invalid'], {}, root))
+      yield* command('revoke-worker', '--worker-id', workerId, '--project-id', projectId, '--json')
+      assert.deepStrictEqual(last<{ projectId: string; workerId: string; revoked: boolean }>(), { projectId, workerId, revoked: true })
+      const revoked = yield* Effect.promise(() => openWorkerStore(profile, homeId))
+      try {
+        assert.isFalse(revoked.agents.permits(workerId, projectId))
+      } finally {
+        revoked.close()
+      }
+      yield* assign(projectId)
       const foreign = yield* Effect.flip(projectRun(`proj_${'f'.repeat(32)}`))
       assert.strictEqual(foreign._tag, 'HostError')
       if (foreign._tag === 'HostError') assert.include(foreign.message, 'registered on this home')
@@ -144,7 +155,20 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
             output: stdout,
           }),
         )
-        yield* command('worker-log', '--attempt-id', claimedProject, '--json')
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const writer = yield* Effect.acquireRelease(
+              Effect.sync(() => new DatabaseSync(join(profile, 'workers', 'ledger.sqlite'))),
+              (db) => Effect.sync(() => db.close()),
+            )
+            writer.exec('BEGIN EXCLUSIVE')
+            const unlock = yield* Effect.forkScoped(
+              Effect.sleep('250 millis').pipe(Effect.andThen(Effect.sync(() => writer.exec('COMMIT')))),
+            )
+            yield* command('worker-log', '--attempt-id', claimedProject, '--json')
+            yield* Fiber.join(unlock)
+          }),
+        )
         assert.strictEqual(last().bytesBase64, stdout.toString('base64'))
         yield* command('worker-cancel', '--attempt-id', claimedProject)
         assert.include(output.at(-1) ?? '', 'cancellation requested')
