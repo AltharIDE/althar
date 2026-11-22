@@ -6,3 +6,7 @@
   background: var(--n-2);
 }
 @media (max-width: 900px) { .page { --gut: 22px; } }
+
+/* The site's nav and its room, on a phone only: wider, the page's own bar stands in for it. */
+.narrow { display: none; }
+@media (max-width: 900px) { .narrow { display: contents; } }
