@@ -26,7 +26,8 @@ import { Projects } from '../src/Projects'
 import { Secrets } from '../src/Secrets'
 import { envelope } from '../src/envelope'
 import { listenNetworkApi } from '../src/networkApi'
-import { makePermissionApprovals } from '../src/permissionApprovals'
+import { approvalKeyEnrollment } from '../src/approvalKeyEnrollment'
+import { approvalClientData, makePermissionApprovals } from '../src/permissionApprovals'
 import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 import { workerTestDirectory } from './workerTestFiles'
 
@@ -150,6 +151,57 @@ describe('protected permission approvals', () => {
     expect(() => approvals.begin({ ...identity, deviceId: `dev_${'5'.repeat(32)}` }, action, 'Run it', null, 100)).toThrow()
   })
 
+  it('bounds pending challenges and rejects incompatible origins and duplicated key identities', () => {
+    const { registration } = fixture()
+    for (const address of ['http://my-home.example', 'https://127.0.0.1', 'https://[::1]'])
+      expect(() => makePermissionApprovals(new URL(address), identity.homeId, [registration])).toThrow()
+    expect(() => makePermissionApprovals(origin, identity.homeId, [registration, registration])).toThrow()
+    const devices = Array.from({ length: 17 }, (_, number) => ({
+      ...registration,
+      deviceId: `dev_${number.toString(16).padStart(32, '0')}`,
+      credentialId: randomBytes(32).toString('base64url'),
+    }))
+    expect(() =>
+      makePermissionApprovals(origin, identity.homeId, [registration, { ...devices[0]!, credentialId: registration.credentialId }]),
+    ).toThrow()
+    expect(() => makePermissionApprovals(origin, identity.homeId, [{ ...registration, publicKey: 'AB' }])).toThrow()
+    const approvals = makePermissionApprovals(origin, identity.homeId, devices)
+    const [first, ...rest] = devices
+    if (first === undefined) throw new Error('Expected a test device')
+    const same = { ...identity, deviceId: first.deviceId }
+    expect(() => approvals.begin({ ...same, homeId: `home_${'6'.repeat(32)}` }, action, 'Run', null, 0)).toThrow()
+    expect(() => approvals.begin({ ...same, role: 'window' }, action, 'Run', null, 0)).toThrow()
+    const one = approvals.begin(same, action, 'Run\u202e now', null, 0)
+    expect(approvals.view(one, 1).title).toBe('Run\\u{202e} now')
+    for (const _ of [1, 2, 3]) approvals.begin(same, action, 'Run', null, 0)
+    expect(() => approvals.begin(same, action, 'Run', null, 0)).toThrow()
+    for (const item of rest.slice(0, 15)) {
+      for (const _ of [1, 2, 3, 4]) approvals.begin({ ...identity, deviceId: item.deviceId }, action, 'Run', null, 0)
+    }
+    expect(() => approvals.begin({ ...identity, deviceId: rest[15]!.deviceId }, action, 'Run', null, 0)).toThrow()
+    expect(() => approvals.view(one, 90_000)).toThrow()
+    expect(approvals.begin(same, action, 'Run', null, 90_000)).toMatch(/^[a-zA-Z0-9_-]{43}$/)
+  })
+
+  it('rejects embedded ceremonies and allows only the current enrollment for a transport device', async () => {
+    for (const data of [null, 7, { topOrigin: origin.origin }, { crossOrigin: true }])
+      expect(() => approvalClientData(Buffer.from(JSON.stringify(data)).toString('base64url'))).toThrow()
+    expect(() => approvalClientData(Buffer.from('{}').toString('base64url'))).not.toThrow()
+    const { id, enroll, registration } = fixture()
+    const proposals = approvalKeyEnrollment(origin, [{ ...registration, deviceId: `dev_${'7'.repeat(32)}` }])
+    await expect(proposals.begin({ ...identity, role: 'window' }, 'This window', 0)).rejects.toThrow()
+    const replaced = await proposals.begin(identity, 'Desktop', 0)
+    const current = await proposals.begin(identity, 'Desktop', 1)
+    expect(() => proposals.view(replaced, 1)).toThrow()
+    const { publicKey } = proposals.view(current, 1)
+    expect(publicKey.excludeCredentials).not.toContainEqual({ id, type: 'public-key' })
+    await expect(proposals.finish(current, enroll(publicKey.challenge, origin), 1)).rejects.toThrow()
+    expect(() => proposals.view(current, 1)).toThrow()
+    const expired = await proposals.begin(identity, 'Desktop', 1)
+    expect(() => proposals.view(expired, 300_001)).toThrow()
+    expect(await proposals.begin(identity, 'Desktop', 300_001)).toMatch(/^[a-zA-Z0-9_-]{43}$/)
+  })
+
   it('answers a real permission over verified HTTPS without promoting the connection device', async () => {
     const authenticator = fixture()
     const run = Effect.gen(function* () {
@@ -243,6 +295,13 @@ describe('protected permission approvals', () => {
             }),
         )
       const route = '/v1/permission-approvals'
+      expect((yield* browser(route + '/view', { code: 'invalid' })).status).toBe(403)
+      expect((yield* browser(route + '/result', { code: 'a'.repeat(43) })).status).toBe(403)
+      const rejected = yield* preparePermissionApproval(target, sign, { ...decision, commandId: id(), decision: 'reject' })
+      const rejectedCode = new URL(rejected.url).hash.slice(1)
+      expect((yield* browser(route + '/answer', { code: rejectedCode, proof: {} })).status).toBe(403)
+      expect(JSON.parse((yield* browser(route + '/result', { code: rejectedCode })).body)).toEqual({ state: 'refused' })
+      expect((yield* browser(route + '/view', { code: rejectedCode })).status).toBe(403)
       const setup = new URL(yield* prepareApprovalKeyEnrollment(target, sign))
       const setupCode = setup.hash.slice(1)
       const proposed = fixture()
