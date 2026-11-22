@@ -137,10 +137,19 @@ describe('the timer', () => {
   it('ends the wait at the limit where one directory never answers', async () => {
     const root = await folder()
     const started = Date.now()
-    // The clock never moves, so only the timer can end this.
-    const size = await measure(root, { timeout: 100, now: () => 0, list: () => new Promise(() => {}) })
-    expect(Date.now() - started).toBeLessThan(5_000)
-    expect(size).toMatchObject({ state: 'done', approximate: true })
+    let release!: (entries: Array<{ name: string }>) => void
+    const listing = new Promise<Array<{ name: string }>>((resolve) => {
+      release = resolve
+    })
+    try {
+      // The clock never moves, so only the timer can end this.
+      const size = await measure(root, { timeout: 100, now: () => 0, list: () => listing })
+      expect(Date.now() - started).toBeLessThan(5_000)
+      expect(size).toMatchObject({ state: 'done', approximate: true })
+    } finally {
+      // Release the shared I/O slot before another walk runs in this process.
+      release([])
+    }
   })
 })
 

@@ -12,6 +12,7 @@ import {
   MenuSeparator,
   Problem,
   ProjectMark,
+  Spinner,
 } from '@althar/ui'
 
 import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
@@ -264,6 +265,14 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
   )
 }
 
+/** Setting up a security key for a home: in its menu, and the line under it while the browser has it. */
+export const keyText = {
+  setUp: 'Set up a security key…',
+  opening: 'Opening your browser…',
+  opened: 'Finish setting up the key in your browser.',
+  again: 'Try again',
+}
+
 /** Where a home stands, in a word or two: this window, its window and how it is connected, or when it was last opened. */
 const statusOf = (home: RemoteHome, live: Liveness, here: HomeState | null, overview: HomesOverview | null) => {
   if (live === 'down') return 'Disconnected'
@@ -301,7 +310,18 @@ function Home({
   const own = here !== null && here.current.kind !== 'local' && here.current.home.homeId === home.homeId
   const enrollKey = own && home.https !== undefined && live === 'live' ? homes.enrollApprovalKey : undefined
   const [copied, setCopied] = useState(false)
+  // A security key for this home's permission answers (ADR-089): set up in the browser, from a page the home serves.
   const [keySetup, setKeySetup] = useState<{ state: 'opening' | 'opened' | 'failed'; message: string } | null>(null)
+  const setUpKey =
+    enrollKey === undefined
+      ? undefined
+      : () => {
+          setKeySetup({ state: 'opening', message: keyText.opening })
+          void enrollKey().then(
+            () => setKeySetup({ state: 'opened', message: keyText.opened }),
+            (error: unknown) => setKeySetup({ state: 'failed', message: homeProblem(error) }),
+          )
+        }
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1600)
@@ -347,19 +367,9 @@ function Home({
           <MenuItem icon="plug" onSelect={() => onEdit('connection')}>
             Edit connection
           </MenuItem>
-          {enrollKey !== undefined && (
-            <MenuItem
-              icon="external"
-              disabled={keySetup?.state === 'opening'}
-              onSelect={() => {
-                setKeySetup({ state: 'opening', message: 'Opening security key setup…' })
-                void enrollKey().then(
-                  () => setKeySetup({ state: 'opened', message: 'Security key setup is open in your browser.' }),
-                  (error: unknown) => setKeySetup({ state: 'failed', message: homeProblem(error) }),
-                )
-              }}
-            >
-              Set up a security key
+          {setUpKey !== undefined && (
+            <MenuItem icon="lock" disabled={keySetup?.state === 'opening'} onSelect={setUpKey}>
+              {keyText.setUp}
             </MenuItem>
           )}
           <MenuItem
@@ -378,9 +388,28 @@ function Home({
         </Menu>
       </div>
       {keySetup?.state === 'failed' ? (
-        <Problem size="small">{keySetup.message}</Problem>
+        <Problem
+          size="small"
+          className={s.keyProblem}
+          {...(setUpKey === undefined
+            ? {}
+            : {
+                action: (
+                  <LinkButton onClick={setUpKey} className={s.keyAction}>
+                    {keyText.again}
+                  </LinkButton>
+                ),
+              })}
+        >
+          {keySetup.message}
+        </Problem>
       ) : (
-        keySetup !== null && <output>{keySetup.message}</output>
+        keySetup !== null && (
+          <output className={s.keyLine}>
+            {keySetup.state === 'opening' ? <Spinner size="small" /> : <Icon name="external" size={12} className={s.keyMark} />}
+            <span>{keySetup.message}</span>
+          </output>
+        )
       )}
       {editing === 'connection' ? (
         <Connection home={home} homes={homes} onDone={() => onEdit(null)} />

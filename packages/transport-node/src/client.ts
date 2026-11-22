@@ -22,7 +22,7 @@ export const openLocalConnection = (profile: string, expectedHome?: string) =>
     port.setFrameLimit(AUTH_FRAME_LIMIT)
     const identity = yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })
     port.setFrameLimit(MAX_SOCKET_FRAME)
-    return { port, identity }
+    return { port, identity, networkFingerprint: endpoint.networkFingerprint }
   })
 
 /** Verify the RPC endpoint too, before handing any commands to its caller. Closing the scope disconnects only this client. */

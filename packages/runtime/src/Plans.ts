@@ -369,7 +369,7 @@ export class Plans extends Context.Service<
             placeOn(workerId),
           )
           if (!accepted && workerId !== undefined)
-            return yield* new ApiError({ reason: 'Invalid', message: 'That task already started. Choose a worker before starting it.' })
+            return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
           // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).

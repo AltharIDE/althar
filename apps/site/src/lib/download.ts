@@ -67,17 +67,20 @@ const assetsOnce = () =>
 
 /** What Chromium calls `navigator.userAgentData`; other browsers have none. */
 interface UaData {
-  getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }>
+  getHighEntropyValues(hints: string[]): Promise<{ architecture?: string; bitness?: string }>
 }
 
-let chip: Promise<Arch> | undefined
+type ReportedArch = Arch | '32-bit'
+
+let chip: Promise<ReportedArch> | undefined
 
 /** The chip, where the browser says; asked once per page. */
 const archOnce = () =>
-  (chip ??= (async () => {
+  (chip ??= (async (): Promise<ReportedArch> => {
     const data = (navigator as Navigator & { userAgentData?: UaData }).userAgentData
     if (!data) return null
-    const { architecture } = await data.getHighEntropyValues(['architecture'])
+    const { architecture, bitness } = await data.getHighEntropyValues(['architecture', 'bitness'])
+    if (bitness === '32') return '32-bit'
     return architecture === 'arm' || architecture === 'x86' ? architecture : null
   })().catch((): Arch => null))
 
@@ -94,6 +97,7 @@ export async function findDownload(): Promise<Found | null> {
   if (!os) return null
   // Asked for by hand, the address stands for the whole system, chip included: the build's, not the one under the browser.
   const [assets, arch] = await Promise.all([assetsOnce(), askedOs() ? null : archOnce()])
+  if (arch === '32-bit') return null
   const asset = pickAsset(os, arch, assets)
   const other = otherMac(os, arch, assets)
   return (

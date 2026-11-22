@@ -37,8 +37,8 @@ export interface Setup {
   readonly labelId: string
 }
 
-/** Setups by API, team and label, so a test or a changed setting never gets another's. */
-export type SetupCache = Map<string, Setup>
+/** Pending and completed setups by API, team and label. */
+export type SetupCache = Map<string, Promise<Setup>>
 
 export interface LinearOptions {
   readonly fetch: Fetch
@@ -121,6 +121,7 @@ const addressOf = (value: unknown): string | null => {
 
 export const makeLinear = (options: LinearOptions): Linear => {
   const key = [options.apiUrl, options.teamId, options.label].join('\n')
+  let setupForReport: Promise<Setup> | undefined
 
   /** A query or mutation's `data`. `words`: whether Linear's error messages may be kept, false where they could quote the person. */
   const graphql = async (
@@ -182,10 +183,20 @@ export const makeLinear = (options: LinearOptions): Linear => {
   return {
     setup: async () => {
       const cached = options.cache.get(key)
-      if (cached !== undefined) return cached
-      const setup = { stateId: await triageState(), labelId: await labelId() }
-      options.cache.set(key, setup)
-      return setup
+      if (cached !== undefined) {
+        setupForReport = cached
+        return cached
+      }
+      // Concurrent first reports share the lookup and can only create one label in this isolate.
+      const pending = (async () => ({ stateId: await triageState(), labelId: await labelId() }))()
+      setupForReport = pending
+      options.cache.set(key, pending)
+      try {
+        return await pending
+      } catch (error) {
+        if (options.cache.get(key) === pending) options.cache.delete(key)
+        throw error
+      }
     },
 
     upload: async ({ filename, contentType, file }) => {
@@ -223,7 +234,7 @@ export const makeLinear = (options: LinearOptions): Linear => {
         const { issueCreate } = await graphql('issue', ISSUE_CREATE, { input }, false)
         succeeded('issue', issueCreate)
       } catch (error) {
-        options.cache.delete(key)
+        if (options.cache.get(key) === setupForReport) options.cache.delete(key)
         throw error
       }
     },

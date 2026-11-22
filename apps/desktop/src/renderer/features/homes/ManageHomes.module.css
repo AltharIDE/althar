@@ -265,3 +265,25 @@
     transition: none;
   }
 }
+
+/* Setting up a security key: a line under the home's name, in its column, while the browser has it or where it failed. */
+.keyLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0 42px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-2);
+}
+.keyProblem {
+  margin: 8px 0 0 42px;
+}
+.keyMark {
+  flex: none;
+  color: var(--t-3);
+}
+.keyAction {
+  margin-left: auto;
+  font-size: 12.5px;
+}

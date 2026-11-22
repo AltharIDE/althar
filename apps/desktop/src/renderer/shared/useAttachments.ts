@@ -14,7 +14,7 @@ import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
+import { draftOf, nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -171,7 +171,8 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
   const [note, setNote] = useState<string | null>(null)
 
   const addImages = (files: ReadonlyArray<File>) => {
-    const room = Math.max(0, MESSAGE_IMAGES.count - waiting.length)
+    // Clipboard reads can finish after another paste or drop has added attachments.
+    const room = Math.max(0, MESSAGE_IMAGES.count - draftOf(key).images.length)
     if (files.length > room) setNote(text.tooMany)
     const reading = files.slice(0, room).map((file) => ({ file, id: next() }))
     setWaiting((now) => [
@@ -203,7 +204,7 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
   const addFiles = (
     asked: ReadonlyArray<{ readonly name: string; readonly read: () => Promise<Attached | null>; readonly unread?: string }>,
   ) => {
-    const room = Math.max(0, MESSAGE_FILES.count - waitingFiles.length)
+    const room = Math.max(0, MESSAGE_FILES.count - draftOf(key).files.length)
     if (asked.length > room) setNote(filesText.tooMany)
     const reading = asked.slice(0, room).map((one) => ({ ...one, id: next() }))
     setFiles((now) => [...now, ...reading.map(({ id, name }) => ({ id, name, ready: null }))])

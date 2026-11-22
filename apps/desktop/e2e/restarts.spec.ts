@@ -80,7 +80,7 @@ const working = async (electronApp: ElectronApplication, page: Page, home: strin
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   await startTask(page, 'Keep the session alive', '[lead:wait]')
   await page.getByRole('button', { name: /Open task/ }).click()
-  await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+  await expect(shown(page, 'Implementing', { exact: true }).first()).toBeVisible()
 }
 
 test('Quitting and opening Althar again twice in a row carries the step on each time, asking nothing', async () => {
@@ -160,13 +160,13 @@ test('a suspended runtime keeps its task through wake and a later clean restart'
     await expect.poll(() => execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()).toMatch(/T/)
     await first.electronApp.evaluate(({ powerMonitor }) => powerMonitor.emit('suspend'))
     // Main remains responsive while the runtime cannot process a turn. Waking resumes the same process and task.
-    await expect(first.page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await expect(shown(first.page, 'Implementing', { exact: true }).first()).toBeVisible()
     await first.electronApp.evaluate(({ powerMonitor }) => powerMonitor.emit('resume'))
     process.kill(pid, 'SIGCONT')
     paused = undefined
     await expect.poll(() => runtimePid(first.electronApp)).toBe(pid)
     await expect(shown(first.page, CARRIED)).toHaveCount(0)
-    await expect(first.page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await expect(shown(first.page, 'Implementing', { exact: true }).first()).toBeVisible()
   } finally {
     if (paused !== undefined) process.kill(paused, 'SIGCONT')
     await quit(first.electronApp)

@@ -1927,7 +1927,7 @@ export const handlers = apiLayer(
                 const available = config.workers?.list(projectId) ?? []
                 const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
                 const message = aside
-                  ? 'This task stays on its home.'
+                  ? 'An aside runs on the home.'
                   : workerId === 'auto' && worker === undefined
                     ? automaticWorkerUnavailable
                     : workerProblem(worker, steps)

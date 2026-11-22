@@ -1227,6 +1227,17 @@ export type Machine = typeof Machine.Type
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
 
+/** Each kind of request in words, as an always answer keeps it: "Always allow ___", in the window and on the home's page. */
+export const ruleKindWords = {
+  'default-branch': 'pushes to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushes of every branch, tags or a pattern of branches',
+  'delete-branch': 'deleting branches that aren’t the task’s',
+  deploy: 'deploying and publishing',
+  outside: 'writing outside the task’s worktree',
+  speak: 'posting for you',
+} as const satisfies Record<RuleKind, string>
+
 /**
  * A command the person named: asked about, refused, or let through without
  * asking (ADR-018). By how it starts (`npm publish`, `terraform *`), or, with
@@ -4894,6 +4905,8 @@ export const FinderQuery = Schema.Struct({
   text: Schema.String.check(Schema.isMaxLength(500)),
   projectId: Schema.optional(Schema.String),
   kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+  /** Find related documents that contain at least one of the search words. */
+  matchAny: Schema.optional(Schema.Boolean),
 })
 export type FinderQuery = typeof FinderQuery.Type
 

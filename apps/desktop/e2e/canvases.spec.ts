@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, reveal, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * The project's canvases (ADR-104), in a real window with the fake agents.
@@ -243,11 +243,15 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     await reply.press('Enter')
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByText('First directions')).toBeVisible()
-    const answer = page.getByRole('paragraph').filter({ hasText: 'The repository also has' })
-    await answer.scrollIntoViewIfNeeded()
+    const thread = page.getByRole('region', { name: 'Thread', exact: true })
+    const answer = thread.getByRole('paragraph').filter({ hasText: 'The repository also has' })
+    const readme = answer.getByRole('button', { name: 'Open README.md', exact: true })
+    await expect(readme).toBeVisible()
+    await expect(thread).not.toHaveAttribute('aria-busy')
+    await reveal(page, readme)
     await expect(doc).toBeInViewport()
     await shoot(page, electronApp, page, 'test-results/aside-canvas-beside.png')
-    await answer.getByRole('button', { name: 'Open README.md' }).click()
+    await readme.click()
     const file = page.getByRole('complementary', { name: 'README.md' })
     await expect(file.getByRole('heading', { name: 'meridian' })).toBeVisible()
     await shoot(page, electronApp, page, 'test-results/aside-file-beside.png')
