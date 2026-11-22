@@ -29,6 +29,7 @@ import {
   type SentFile,
   type SentImage,
   type LineComment,
+  workerProblem,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
@@ -1867,8 +1868,8 @@ export const handlers = apiLayer(
               const aside = chat === true
               if (workerId !== undefined) {
                 const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
-                if (worker === undefined || worker.busy)
-                  return yield* new ApiError({ reason: 'Invalid', message: 'Choose an available worker assigned to this project.' })
+                const message = aside ? 'This task stays on its home.' : workerProblem(worker, steps)
+                if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
               }
 
               const created = yield* projects.createTask({
@@ -1879,6 +1880,7 @@ export const handlers = apiLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
+                ...(workerId === undefined ? {} : { requireSingleRepository: true }),
                 ...(taskId === undefined ? {} : { taskId }),
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.

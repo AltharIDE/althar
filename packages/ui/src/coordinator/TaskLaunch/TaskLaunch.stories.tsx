@@ -168,20 +168,32 @@ export const HeldWithWorker: Story = {
         held
         estimate={undefined}
         footNote={
-          <Select
-            label="Run on"
-            variant="filled"
-            value={worker}
-            options={[
-              { value: 'home', label: 'This home' },
-              { value: 'worker', label: 'Linux worker aaaaaa' },
-            ]}
-            onChange={choose}
-          />
+          <>
+            <Select
+              label="Run on"
+              variant="filled"
+              value={worker}
+              options={[
+                { value: 'home', label: 'This home' },
+                { value: 'worker', label: 'Linux worker aaaaaa' },
+              ]}
+              onChange={choose}
+            />
+            {worker === 'worker' && (
+              <>
+                {' '}
+                <span role="status">Lead on the worker. Setup and review on this home.</span>
+              </>
+            )}
+          </>
         }
       />
     )
   },
+}
+
+export const HeldOnHome: Story = {
+  render: () => <Launch held estimate={undefined} footNote={<span role="status">A worker needs a task with one repository.</span>} />,
 }
 
 const started = fn()

@@ -163,6 +163,26 @@ collaboration ships.
 
 #### Placement
 
+The first worker placement contract uses a project's enrolled workers and
+their connected providers and availability. The home reads repository
+requirements from the task. Desktop uses the same eligibility rules as the
+home and shows where the lead runs before Start. The home rechecks the
+choice when it accepts the plan. Taking a plan back to Hold lets the person
+choose its place again.
+
+| Capability | On the home today | On an enrolled worker today |
+| --- | --- | --- |
+| Task shape | Worktree or existing checkout, one or several repositories, private copies | Implement lead in a worktree for one repository |
+| Other roles | Coordinator, helpers, reviewers and pull request reviews | The home still runs them |
+| Execution environment | Althar-managed setup, runs, skills, configured MCP and local platform tools | The Linux worker's installed toolchain and provider account, with Althar's built-in tools through the home |
+| State and output | Task state, approvals, worktrees and managed runs | Agent messages, Git commits and working changes returned to the home |
+| Assignment | The task's own home | An available worker granted access to the project that advertises the lead's provider |
+
+The worker must eventually describe the OS, tools, workspace shapes and
+runtime safeguards it can provide. Placement can then explain the first
+unmet requirement while keeping the person's choice and the home as the
+authority for admission.
+
 A project names the pools it may use. A pool supplies private workers or
 managed capacity. Enrolled workers advertise OS, architecture, available
 CPU, memory and disk, installed tools, provider/account capabilities and

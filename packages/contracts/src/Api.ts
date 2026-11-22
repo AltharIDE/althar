@@ -2435,10 +2435,11 @@ export const ArrivalItem = Schema.Struct({
   }),
 })
 
-/** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
+/** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({ workerId: Schema.String, providers: Schema.Array(Schema.String), busy: Schema.Boolean })
 export type ProjectWorker = typeof ProjectWorker.Type
 
+/** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
@@ -2448,6 +2449,13 @@ export const PlanStep = Schema.Struct({
   skipped: Schema.Boolean,
 })
 export type PlanStep = typeof PlanStep.Type
+
+export const WorkerPlanRequirements = Schema.Struct({
+  repositoryCount: Schema.Int,
+  homeOnly: Schema.Boolean,
+  readOnly: Schema.Boolean,
+})
+export type WorkerPlanRequirements = typeof WorkerPlanRequirements.Type
 
 /**
  * A command the agent left running in the background, such as a dev server
@@ -2792,6 +2800,8 @@ export const TaskCard = Schema.Struct({
       end: Schema.NullOr(TaskEnd),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
+      /** Facts the home reads before offering a worker for the lead. Absent on earlier homes. */
+      workerRequirements: Schema.optional(WorkerPlanRequirements),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
       /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */

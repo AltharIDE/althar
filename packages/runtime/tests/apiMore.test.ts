@@ -35,6 +35,7 @@ const connected = (
     readonly agents?: Layer.Layer<Agents>
     readonly editors?: RuntimeOptions['editors']
     readonly workers?: RuntimeOptions['workers']
+    readonly countdown?: Duration.Duration
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -53,6 +54,7 @@ const connected = (
         agentsRoot: mkdtempSync(join(tmpdir(), 'althar-agents-')),
         busy: { machine: ROOMY },
         checksAppear: Duration.zero,
+        ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.workers === undefined ? {} : { workers: options.workers }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
@@ -254,6 +256,74 @@ describe('the coordinator’s question, through the API', () => {
 })
 
 describe('a normal task assigned to a worker', () => {
+  it.live('projects the held plan’s requirements and rechecks the selected worker at Start', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '6'.repeat(32)
+        const { client, grant } = yield* connected({
+          countdown: Duration.minutes(5),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true }],
+            open: () => Effect.die('A busy worker must not start again'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        assert.isTrue(item?.kind === 'task')
+        const plan = item?.kind === 'task' ? item.content.plan : null
+        assert.deepStrictEqual(plan?.workerRequirements, { repositoryCount: 1, homeOnly: false, readOnly: false })
+        const planId = plan?.id ?? ''
+        yield* client.HoldPlan({ commandId: commandId(), planId })
+        const rejected = yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId, workerId }))
+        assert.strictEqual(rejected.message, 'This worker is already running a task.')
+        const held = (yield* thread).items.find((one) => one.kind === 'task')
+        assert.strictEqual(held?.kind === 'task' ? held.content.phase : null, 'held')
+      }),
+    ),
+  )
+
+  it.live('refuses unsupported worker starts before creating a task', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '5'.repeat(32)
+        let opened = 0
+        const { client, grant } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['codex'], busy: false }],
+            open: () => Effect.sync(() => ++opened).pipe(Effect.andThen(Effect.die('A refused task must not open a worker'))),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folderWith(['api', 'web'])) })
+        const request = {
+          projectId: project.id,
+          workerId,
+          title: 'Test placement',
+          steps: [{ key: 'implement' as const, agentId: 'codex', model: null, skipped: false }],
+        }
+        const refused = (changes: Partial<Pick<typeof request, 'steps'>> & { repositories?: string[]; chat?: boolean }) =>
+          Effect.flip(client.StartTask({ ...request, ...changes, commandId: commandId() })).pipe(Effect.map((error) => error.message))
+        assert.strictEqual(yield* refused({ repositories: ['api', 'web'] }), 'A worker needs a task with one repository.')
+        assert.strictEqual(yield* refused({ chat: true }), 'This task stays on its home.')
+        assert.strictEqual(
+          yield* refused({ repositories: ['api'], steps: [{ ...request.steps[0]!, agentId: 'claude-code' }] }),
+          'This worker does not have the lead’s agent.',
+        )
+        assert.lengthOf((yield* client.ListTasks({ projectId: project.id })).tasks, 0)
+        assert.strictEqual(opened, 0)
+      }),
+    ),
+  )
+
   it.live('starts its lead in the worker checkout and lands its edits before the task sees the turn finish', () =>
     Effect.scoped(
       Effect.gen(function* () {
