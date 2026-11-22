@@ -15,7 +15,7 @@
   display: grid;
   place-items: center;
   min-height: 520px;
-  padding: 64px 32px 190px;
+  padding: 72px 32px 170px;
   text-align: center;
 }
 /* The light, fading out at its foot rather than cut off where the page goes on */
@@ -24,8 +24,8 @@
   inset: 0;
   z-index: -1;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(#000 78%, transparent);
-  mask-image: linear-gradient(#000 78%, transparent);
+  -webkit-mask-image: linear-gradient(#000 72%, transparent 96%);
+  mask-image: linear-gradient(#000 72%, transparent 96%);
 }
 .back {
   position: absolute;
@@ -41,13 +41,29 @@
 }
 .eyebrow {
   display: flex;
+  align-items: center;
   gap: 12px;
-  margin: 22px 0 14px;
+  margin: 22px 0 16px;
   font: 500 12px/1.3 var(--font-label);
   letter-spacing: 0.04em;
   color: var(--t-3);
 }
+/* the jump this update made, as a chip */
+.jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-4);
+}
+.from {
+  color: var(--t-3);
+}
 .version {
+  font-weight: 600;
   color: var(--live);
 }
 .title {
@@ -58,6 +74,9 @@
   color: var(--t-1);
   text-wrap: balance;
 }
+.titleLit {
+  color: var(--live);
+}
 .why {
   max-width: 520px;
   margin: 18px 0 0;
@@ -66,11 +85,6 @@
   letter-spacing: -0.008em;
   color: var(--t-2);
   text-wrap: pretty;
-}
-.actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 28px;
 }
 
 /* ---- the bands under it ---- */
@@ -95,11 +109,15 @@
   color: var(--t-1);
 }
 
-/* Where the work runs: three places, linked */
+/* Where the work runs: off the light, three places, the work going along them */
+.where {
+  padding-top: 64px;
+}
 .places {
+  --cycle: 4.2s;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 44px;
+  gap: 64px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -112,45 +130,201 @@
 .link {
   position: absolute;
   top: 50%;
-  left: -44px;
-  width: 44px;
-  height: 1px;
+  left: -64px;
+  width: 64px;
+  height: 16px;
+  margin-top: -8px;
   overflow: hidden;
-  background: var(--line-3);
 }
-/* the work, going from the window to the home to the worker */
+.link::before {
+  content: '';
+  position: absolute;
+  inset: 50% 0 auto;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, var(--line-3) 0 3px, transparent 3px 7px);
+}
+/* the work: a spark with its trail, from the window to the home, then on to the worker */
 .link i {
   position: absolute;
-  top: -1px;
+  top: 50%;
   left: 0;
-  width: 10px;
-  height: 3px;
+  width: 34px;
+  height: 2px;
+  margin-top: -1px;
   border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--live));
+  opacity: 0;
+  animation: toHome var(--cycle) infinite;
+}
+.link i::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
   background: var(--live);
-  animation: carry 2.4s var(--ease-out) infinite;
+  box-shadow:
+    0 0 0 3px var(--live-dim),
+    0 0 12px 1px color-mix(in srgb, var(--live) 60%, transparent);
 }
 .placeCell:nth-child(3) .link i {
-  animation-delay: 1.2s;
+  animation-name: toWorker;
 }
-@keyframes carry {
-  from {
-    transform: translateX(-12px);
+@keyframes toHome {
+  0% {
+    transform: translateX(-36px);
     opacity: 0;
+    animation-timing-function: var(--ease-out);
   }
-  20% {
+  6% {
     opacity: 1;
   }
-  to {
-    transform: translateX(46px);
+  34% {
+    transform: translateX(66px);
+    opacity: 1;
+  }
+  38%,
+  100% {
+    transform: translateX(66px);
     opacity: 0;
+  }
+}
+@keyframes toWorker {
+  0%,
+  46% {
+    transform: translateX(-36px);
+    opacity: 0;
+    animation-timing-function: var(--ease-out);
+  }
+  52% {
+    opacity: 1;
+  }
+  80% {
+    transform: translateX(66px);
+    opacity: 1;
+  }
+  84%,
+  100% {
+    transform: translateX(66px);
+    opacity: 0;
+  }
+}
+/* where it lands: the place lights, and its icon rings */
+.place::before,
+.placeIcon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.place::before {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--live) 55%, transparent),
+    0 6px 28px -6px color-mix(in srgb, var(--live) 40%, transparent);
+}
+.placeIcon::after {
+  box-shadow: 0 0 0 2px var(--live);
+}
+.placeCell:nth-child(1) .placeIcon {
+  animation: send var(--cycle) var(--ease-out) infinite;
+}
+.placeCell:nth-child(2) .place::before {
+  animation: litHome var(--cycle) var(--ease-out) infinite;
+}
+.placeCell:nth-child(2) .placeIcon::after {
+  animation: ringHome var(--cycle) var(--ease-out) infinite;
+}
+.placeCell:nth-child(3) .place::before {
+  animation: litWorker var(--cycle) var(--ease-out) infinite;
+}
+.placeCell:nth-child(3) .placeIcon::after {
+  animation: ringWorker var(--cycle) var(--ease-out) infinite;
+}
+@keyframes send {
+  0% {
+    transform: scale(1);
+  }
+  4% {
+    transform: scale(0.9);
+  }
+  14%,
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes litHome {
+  0%,
+  30% {
+    opacity: 0;
+  }
+  36% {
+    opacity: 1;
+  }
+  62%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ringHome {
+  0%,
+  33% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  35% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  58%,
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+@keyframes litWorker {
+  0%,
+  76% {
+    opacity: 0;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ringWorker {
+  0%,
+  79% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  81% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .link i {
+  .link i,
+  .place::before,
+  .placeIcon::after {
     display: none;
+  }
+  .placeIcon {
+    animation: none !important;
   }
 }
 .place {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 2px;
@@ -163,6 +337,7 @@
     var(--lift-card);
 }
 .placeIcon {
+  position: relative;
   display: grid;
   place-items: center;
   width: 36px;
@@ -232,8 +407,25 @@
     var(--lift-card);
 }
 .big {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   grid-column: span 3;
   padding: 24px 24px 22px;
+}
+/* the mark's halftone, fading out of the corner */
+.big::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto auto;
+  z-index: -1;
+  width: 62%;
+  height: 78%;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--live) 34%, transparent) 1.1px, transparent 1.6px);
+  background-size: 9px 9px;
+  -webkit-mask-image: radial-gradient(ellipse at 100% 0, #000 0%, transparent 70%);
+  mask-image: radial-gradient(ellipse at 100% 0, #000 0%, transparent 70%);
+  pointer-events: none;
 }
 .tileIcon {
   display: grid;
@@ -406,6 +598,104 @@
   bottom: 10px;
   box-shadow: 0 0 0 3px var(--paper);
 }
+/* pointed at, said, drawn again: the pin drops, the words come, v2 goes to v3 */
+.artBoard {
+  --story: 6s;
+}
+.pin {
+  animation: pinDrop var(--story) var(--ease-out) infinite;
+}
+.said {
+  animation: sayIt var(--story) var(--ease-out) infinite;
+}
+.next {
+  display: inline-grid;
+}
+.was,
+.now {
+  grid-area: 1 / 1;
+}
+.was {
+  color: var(--t-3);
+  animation: goes var(--story) var(--ease-out) infinite;
+}
+.now {
+  animation: comes var(--story) var(--ease-out) infinite;
+}
+@keyframes pinDrop {
+  0%,
+  6% {
+    transform: translateY(-8px) scale(0.6);
+    opacity: 0;
+  }
+  14%,
+  92% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 0;
+  }
+}
+@keyframes sayIt {
+  0%,
+  20% {
+    transform: translateX(-6px);
+    opacity: 0;
+  }
+  28%,
+  92% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes goes {
+  0%,
+  44% {
+    transform: none;
+    opacity: 1;
+  }
+  52%,
+  94% {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes comes {
+  0%,
+  46% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  54%,
+  92% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin,
+  .said,
+  .was,
+  .now {
+    animation: none;
+  }
+  .was {
+    opacity: 0;
+  }
+}
 .said {
   display: flex;
   align-items: center;
@@ -470,6 +760,17 @@
   height: 13px;
   vertical-align: -2px;
   background: var(--term-t2);
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
 }
 .artFrom {
   display: flex;
@@ -517,6 +818,121 @@
   color: var(--t-2);
 }
 
+/* Follow what's next: the light again, closing what's new */
+.follow {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  max-width: 976px;
+  margin: 0 auto 72px;
+  border-radius: 20px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.followGlow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  /* a dawn at the panel's foot: bright in the middle, gone by its corners */
+  -webkit-mask-image: radial-gradient(ellipse 58% 92% at 50% 100%, #000 34%, transparent 100%);
+  mask-image: radial-gradient(ellipse 58% 92% at 50% 100%, #000 34%, transparent 100%);
+}
+.followIn {
+  display: grid;
+  justify-items: center;
+  padding: 52px 32px 104px;
+  text-align: center;
+}
+.followTitle {
+  margin: 0;
+  font: 640 32px/1.1 var(--font-display);
+  letter-spacing: -0.035em;
+  color: var(--t-1);
+}
+.followLine {
+  max-width: 440px;
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.socials {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 720px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.social {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  color: var(--t-1);
+  text-align: left;
+  text-decoration: none;
+  transition:
+    transform var(--fast) var(--ease-out),
+    background-color var(--fast) var(--ease-out);
+}
+.social:hover {
+  transform: translateY(-2px);
+  background: var(--paper);
+}
+.social:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.socialMark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.socialWords {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.socialWords b {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.socialWords span {
+  overflow: hidden;
+  font: 500 12px/1.3 var(--font-label);
+  color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.socialOut {
+  color: var(--t-4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .social {
+    transition: background-color var(--fast) var(--ease-out);
+  }
+  .social:hover {
+    transform: none;
+  }
+}
+
 .foot {
   max-width: 760px;
   margin: 0 auto;
@@ -532,6 +948,12 @@
   .places {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+  }
+  .follow {
+    margin-inline: 32px;
+  }
+  .socials {
+    grid-template-columns: minmax(0, 1fr);
   }
   .link {
     display: none;
