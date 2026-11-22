@@ -1,33 +1,51 @@
 import type { ReactNode } from 'react'
 import type { LoadGlance } from '@althar/ui'
 
-import type { Places, Waiting } from '../data'
+import type { Waiting, Worker } from '../data'
 
 /** What a take draws from, and what it can do in the lab. */
 export interface Ctx {
-  places: Places
+  /** The home's workers, this Mac first. */
+  workers: readonly Worker[]
+  /** This Mac. */
+  here: Worker
+  /** This Mac's load, as the bar's meter reads it. */
   load: LoadGlance
-  /** What waits for an agent, in every project. */
+  /** Any worker's. */
+  loadOf: (worker: Worker) => LoadGlance
+  /** What waits for an agent, on every board. */
   waiting: readonly Waiting[]
   most: number
-  /** The person's own number; null goes back to the default. */
-  setCount: (n: number | null) => void
+  /** A worker's own number; null goes back to its default. */
+  setCount: (worker: string, n: number | null) => void
   /** Opens a task, from a row. */
   onOpen: (id: string) => void
   /** Says in the lab's bar what a press would do. */
   say: (what: string) => void
-  /** The meter's popover. */
+  /** This Mac, the meter's popover. */
   peek: { open: boolean; set: (open: boolean) => void }
+  /** The homes chip's menu. */
+  homes: { open: boolean; set: (open: boolean) => void }
   /** The quick settings. */
   quick: { open: boolean; set: (open: boolean) => void }
+  /** Opens Settings, on a worker's number where one is given. */
+  settings: (worker?: string) => void
 }
 
-/** A take: what sits in the bar and what it opens, and the slider in the quick settings and in Settings. */
+/** What a take opens as the lab loads, and keeps open as the rest changes. */
+export type Opens = 'peek' | 'homes' | 'quick'
+
+/** A take: the bar and what it opens, the quick settings' slider and what follows it, and Settings' slider and what follows. */
 export interface Take {
   key: string
   kbd: string
   label: string
   idea: string
+  opens: Opens
   bar: (ctx: Ctx) => ReactNode
   slider: (ctx: Ctx, compact: boolean) => ReactNode
+  /** After the quick settings' slider, on its sheet. */
+  quick?: (ctx: Ctx) => ReactNode
+  /** After Settings' list, as groups of their own. */
+  settings?: (ctx: Ctx) => ReactNode
 }

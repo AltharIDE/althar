@@ -1,10 +1,91 @@
-/* B: the slider between the readings and Running, ruled off as the popover's other parts are */
-.atOnce {
-  padding-top: 12px;
+/* what is off, in the danger colour, as the chip says a dropped home */
+.danger {
+  color: var(--danger);
+}
+
+/* ---- A: the other workers under This Mac ---- */
+.worker {
+  align-items: start;
+}
+/* the bar's own CPU and MEM, under the name, a step apart as they are in the bar */
+.gauges {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 15px;
+}
+.problem {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+/* opened in place: what runs there, and its number */
+.opened {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 6px 21px;
+  padding: 2px 0 2px 6px;
+  border-left: 1px solid var(--line);
+}
+.task {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 7px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.task:hover {
+  background: var(--hover-paper);
+}
+.task :global(svg) {
+  margin-top: 0;
+}
+.taskTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.number {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 6px 2px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+/* ---- B: the chip's menu, and a worker opened from it ---- */
+/* where another worker's popover hangs from: the chip's end, taking no room */
+.anchor {
+  width: 0;
+  height: 26px;
+  margin-left: -6px;
+  padding: 0;
+  pointer-events: none;
+}
+.foot {
+  margin: 0 -12px;
+  padding: 10px 12px 8px;
   border-top: 1px solid var(--line);
 }
 
-/* C: the sentence, in the kit's own state line, a shade stronger than a note */
-.state {
-  color: var(--t-2);
+/* ---- C: each worker under This Mac's slider ---- */
+.atSlider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px -6px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.line {
+  align-items: center;
 }

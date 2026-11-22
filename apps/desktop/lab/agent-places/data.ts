@@ -5,19 +5,19 @@ import { lanesOf, type Lanes } from '../../src/renderer/features/board/lanes'
 import { card } from '../../tests/fixtures'
 
 /*
- * What the lab draws from: this computer's agents (the runtime's `WorkPlaces`:
- * how many work, its number, a number lowered for now, and each agent's task,
- * role and what it does), how hard the computer works (`GetLoad`), and
- * Meridian's board, whose Up next waits on them. Made up, and the same on
- * every load. The runtime doesn't say why it lowers the number; the lab does
- * (memory or CPU, which its pressure check knows).
+ * What the lab draws from: the home's workers, this Mac first. Each has its
+ * agents (the runtime's `WorkPlaces`: how many work, its number, a number
+ * lowered for now and each agent's task), how hard it works (`GetLoad`), and
+ * whether it can be reached. Meridian's board waits on them in Up next. Made
+ * up, and the same on every load: the runtime knows this Mac's agents and
+ * load, and only a worker's id, its agents and whether it is busy (#1120).
  */
 
 export const SCENES = [
-  { key: 'memory', label: 'Lowered, memory' },
+  { key: 'memory', label: 'This Mac lowered' },
   { key: 'full', label: 'All at work' },
-  { key: 'cpu', label: 'Lowered, CPU' },
-  { key: 'free', label: 'Room to spare' },
+  { key: 'down', label: 'A worker offline' },
+  { key: 'calm', label: 'Room to spare' },
 ] as const
 export type Scene = (typeof SCENES)[number]['key']
 
@@ -46,7 +46,7 @@ export interface Machine {
   readonly cores: number
 }
 
-/** This computer's agents. */
+/** A worker's agents. */
 export interface Places {
   /** Agents at once: the person's number, or the default. */
   readonly configured: number
@@ -58,14 +58,29 @@ export interface Places {
   readonly machine: Machine
 }
 
+/** A computer the home runs work on: this Mac, or one enrolled. */
+export interface Worker extends Places {
+  readonly id: string
+  readonly name: string
+  /** This Mac, the computer the window is on. */
+  readonly here: boolean
+  readonly system: 'macOS' | 'Linux'
+  /** How hard it works, now: shares of the whole. */
+  readonly cpu: number
+  readonly memory: number
+  readonly pressure: MemoryPressure
+  /** Out of reach: since when, and the tasks whose work is there, waiting for it. */
+  readonly offline: { readonly for: string; readonly holding: number } | null
+}
+
 /** Lowered for now: fewer may work than the number says. */
 export const isLowered = (places: Places) => places.atOnce < places.configured
 
 /** How many more could start now. */
 export const freeOf = (places: Places) => Math.max(0, places.atOnce - places.agents.length)
 
-/** Of the number, how many can't be used for now: lowered away, and not at work. */
-export const closedOf = (places: Places) => Math.max(0, places.configured - Math.max(places.atOnce, places.agents.length))
+/** A worker that needs a look: out of reach, or lowered for now. */
+export const troubled = (worker: Worker) => worker.offline !== null || isLowered(worker)
 
 export const PROJECTS = [
   { id: 'meridian', name: 'Meridian', ink: ProjectInk.Teal },
@@ -119,6 +134,24 @@ const TASKS = {
     project: 'Meridian',
     ...claude,
   },
+  cache: {
+    title: 'Cache the CI dependencies',
+    long: 'Cache the CI dependencies between runs and key them on the lockfile',
+    project: 'Halyard',
+    ...codex,
+  },
+  emails: {
+    title: 'Translate the welcome emails',
+    long: 'Translate the welcome emails into German and French and check their layout',
+    project: 'Meridian',
+    ...claude,
+  },
+  export: {
+    title: 'Fix the export dialog',
+    long: 'Fix the export dialog on small screens, where its buttons fall off the edge',
+    project: 'Tessera',
+    ...claude,
+  },
 } as const
 type TaskKey = keyof typeof TASKS
 
@@ -137,40 +170,143 @@ const agentOf = (key: TaskKey, crowded: boolean, role: Role = 'lead', doing: Doi
   }
 }
 
-/** This computer's agents, by scene; crowded, a bigger Mac with more of them and long titles. */
-export const placesOf = (scene: Scene, crowded: boolean): Places => {
-  const a = (key: TaskKey, role?: Role, doing?: Doing) => agentOf(key, crowded, role, doing)
-  const machine: Machine = crowded ? { count: 8, memory: 64, cores: 20 } : { count: 5, memory: 32, cores: 14 }
-  const at = (agents: Agent[], lowered?: { atOnce: number; why: Why }): Places => ({
-    configured: machine.count,
-    atOnce: lowered?.atOnce ?? machine.count,
-    why: lowered?.why ?? null,
-    agents,
-    machine,
-  })
-  switch (scene) {
-    case 'memory':
-      return at([a('login'), a('safari'), ...(crowded ? [a('login', 'helper')] : [])], { atOnce: 1, why: 'memory' })
-    case 'full':
-      return at([
-        a('login'),
-        a('safari'),
-        a('audit'),
-        a('audit', 'helper', 'background'),
-        a('webhooks', 'reviewer'),
-        ...(crowded ? [a('vite'), a('notes'), a('perf', 'lead', 'starting')] : []),
-      ])
-    case 'cpu':
-      return at([a('login'), a('safari'), a('vite', 'lead', 'background'), ...(crowded ? [a('notes'), a('perf')] : [])], {
-        atOnce: crowded ? 5 : 3,
-        why: 'cpu',
-      })
-    case 'free':
-      return at([a('login'), a('safari'), ...(crowded ? [a('audit')] : [])])
-  }
+/* ---- the workers, by scene ------------------------------------------------------------------------------- */
+
+interface Draft {
+  id: string
+  name: string
+  here?: boolean
+  system?: Worker['system']
+  machine: Machine
+  agents: Agent[]
+  cpu: number
+  memory: number
+  lowered?: { atOnce: number; why: Why }
+  offline?: Worker['offline']
 }
 
-/** What the runtime gives the board today, for the take as built. */
+const worker = (draft: Draft): Worker => ({
+  id: draft.id,
+  name: draft.name,
+  here: draft.here ?? false,
+  system: draft.system ?? 'Linux',
+  configured: draft.machine.count,
+  atOnce: draft.lowered?.atOnce ?? draft.machine.count,
+  why: draft.lowered?.why ?? null,
+  agents: draft.offline === undefined ? draft.agents : [],
+  machine: draft.machine,
+  cpu: draft.offline === undefined ? draft.cpu : 0,
+  memory: draft.offline === undefined ? draft.memory : 0,
+  pressure: draft.memory > 0.9 ? MemoryPressure.Critical : MemoryPressure.Normal,
+  offline: draft.offline ?? null,
+})
+
+/** The home's workers, this Mac first; crowded, a bigger Mac, more workers, long names and long titles. Alone, this Mac only. */
+export const workersOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
+  const a = (key: TaskKey, role?: Role, doing?: Doing) => agentOf(key, crowded, role, doing)
+  const mac: Machine = crowded ? { count: 8, memory: 64, cores: 20 } : { count: 5, memory: 32, cores: 14 }
+  const box: Machine = { count: 4, memory: 64, cores: 16 }
+  const mini: Machine = { count: 2, memory: 16, cores: 8 }
+  const here = (agents: Agent[], cpu: number, memory: number, lowered?: Draft['lowered']) =>
+    worker({
+      id: 'here',
+      name: 'This Mac',
+      here: true,
+      system: 'macOS',
+      machine: mac,
+      agents,
+      cpu,
+      memory,
+      ...(lowered ? { lowered } : {}),
+    })
+  const buildBox = (agents: Agent[], cpu: number, memory: number, rest: Partial<Draft> = {}) =>
+    worker({ id: 'build-box', name: 'build-box', machine: box, agents, cpu, memory, ...rest })
+  const macMini = (agents: Agent[], cpu: number, memory: number, rest: Partial<Draft> = {}) =>
+    worker({ id: 'mac-mini', name: 'mac-mini', system: 'macOS', machine: mini, agents, cpu, memory, ...rest })
+  // Crowded: two more, one with a long name.
+  const more = (agents: [Agent[], Agent[]], offline = false) =>
+    crowded
+      ? [
+          worker({
+            id: 'gpu',
+            name: 'gpu-box',
+            machine: { count: 6, memory: 128, cores: 32 },
+            agents: agents[0],
+            cpu: 0.44,
+            memory: 0.38,
+          }),
+          worker({
+            id: 'frankfurt',
+            name: 'ci-runner-frankfurt-02.internal',
+            machine: { count: 3, memory: 32, cores: 8 },
+            agents: agents[1],
+            cpu: 0.58,
+            memory: 0.66,
+            ...(offline ? { offline: { for: '3 h', holding: 1 } } : {}),
+          }),
+        ]
+      : []
+
+  const all = (() => {
+    switch (scene) {
+      case 'memory':
+        return [
+          here([a('login'), a('safari'), ...(crowded ? [a('login', 'helper')] : [])], 0.52, 0.94, { atOnce: 1, why: 'memory' }),
+          buildBox([a('vite'), a('notes'), a('audit'), a('audit', 'helper', 'background')], 0.62, 0.55),
+          macMini([a('webhooks'), a('webhooks', 'reviewer')], 0.48, 0.71),
+          ...more([
+            [a('perf'), a('cache'), a('emails'), a('emails', 'reviewer'), a('export'), a('export', 'helper')],
+            [a('vite', 'reviewer'), a('notes', 'helper'), a('cache', 'helper')],
+          ]),
+        ]
+      case 'full':
+        return [
+          here(
+            [
+              a('login'),
+              a('safari'),
+              a('audit'),
+              a('audit', 'helper', 'background'),
+              a('webhooks', 'reviewer'),
+              ...(crowded ? [a('perf'), a('cache'), a('emails', 'lead', 'starting')] : []),
+            ],
+            0.71,
+            0.68,
+          ),
+          buildBox([a('vite'), a('notes'), a('perf', crowded ? 'reviewer' : 'lead'), a('emails', crowded ? 'helper' : 'lead')], 0.81, 0.62),
+          macMini([a('cache', crowded ? 'reviewer' : 'lead'), a('export')], 0.66, 0.74),
+          ...more([
+            [
+              a('webhooks'),
+              a('safari', 'reviewer'),
+              a('login', 'reviewer'),
+              a('audit', 'reviewer'),
+              a('export', 'reviewer'),
+              a('notes', 'reviewer'),
+            ],
+            [a('vite', 'reviewer'), a('vite', 'helper'), a('cache', 'helper')],
+          ]),
+        ]
+      case 'down':
+        return [
+          here([a('login'), a('safari'), a('audit')], 0.46, 0.58),
+          buildBox([], 0, 0, { offline: { for: '12 min', holding: 2 } }),
+          macMini([a('webhooks')], 0.96, 0.52, { lowered: { atOnce: 1, why: 'cpu' } }),
+          ...more([[a('perf'), a('emails')], []], true),
+        ]
+      case 'calm':
+        return [
+          here([a('login'), a('safari')], 0.3, 0.48),
+          buildBox([a('vite')], 0.22, 0.31),
+          macMini([], 0.04, 0.27),
+          ...more([[a('perf')], []]),
+        ]
+    }
+  })()
+  return alone ? all.slice(0, 1) : all
+}
+
+/** What the runtime gives the board today, for the take as built: this Mac's agents. */
 const workPlacesOf = (places: Places): WorkPlaces => ({
   busy: places.agents.length,
   atOnce: places.atOnce,
@@ -197,9 +333,9 @@ export interface Waiting {
   readonly project: string
 }
 
-/** What waits, on every board: nothing while one more could start. */
-export const waitingOf = (places: Places, crowded: boolean): Waiting[] => {
-  if (freeOf(places) > 0) return []
+/** What waits, on every board: nothing while a worker that can be reached could start one more. */
+export const waitingOf = (workers: readonly Worker[], crowded: boolean): Waiting[] => {
+  if (workers.some((one) => one.offline === null && freeOf(one) > 0)) return []
   return [
     { taskId: 'line-0', title: 'Dark mode for Settings', project: 'Meridian' },
     { taskId: 'else-0', title: 'Bump Node to 24 in CI', project: 'Halyard' },
@@ -241,10 +377,11 @@ const permission: BoardCall = {
   taskSlug: 'ship-the-billing-fix',
 }
 
-/** Meridian's board: what runs there, what waits in Up next for an agent, a plan, a call and something settled. */
-export const boardOf = (places: Places, waiting: readonly Waiting[], asBuilt: boolean): Lanes => {
-  const queued = { busy: places.agents.length, atOnce: places.atOnce }
-  const mine = places.agents.filter((one) => one.project === 'Meridian')
+/** Meridian's board: what runs there on any worker, what waits in Up next for an agent, a plan, a call and something settled. */
+export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[], asBuilt: boolean): Lanes => {
+  const here = workers[0]!
+  const queued = { busy: here.agents.length, atOnce: here.atOnce }
+  const mine = workers.flatMap((one) => one.agents).filter((one) => one.project === 'Meridian')
   const running = [...new Map(mine.map((one) => [one.taskId, one])).values()].map((one) =>
     task({
       taskId: one.taskId,
@@ -294,27 +431,27 @@ export const boardOf = (places: Places, waiting: readonly Waiting[], asBuilt: bo
     tasks: [...running, ...line, planned, ship, settled],
     calls: [permission],
     settledTotal: 1,
-    // As built, the board draws the banner from these; a take takes them away.
-    ...(asBuilt ? { workPlaces: workPlacesOf(places) } : {}),
+    // As built, the board draws the banner from this Mac's; a take takes them away.
+    ...(asBuilt ? { workPlaces: workPlacesOf(here) } : {}),
   } as BoardSnapshot
   return lanesOf(snapshot)
 }
 
-/* ---- how hard this computer works ------------------------------------------------------- */
+/* ---- how hard a worker works ------------------------------------------------------- */
 
 export const SLOTS = 40
 
-const grain = (i: number) => Math.sin(i * 1.7) * 0.5 + Math.sin(i * 0.43 + 1) * 0.5
-const historyTo = (to: LoadPoint): LoadPoint[] =>
+const grain = (i: number, seed: number) => Math.sin(i * 1.7 + seed) * 0.5 + Math.sin(i * 0.43 + 1 + seed) * 0.5
+const historyTo = (to: LoadPoint, seed: number): LoadPoint[] =>
   Array.from({ length: SLOTS }, (_, i) => {
     if (i === SLOTS - 1) return to
     const t = i / (SLOTS - 1)
     const k = t < 0.55 ? 0.6 : 0.6 + (t - 0.55) * 0.9
-    const cpu = Math.min(1, Math.max(0, to.cpu * k + grain(i) * 0.04))
-    return { cpu, work: Math.min(cpu, Math.max(0, to.work * k + grain(i) * 0.03)) }
+    const cpu = Math.min(1, Math.max(0, to.cpu * k + grain(i, seed) * 0.04))
+    return { cpu, work: Math.min(cpu, Math.max(0, to.work * k + grain(i, seed) * 0.03)) }
   })
 
-/** What else of Althar's runs and has no agent at work: each project's coordinator, and Althar itself. */
+/** What else of Althar's runs on this Mac and has no agent at work: each project's coordinator, and Althar itself. */
 const NO_AGENT: readonly LoadRow[] = [
   {
     id: 'coordinator',
@@ -329,13 +466,6 @@ const NO_AGENT: readonly LoadRow[] = [
   { id: 'althar', title: 'Althar', opens: false, cpu: 0.03, memory: '0.6 GB', processes: 6 },
 ]
 
-const LOAD: Record<Scene, { cpu: number; memory: number; pressure: MemoryPressure }> = {
-  memory: { cpu: 0.52, memory: 0.94, pressure: MemoryPressure.Critical },
-  full: { cpu: 0.71, memory: 0.68, pressure: MemoryPressure.Normal },
-  cpu: { cpu: 0.96, memory: 0.61, pressure: MemoryPressure.Normal },
-  free: { cpu: 0.3, memory: 0.48, pressure: MemoryPressure.Normal },
-}
-
 /** Each task's share of the CPU and the memory it holds, made up but steady. */
 const SHARE: Record<TaskKey, { cpu: number; memory: number }> = {
   login: { cpu: 0.16, memory: 2.4 },
@@ -345,14 +475,17 @@ const SHARE: Record<TaskKey, { cpu: number; memory: number }> = {
   webhooks: { cpu: 0.05, memory: 0.9 },
   notes: { cpu: 0.11, memory: 1.4 },
   perf: { cpu: 0.08, memory: 1.2 },
+  cache: { cpu: 0.14, memory: 1.1 },
+  emails: { cpu: 0.06, memory: 0.8 },
+  export: { cpu: 0.07, memory: 1.3 },
 }
 
-/** The load meter's reading: Althar's work on this computer by task, most CPU first. */
-export const loadOf = (scene: Scene, places: Places, crowded: boolean): LoadGlance => {
-  const now = LOAD[scene]
-  const total = crowded ? 64 : 32
+/** A worker's reading as the load meter draws it: its work by task, most CPU first; this Mac's with Althar's own. */
+export const loadOf = (worker: Worker): LoadGlance => {
+  const total = worker.machine.memory
+  const busy = worker.cpu > 0.9
   const byTask = new Map<string, LoadRow>()
-  for (const one of places.agents) {
+  for (const one of worker.agents) {
     if (byTask.has(one.taskId)) continue
     const share = SHARE[one.taskId as TaskKey]
     byTask.set(one.taskId, {
@@ -361,25 +494,25 @@ export const loadOf = (scene: Scene, places: Places, crowded: boolean): LoadGlan
       project: one.project,
       agent: one.agent,
       mark: one.mark,
-      cpu: scene === 'cpu' ? share.cpu * 1.6 : share.cpu,
+      cpu: busy ? share.cpu * 2.4 : share.cpu,
       memory: `${share.memory.toFixed(1)} GB`,
-      processes: places.agents.filter((other) => other.taskId === one.taskId).length * 4,
+      processes: worker.agents.filter((other) => other.taskId === one.taskId).length * 4,
     })
   }
-  const rows = [...byTask.values(), ...NO_AGENT].toSorted((a, b) => b.cpu - a.cpu)
+  const rows = [...byTask.values(), ...(worker.here ? NO_AGENT : [])].toSorted((a, b) => b.cpu - a.cpu)
   const work = Math.min(
-    now.cpu,
+    worker.cpu,
     rows.reduce((sum, row) => sum + row.cpu, 0),
   )
   return {
-    cpu: now.cpu,
+    cpu: worker.cpu,
     work,
-    memory: now.memory,
-    workMemory: Math.min(now.memory, rows.reduce((sum, row) => sum + Number.parseFloat(row.memory), 0) / total),
-    memoryUsed: `${(now.memory * total).toFixed(1)} GB`,
+    memory: worker.memory,
+    workMemory: Math.min(worker.memory, rows.reduce((sum, row) => sum + Number.parseFloat(row.memory), 0) / total),
+    memoryUsed: `${(worker.memory * total).toFixed(1)} GB`,
     memoryTotal: `${total} GB`,
-    pressure: now.pressure,
+    pressure: worker.pressure,
     rows,
-    history: historyTo({ cpu: now.cpu, work }),
+    history: historyTo({ cpu: worker.cpu, work }, worker.name.length),
   }
 }

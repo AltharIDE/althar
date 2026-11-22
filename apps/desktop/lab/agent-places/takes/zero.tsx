@@ -9,7 +9,8 @@ export const ZERO: Take = {
   key: '0',
   kbd: '0',
   label: 'As built',
-  idea: 'As built: the banner over Up next; the bar and the slider as they are',
+  idea: 'As built: the banner over Up next; the bar and the slider as they are, and no other workers anywhere',
+  opens: 'peek',
   bar: (ctx) => (
     <>
       <ChromeButton icon="plug" label="Homes" compact onClick={() => ctx.say('Opens the homes menu, as it is')} />
@@ -20,11 +21,11 @@ export const ZERO: Take = {
   slider: (ctx, compact) => (
     <AgentsAtOnce
       compact={compact}
-      count={ctx.places.configured}
-      own={ctx.places.configured !== ctx.places.machine.count}
-      machine={ctx.places.machine}
+      count={ctx.here.configured}
+      own={ctx.here.configured !== ctx.here.machine.count}
+      machine={ctx.here.machine}
       most={ctx.most}
-      onChange={ctx.setCount}
+      onChange={(n) => ctx.setCount(ctx.here.id, n)}
     />
   ),
 }

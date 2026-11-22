@@ -1,6 +1,22 @@
-/* lab only: a long This Mac scrolls short of the window's foot, where the lab's bar sits */
+/* lab only: a long popover scrolls short of the window's foot, where the lab's bar sits */
 .scroll {
   max-height: calc(100vh - 140px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* quiet, at the heading's end: what the worker is */
+.side {
+  font-size: 11px;
+  color: var(--t-3);
+}
+/* a worker out of reach, in its readings' place */
+.away {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.danger {
+  color: var(--danger);
 }

@@ -1,18 +1,33 @@
 import { type ReactNode, useId, useState } from 'react'
-import { BrandMark, ChromeButton, Gauge, type LoadPoint, type LoadRow, loadPeekText, PlanGauge, Popover, Switch } from '@althar/ui'
+import {
+  AgentsAtOnce,
+  agentsAtOnceText,
+  BrandMark,
+  ChromeButton,
+  Gauge,
+  type LoadGlance,
+  type LoadPoint,
+  type LoadRow,
+  loadPeekText,
+  PlanGauge,
+  Popover,
+  Switch,
+} from '@althar/ui'
 
 import { heldSteps, percent, STEPS, strained } from '../../../../packages/ui/src/chrome/LoadMeter/load'
 import m from '../../../../packages/ui/src/chrome/LoadMeter/LoadMeter.module.css'
 import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
 import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../packages/ui/src/fixtures/plan'
-import { SLOTS } from './data'
+import { SLOTS, type Worker } from './data'
 import type { Ctx } from './takes/types'
+import { words } from './words'
 import s from './parts.module.css'
 
 /*
  * The bar and This Mac as the kit draws them (`LoadMeter`, `LoadPeek`, their
- * own styles), with a place for what a take adds: a reading among CPU and
- * Memory, or something between them and Running. Nothing else differs.
+ * own styles), drawn for any worker: its trace, CPU and Memory, its Agents in
+ * their form, what runs on it, and a foot. Takes put the home's other workers
+ * around it.
  */
 
 const t = loadPeekText
@@ -26,15 +41,25 @@ const useSteps = (share: number) => {
   return steps
 }
 
-/** The bar between Homes and the gear: Homes, the meter, plan usage, each as it is. */
-export function Bar({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
-  const cpu = useSteps(ctx.load.cpu)
-  const work = useSteps(ctx.load.work ?? 0)
-  const memory = useSteps(ctx.load.memory)
-  const workMemory = useSteps(ctx.load.workMemory ?? 0)
+/** A worker's CPU and MEM as the bar draws this Mac's: five steps each, Althar's part in cobalt, full in ink. */
+export function Gauges({ load }: { load: LoadGlance }) {
+  const cpu = useSteps(load.cpu)
+  const work = useSteps(load.work ?? 0)
+  const memory = useSteps(load.memory)
+  const workMemory = useSteps(load.workMemory ?? 0)
   return (
     <>
-      <ChromeButton icon="plug" label="Homes" compact onClick={() => ctx.say('Opens the homes menu, as it is')} />
+      <Gauge name="CPU" lit={cpu} ours={work} full={cpu === STEPS} />
+      <Gauge name="MEM" lit={memory} ours={workMemory} full={strained(load.pressure)} />
+    </>
+  )
+}
+
+/** The bar's end before the gear: Homes (or what a take puts there), the meter and what it opens, plan usage. */
+export function Bar({ ctx, homes, children }: { ctx: Ctx; homes?: ReactNode; children: ReactNode }) {
+  return (
+    <>
+      {homes ?? <ChromeButton icon="plug" label="Homes" compact onClick={() => ctx.say('Opens the homes menu, as it is')} />}
       <span className={m.meter}>
         <Popover
           label="This Mac’s load"
@@ -47,8 +72,7 @@ export function Bar({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
           onOpenChange={ctx.peek.set}
           trigger={
             <button type="button" className={m.button} aria-label={`CPU ${percent(ctx.load.cpu)}%, MEM ${percent(ctx.load.memory)}%`}>
-              <Gauge name="CPU" lit={cpu} ours={work} full={cpu === STEPS} />
-              <Gauge name="MEM" lit={memory} ours={workMemory} full={strained(ctx.load.pressure)} />
+              <Gauges load={ctx.load} />
             </button>
           }
         >
@@ -105,6 +129,21 @@ function Figure({ name, figure, total, ours }: { name: string; figure: string; t
   )
 }
 
+/** Agents beside CPU and Memory, in their form: how many work of the number, all of it Althar's; under it what is off. */
+export function AgentsReading({ worker, waiting = 0 }: { worker: Worker; waiting?: number }) {
+  const share = worker.agents.length / Math.max(1, worker.configured)
+  const lowered = words.lowered(worker)
+  return (
+    <div className={lp.row}>
+      <span className={lp.name}>{words.agents}</span>
+      <span className={lp.figure}>{words.of(worker)}</span>
+      <SplitBar total={share} ours={share} />
+      {lowered !== null && <span className={lp.work}>{lowered}</span>}
+      {waiting > 0 && <span className={lp.work}>{words.waiting(waiting)}</span>}
+    </div>
+  )
+}
+
 function Row({ row }: { row: LoadRow }) {
   return (
     <>
@@ -123,42 +162,18 @@ function Row({ row }: { row: LoadRow }) {
   )
 }
 
-/**
- * This Mac, as the kit's peek: the trace, CPU and Memory, what runs, the switch. `reading` goes after Memory, in the
- * same form; `after` between the readings and Running.
- */
-export function MacPeek({ ctx, reading, after }: { ctx: Ctx; reading?: ReactNode; after?: ReactNode }) {
-  const id = useId()
-  const { load } = ctx
+/** What runs on a worker, as This Mac lists it: each task, most CPU first, and what else the computer runs. */
+function Running({ ctx, load, close, title }: { ctx: Ctx; load: LoadGlance; close: () => void; title: string }) {
   const rows = load.rows ?? []
   return (
-    <div className={`${lp.peek} ${s.scroll}`}>
-      <span className={lp.head}>
-        <h2 className={lp.heading}>{t.machine}</h2>
+    <section className={lp.rows}>
+      <span className={lp.rowsHead}>
+        <h3 className={lp.eyebrow}>{title}</h3>
+        <span className={lp.eyebrow}>{t.cpu}</span>
       </span>
-      <div className={lp.trace}>
-        <Trace points={load.history} />
-        <span className={lp.axis} aria-hidden="true">
-          <span>{t.ago}</span>
-          <span>{t.now}</span>
-        </span>
-      </div>
-      <div className={lp.machine}>
-        <Figure name={t.cpu} figure={t.percent(percent(load.cpu))} total={load.cpu} ours={load.work ?? 0} />
-        <Figure
-          name={t.memory}
-          figure={t.memoryFigure(load.memoryUsed, load.memoryTotal)}
-          total={load.memory}
-          ours={load.workMemory ?? 0}
-        />
-        {reading}
-      </div>
-      {after}
-      <section className={lp.rows}>
-        <span className={lp.rowsHead}>
-          <h3 className={lp.eyebrow}>{t.running}</h3>
-          <span className={lp.eyebrow}>{t.cpu}</span>
-        </span>
+      {rows.length === 0 ? (
+        <p className={lp.none}>{t.nothingRuns}</p>
+      ) : (
         <ul className={lp.list}>
           {rows.map((row) => (
             <li key={row.id}>
@@ -171,7 +186,7 @@ export function MacPeek({ ctx, reading, after }: { ctx: Ctx; reading?: ReactNode
                   type="button"
                   className={`${lp.share} ${lp.way}`}
                   onClick={() => {
-                    ctx.peek.set(false)
+                    close()
                     ctx.onOpen(row.id)
                   }}
                 >
@@ -181,20 +196,133 @@ export function MacPeek({ ctx, reading, after }: { ctx: Ctx; reading?: ReactNode
             </li>
           ))}
         </ul>
-        <span className={lp.other}>
-          <span>{t.otherApps}</span>
-          <span className={lp.figure}>{t.percent(percent(load.cpu - (load.work ?? 0)))}</span>
+      )}
+      <span className={lp.other}>
+        <span>{t.otherApps}</span>
+        <span className={lp.figure}>{t.percent(percent(load.cpu - (load.work ?? 0)))}</span>
+      </span>
+    </section>
+  )
+}
+
+/** This Mac's foot, as built: the switch that takes the meter out of the bar. */
+export function ShowInBar({ ctx }: { ctx: Ctx }) {
+  const id = useId()
+  return (
+    <div className={lp.foot}>
+      <span className={lp.footWords}>
+        <span id={`${id}-show`} className={lp.footTitle}>
+          {t.show}
         </span>
-      </section>
-      <div className={lp.foot}>
-        <span className={lp.footWords}>
-          <span id={`${id}-show`} className={lp.footTitle}>
-            {t.show}
-          </span>
-          <span className={lp.footNote}>{t.showNote}</span>
-        </span>
-        <Switch checked onChange={() => ctx.say('Takes the meter out of the bar')} labelledBy={`${id}-show`} />
-      </div>
+        <span className={lp.footNote}>{t.showNote}</span>
+      </span>
+      <Switch checked onChange={() => ctx.say('Takes the meter out of the bar')} labelledBy={`${id}-show`} />
     </div>
+  )
+}
+
+/**
+ * A worker as This Mac's popover draws it: its name, the trace, CPU, Memory and Agents, what runs on it, and a foot.
+ * `between` goes between the readings and what runs; `after` after it. Out of reach, a line says since when and what
+ * waits for it, in the readings' place.
+ */
+export function Peek({
+  ctx,
+  worker,
+  load,
+  waiting = 0,
+  side,
+  between,
+  after,
+  foot,
+  close,
+  running = t.running,
+}: {
+  ctx: Ctx
+  worker: Worker
+  load: LoadGlance
+  waiting?: number
+  /** Quiet, at the heading's end. */
+  side?: ReactNode
+  between?: ReactNode
+  after?: ReactNode
+  foot?: ReactNode
+  close: () => void
+  /** What runs on it, as its list is headed. */
+  running?: string
+}) {
+  return (
+    <div className={`${lp.peek} ${s.scroll}`}>
+      <span className={lp.head}>
+        <h2 className={lp.heading}>{worker.name}</h2>
+        {side !== undefined && <span className={s.side}>{side}</span>}
+      </span>
+      {worker.offline !== null ? (
+        <p className={s.away}>
+          <span className={s.danger}>{words.away(worker)}.</span> {words.holding(worker)} to come back.
+        </p>
+      ) : (
+        <>
+          <div className={lp.trace}>
+            <Trace points={load.history} />
+            <span className={lp.axis} aria-hidden="true">
+              <span>{t.ago}</span>
+              <span>{t.now}</span>
+            </span>
+          </div>
+          <div className={lp.machine}>
+            <Figure name={t.cpu} figure={t.percent(percent(load.cpu))} total={load.cpu} ours={load.work ?? 0} />
+            <Figure
+              name={t.memory}
+              figure={t.memoryFigure(load.memoryUsed, load.memoryTotal)}
+              total={load.memory}
+              ours={load.workMemory ?? 0}
+            />
+            <AgentsReading worker={worker} waiting={waiting} />
+          </div>
+        </>
+      )}
+      {between}
+      {worker.offline === null && <Running ctx={ctx} load={load} close={close} title={running} />}
+      {after}
+      {foot}
+    </div>
+  )
+}
+
+/** Agents at once, the kit's own, for a worker: its number and default; where the number is lowered for now, its note says so. */
+export function Slider({
+  ctx,
+  worker,
+  compact,
+  title,
+  note,
+  short,
+}: {
+  ctx: Ctx
+  worker: Worker
+  compact: boolean
+  title?: string
+  /** In place of the note at the number: what is so now. */
+  note?: string | null
+  short?: string
+}) {
+  const lowered = words.lowered(worker)
+  const said = note ?? lowered
+  return (
+    <AgentsAtOnce
+      compact={compact}
+      count={worker.configured}
+      own={worker.configured !== worker.machine.count}
+      machine={worker.machine}
+      most={ctx.most}
+      onChange={(n) => ctx.setCount(worker.id, n)}
+      text={{
+        ...(title === undefined ? {} : { title }),
+        ...(worker.here ? {} : { mark: () => words.mark(worker), value: (n: number) => String(n) }),
+        note: (n, machine) => (n === worker.configured && said !== null ? said : agentsAtOnceText.note(n, machine)),
+        short: short ?? lowered ?? agentsAtOnceText.short,
+      }}
+    />
   )
 }
