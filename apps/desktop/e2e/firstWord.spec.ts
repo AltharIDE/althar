@@ -6,7 +6,7 @@ import { fileHolds } from '@althar/provider-adapters/testing'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { holdRuntime, launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { holdRuntime, launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Between sending and the first word back, in a real window with the fake
@@ -278,7 +278,7 @@ test('thinks while the agent starts for what was said: the coordinator’s first
 
     await startTask(page, 'Keep the session alive', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await expect(shown(page, 'Implementing', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'More for this task' }).click()
     await page
       .getByRole('menu')
@@ -315,7 +315,7 @@ test('keeps messages accessible when the coordinator or task lead cannot start, 
     await box.fill('')
     await startTask(page, 'Stopped lead', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await expect(shown(page, 'Implementing', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'More for this task' }).click()
     await page
       .getByRole('menu')

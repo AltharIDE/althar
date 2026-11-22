@@ -42,7 +42,7 @@ const overview: HomesOverview = {
     local: { live: true, list: [{ id: 'prj_althar', name: 'althar', ink: 'clay', working: 0, yours: 0 }] },
     [home.homeId]: { live: true, list: [{ id: 'prj_ledger', name: 'ledger', ink: 'moss', working: 2, yours: 1 }] },
   },
-  opened: { [home.id]: Date.now() - 40 * 60_000 },
+  opened: {},
 }
 const fixture = () => {
   const listeners = new Set<(state: HomeState) => void>()
@@ -351,6 +351,7 @@ it('shows a resting home’s projects quietly, as last read, with when it was la
   const at = fixture()
   manage(at, {
     ...overview,
+    opened: { [home.id]: Date.now() - 40 * 60_000 },
     windows: { local: 'local' },
     projects: {
       ...overview.projects,
