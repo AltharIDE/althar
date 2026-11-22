@@ -1849,8 +1849,7 @@ export class Sessions extends Context.Service<
         })
 
       /** Whether the lead a session stands in for is back: its usage again, or the step it failed over (standIn.ts). */
-      const backFrom = (standsIn: StandIn, projectId: string) =>
-        isBack(standsIn, (one) => (one.accountId === null ? limits.out(one.agentId, projectId) : limits.outAccount(one.accountId)))
+      const backFrom = (standsIn: StandIn, projectId: string) => isBack(standsIn, (one) => limits.spent(one, projectId))
 
       const switchOn = (input: {
         readonly threadId: string
@@ -2145,6 +2144,13 @@ export class Sessions extends Context.Service<
             projectId: thread.projectId,
             ...(lead === undefined ? {} : { reviewing: lead }),
           })
+          // A review with no model left but the lead's own doesn't start: on the agent's default, it could be the lead itself.
+          if (lead !== undefined && instead === null)
+            return {
+              input,
+              said: undefined,
+              refused: `${routeWords({ from })} A review never goes to the lead it reviews, so it waits until another model is free.`,
+            }
           const to = instead === null ? undefined : yield* limits.named(input.agentId, instead)
           const kept = {
             ...rest,
@@ -2156,12 +2162,14 @@ export class Sessions extends Context.Service<
           Effect.catchCause((cause) =>
             Effect.as(Effect.logWarning('Could not read where a model runs; starting as asked', cause), { input, said: undefined }),
           ),
+          Effect.map((way): { readonly input: I; readonly said: string | undefined; readonly refused?: string } => way),
         )
 
       /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
       const start = (asked: Parameters<typeof startOn>[0]) =>
         Effect.gen(function* () {
-          const { input, said } = yield* routed(asked, false)
+          const { input, said, refused } = yield* routed(asked, false)
+          if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
           const sessionId = yield* startOn(input)
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
@@ -2170,7 +2178,8 @@ export class Sessions extends Context.Service<
       /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
       const switchAgent = (asked: Parameters<typeof switchOn>[0]) =>
         Effect.gen(function* () {
-          const { input, said } = yield* routed(asked, true)
+          const { input, said, refused } = yield* routed(asked, true)
+          if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
           const sessionId = yield* switchOn(input)
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
@@ -2638,6 +2647,14 @@ export class Sessions extends Context.Service<
               const running = threads.get(input.threadId)
               if (running === undefined) return false
               const sql = yield* SqlClient.SqlClient
+              // Its model turned off on the stand-in's own agent, the given lead comes back as that model through another agent
+              // with room, as any session started on it would (`routed`); none has it, the stand-in carries on.
+              const asked = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
+              const way =
+                asked !== undefined && asked.agentId === running.entry.definition.id && asked.model !== null
+                  ? yield* limits.route({ agentId: asked.agentId, model: asked.model, projectId: running.thread.projectId })
+                  : ({ kind: 'here' } as const)
+              if (way.kind === 'none') return false
               // One transaction: the stand-in still the lead, still standing in, and nothing chosen for it since, as the lead given
               // back is queued; a choice made meanwhile (chooseLead, changeLead) is never overwritten. No `choice` is recorded, so
               // the stand-in stays one until the given lead has started (`takeOver`), and a stop or restart before still gives it back.
@@ -2646,16 +2663,34 @@ export class Sessions extends Context.Service<
                   if (running.stopping || running.sessionId !== input.sessionId || running.handover !== 'none') return undefined
                   if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
                   const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
-                  if (standsIn === undefined) return undefined
-                  const next = {
-                    agentId: standsIn.agentId,
-                    ...(standsIn.model === null ? {} : { model: standsIn.model }),
-                    ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
-                  }
+                  if (standsIn === undefined || standsIn.agentId !== asked?.agentId || standsIn.model !== asked.model) return undefined
+                  const next =
+                    way.kind === 'elsewhere'
+                      ? { agentId: way.to.agentId, ...(way.to.model === null ? {} : { model: way.to.model }) }
+                      : {
+                          agentId: standsIn.agentId,
+                          ...(standsIn.model === null ? {} : { model: standsIn.model }),
+                          ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
+                        }
                   return (yield* setLeadChoice(running, next, { onlyIfEmpty: true })) ? standsIn : undefined
                 }),
               )
               if (queued === undefined) return false
+              if (way.kind === 'elsewhere') {
+                // Handed to another agent between turns (`takeOver`): said here, as that agent isn't the one it stood in for.
+                const said = routeWords({
+                  from: yield* limits.named(queued.agentId, queued.model),
+                  to: yield* limits.named(way.to.agentId, way.to.model),
+                })
+                yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: said,
+                  about: queued.why === 'stall' ? 'stall' : 'limit',
+                  handover: true,
+                })
+                return true
+              }
               // The same agent on its own model again is set between turns, with no hand-over to say it: said here.
               if (queued.agentId === running.entry.definition.id) {
                 const said = yield* backSaid(queued, running)

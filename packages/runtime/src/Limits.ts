@@ -294,6 +294,14 @@ export class Limits extends Context.Service<
     /** How much room an account's plan has, for a model where named: its tightest window as last read; none where nothing is read. */
     room(accountId: string, model?: string): Effect.Effect<Option.Option<Room>, SqlError.SqlError>
     /**
+     * Whether a lead is spent, and until when: its account (or, with none, every account work could run on) out, as `out`
+     * and `outAccount` say, or with no room left on its model by the plan's latest reading, though no limit was hit yet.
+     */
+    spent(
+      lead: { readonly agentId: string; readonly accountId: string | null; readonly model: string | null },
+      projectId?: string,
+    ): Effect.Effect<Option.Option<Out>, Failure>
+    /**
      * Whether a new step on the agent should steer clear of it: every
      * account work could run on here is out or nearly out, and one is only
      * nearly out (one that is all out is `out`'s). The one with the most
@@ -652,6 +660,10 @@ export class Limits extends Context.Service<
           }
           const otherMaker = makerFor(input.other)
           const fromMaker = makerFor(input.from ?? input.planned)
+          // The model the other step runs, its agent's named Default resolved: the one that is the other step itself.
+          const otherOffered = catalog.find((one) => one.agentId === input.other?.agentId)
+          const otherId =
+            input.other === undefined ? null : standsFor(otherOffered?.models ?? [], input.other.model ?? otherOffered?.model ?? null)
           const fromKeys = choiceKeys(catalog, input.from ?? input.planned)
           const found: Array<
             Takeover & { low: boolean; sameMaker: boolean; sameModel: boolean; isOther: boolean; score: number; preferred: boolean }
@@ -723,7 +735,7 @@ export class Limits extends Context.Service<
               const isOther =
                 input.other !== undefined &&
                 agentId === input.other.agentId &&
-                (input.other.model === null || model.id === null || model.id === input.other.model)
+                (otherId === null || model.id === null || model.id === otherId || model.id === input.other.model)
               if (isOther && input.reviewing === true) continue
               found.push({
                 agentId,
@@ -895,6 +907,34 @@ export class Limits extends Context.Service<
         out,
         standing,
         nearlyOut,
+        spent: (lead, projectId) =>
+          Effect.gen(function* () {
+            const list =
+              lead.accountId === null
+                ? yield* runnable(lead.agentId, projectId)
+                : yield* accounts.get(lead.accountId).pipe(
+                    Effect.map((one) => [one]),
+                    Effect.catchTag('NotFound', () => Effect.succeed([])),
+                  )
+            const marked =
+              lead.accountId === null
+                ? yield* out(lead.agentId, projectId)
+                : list[0] === undefined
+                  ? Option.none<Out>()
+                  : yield* outOf(list[0])
+            if (Option.isSome(marked)) return marked
+            const empty: Array<Room> = []
+            for (const account of list) {
+              if (lead.accountId === null && Option.isSome(yield* outOf(account))) continue
+              const room = yield* roomOf(account, lead.model ?? undefined)
+              if (Option.isNone(room) || room.value.leftPercent > 0) return Option.none<Out>()
+              empty.push(room.value)
+            }
+            const [first] = empty.toSorted((a, b) => Date.parse(a.resetsAt ?? '') - Date.parse(b.resetsAt ?? ''))
+            if (first === undefined) return Option.none<Out>()
+            const until = first.resetsAt ?? new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
+            return Option.some<Out>({ agentId: lead.agentId, accountId: first.accountId, resetsAt: first.resetsAt, until })
+          }),
         room: (accountId, model) =>
           accounts.get(accountId).pipe(
             Effect.flatMap((account) => roomOf(account, model)),

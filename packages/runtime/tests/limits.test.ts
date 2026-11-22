@@ -505,7 +505,7 @@ describe('an agent out of usage', () => {
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
   const reviewerOut = reviewerOutUntil('ready')
-  function reviewerOutUntil(end: 'ready' | 'waits') {
+  function reviewerOutUntil(end: 'ready' | 'waits', leadModel: string | null = null) {
     return Effect.gen(function* () {
       // Make the replacement model known before a takeover can be selected.
       yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
@@ -513,7 +513,7 @@ describe('an agent out of usage', () => {
       const projects = yield* Projects
       const limits = yield* Limits
       const { projectId, task, start } = yield* planned(
-        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        [lead('claude-code', leadModel), { key: 'review', agentId: 'codex', model: null, skipped: false }],
         'Retry the checkout [lead:finish] [review:pass]',
       )
       const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
@@ -565,6 +565,58 @@ describe('an agent out of usage', () => {
       assert.match(lines.join('\n'), /Fake codex ran out of usage during the review/)
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
+
+  it.live('never gives a review to the lead on its agent’s Default, as the model that Default names', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      // The lead runs Claude Code's Default, which is Large; Small turned off, Large is the only model with room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'small', blocked: true })
+      const lines = yield* reviewerOutUntil('waits', 'default')
+      assert.notMatch(lines.join('\n'), /takes the review over/)
+    }).pipe(
+      Effect.provide(
+        withAgents(
+          {
+            codex: { outOfUsage: { until: back } },
+            'claude-code': {
+              models: [
+                { id: 'default', name: 'Default (recommended)', description: 'Large' },
+                { id: 'small', name: 'Small' },
+                { id: 'large', name: 'Large' },
+              ],
+            },
+          },
+          ['opencode'],
+        ),
+      ),
+    )
+  })
+
+  it.live('never starts a reviewer whose model is turned off on the lead’s own model, its agent’s only other one', () =>
+    Effect.gen(function* () {
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      // The lead is Small on Codex; its reviewer, Large on Codex, is turned off there, and no other agent has room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'codex', model: 'large', blocked: true })
+      const { task, start } = yield* planned(
+        [lead('codex', 'small'), { key: 'review', agentId: 'codex', model: 'large', skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      yield* start
+      // The review waits on the person, saying why it can't start.
+      const sql = yield* SqlClient.SqlClient
+      const [asked] = yield* until(
+        sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck'`,
+        (rows) => rows.length > 0,
+      )
+      assert.include(asked?.payload ?? '', 'A review never goes to the lead it reviews')
+      assert.notInclude((yield* said(task.threadId)).join('\n'), 'review: The change holds.')
+      // No reviewer started at all, so none on Small, the lead's own model.
+      const reviewers = yield* sql<{ model: string | null }>`
+        SELECT s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
+      assert.deepStrictEqual(reviewers, [])
+    }).pipe(Effect.provide(withAgents({}, ['claude-code', 'opencode']))),
+  )
 
   it.live('never moves work to an agent paid per use: it waits for the reset instead', () => {
     const back = Date.now() + HOUR

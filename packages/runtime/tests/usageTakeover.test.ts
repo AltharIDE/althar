@@ -743,12 +743,13 @@ describe('automatic usage takeover by model', () => {
   }
 })
 
-describe('a lead whose model the person turned off for its agent', () => {
-  const lines = (threadId: string) =>
-    Effect.map(items(threadId), (all) =>
-      all.flatMap((item) => (item.kind === 'notice' ? [(item.content as { title?: string }).title ?? ''] : [])),
-    )
+/** What a thread's notices say, in order. */
+const lines = (threadId: string) =>
+  Effect.map(items(threadId), (all) =>
+    all.flatMap((item) => (item.kind === 'notice' ? [(item.content as { title?: string }).title ?? ''] : [])),
+  )
 
+describe('a lead whose model the person turned off for its agent', () => {
   it.live('starts on the same model through another agent, as the lead, and the thread says so', () =>
     Effect.gen(function* () {
       const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
@@ -875,9 +876,56 @@ describe('a stand-in kept for another model than the task’s lead', () => {
       assert.deepInclude(standsIn, { agentId: 'opencode', model: goSol.id, until: null, why: 'limit' })
       assert.notProperty(standsIn, 'attemptId')
       const limits = yield* Limits
-      assert.isTrue(
-        yield* isBack(standsIn!, (one) => (one.accountId === null ? limits.out(one.agentId) : limits.outAccount(one.accountId))),
+      assert.isTrue(yield* isBack(standsIn!, (one) => limits.spent(one)))
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
+  it.live('keeps the thread while the task’s lead has no room left on its model, though no limit was hit', () =>
+    Effect.gen(function* () {
+      const standsIn = yield* standingIn(
+        { agentId: 'claude-code', model: claude.id },
+        { agentId: 'opencode', model: third.id },
+        { why: 'low', until: new Date(Date.now() + 7 * 24 * 3_600_000).toISOString() },
       )
+      // OpenCode Go's plan, read a moment ago, has nothing left: it was never marked out.
+      const [account] = yield* (yield* Accounts).of('opencode')
+      const sql = yield* SqlClient.SqlClient
+      const resetsAt = new Date(Date.now() + 3_600_000).toISOString()
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: account!.id,
+        agentId: 'opencode',
+        source: 'agent',
+        windows: JSON.stringify([{ kind: 'weekly', usedPercent: 100, resetsAt }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      const limits = yield* Limits
+      assert.isFalse(yield* isBack(standsIn!, (one) => limits.spent(one)))
+      assert.deepInclude(Option.getOrUndefined(yield* limits.spent(standsIn!)) ?? {}, { agentId: 'opencode', until: resetsAt })
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+})
+
+describe('a stand-in on its lead’s own agent, giving the thread back to a model turned off there', () => {
+  it.live('gives it to the same model through another agent, and says so', () =>
+    Effect.gen(function* () {
+      // GPT Weak on Codex stands in for the task's lead, GPT Strong on Codex; then GPT Strong is turned off for Codex.
+      const task = yield* startTask(undefined, undefined, { agentId: 'codex', model: sol.id })
+      const sessions = yield* Sessions
+      const sessionId = yield* sessions.start({
+        threadId: task.threadId,
+        agentId: 'codex',
+        model: weak.id,
+        standsIn: { agentId: 'codex', model: sol.id, effort: null, accountId: null, until: null, why: 'limit' },
+      })
+      yield* (yield* Models).setModelBlocked({ agentId: 'codex', model: sol.id, blocked: true })
+      assert.isTrue(yield* sessions.giveBack({ threadId: task.threadId, sessionId }))
+      assert.include(yield* lines(task.threadId), 'GPT Strong is turned off for Fake codex: it carries on through Fake opencode.')
+      // It takes the thread over from the next turn, as any lead given back to another agent does.
+      const live = yield* sessions.running(task.threadId)
+      assert.deepStrictEqual(Option.getOrUndefined(live)?.nextLead, { agentId: 'opencode', model: goSol.id })
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
+      const on = yield* until(agentsOn(task.threadId), (rows) => rows.length > 1)
+      assert.deepStrictEqual(on.at(-1), { agentId: 'opencode', model: goSol.id })
     }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
   )
 })
