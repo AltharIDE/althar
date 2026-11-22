@@ -673,6 +673,11 @@ describe('the API', () => {
               RenameTask: () => Effect.void,
               TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
+              GetArtifactsPlace: () => Effect.die('unused'),
+              ListRepositoryFolders: () => Effect.die('unused'),
+              SetArtifactsHome: () => Effect.void,
+              SaveCanvas: () => Effect.void,
+              StopSavingCanvas: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               SetThreadGoal: () => Effect.die('unused'),
               Send: ({ body, images }) =>

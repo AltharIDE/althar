@@ -348,6 +348,102 @@ export const CanvasVersionFacts = Schema.Struct({
 })
 export type CanvasVersionFacts = typeof CanvasVersionFacts.Type
 
+/*
+ * Saving an artifact to a repository: a canvas lives in Althar until someone
+ * saves it to a folder in one of the project's repositories, where it is in
+ * git with everything else, for people who never open Althar. The project
+ * keeps one place for its artifacts (a setting, which the first save makes);
+ * Save to repo puts one there unless the person picks somewhere else. It
+ * goes in a pull request of its own, or straight to the default branch, and
+ * each new version is committed as it is published, or only the one saved.
+ */
+
+/** How a saved artifact goes into its repository: a pull request of its own, or straight to the default branch. */
+export const ArtifactsHow = Schema.Literals(['pr', 'main'])
+export type ArtifactsHow = typeof ArtifactsHow.Type
+
+/** Where the project's artifacts go, as its setting says: a folder in one of its repositories, how, and whether each version is committed. */
+export const ArtifactsHome = Schema.Struct({
+  repositoryId: Schema.String,
+  /** The repository's name, as the project shows it. */
+  repository: Schema.String,
+  /** A folder in it, with a trailing slash (`design/`); empty for its root. */
+  folder: Schema.String,
+  how: ArtifactsHow,
+  /** Each new version committed as it is published; otherwise only the version someone saves. */
+  follow: Schema.Boolean,
+})
+export type ArtifactsHome = typeof ArtifactsHome.Type
+
+/** The project's place for artifacts, where it has one, and Althar's pick for the first save where it has none, with why. */
+export const ArtifactsPlace = Schema.Struct({
+  home: Schema.NullOr(ArtifactsHome),
+  guess: Schema.NullOr(Schema.Struct({ ...ArtifactsHome.fields, why: Schema.String })),
+})
+export type ArtifactsPlace = typeof ArtifactsPlace.Type
+
+/** A repository's folders at the head of its default branch, each with a trailing slash, in path order. */
+export const RepositoryFolders = Schema.Struct({ folders: Schema.Array(Schema.String), truncated: Schema.Boolean })
+export type RepositoryFolders = typeof RepositoryFolders.Type
+
+/*
+ * Downloading a canvas, as a file to send or keep: its own source (the
+ * Markdown, the diagram's words, the drawing, the picture), its files in a
+ * folder, or as drawn: a PNG (one a board, for a canvas of boards), a PDF (a
+ * page a board), or a diagram's SVG.
+ */
+
+export const CanvasDownloadFormat = Schema.Literals(['source', 'files', 'png', 'pdf', 'svg'])
+export type CanvasDownloadFormat = typeof CanvasDownloadFormat.Type
+
+/** What each kind downloads as, the first the one most wanted. */
+export const CANVAS_DOWNLOADS: Readonly<Record<CanvasKind, ReadonlyArray<CanvasDownloadFormat>>> = {
+  markdown: ['source'],
+  mermaid: ['svg', 'png', 'source'],
+  svg: ['source', 'png'],
+  picture: ['source'],
+  html: ['png', 'pdf', 'files'],
+  boards: ['png', 'pdf', 'files'],
+}
+
+/** A version to download, and how: what the window asks the main process for. A diagram's SVG is the one the window drew. */
+export interface CanvasDownload {
+  readonly projectId: string
+  readonly canvasId: string
+  readonly version: number
+  readonly manifest: string
+  /** The canvas's name, which the files are named by. */
+  readonly name: string
+  readonly kind: CanvasKind
+  readonly format: CanvasDownloadFormat
+  readonly svg?: string
+}
+
+/** How a download went: where it was saved, or that the person called it off, or what went wrong in words. */
+export type CanvasDownloaded =
+  | { readonly kind: 'saved'; readonly path: string }
+  | { readonly kind: 'cancelled' }
+  | { readonly kind: 'failed'; readonly why: string }
+
+/** A canvas saved to a repository: where, how, and how its last save went. */
+export const CanvasSaved = Schema.Struct({
+  repositoryId: Schema.String,
+  repository: Schema.String,
+  /** The canvas's own folder in the repository, with a trailing slash: `design/gift-a-class/`. */
+  path: Schema.String,
+  how: ArtifactsHow,
+  follow: Schema.Boolean,
+  /** The version last committed, and its commit; null until the first save is done. */
+  version: Schema.NullOr(Schema.Number),
+  commit: Schema.NullOr(Schema.String),
+  /** The pull request it went in, where it goes in one. */
+  pullRequest: Schema.NullOr(Schema.Struct({ number: Schema.Number, url: Schema.String })),
+  /** Saving while a commit is under way; failed with what went wrong, in words for the person. */
+  state: Schema.Literals(['saving', 'saved', 'failed']),
+  problem: Schema.NullOr(Schema.String),
+})
+export type CanvasSaved = typeof CanvasSaved.Type
+
 /** A canvas in its project's list: its latest version and what is open on it. */
 export const CanvasSummary = Schema.Struct({
   id: Schema.String,
@@ -358,6 +454,8 @@ export const CanvasSummary = Schema.Struct({
   versions: Schema.Number,
   openComments: Schema.Number,
   archived: Schema.Boolean,
+  /** Where it is saved in git; null or absent where it lives in Althar only. */
+  saved: Schema.optional(Schema.NullOr(CanvasSaved)),
 })
 export type CanvasSummary = typeof CanvasSummary.Type
 
