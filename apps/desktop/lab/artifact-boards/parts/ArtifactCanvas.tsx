@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { DEVICES } from '../../../src/main/browser/devices'
 import type { Artifact, BoardDef } from '../artifacts'
 import { ask, boardKey, boardsOf, live, useLive } from '../live'
-import { AskButton, Boards, type Placed, type Pointed, type Tool, type View } from './Boards'
+import { Boards, type Placed, type Pointed, type Section, type Tool, type View } from './Boards'
 import { drawnWidth } from './Board'
 import { askInPin, PinCard, PinMarks } from './Pins'
 import { Say } from './Say'
@@ -15,8 +15,12 @@ import s from './boards.module.css'
  * the board in place, or draws takes beside it to keep one. Where what is
  * said goes is the direction's: the task's conversation (A, B), or a pin on
  * the part (D). Comments are pins for people. A guest, on a shared page,
- * only comments.
+ * only comments. An artifact with a lot of work in it shows every page at
+ * once, a row each (C).
  */
+
+/** Every page at once, a row each. */
+export const EVERY_PAGE = 'every'
 
 export interface Opening {
   readonly page?: string
@@ -36,6 +40,9 @@ export function ArtifactCanvas({
   talk,
   opening = {},
   head,
+  lead,
+  trail,
+  close,
   guest = false,
 }: {
   artifact: Artifact
@@ -45,6 +52,10 @@ export function ArtifactCanvas({
   opening?: Opening
   /** After the view's switch, in the canvas's head. */
   head?: ReactNode
+  /** The canvas's head, floating on it: what it is, top left; its version, Share and the rest, top right; closing it. */
+  lead?: ReactNode
+  trail?: ReactNode
+  close?: ReactNode
   /** On a shared page: comments, nothing to the lead. */
   guest?: boolean
 }) {
@@ -63,9 +74,24 @@ export function ArtifactCanvas({
     setFrame([boardKey(artifact.id, from.id), ...takes.map((one) => boardKey(artifact.id, one.id))])
   }
 
-  const boards = boardsOf(world, artifact, page)
-  const sections = [{ key: page, artifact, pageId: page, boards }]
-  const pages = artifact.pages.map((one) => ({ id: one.id, name: one.name, count: boardsOf(world, artifact, one.id).length }))
+  const every = page === EVERY_PAGE
+  const sections: ReadonlyArray<Section> = every
+    ? artifact.pages.map((one) => {
+        const these = boardsOf(world, artifact, one.id)
+        return {
+          key: one.id,
+          artifact,
+          pageId: one.id,
+          boards: these,
+          heading: { title: one.name, facts: these.length === 1 ? '1 board' : `${these.length} boards`, onOpen: () => setPage(one.id) },
+        }
+      })
+    : [{ key: page, artifact, pageId: page, boards: boardsOf(world, artifact, page) }]
+  const boards = sections.flatMap((one) => one.boards)
+  /** The page a board is on, for what the lead draws beside it. */
+  const pageOf = (boardId: string) => sections.find((one) => one.boards.some((b) => b.id === boardId))?.pageId ?? page
+  const own = artifact.pages.map((one) => ({ id: one.id, name: one.name, count: boardsOf(world, artifact, one.id).length }))
+  const pages = own.length > 1 ? [{ id: EVERY_PAGE, name: 'Every page', count: boards.length }, ...own] : own
   const onPage = new Set(boards.map((one) => one.id))
   const pins = world.pins.filter((one) => one.spot.artifactId === artifact.id && onPage.has(one.spot.boardId))
   const openPin = pins.find((one) => one.id === pin) ?? null
@@ -73,8 +99,9 @@ export function ArtifactCanvas({
 
   const send = (from: Pointed, words: string) => {
     setPointed(null)
-    if (talk === 'pin') setPin(askInPin(artifact, from.placed.def, page, from.spot, words, null, showTakes(from.placed.def)))
-    else ask(artifact, from.placed.def, page, from.spot, words, (answer) => showTakes(from.placed.def)(answer.takes))
+    const on = pageOf(from.placed.def.id)
+    if (talk === 'pin') setPin(askInPin(artifact, from.placed.def, on, from.spot, words, null, showTakes(from.placed.def)))
+    else ask(artifact, from.placed.def, on, from.spot, words, (answer) => showTakes(from.placed.def)(answer.takes))
   }
   const comment = (from: Pointed, words: string) => {
     const id = `pin-${Date.now().toString(36)}`
@@ -90,7 +117,7 @@ export function ArtifactCanvas({
     const version = live.land(artifact, from, { look: take.def.look ?? {} }, `kept ${take.def.name}`)
     live.remove(
       artifact.id,
-      page,
+      pageOf(from),
       boards.filter((one) => one.from === from).map((one) => one.id),
     )
     live.say({
@@ -101,20 +128,6 @@ export function ArtifactCanvas({
     setFocus(boardKey(artifact.id, from))
     setFrame(null)
   }
-  /** The whole of a board, as Ask points at it. */
-  const wholeOf = (shown: Placed): Pointed => ({
-    key: shown.key,
-    tool: 'point',
-    placed: shown,
-    spot: {
-      artifactId: artifact.id,
-      boardId: shown.def.id,
-      selector: null,
-      label: 'The whole board',
-      box: { x: 0, y: 0, width: shown.width, height: shown.height },
-      part: null,
-    },
-  })
 
   return (
     <div
@@ -143,6 +156,9 @@ export function ArtifactCanvas({
         focus={focus}
         onFocus={setFocus}
         head={head}
+        lead={lead}
+        trail={trail}
+        close={close}
         tool={tool}
         onTool={setTool}
         fitKey={`${artifact.id}|${page}|${boards.length}`}
@@ -198,8 +214,9 @@ export function ArtifactCanvas({
                     talk={guest ? 'conversation' : talk}
                     onAsk={(words) => {
                       if (guest) return
-                      if (talk === 'pin') askInPin(artifact, board, page, openPin.spot, words, openPin.id, showTakes(board))
-                      else ask(artifact, board, page, openPin.spot, words, (answer) => showTakes(board)(answer.takes))
+                      const on = pageOf(board.id)
+                      if (talk === 'pin') askInPin(artifact, board, on, openPin.spot, words, openPin.id, showTakes(board))
+                      else ask(artifact, board, on, openPin.spot, words, (answer) => showTakes(board)(answer.takes))
                     }}
                     onClose={() => setPin(null)}
                   />
@@ -214,22 +231,6 @@ export function ArtifactCanvas({
               Keep
             </button>
           ) : null
-        }
-        ask={
-          guest
-            ? undefined
-            : (shown) => (
-                <AskButton
-                  pressed={pointed !== null && pointed.spot.selector === null && pointed.tool === 'point'}
-                  onClick={() => {
-                    if (shown === null) return
-                    setPin(null)
-                    setPointed(wholeOf(shown))
-                  }}
-                >
-                  {artifact.found ? 'Ask an agent' : 'Ask the lead'}
-                </AskButton>
-              )
         }
       />
     </div>

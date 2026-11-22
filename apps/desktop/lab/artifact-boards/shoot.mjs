@@ -12,7 +12,7 @@ const size = { width: 1440, height: 860 }
 
 /** Every copy of Kiln drawn in the page has drawn its screen. */
 const settled = async (page) => {
-  await page.waitForLoadState('networkidle')
+  await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => undefined)
   await page.waitForTimeout(1200)
   for (const frame of page.frames()) {
     if (frame === page.mainFrame()) continue
@@ -81,13 +81,34 @@ const shots = [
     },
   ],
   ['b1-gallery', 'd=b&m=0'],
-  ['b1-in-git', 'd=b&m=0', async (page) => page.getByRole('radio', { name: 'In git' }).click()],
+  ['b1-list', 'd=b&m=0', async (page) => page.getByRole('radio', { name: 'List' }).click()],
+  [
+    'b1-filter',
+    'd=b&m=0',
+    async (page) => {
+      await page.getByRole('button', { name: /^Filter/ }).click()
+      await page.getByRole('menuitemradio', { name: /In git/ }).click()
+      await page.getByRole('menuitemcheckbox', { name: /Designs/ }).click()
+    },
+  ],
+  [
+    'b1-grouped',
+    'd=b&m=0',
+    async (page) => {
+      await page.getByRole('button', { name: /^Newest/ }).click()
+      await page
+        .getByRole('menuitemcheckbox', { name: /Group by task/ })
+        .or(page.getByRole('switch', { name: /Group by task/ }))
+        .first()
+        .click()
+      await page.keyboard.press('Escape')
+    },
+  ],
   ['b-found', 'd=b&m=0', async (page) => page.getByRole('button', { name: /A class, by hand/ }).click()],
   ['b2-room', 'd=b&m=1'],
   ['b3-share', 'd=b&m=2'],
-  ['c1-wall', 'd=c&m=0'],
-  ['c2-picked', 'd=c&m=1'],
-  ['c3-share', 'd=c&m=2'],
+  ['c1-every-page', 'd=c&m=0'],
+  ['c2-room', 'd=c&m=1'],
   ['d1-pins', 'd=d&m=0'],
   ['d2-pin', 'd=d&m=1'],
   [
@@ -102,9 +123,19 @@ const shots = [
     },
   ],
   ['d3-shared', 'd=d&m=2'],
+  [
+    'd3-made-with',
+    'd=d&m=2',
+    async (page) => {
+      await page.getByRole('link', { name: /Made with Althar/ }).hover()
+      await page.waitForTimeout(500)
+    },
+  ],
   ['note-a', 'd=a&m=0&note=1'],
   ['dark-a2', 'd=a&m=1&theme=dark'],
   ['dark-a5', 'd=a&m=4&theme=dark'],
+  ['dark-b1', 'd=b&m=0&theme=dark'],
+  ['dark-c1', 'd=c&m=0&theme=dark'],
   ['dark-b2', 'd=b&m=1&theme=dark'],
   ['dark-d2', 'd=d&m=1&theme=dark'],
 ]

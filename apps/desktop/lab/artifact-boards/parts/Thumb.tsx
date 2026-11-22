@@ -26,7 +26,13 @@ export function Thumb({ artifact, className }: { artifact: Artifact; className?:
   const laid = def.draw === undefined ? DEVICES[def.size ?? 'laptop'].width : drawnWidth(def)
   const scale = room.width / laid
   return (
-    <div ref={place} className={[s.thumb, className].filter(Boolean).join(' ')} aria-hidden data-phone={def.size === 'phone' || undefined}>
+    <div
+      ref={place}
+      className={[s.thumb, className].filter(Boolean).join(' ')}
+      aria-hidden
+      data-phone={def.size === 'phone' || undefined}
+      data-drawn={def.draw !== undefined || undefined}
+    >
       {room.width > 0 && (
         <div className={s.thumbWorld} style={{ width: laid, height: room.height / scale, transform: `scale(${scale})` }}>
           <Board id={`thumb/${artifact.id}`} def={def} width={laid} look={def.look ?? {}} frames={frames} onHeight={() => undefined} />

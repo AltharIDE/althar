@@ -79,7 +79,6 @@ export function Switcher({
             <Icon name="canvas" size={14} />
           </span>
           <span className={s.triggerTitle}>{artifact.title}</span>
-          <span className={s.triggerName}>{artifact.name}</span>
           <Glyph name="down" size={11} />
         </button>
       }

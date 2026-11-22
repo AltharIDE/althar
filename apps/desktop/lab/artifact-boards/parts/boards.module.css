@@ -535,3 +535,42 @@ button.sectionTitle:hover {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* the canvas's head: two islands floating on the ground, in place of a bar over it */
+.island {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.island:empty {
+  display: none;
+}
+.island .chip {
+  height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  box-shadow: none;
+}
+.island .chip:hover,
+.island .chip[data-state='open'] {
+  background: var(--hover-faint);
+}
+.island .views {
+  background: transparent;
+  box-shadow: none;
+}
+/* a hair between what the island holds */
+.islandRule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line-2);
+}

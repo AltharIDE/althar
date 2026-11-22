@@ -1,37 +1,53 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { Artifacts, Button, Icon, Markdown, Menu, MenuItem, Segmented, You } from '@althar/ui'
+import {
+  Artifacts,
+  Button,
+  Icon,
+  Markdown,
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSwitchItem,
+  Segmented,
+  You,
+} from '@althar/ui'
 
 import { agoWords, ARTIFACTS, type Artifact, artifactOf, type ArtifactKind, boardCount, CANVAS_KIND, GIFT, KIND_WORDS } from '../artifacts'
 import { GIFT_SO_FAR } from '../data'
-import { ask, boardKey, boardsOf, live, type Spot, useLive } from '../live'
-import { type Moment, momentOf } from '../moments'
+import { ask, live, type Spot, useLive } from '../live'
+import type { Moment } from '../moments'
+import { momentOf } from '../moments'
 import { ArtifactCanvas } from '../parts/ArtifactCanvas'
-import { Boards, type Pointed, type View } from '../parts/Boards'
-import { PinCard, PinMarks } from '../parts/Pins'
-import { Say } from '../parts/Say'
+import { Rule } from '../parts/Boards'
+import { Glyph } from '../parts/Glyph'
 import { Keep, Where } from '../parts/Keep'
 import { Share } from '../parts/Share'
+import { Sheet } from '../parts/Sheet'
+import { Switcher } from '../parts/Switcher'
 import { Thumb } from '../parts/Thumb'
 import { roundOf, useLab, useOpenSoon } from '../state'
-import { Panel } from './Host'
+import { Facts, Panel } from './Host'
 import r from './room.module.css'
 
 /*
  * The lab's Artifacts room (in place of features/canvases/ArtifactsView, in
- * the project's view). B: a gallery of every artifact, each a live picture,
- * and one opened takes the room, its conversation docked beside it. C: the
- * wall, every artifact's boards on one canvas. A and D keep today's table,
- * and an artifact opened from it is the canvas they put beside a
- * conversation, as wide as the room.
+ * the project's view). B: every artifact, as cards that are a little of
+ * their canvas or as a list, found by words, filtered and sorted; one opened
+ * takes the room, its conversation docked beside it. C opens Gift a class
+ * there, every page at once. A and D keep today's table, and an artifact
+ * opened from it is the canvas they put beside a conversation, as wide as
+ * the room.
  */
 
 export function ArtifactsView(_: { projectId: string; threadId: string | null; draft: string | null }) {
   const { d, m } = useLab()
   const moment = momentOf(d, m)
   const key = String(roundOf())
-  if (d === 'b') return <Gallery key={key} moment={moment} />
-  if (d === 'c') return <Wall key={key} moment={moment} />
+  if (d === 'b' || d === 'c') return <Gallery key={key} moment={moment} />
   return <Table key={key} talk={d === 'd' ? 'pin' : 'conversation'} />
 }
 
@@ -39,7 +55,7 @@ export function ArtifactsView(_: { projectId: string; threadId: string | null; d
 
 function Table({ talk }: { talk: 'conversation' | 'pin' }) {
   const [open, setOpen] = useState<string | null>(null)
-  const now = Date.now()
+  const [now] = useState(() => Date.now())
   return (
     <Artifacts
       canvases={ARTIFACTS.map((one) => ({
@@ -59,39 +75,106 @@ function Table({ talk }: { talk: 'conversation' | 'pin' }) {
   )
 }
 
-/* ——— B: a gallery, and an artifact's own room ——— */
+/* ——— B: every artifact, and an artifact's own room ——— */
 
 const TASK_ORDER = ['Gift a class', 'Bigger photos on Classes', 'A calmer checkout', null] as const
+const KINDS: ReadonlyArray<ArtifactKind> = ['design', 'diagram', 'document', 'chart']
+const PLURAL: Readonly<Record<ArtifactKind, string>> = { design: 'Designs', diagram: 'Diagrams', document: 'Documents', chart: 'Charts' }
+
+type Sort = 'newest' | 'oldest' | 'name' | 'boards' | 'comments'
+const SORTS: ReadonlyArray<{ readonly value: Sort; readonly label: string }> = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'name', label: 'Name' },
+  { value: 'boards', label: 'Most boards' },
+  { value: 'comments', label: 'Most comments' },
+]
+const sortBy = (sort: Sort) => (a: Artifact, b: Artifact) =>
+  sort === 'newest'
+    ? a.ago - b.ago
+    : sort === 'oldest'
+      ? b.ago - a.ago
+      : sort === 'name'
+        ? a.title.localeCompare(b.title)
+        : sort === 'boards'
+          ? boardCount(b) - boardCount(a)
+          : b.comments - a.comments
+
+type From = 'lead' | 'coordinator' | 'person'
+const FROM_WORDS: Readonly<Record<From, string>> = { lead: 'A task’s lead', coordinator: 'The coordinator', person: 'Someone, by hand' }
+const fromOf = (one: Artifact): From => (one.found === true ? 'person' : one.task === null ? 'coordinator' : 'lead')
+
+interface Filters {
+  readonly kinds: ReadonlySet<ArtifactKind>
+  readonly where: 'git' | 'althar' | null
+  readonly from: ReadonlySet<From>
+  readonly talked: boolean
+}
+const NONE: Filters = { kinds: new Set(), where: null, from: new Set(), talked: false }
+const toggled = <T,>(set: ReadonlySet<T>, one: T) => {
+  const next = new Set(set)
+  if (next.has(one)) next.delete(one)
+  else next.add(one)
+  return next
+}
+
+/** Where it came from, in a few words: the task, or who. */
+const fromWords = (one: Artifact) => (one.found === true ? `${one.by}, by hand` : (one.task ?? 'The coordinator'))
 
 function Gallery({ moment }: { moment: Moment }) {
   const [open, setOpen] = useState<string | null>(moment.open ?? null)
-  const [kind, setKind] = useState<ArtifactKind | 'all'>('all')
-  const [order, setOrder] = useState<'newest' | 'task'>('newest')
-  const [place, setPlace] = useState<'anywhere' | 'git' | 'althar'>('anywhere')
+  const [look, setLook] = useState<'cards' | 'list'>('cards')
+  const [sort, setSort] = useState<Sort>('newest')
+  const [byTask, setByTask] = useState(false)
+  const [filters, setFilters] = useState<Filters>(NONE)
   const [words, setWords] = useState('')
-  if (open !== null) return <ArtifactRoom id={open} moment={moment} onBack={() => setOpen(null)} />
+  useLive()
+  if (open !== null) return <ArtifactRoom id={open} moment={moment} onOpen={setOpen} onBack={() => setOpen(null)} />
   const said = words.trim().toLowerCase()
   const shown = ARTIFACTS.filter(
     (one) =>
-      (kind === 'all' || one.kind === kind) &&
-      (place === 'anywhere' || (live.keptOf(one) !== null) === (place === 'git')) &&
-      (said === '' || `${one.title} ${one.name} ${one.by} ${live.keptOf(one)?.path ?? ''}`.toLowerCase().includes(said)),
-  )
-  const groups =
-    order === 'newest'
-      ? [{ name: null as string | null, artifacts: [...shown].sort((a, b) => a.ago - b.ago) }]
+      (filters.kinds.size === 0 || filters.kinds.has(one.kind)) &&
+      (filters.where === null || (live.keptOf(one) !== null) === (filters.where === 'git')) &&
+      (filters.from.size === 0 || filters.from.has(fromOf(one))) &&
+      (!filters.talked || one.comments > 0) &&
+      (said === '' || `${one.title} ${one.name} ${one.by} ${one.task ?? ''} ${live.keptOf(one)?.path ?? ''}`.toLowerCase().includes(said)),
+  ).sort(sortBy(sort))
+  const groups = byTask
+    ? [
+        ...TASK_ORDER.map((task) => ({
+          name: task === null ? 'The coordinator' : task,
+          artifacts: shown.filter((one) => one.task === task && one.found !== true),
+        })),
+        { name: 'Found in git', artifacts: shown.filter((one) => one.found === true) },
+      ].filter((one) => one.artifacts.length > 0)
+    : [{ name: null as string | null, artifacts: shown }]
+  const chips = [
+    ...[...filters.kinds].map((kind) => ({
+      key: kind,
+      label: PLURAL[kind],
+      off: () => setFilters({ ...filters, kinds: toggled(filters.kinds, kind) }),
+    })),
+    ...(filters.where === null
+      ? []
       : [
-          ...TASK_ORDER.map((task) => ({
-            name: task === null ? 'The coordinator' : task,
-            artifacts: shown.filter((one) => one.task === task && one.found !== true),
-          })),
-          { name: 'Found in git', artifacts: shown.filter((one) => one.found === true) },
-        ].filter((one) => one.artifacts.length > 0)
+          {
+            key: 'where',
+            label: filters.where === 'git' ? 'In git' : 'Only in Althar',
+            off: () => setFilters({ ...filters, where: null }),
+          },
+        ]),
+    ...[...filters.from].map((from) => ({
+      key: from,
+      label: FROM_WORDS[from],
+      off: () => setFilters({ ...filters, from: toggled(filters.from, from) }),
+    })),
+    ...(filters.talked ? [{ key: 'talked', label: 'With open comments', off: () => setFilters({ ...filters, talked: false }) }] : []),
+  ]
   return (
     <div className={r.gallery}>
       <header className={r.galleryHead}>
         <h1 className={r.heading}>Artifacts</h1>
-        <span className={r.count}>{shown.length}</span>
+        <span className={r.count}>{shown.length === ARTIFACTS.length ? shown.length : `${shown.length} of ${ARTIFACTS.length}`}</span>
         <span className={r.gap} />
         <label className={r.search}>
           <Icon name="search" size={13} />
@@ -102,68 +185,148 @@ function Gallery({ moment }: { moment: Moment }) {
             onChange={(event) => setWords(event.target.value)}
           />
         </label>
+        <Menu
+          label="Filter"
+          align="end"
+          width={240}
+          trigger={
+            <button type="button" className={r.tool} data-on={chips.length > 0 || undefined}>
+              <Glyph name="filter" size={13} />
+              Filter
+              {chips.length > 0 && <span className={r.toolCount}>{chips.length}</span>}
+            </button>
+          }
+        >
+          <MenuGroup label="Kind">
+            {KINDS.map((kind) => (
+              <MenuCheckboxItem
+                key={kind}
+                keepOpen
+                checked={filters.kinds.has(kind)}
+                onCheckedChange={() => setFilters({ ...filters, kinds: toggled(filters.kinds, kind) })}
+                hint={String(ARTIFACTS.filter((one) => one.kind === kind).length)}
+              >
+                {PLURAL[kind]}
+              </MenuCheckboxItem>
+            ))}
+          </MenuGroup>
+          <MenuSeparator />
+          <MenuRadioGroup
+            label="Where it lives"
+            value={filters.where ?? 'anywhere'}
+            onChange={(value) => setFilters({ ...filters, where: value === 'anywhere' ? null : (value as 'git' | 'althar') })}
+          >
+            <MenuRadioItem value="anywhere" keepOpen>
+              Anywhere
+            </MenuRadioItem>
+            <MenuRadioItem value="git" keepOpen hint={String(ARTIFACTS.filter((one) => live.keptOf(one) !== null).length)}>
+              In git
+            </MenuRadioItem>
+            <MenuRadioItem value="althar" keepOpen hint={String(ARTIFACTS.filter((one) => live.keptOf(one) === null).length)}>
+              Only in Althar
+            </MenuRadioItem>
+          </MenuRadioGroup>
+          <MenuSeparator />
+          <MenuGroup label="Made by">
+            {(['lead', 'coordinator', 'person'] as const).map((from) => (
+              <MenuCheckboxItem
+                key={from}
+                keepOpen
+                checked={filters.from.has(from)}
+                onCheckedChange={() => setFilters({ ...filters, from: toggled(filters.from, from) })}
+              >
+                {FROM_WORDS[from]}
+              </MenuCheckboxItem>
+            ))}
+          </MenuGroup>
+          <MenuSeparator />
+          <MenuCheckboxItem keepOpen checked={filters.talked} onCheckedChange={(on) => setFilters({ ...filters, talked: on })}>
+            With open comments
+          </MenuCheckboxItem>
+        </Menu>
+        <Menu
+          label="Sort"
+          align="end"
+          width={220}
+          trigger={
+            <button type="button" className={r.tool}>
+              <Glyph name="sort" size={13} />
+              {SORTS.find((one) => one.value === sort)?.label}
+            </button>
+          }
+        >
+          <MenuRadioGroup label="Sort by" value={sort} onChange={(value) => setSort(value as Sort)}>
+            {SORTS.map((one) => (
+              <MenuRadioItem key={one.value} value={one.value}>
+                {one.label}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+          <MenuSeparator />
+          <MenuSwitchItem checked={byTask} onCheckedChange={setByTask}>
+            Group by task
+          </MenuSwitchItem>
+        </Menu>
         <Segmented
-          label="Kind"
-          value={kind}
-          onChange={setKind}
+          label="Show as"
+          value={look}
+          onChange={setLook}
           options={[
-            { value: 'all', label: 'All' },
-            { value: 'design', label: 'Designs' },
-            { value: 'diagram', label: 'Diagrams' },
-            { value: 'document', label: 'Documents' },
-            { value: 'chart', label: 'Charts' },
-          ]}
-        />
-        <Segmented
-          label="Where it lives"
-          value={place}
-          onChange={setPlace}
-          options={[
-            { value: 'anywhere', label: 'Anywhere' },
-            { value: 'git', label: 'In git' },
-            { value: 'althar', label: 'Only in Althar' },
-          ]}
-        />
-        <Segmented
-          label="Order"
-          value={order}
-          onChange={setOrder}
-          options={[
-            { value: 'task', label: 'By task' },
-            { value: 'newest', label: 'Newest' },
+            {
+              value: 'cards',
+              label: (
+                <>
+                  <Glyph name="everyBoard" size={14} />
+                  <span className={r.hidden}>Cards</span>
+                </>
+              ) as unknown as string,
+              tooltip: { label: 'Cards' },
+            },
+            {
+              value: 'list',
+              label: (
+                <>
+                  <Glyph name="list" size={14} />
+                  <span className={r.hidden}>List</span>
+                </>
+              ) as unknown as string,
+              tooltip: { label: 'List' },
+            },
           ]}
         />
       </header>
+      {chips.length > 0 && (
+        <div className={r.chips}>
+          {chips.map((chip) => (
+            <button key={chip.key} type="button" className={r.chip} onClick={chip.off} aria-label={`Stop filtering by ${chip.label}`}>
+              {chip.label}
+              <Icon name="close" size={10} />
+            </button>
+          ))}
+          <button type="button" className={r.clearAll} onClick={() => setFilters(NONE)}>
+            Clear
+          </button>
+        </div>
+      )}
       <div className={r.galleryBody}>
+        {shown.length === 0 && <p className={r.empty}>No artifact fits. Clear a filter, or find other words.</p>}
         {groups.map((group) => (
           <section key={group.name ?? 'all'} className={r.group}>
-            {group.name !== null && <h2 className={r.groupName}>{group.name}</h2>}
-            <div className={r.grid}>
-              {group.artifacts.map((one) => (
-                <button key={one.id} type="button" className={r.card} onClick={() => setOpen(one.id)}>
-                  <Thumb artifact={one} className={r.cardThumb} />
-                  <span className={r.cardWords}>
-                    <span className={r.cardTitle}>{one.title}</span>
-                    <span className={r.cardFacts}>
-                      {KIND_WORDS[one.kind]}
-                      {one.kind === 'design'
-                        ? ` · ${one.pages.length > 1 ? `${one.pages.length} pages, ` : ''}${boardCount(one)} boards`
-                        : ''}
-                    </span>
-                    <span className={r.cardFacts}>
-                      v{live.version(one)} · {order === 'newest' ? `${one.by} · ` : ''}
-                      {agoWords(one.ago)}
-                      {one.comments > 0 && (
-                        <span className={r.cardComments}>
-                          <Icon name="comment" size={11} /> {one.comments}
-                        </span>
-                      )}
-                    </span>
-                    <Where artifact={one} className={r.cardWhere} />
-                  </span>
-                </button>
-              ))}
-            </div>
+            {group.name !== null && (
+              <h2 className={r.groupName}>
+                {group.name}
+                <span className={r.groupCount}>{group.artifacts.length}</span>
+              </h2>
+            )}
+            {look === 'cards' ? (
+              <div className={r.grid}>
+                {group.artifacts.map((one) => (
+                  <Card key={one.id} artifact={one} onOpen={() => setOpen(one.id)} />
+                ))}
+              </div>
+            ) : (
+              <List artifacts={group.artifacts} sort={sort} onSort={setSort} onOpen={setOpen} />
+            )}
           </section>
         ))}
       </div>
@@ -171,42 +334,154 @@ function Gallery({ moment }: { moment: Moment }) {
   )
 }
 
-/** An artifact with the room to itself: its canvas, and the conversation with the lead that drew it, docked beside. */
-function ArtifactRoom({ id, moment, onBack }: { id: string; moment: Moment; onBack: () => void }) {
+/** An artifact as a card: a little of its canvas, then what it is and where it came from. */
+function Card({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+  const kept = live.keptOf(artifact)
+  const pages = artifact.pages.length
+  return (
+    <button type="button" className={r.card} onClick={onOpen}>
+      <span className={r.cardSheet}>
+        <Sheet artifact={artifact} className={r.sheet} />
+        <span className={r.cardKind}>
+          {KIND_WORDS[artifact.kind]}
+          {artifact.kind === 'design' && (
+            <span className={r.cardKindFacts}>
+              {pages > 1 ? `${pages} pages · ` : ''}
+              {boardCount(artifact)} boards
+            </span>
+          )}
+        </span>
+        {kept !== null && (
+          <span className={r.cardGit} title={`In ${kept.repo}/${kept.path}`}>
+            <Glyph name="repo" size={12} />
+          </span>
+        )}
+      </span>
+      <span className={r.cardWords}>
+        <span className={r.cardTop}>
+          <span className={r.cardTitle}>{artifact.title}</span>
+          <span className={r.cardVersion}>v{live.version(artifact)}</span>
+        </span>
+        <span className={r.cardFacts}>
+          <span className={r.cardFrom} data-from={fromOf(artifact)}>
+            {fromWords(artifact)}
+          </span>
+          <span>·</span>
+          <span>{agoWords(artifact.ago)}</span>
+          {artifact.comments > 0 && (
+            <span className={r.cardComments}>
+              <Icon name="comment" size={11} /> {artifact.comments}
+            </span>
+          )}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/** Artifacts as a list: a row each, its columns sorting it. */
+function List({
+  artifacts,
+  sort,
+  onSort,
+  onOpen,
+}: {
+  artifacts: ReadonlyArray<Artifact>
+  sort: Sort
+  onSort: (sort: Sort) => void
+  onOpen: (id: string) => void
+}) {
+  const column = (label: string, by: Sort | null, className?: string) => (
+    <th className={className} aria-sort={by !== null && sort === by ? (by === 'name' ? 'ascending' : 'descending') : undefined}>
+      {by === null ? (
+        label
+      ) : (
+        <button type="button" className={r.th} data-on={sort === by || undefined} onClick={() => onSort(by)}>
+          {label}
+          {sort === by && <Glyph name="down" size={10} />}
+        </button>
+      )}
+    </th>
+  )
+  return (
+    <table className={r.list}>
+      <thead>
+        <tr>
+          {column('Name', 'name', r.colName)}
+          {column('Kind', null)}
+          {column('Boards', 'boards', r.colNum)}
+          {column('From', null)}
+          {column('In git', null)}
+          {column('Comments', 'comments', r.colNum)}
+          {column('Changed', 'newest', r.colWhen)}
+        </tr>
+      </thead>
+      <tbody>
+        {artifacts.map((one) => (
+          <tr key={one.id} className={r.row} onClick={() => onOpen(one.id)}>
+            <td className={r.colName}>
+              <button type="button" className={r.rowOpen} onClick={() => onOpen(one.id)}>
+                <Thumb artifact={one} className={r.rowThumb} />
+                <span className={r.rowWords}>
+                  <span className={r.rowTitle}>{one.title}</span>
+                  <span className={r.rowName}>{one.name}</span>
+                </span>
+              </button>
+            </td>
+            <td>{KIND_WORDS[one.kind]}</td>
+            <td className={r.colNum}>{boardCount(one)}</td>
+            <td>
+              <span className={r.cardFrom} data-from={fromOf(one)}>
+                {fromWords(one)}
+              </span>
+            </td>
+            <td className={r.colWhere}>{live.keptOf(one) === null ? <span className={r.none}>—</span> : <Where artifact={one} />}</td>
+            <td className={r.colNum}>{one.comments > 0 ? one.comments : <span className={r.none}>—</span>}</td>
+            <td className={r.colWhen}>
+              v{live.version(one)} · {agoWords(one.ago)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** An artifact with the room to itself: its canvas, and the conversation with the lead that drew it, docked beside. Its head floats on the canvas, as beside a conversation. */
+function ArtifactRoom({ id, moment, onOpen, onBack }: { id: string; moment: Moment; onOpen: (id: string) => void; onBack: () => void }) {
   const artifact = artifactOf(id)
   const [sharing, setSharing] = useOpenSoon(moment.share === true && id === moment.open)
-  const version = live.version(artifact)
+  const [browsing, setBrowsing] = useState(false)
   useLive()
   return (
     <div className={r.room}>
-      <header className={r.roomHead}>
-        <button type="button" className={r.back} onClick={onBack}>
-          <Icon name="chevronL" size={12} />
-          Artifacts
-        </button>
-        <span className={r.crumb}>/</span>
-        <span className={r.roomTitle}>{artifact.title}</span>
-        <Menu
-          label="Versions"
-          trigger={
-            <button type="button" className={r.version}>
-              v{version}
-            </button>
-          }
-        >
-          {Array.from({ length: version }, (_, i) => version - i).map((one) => (
-            <MenuItem key={one} hint={one === version ? 'Latest' : undefined} onSelect={() => undefined}>
-              Version {one}
-            </MenuItem>
-          ))}
-        </Menu>
-        <span className={r.gap} />
-        <Keep artifact={artifact} />
-        <Share title={artifact.title} slug={artifact.name} tone="head" open={sharing} onOpenChange={setSharing} />
-      </header>
       <div className={r.roomBody}>
         <Talk artifact={artifact} />
-        <ArtifactCanvas artifact={artifact} talk="conversation" opening={id === moment.open ? moment.opening : {}} />
+        <ArtifactCanvas
+          key={id}
+          artifact={artifact}
+          talk="conversation"
+          opening={id === moment.open ? moment.opening : {}}
+          lead={
+            <>
+              <button type="button" className={r.back} onClick={onBack} aria-label="Every artifact">
+                <Icon name="chevronL" size={12} />
+                Artifacts
+              </button>
+              <Rule />
+              <Switcher artifact={artifact} task={artifact.task} onPick={onOpen} open={browsing} onOpenChange={setBrowsing} />
+              <Rule />
+            </>
+          }
+          trail={
+            <>
+              <Facts artifactId={artifact.id} talk="conversation" />
+              <Rule />
+              <Keep artifact={artifact} />
+              <Share title={artifact.title} slug={artifact.name} tone="head" open={sharing} onOpenChange={setSharing} />
+            </>
+          }
+        />
       </div>
     </div>
   )
@@ -308,130 +583,5 @@ function Talk({ artifact }: { artifact: Artifact }) {
         </div>
       </div>
     </section>
-  )
-}
-
-/* ——— C: the wall ——— */
-
-function Wall({ moment }: { moment: Moment }) {
-  const world = useLive()
-  const [opened, setOpened] = useState<string | null>(null)
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set(moment.picked ?? []))
-  const [view, setView] = useState<View>('every')
-  const [focus, setFocus] = useState<string | null>(null)
-  const [pointed, setPointed] = useState<Pointed | null>(null)
-  const [pin, setPin] = useState<string | null>(null)
-  const [sharing, setSharing] = useOpenSoon(moment.share === true)
-  if (opened !== null) return <ArtifactRoom id={opened} moment={{ opening: {} }} onBack={() => setOpened(null)} />
-  const sections = ARTIFACTS.map((one) => {
-    const page = one.pages[0]?.id ?? ''
-    return {
-      key: one.id,
-      artifact: one,
-      pageId: page,
-      boards: boardsOf(world, one, page),
-      heading: {
-        title: one.title,
-        facts: `${KIND_WORDS[one.kind]} · ${one.pages.length > 1 ? `${one.pages.length} pages · ` : ''}${one.by} · ${agoWords(one.ago)}${
-          live.keptOf(one) === null ? '' : ` · in ${live.keptOf(one)?.repo}/${live.keptOf(one)?.path}`
-        }`,
-        onOpen: () => setOpened(one.id),
-      },
-    }
-  })
-  const openPin = world.pins.find((one) => one.id === pin) ?? null
-  return (
-    <div className={r.wall}>
-      <Boards
-        sections={sections}
-        view={view}
-        onView={setView}
-        focus={focus}
-        onFocus={setFocus}
-        selected={picked}
-        onSelect={(key) =>
-          setPicked((was) => {
-            const next = new Set(was)
-            if (next.has(key)) next.delete(key)
-            else next.add(key)
-            return next
-          })
-        }
-        fitKey="wall"
-        head={
-          picked.size > 0 && (
-            <span className={r.picked}>
-              <span className={r.pickedWords}>{picked.size === 1 ? '1 board picked' : `${picked.size} boards picked`}</span>
-              <Share title="kiln" slug="picked" boards={picked.size} tone="head" open={sharing} onOpenChange={setSharing} />
-              <button type="button" className={r.clear} onClick={() => setPicked(new Set())}>
-                Clear
-              </button>
-            </span>
-          )
-        }
-        onPoint={(found) => {
-          setPin(null)
-          setPointed(found)
-        }}
-        pointed={pointed}
-        box={
-          pointed !== null && (
-            <Say
-              key={`${pointed.key}|${pointed.spot.selector ?? ''}`}
-              pointed={pointed}
-              to={`To the lead of ${pointed.placed.section.artifact.task ?? 'the coordinator'}, in its conversation`}
-              onSend={(words) => {
-                ask(pointed.placed.section.artifact, pointed.placed.def, pointed.placed.section.pageId, pointed.spot, words)
-                setPointed(null)
-              }}
-              onComment={(words) => {
-                live.pin({
-                  id: `pin-${Date.now().toString(36)}`,
-                  spot: pointed.spot,
-                  who: 'you',
-                  lines: [{ who: 'you', text: words }],
-                  state: 'comment',
-                })
-                setPointed(null)
-              }}
-              onClose={() => setPointed(null)}
-            />
-          )
-        }
-        marks={(at, _placed, room) => {
-          const shown =
-            openPin === null ? null : at(boardKey(openPin.spot.artifactId, openPin.spot.boardId), openPin.spot.selector ?? openPin.spot.box)
-          const artifact = openPin === null ? null : artifactOf(openPin.spot.artifactId)
-          const board = artifact?.pages.flatMap((one) => one.boards).find((one) => one.id === openPin?.spot.boardId)
-          return (
-            <>
-              <PinMarks at={at} pins={world.pins} open={pin} onOpen={setPin} />
-              {openPin !== null && shown !== null && artifact !== null && board !== undefined && (
-                <div
-                  className={r.pinPlace}
-                  style={{
-                    left: Math.min(shown.x + shown.width + 24, room.width - 356),
-                    top: Math.max(56, Math.min(shown.y - 14, room.height - 460)),
-                  }}
-                >
-                  <PinCard
-                    pin={openPin}
-                    board={board.name}
-                    talk="conversation"
-                    onAsk={(words) => ask(artifact, board, artifact.pages[0]?.id ?? '', openPin.spot, words)}
-                    onClose={() => setPin(null)}
-                  />
-                </div>
-              )}
-            </>
-          )
-        }}
-        labelEnd={(p) => (
-          <button type="button" className={r.openOne} onClick={() => setOpened(p.section.artifact.id)}>
-            Open
-          </button>
-        )}
-      />
-    </div>
   )
 }

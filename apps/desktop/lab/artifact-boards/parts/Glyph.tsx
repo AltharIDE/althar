@@ -3,12 +3,15 @@ import {
   CursorPointer,
   DragHandGesture,
   EditPencil,
+  Filter,
   GitCommit,
   Link,
+  List,
   MultiplePages,
   NavArrowDown,
   Repository,
   ShareIos,
+  Sort,
   Square,
   ViewGrid,
   ZoomIn,
@@ -34,6 +37,9 @@ const DRAWINGS = {
   down: NavArrowDown,
   repo: Repository,
   commit: GitCommit,
+  filter: Filter,
+  sort: Sort,
+  list: List,
 } as const
 export type GlyphName = keyof typeof DRAWINGS
 

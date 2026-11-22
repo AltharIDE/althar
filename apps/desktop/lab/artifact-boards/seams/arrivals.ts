@@ -27,6 +27,7 @@ export const useCanvasArrivals = (
     if (items === undefined || done.current) return
     done.current = true
     const { d } = lab.get()
-    if ((d === 'a' || d === 'd') && items.some((item) => item.kind === 'canvas' && item.content.canvasId === GIFT)) open(GIFT, null, true)
+    if ((d === 'a' || d === 'c' || d === 'd') && items.some((item) => item.kind === 'canvas' && item.content.canvasId === GIFT))
+      open(GIFT, null, true)
   }, [items, open])
 }

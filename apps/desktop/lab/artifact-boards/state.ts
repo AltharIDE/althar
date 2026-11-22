@@ -10,7 +10,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 export const DIRECTIONS = [
   { key: 'a', kbd: 'A', label: 'Beside the conversation', moments: ['Every board', 'Point and say', 'Switch', 'Share', 'Save to repo'] },
   { key: 'b', kbd: 'B', label: 'A room of its own', moments: ['Artifacts', 'In its room', 'Share'] },
-  { key: 'c', kbd: 'C', label: 'The wall', moments: ['Every artifact', 'Two picked', 'Share two'] },
+  { key: 'c', kbd: 'C', label: 'A lot of work', moments: ['Every page', 'In its room'] },
   { key: 'd', kbd: 'D', label: 'Talk on the board', moments: ['Pins', 'A pin open', 'Shared'] },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']

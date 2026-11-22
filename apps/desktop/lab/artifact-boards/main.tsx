@@ -49,11 +49,11 @@ const cache = makeQueryClient()
 const services = { client, host, cache, feed: follow(client, cache) }
 const router = makeRouter({ client, cache })
 
-/** Where each direction's moment is in the app: Gift a class's conversation, its canvas beside it (A, D); the project's Artifacts (B, C). */
+/** Where each direction's moment is in the app: Gift a class's conversation, its canvas beside it (A, C, D); the project's Artifacts (B, C in its room). */
 const go = () => {
-  const { d } = lab.get()
+  const { d, m } = lab.get()
   pages.hide(GIFT_TASK_ID)
-  if (d === 'b' || d === 'c') {
+  if (d === 'b' || (d === 'c' && m === 1)) {
     void router.navigate({ to: '/projects/$projectId', params: { projectId: KILN }, search: { room: Room.Artifacts } })
     return
   }

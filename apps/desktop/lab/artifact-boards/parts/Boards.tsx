@@ -1,9 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { ActionButton, Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, Segmented, Tooltip } from '@althar/ui'
+import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, Segmented, Tooltip } from '@althar/ui'
 
 import { DEVICES } from '../../../src/main/browser/devices'
-import { type Artifact, type BoardDef, SIZE_WORDS, SIZES, type Size } from '../artifacts'
+import type { Artifact, BoardDef, Size } from '../artifacts'
 import { boardKey, type Spot, useLive } from '../live'
 import { Board, drawnWidth, type Frames, type Look } from './Board'
 import { Glyph, type GlyphName } from './Glyph'
@@ -11,8 +11,9 @@ import s from './boards.module.css'
 
 /*
  * An artifact as a canvas of boards: every board laid out side by side on
- * the ground, or one board at a time, with its pages, its zoom and the
- * sizes a board is laid out at; a tool bar along the bottom. Point at a part
+ * the ground, or one board at a time, with its pages and its zoom; a tool
+ * bar along the bottom. A board is whatever size the agent built it at:
+ * Althar has no picker for sizes. Point at a part
  * of a board and the host opens a box on it, to say what you think; Mark
  * rings an area to say it about; Comment leaves a note for people. Nothing
  * here maps the design to controls: what changes a board is what is said.
@@ -222,8 +223,12 @@ export interface BoardsProps {
   readonly onFocus: (key: string) => void
   /** After the view's switch, in the canvas's head. */
   readonly head?: ReactNode
-  /** At the end of the tool bar: what talks to the agent, given the board shown (one at a time) or the first. */
-  readonly ask?: (shown: Placed | null) => ReactNode
+  /** First in the canvas's top left: what the artifact is (its switcher, or the way back). */
+  readonly lead?: ReactNode
+  /** In the top right, before the zoom: its version, comments, where it lives, Share. */
+  readonly trail?: ReactNode
+  /** Last in the top right: closing it. */
+  readonly close?: ReactNode
   readonly onPoint?: (pointed: Pointed) => void
   /** The box open on what was pointed at: the host draws it, the canvas places it by its spot. */
   readonly pointed?: Pointed | null
@@ -257,7 +262,9 @@ export function Boards({
   focus,
   onFocus,
   head,
-  ask,
+  lead,
+  trail,
+  close,
   onPoint,
   pointed = null,
   box,
@@ -277,7 +284,7 @@ export function Boards({
   const frames = useMemo<Frames>(() => new Map(), [])
   const [room, setRoom] = useState({ width: 0, height: 0 })
   const [heights, setHeights] = useState<Readonly<Record<string, number>>>({})
-  const [sizes, setSizes] = useState<Readonly<Record<string, Size>>>({})
+  const sizes = useMemo<Readonly<Record<string, Size>>>(() => ({}), [])
   const [toolOwn, setToolOwn] = useState<Tool>('point')
   const tool = toolGiven ?? toolOwn
   const setTool = onTool ?? setToolOwn
@@ -321,7 +328,7 @@ export function Boards({
       moved.current = true
       return
     }
-    setCamera(fitTo(placed, room.width, room.height, view === 'one' ? 1 : 0.6, heads.length > 0 ? 44 : 0))
+    setCamera(fitTo(placed, room.width, room.height, view === 'one' ? 1 : 0.6, heads.length > 0 ? 64 : 0))
   }, [fitWhat, placed, room, view, start, heads.length])
 
   const toScreen = useCallback((x: number, y: number) => ({ x: x * camera.zoom + camera.x, y: y * camera.zoom + camera.y }), [camera])
@@ -354,7 +361,7 @@ export function Boards({
   const zoomTo = (zoom: number) => zoomAt(zoom / camera.zoom)
   const fit = () => {
     moved.current = false
-    setCamera(fitTo(placed, room.width, room.height, view === 'one' ? 1 : 0.6, heads.length > 0 ? 44 : 0))
+    setCamera(fitTo(placed, room.width, room.height, view === 'one' ? 1 : 0.6, heads.length > 0 ? 64 : 0))
   }
 
   // Two fingers pan; a pinch, or a wheel with Ctrl, zooms at the pointer.
@@ -685,43 +692,19 @@ export function Boards({
                   data-narrow={box.width < 150 || undefined}
                   style={{ left: box.x, top: box.y - 26, width: Math.max(box.width, 56) }}
                 >
-                  {/* a board named for its size is named by its size */}
-                  {p.def.name !== SIZE_WORDS[p.def.size ?? 'laptop'] && (
-                    <button
-                      type="button"
-                      className={s.labelName}
-                      onClick={(event) => (onSelect !== undefined ? onSelect(p.key, event.shiftKey) : onFocus(p.key))}
-                      onDoubleClick={() => {
-                        onFocus(p.key)
-                        onView('one')
-                      }}
-                      title={p.def.name}
-                    >
-                      {p.def.name}
-                    </button>
-                  )}
-                  {p.def.draw === undefined ? (
-                    <Menu
-                      label="Size"
-                      trigger={
-                        <button type="button" className={s.labelSize}>
-                          {SIZE_WORDS[p.size]}
-                        </button>
-                      }
-                    >
-                      <MenuRadioGroup
-                        label="Lay it out at"
-                        value={p.size}
-                        onChange={(value) => setSizes((was) => ({ ...was, [p.key]: value as Size }))}
-                      >
-                        {SIZES.map((size) => (
-                          <MenuRadioItem key={size} value={size} hint={`${DEVICES[size].width}`}>
-                            {SIZE_WORDS[size]}
-                          </MenuRadioItem>
-                        ))}
-                      </MenuRadioGroup>
-                    </Menu>
-                  ) : null}
+                  <button
+                    type="button"
+                    className={s.labelName}
+                    onClick={(event) => (onSelect !== undefined ? onSelect(p.key, event.shiftKey) : onFocus(p.key))}
+                    onDoubleClick={() => {
+                      onFocus(p.key)
+                      onView('one')
+                    }}
+                    title={p.def.name}
+                  >
+                    {p.def.name}
+                  </button>
+
                   {last !== undefined && (
                     <button
                       type="button"
@@ -800,58 +783,61 @@ export function Boards({
       </div>
 
       <div className={s.headStart}>
-        {pages.length > 1 && page !== undefined && onPage !== undefined && (
-          <Menu
-            label="Pages"
-            trigger={
-              <button type="button" className={s.chip}>
-                <Glyph name="pages" size={13} />
-                <span className={s.chipWords}>{pages.find((one) => one.id === page)?.name ?? ''}</span>
-                <Glyph name="down" size={11} />
-              </button>
-            }
-          >
-            <MenuRadioGroup label="Pages" value={page} onChange={onPage}>
-              {pages.map((one) => (
-                <MenuRadioItem key={one.id} value={one.id} hint={String(one.count)}>
-                  {one.name}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </Menu>
-        )}
-        <Segmented
-          label="Boards"
-          className={s.views}
-          value={view}
-          onChange={(value) => {
-            if (value === 'one' && hover !== null) onFocus(hover.key)
-            onView(value)
-          }}
-          options={[
-            // The kit's Segmented takes words; with a glyph for each, it would take a picture too.
-            {
-              value: 'every',
-              label: (
-                <>
-                  <Glyph name="everyBoard" size={14} />
-                  <span className={s.hidden}>Every board</span>
-                </>
-              ) as unknown as string,
-              tooltip: { label: 'Every board', kbd: 'F' },
-            },
-            {
-              value: 'one',
-              label: (
-                <>
-                  <Glyph name="oneBoard" size={13} />
-                  <span className={s.hidden}>One board at a time</span>
-                </>
-              ) as unknown as string,
-              tooltip: { label: 'One board at a time', kbd: 'F' },
-            },
-          ]}
-        />
+        <div className={s.island}>
+          {lead}
+          {pages.length > 1 && page !== undefined && onPage !== undefined && (
+            <Menu
+              label="Pages"
+              trigger={
+                <button type="button" className={s.chip}>
+                  <Glyph name="pages" size={13} />
+                  <span className={s.chipWords}>{pages.find((one) => one.id === page)?.name ?? ''}</span>
+                  <Glyph name="down" size={11} />
+                </button>
+              }
+            >
+              <MenuRadioGroup label="Pages" value={page} onChange={onPage}>
+                {pages.map((one) => (
+                  <MenuRadioItem key={one.id} value={one.id} hint={String(one.count)}>
+                    {one.name}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </Menu>
+          )}
+          <Segmented
+            label="Boards"
+            className={s.views}
+            value={view}
+            onChange={(value) => {
+              if (value === 'one' && hover !== null) onFocus(hover.key)
+              onView(value)
+            }}
+            options={[
+              // The kit's Segmented takes words; with a glyph for each, it would take a picture too.
+              {
+                value: 'every',
+                label: (
+                  <>
+                    <Glyph name="everyBoard" size={14} />
+                    <span className={s.hidden}>Every board</span>
+                  </>
+                ) as unknown as string,
+                tooltip: { label: 'Every board', kbd: 'F' },
+              },
+              {
+                value: 'one',
+                label: (
+                  <>
+                    <Glyph name="oneBoard" size={13} />
+                    <span className={s.hidden}>One board at a time</span>
+                  </>
+                ) as unknown as string,
+                tooltip: { label: 'One board at a time', kbd: 'F' },
+              },
+            ]}
+          />
+        </div>
         {head}
       </div>
 
@@ -871,40 +857,37 @@ export function Boards({
       )}
 
       <div className={s.headEnd}>
-        {view === 'one' && one !== null && one.def.draw === undefined && (
-          <Segmented
-            label="Size"
-            value={one.size}
-            onChange={(value) => setSizes((was) => ({ ...was, [one.key]: value }))}
-            options={SIZES.map((size) => ({ value: size, label: SIZE_WORDS[size], tooltip: { label: `${DEVICES[size].width} wide` } }))}
-          />
-        )}
-        <Menu
-          label="Zoom"
-          align="end"
-          trigger={
-            <button type="button" className={s.chip}>
-              <span className={s.zoomWord}>{pct}%</span>
-              <Glyph name="down" size={11} />
-            </button>
-          }
-        >
-          <MenuItem onSelect={() => zoomAt(1.25)} kbd="+">
-            Zoom in
-          </MenuItem>
-          <MenuItem onSelect={() => zoomAt(0.8)} kbd="−">
-            Zoom out
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem onSelect={fit} kbd="⇧1">
-            {view === 'one' ? 'Fit the board' : 'Fit every board'}
-          </MenuItem>
-          <MenuItem onSelect={() => zoomTo(0.5)}>50%</MenuItem>
-          <MenuItem onSelect={() => zoomTo(1)} kbd="⇧0">
-            100%
-          </MenuItem>
-          <MenuItem onSelect={() => zoomTo(2)}>200%</MenuItem>
-        </Menu>
+        <div className={s.island}>
+          {trail}
+
+          <Menu
+            label="Zoom"
+            align="end"
+            trigger={
+              <button type="button" className={s.chip}>
+                <span className={s.zoomWord}>{pct}%</span>
+                <Glyph name="down" size={11} />
+              </button>
+            }
+          >
+            <MenuItem onSelect={() => zoomAt(1.25)} kbd="+">
+              Zoom in
+            </MenuItem>
+            <MenuItem onSelect={() => zoomAt(0.8)} kbd="−">
+              Zoom out
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem onSelect={fit} kbd="⇧1">
+              {view === 'one' ? 'Fit the board' : 'Fit every board'}
+            </MenuItem>
+            <MenuItem onSelect={() => zoomTo(0.5)}>50%</MenuItem>
+            <MenuItem onSelect={() => zoomTo(1)} kbd="⇧0">
+              100%
+            </MenuItem>
+            <MenuItem onSelect={() => zoomTo(2)}>200%</MenuItem>
+          </Menu>
+          {close}
+        </div>
       </div>
 
       <div className={s.tools} role="toolbar" aria-label="Tools">
@@ -921,22 +904,10 @@ export function Boards({
             </button>
           </Tooltip>
         ))}
-        {ask !== undefined && (
-          <>
-            <span className={s.toolsRule} aria-hidden />
-            {ask(one ?? placed.find((p) => p.key === focus) ?? placed[0] ?? null)}
-          </>
-        )}
       </div>
     </div>
   )
 }
 
-/** The tool bar's way to talk to the agent: a quiet button with what it does. */
-export function AskButton({ children, onClick, pressed = false }: { children: ReactNode; onClick: () => void; pressed?: boolean }) {
-  return (
-    <ActionButton className={s.ask} aria-pressed={pressed} onClick={onClick}>
-      {children}
-    </ActionButton>
-  )
-}
+/** A hair between what an island in the canvas's head holds. */
+export const Rule = () => <span className={s.islandRule} aria-hidden />

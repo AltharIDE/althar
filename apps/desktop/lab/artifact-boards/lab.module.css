@@ -244,3 +244,72 @@
 .note p + p {
   margin-top: 6px;
 }
+
+/* the shared page's one line about Althar: a mark in the corner, more on hover */
+.sharedBody {
+  position: relative;
+}
+.madeWith {
+  position: absolute;
+  left: 14px;
+  bottom: 16px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--n-1) 82%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  font-size: 12px;
+  color: var(--t-2);
+  text-decoration: none;
+  transition: box-shadow var(--fast) var(--ease);
+}
+.madeWith:hover,
+.madeWith:focus-visible {
+  outline: none;
+  color: var(--t-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-pop);
+}
+.madeWithName {
+  font-weight: 550;
+  letter-spacing: -0.005em;
+}
+.madeWithMore {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+  transition:
+    max-width 320ms var(--ease),
+    opacity 200ms var(--ease);
+}
+.madeWith:hover .madeWithMore,
+.madeWith:focus-visible .madeWithMore {
+  max-width: 420px;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .madeWithMore {
+    transition: none;
+  }
+}
+.madeWithLine {
+  padding-left: 10px;
+  border-left: 1px solid var(--line-2);
+  color: var(--t-3);
+}
+.madeWithGo {
+  color: var(--signal-ink);
+  font-weight: 550;
+}

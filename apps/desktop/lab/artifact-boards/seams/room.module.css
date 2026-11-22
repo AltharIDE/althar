@@ -11,7 +11,7 @@
 .galleryHead {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 18px 28px 14px;
 }
 .heading {
@@ -72,67 +72,343 @@
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
 }
+
+/* a card: a little of its canvas, then what it is */
 .card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
-  text-align: left;
-}
-.cardThumb {
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 8px;
+  border-radius: 12px;
+  background: var(--n-1);
   box-shadow:
     0 0 0 1px var(--line-2),
     var(--lift);
-  transition: box-shadow var(--fast) var(--ease);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
 }
-.card:hover .cardThumb {
+.card:hover {
+  transform: translateY(-1px);
   box-shadow:
     0 0 0 1px var(--line-2),
-    0 0 0 4px var(--hover-faint),
     var(--lift-pop);
 }
 .card:focus-visible {
   outline: none;
+  box-shadow:
+    0 0 0 2px var(--signal),
+    var(--lift-pop);
 }
-.card:focus-visible .cardThumb {
-  box-shadow: 0 0 0 2px var(--signal);
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card:hover {
+    transform: none;
+  }
+}
+.cardSheet {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid var(--line);
+}
+.sheet {
+  position: absolute;
+  inset: 0;
+}
+.cardKind {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.cardKindFacts {
+  font-weight: 400;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.cardGit {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+  color: var(--t-2);
 }
 .cardWords {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  padding: 0 2px;
+  padding: 10px 12px 12px;
+}
+.cardTop {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 .cardTitle {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
-  font-size: 13.5px;
-  font-weight: 550;
+  font: 600 14px/1.25 var(--font-display, var(--font));
   color: var(--t-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cardVersion {
+  flex: none;
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
 .cardFacts {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  min-width: 0;
   overflow: hidden;
   font-size: 12px;
   color: var(--t-3);
   white-space: nowrap;
 }
+/* where it came from, with a dot for who: a task's lead, the coordinator, a person */
+.cardFrom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+}
+.cardFrom::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.cardFrom[data-from='coordinator']::before {
+  background: var(--mark-teal);
+}
+.cardFrom[data-from='person']::before {
+  background: var(--mark-ochre);
+}
 .cardComments {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-left: 6px;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+/* the gallery's tools: Filter, Sort */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.tool:hover,
+.tool[data-state='open'] {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.tool[data-on] {
+  color: var(--t-1);
+}
+.toolCount {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--signal-paper);
+  color: var(--signal-ink);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 28px 12px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 10px;
+  border-radius: 99px;
+  background: var(--n-2);
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 12px;
+  color: var(--t-1);
+}
+.chip:hover {
+  background: var(--hover);
+}
+.clearAll {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.clearAll:hover {
+  color: var(--t-1);
+}
+.empty {
+  margin: 40px 0;
+  font-size: 13px;
+  color: var(--t-3);
+  text-align: center;
+}
+.groupCount {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* the list: a row each */
+.list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.list th {
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+  text-align: left;
+  white-space: nowrap;
+}
+.th {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+}
+.th:hover,
+.th[data-on] {
+  color: var(--t-1);
+}
+.th:hover {
+  background: var(--hover-faint);
+}
+.list td {
+  height: 60px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.row {
+  cursor: default;
+}
+.row:hover td {
+  background: var(--hover-faint);
+}
+.colName {
+  width: 38%;
+}
+.colNum {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+.colWhen {
+  text-align: right !important;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.colWhere {
+  max-width: 220px;
+  overflow: hidden;
+}
+.rowOpen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+.rowOpen:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.rowThumb {
+  flex: none;
+  width: 72px;
+  height: 45px;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.rowWords {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rowTitle {
+  overflow: hidden;
+  font-weight: 550;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+}
+.rowName {
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.none {
+  color: var(--t-4);
 }
 
 /* ——— an artifact's own room ——— */
@@ -155,10 +431,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
+  height: 30px;
   padding: 0 8px 0 6px;
-  border-radius: var(--r-sm);
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 12.5px;
   color: var(--t-3);
 }
 .back:hover {

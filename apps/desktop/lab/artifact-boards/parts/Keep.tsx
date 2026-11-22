@@ -86,8 +86,11 @@ export function Keep({
           {kept === null ? (
             <span>Save to repo</span>
           ) : (
-            <span className={s.keepPath}>
-              {kept.repo}/{kept.path}
+            // Its folder's own name; the whole path is in its popover.
+            <span className={s.keepPath} title={`In ${kept.repo}/${kept.path}`}>
+              {kept.path.endsWith('/')
+                ? `${kept.path.split('/').filter(Boolean).at(-1) ?? ''}/`
+                : (kept.path.split('/').at(-1) ?? kept.path)}
             </span>
           )}
           {committing && <span className={s.keepBusy} aria-label="Committing" />}
