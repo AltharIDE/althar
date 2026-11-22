@@ -48,12 +48,13 @@ import type { Ctx, Place, Take } from './types'
 import s from './lab.module.css'
 
 /*
- * The agent places lab (README.md): Settings › Computers, B's modules, and
- * three ways to tell the computers apart. The base is what was picked (the
- * home's popover with the other computers under it, the quick settings'
- * slider with a row for each). The bar along the bottom, or its keys, swaps
- * in place: the take (A B C), the home (1 This Mac, 2 studio, 3 hosted in
- * Althar Cloud), its cloud runners (U), the scene (Q W E R), crowded (K), the
+ * The agent places lab (README.md): Settings › Computers in sections with
+ * pictures, and three takes on where Althar Cloud's use and limit live. The
+ * base is what was picked (the home's popover with the other computers under
+ * it, the quick settings' slider with a row for each). The bar along the
+ * bottom, or its keys, swaps in place: the take (A B C), the home (1 This
+ * Mac, 2 studio, 3 hosted in Althar Cloud), Althar Cloud in use (U),
+ * headless workers pictured apart (H), the scene (Q W E R), crowded (K), the
  * home alone (M), a narrow window (N), the board or Settings (S), dark (D);
  * G opens the quick settings, P the home's popover.
  */
@@ -62,7 +63,7 @@ const SCENE_KEYS = ['q', 'w', 'e', 'r'] as const
 const HOMES = [
   { key: 'mac', pov: 'local', label: 'This Mac' },
   { key: 'studio', pov: 'remote', label: 'studio' },
-  { key: 'cloud', pov: 'cloud', label: 'Cloud' },
+  { key: 'cloud', pov: 'cloud', label: 'Hosted' },
 ] as const satisfies readonly { key: string; pov: Pov; label: string }[]
 type Home = (typeof HOMES)[number]['key']
 
@@ -74,6 +75,7 @@ const read = () => {
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
     h: (HOMES.find((one) => one.key === now.get('h'))?.key ?? 'mac') as Home,
     u: now.get('u') === '1',
+    two: now.get('two') === '1',
     l: now.get('l') === '1',
     k: now.get('k') === '1',
     m: now.get('m') === '1',
@@ -124,13 +126,13 @@ function Gear({ ctx, onAll }: { ctx: Ctx; onAll: () => void }) {
 
 function SettingsScreen({ ctx, take, place, go }: { ctx: Ctx; take: Take; place: Place; go: (place: Place) => void }) {
   const preferences = usePreferences()
-  const page = pageOf(ctx, take.style, place, go) ?? pageOf(ctx, take.style, at(null), go)!
+  const page = pageOf(ctx, take, place, go) ?? pageOf(ctx, take, at(null), go)!
   return (
     <SettingsLayout
       section={place.section}
       title={page.title}
       {...(page.lede === undefined ? {} : { lede: page.lede })}
-      side={side(ctx, place, go, <QuickCards side preferences={preferences} sounds={[]} onSection={() => undefined} />)}
+      side={side(ctx, take, place, go, <QuickCards side preferences={preferences} sounds={[]} onSection={() => undefined} />)}
     >
       {page.body}
     </SettingsLayout>
@@ -142,8 +144,7 @@ function Lab() {
   // Each worker's own number, where the person moved its slider, and those taking no new tasks.
   const [own, setOwn] = useState<Record<string, number | null>>({})
   const [paused, setPaused] = useState<ReadonlySet<string>>(new Set())
-  // The runners' own number, whether they start by themselves, and the month's limit.
-  const [runnersOwn, setRunnersOwn] = useState<number | null>(null)
+  // Whether Althar Cloud takes tasks that would wait, and the month's limit.
   const [auto, setAuto] = useState(true)
   const [limit, setLimit] = useState<number | null>(40)
   const [open, setOpen] = useState({ peek: params().get('open') === 'peek', quick: params().get('open') === 'quick' })
@@ -161,6 +162,7 @@ function Lab() {
     else url.set('h', merged.h)
     for (const [key, on] of [
       ['u', merged.u],
+      ['two', merged.two],
       ['l', merged.l],
       ['k', merged.k],
       ['m', merged.m],
@@ -180,10 +182,7 @@ function Lab() {
       else url.set(key, value)
     url.delete('open')
     history.replaceState(null, '', `?${url.toString()}`)
-    if (next.p !== undefined || next.k !== undefined || next.h !== undefined) {
-      setOwn({})
-      setRunnersOwn(null)
-    }
+    if (next.p !== undefined || next.k !== undefined || next.h !== undefined) setOwn({})
     setStateNow(merged)
   }
 
@@ -192,7 +191,7 @@ function Lab() {
   }, [state.dark])
 
   const pov = HOMES.find((one) => one.key === state.h)!.pov
-  // Hosted in Althar Cloud, the home's agents run on its runners: it has them whatever U says.
+  // Hosted in Althar Cloud, the home's agents run there: it uses it whatever U says.
   const withRunners = state.u || pov === 'cloud'
 
   // The scene's workers, with the person's own numbers where they moved a slider: lowered for now still lowers it.
@@ -209,9 +208,8 @@ function Lab() {
   const home = workers[0]!
   const runners = useMemo((): Runners | null => {
     if (!withRunners) return null
-    const found = runnersOf(state.p, state.k)
-    return { ...found, atOnce: runnersOwn ?? found.suggested, auto, limit }
-  }, [withRunners, state.p, state.k, runnersOwn, auto, limit])
+    return { ...runnersOf(state.p, state.k), auto, limit }
+  }, [withRunners, state.p, state.k, auto, limit])
   const waiting = useMemo(() => waitingOf(workers, runners, state.k), [workers, runners, state.k])
   // Drawn again only when what it shows changes: the board moves its cards on a new one.
   const lanes = useMemo(() => boardOf(workers, runners, waiting), [workers, runners, waiting])
@@ -229,7 +227,8 @@ function Lab() {
     workers,
     home,
     mac,
-    load: loads.get(home.id)!,
+    // Hosted, the home's own load is Althar's to know: the bar's meter reads This Mac, the computer the window is on.
+    load: loads.get(home.hosted === null ? home.id : mac.id)!,
     loadOf: (worker) => loads.get(worker.id) ?? loadOf(worker),
     waiting,
     most: MOST_AT_ONCE,
@@ -243,9 +242,9 @@ function Lab() {
         return next
       }),
     lent: state.l,
+    twoKinds: state.two,
     setLent: (on) => set({ l: on }),
     runners,
-    setRunners: setRunnersOwn,
     setAuto,
     setLimit,
     onOpen: (id) => say(`Opens ${titleOf(id)}`),
@@ -254,7 +253,7 @@ function Lab() {
     quick: { open: open.quick, set: (on) => setOpen((was) => ({ ...was, quick: on, ...(on ? { peek: false } : {}) })) },
     settings: (worker) => {
       setOpen({ peek: false, quick: false })
-      const where = at(worker ?? null)
+      const where = at(worker ?? null, take)
       set({ screen: 'settings', sec: where.section, w: where.worker })
       if (worker !== undefined)
         requestAnimationFrame(() => document.getElementById(`worker-${worker}`)?.scrollIntoView({ block: 'center' }))
@@ -280,6 +279,7 @@ function Lab() {
       const homeAt = HOMES[Number(key) - 1]
       if (homeAt !== undefined) return set({ h: homeAt.key, sec: null, w: null })
       if (key === 'u') return set({ u: !state.u, sec: null, w: null })
+      if (key === 'h') return set({ two: !state.two })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'm') return set({ m: !state.m })
       if (key === 'n') return set({ n: !state.n })
@@ -369,9 +369,17 @@ function Lab() {
             aria-pressed={withRunners}
             disabled={pov === 'cloud'}
             onClick={() => set({ u: !state.u, sec: null, w: null })}
-            title="The home’s cloud runners; hosted in Althar Cloud, it always has them"
+            title="The home uses Althar Cloud; hosted there, it always does"
           >
-            <kbd>U</kbd>Runners
+            <kbd>U</kbd>Cloud
+          </button>
+          <button
+            type="button"
+            aria-pressed={state.two}
+            onClick={() => set({ two: !state.two })}
+            title="Headless workers pictured as servers, the rest as computers"
+          >
+            <kbd>H</kbd>Headless
           </button>
           <span className={s.rule} />
           {SCENES.map((one, i) => (
@@ -399,6 +407,13 @@ function Lab() {
       </div>
     </ServicesProvider>
   )
+}
+
+// For pictures: still=1 draws every state at once, with no transitions or animations to catch halfway.
+if (params().get('still') === '1') {
+  const still = document.createElement('style')
+  still.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }'
+  document.head.append(still)
 }
 
 createRoot(document.getElementById('root')!).render(

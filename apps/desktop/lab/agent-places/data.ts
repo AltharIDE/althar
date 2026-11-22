@@ -8,8 +8,9 @@ import { card } from '../../tests/fixtures'
  * What the lab draws from: the window's home and its workers, the home first.
  * The home is this Mac, a home the window is connected to (studio), or a home
  * hosted in Althar Cloud; the first two are workers too, the hosted one runs
- * no agents of its own. Any home may also start cloud runners, a runner a
- * task, while tasks would wait (ADR-103). Each worker has its agents (the runtime's `WorkPlaces`: how
+ * no agents of its own. Any home may also run tasks in Althar Cloud while
+ * they would wait, a runner a task (ADR-103), paid by the hour, up to a
+ * monthly limit. Each worker has its agents (the runtime's `WorkPlaces`: how
  * many work, its number, a number lowered for now and each agent's task), how
  * hard it works (`GetLoad`), whether it can be reached, and what it is. Made
  * up, and the same on every load: the runtime knows this Mac's agents and
@@ -69,11 +70,8 @@ export type Provider = 'Claude Code' | 'Codex'
 /** What a computer is, as its picture draws it. */
 export type Kind = 'laptop' | 'desktop' | 'server' | 'gpu' | 'cloud'
 
-/** A home hosted in Althar Cloud: where, and how much of its room its projects take. */
+/** A home hosted in Althar Cloud: always on; what runs it is Althar's to know. */
 export interface Hosted {
-  readonly region: string
-  readonly storage: number
-  readonly room: number
   readonly projects: number
 }
 
@@ -104,6 +102,9 @@ export interface Worker extends Places {
   /** Out of reach: since when, and the tasks whose work is there, waiting for it. */
   readonly offline: { readonly for: string; readonly holding: number } | null
 }
+
+/** A computer with no screen of its own, as a server is; the rest are desktops. */
+export const headless = (worker: Worker) => worker.kind === 'server' || worker.kind === 'gpu'
 
 /** Lowered for now: fewer may work than the number says. */
 export const isLowered = (places: Places) => places.atOnce < places.configured
@@ -402,7 +403,7 @@ const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
 export const STUDIO = { name: 'studio', address: 'studio.tail9c2e.ts.net', version: '0.9.3', latest: '0.9.4' } as const
 
 /** A home hosted in Althar Cloud. */
-export const CLOUD = { name: 'Althar Cloud', region: 'Frankfurt' } as const
+export const CLOUD = { name: 'Althar Cloud' } as const
 
 /**
  * The window's home and its workers, the home first, and This Mac, among them or not. On studio, the server takes
@@ -421,8 +422,8 @@ export const workersOf = (scene: Scene, crowded: boolean, alone: boolean, pov: P
       name: CLOUD.name,
       home: true,
       kind: 'cloud',
-      model: `Hosted in ${CLOUD.region}`,
-      hosted: { region: CLOUD.region, storage: 4.2, room: 20, projects: 3 },
+      model: 'Always on',
+      hosted: { projects: 3 },
       machine: { count: 0, memory: 8, cores: 2 },
       agents: [],
       cpu: 0.12,
@@ -460,29 +461,47 @@ export interface Run {
   readonly for: string
 }
 
-/** The home's cloud runners: how many at once, those at work, and this month's spend against its limit. */
+/** The home's use of Althar Cloud: what runs there now, and this month's use against its limit. */
 export interface Runners {
-  readonly atOnce: number
-  /** Althar's suggestion, for the slider's mark. */
-  readonly suggested: number
   readonly running: readonly Run[]
   /** Dollars this month. */
   readonly spent: number
+  /** Hours of tasks run this month. */
+  readonly hours: number
+  /** Tasks run this month. */
+  readonly tasks: number
+  /** Dollars a day, the 1st to today. */
+  readonly daily: readonly number[]
   readonly limit: number | null
-  /** Starts one when a task would wait; else only a task's Run in cloud does. */
+  /** Runs a task there when it would wait; else only a task's Run in cloud does. */
   readonly auto: boolean
-  readonly region: string
-  /** Each runner's size. */
-  readonly size: string
 }
+
+/** What an hour of a task costs there. */
+export const RATE = 0.42
+/** November: today is the 22nd, of 30. */
+export const MONTH = { days: 30, today: 22 } as const
+
+/** At its limit: nothing new starts there; what runs finishes. */
+export const reachedOf = (runners: Runners) => runners.limit !== null && runners.spent >= runners.limit
+
+/** Where this month's spend ends at today's pace. */
+export const paceOf = (runners: Runners) => (runners.spent / MONTH.today) * MONTH.days
 
 const run = (key: TaskKey, time: string, crowded: boolean): Run => {
   const task = TASKS[key]
   return { taskId: key, title: crowded ? task.long : task.title, project: task.project, agent: task.agent, mark: task.mark, for: time }
 }
 
-/** The runners as a scene has them, before the person's own number, switch and limit. */
-export const runnersOf = (scene: Scene, crowded: boolean): Omit<Runners, 'atOnce' | 'auto' | 'limit'> => {
+/** How a month's spend falls on its days: little at weekends (the 1st is a Sunday), today so far. */
+const SHAPE = [0.1, 0.8, 1.1, 0.9, 1.3, 0.7, 0.2, 0.1, 1.0, 1.4, 1.2, 0.8, 1.1, 0.3, 0.1, 0.9, 1.6, 1.3, 1.0, 1.2, 0.2, 0.15]
+const dailyOf = (spent: number) => {
+  const sum = SHAPE.reduce((n, one) => n + one, 0)
+  return SHAPE.map((one) => (spent * one) / sum)
+}
+
+/** The cloud as a scene has it, before the person's own switch and limit; busy, it has reached $40. */
+export const runnersOf = (scene: Scene, crowded: boolean): Omit<Runners, 'auto' | 'limit'> => {
   const r = (key: TaskKey, time: string) => run(key, time, crowded)
   const running = {
     memory: [r('flaky', '14 min'), r('docs', '6 min')],
@@ -490,8 +509,9 @@ export const runnersOf = (scene: Scene, crowded: boolean): Omit<Runners, 'atOnce
     down: [r('flaky', '8 min')],
     calm: [],
   }[scene]
-  const spent = { memory: 12.4, full: 36.8, down: 8.1, calm: 3.2 }[scene]
-  return { suggested: crowded ? 6 : 4, running, spent, region: CLOUD.region, size: '4 cores · 16 GB' }
+  const spent = { memory: 12.4, full: 40, down: 8.1, calm: 3.2 }[scene]
+  const tasks = { memory: 23, full: 71, down: 15, calm: 6 }[scene]
+  return { running, spent, hours: Math.round((spent / RATE) * 10) / 10, tasks: crowded ? tasks * 2 : tasks, daily: dailyOf(spent) }
 }
 
 /* ---- what waits for an agent ----------------------------------------------------------- */
@@ -506,7 +526,7 @@ export interface Waiting {
 /** What waits, on every board: nothing while a worker that can be reached, or a runner, could start one more. */
 export const waitingOf = (workers: readonly Worker[], runners: Runners | null, crowded: boolean): Waiting[] => {
   if (workers.some((one) => one.offline === null && freeOf(one) > 0)) return []
-  if (runners !== null && runners.auto && runners.running.length < runners.atOnce) return []
+  if (runners !== null && runners.auto && !reachedOf(runners)) return []
   return [
     { taskId: 'line-0', title: 'Dark mode for Settings', project: 'Meridian' },
     { taskId: 'else-0', title: 'Bump Node to 24 in CI', project: 'Halyard' },

@@ -20,7 +20,7 @@ import m from '../../../../packages/ui/src/chrome/LoadMeter/LoadMeter.module.css
 import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
 import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../packages/ui/src/fixtures/plan'
 import h from '../../src/renderer/features/homes/Homes.module.css'
-import { freeOf, SLOTS, type Worker } from './data'
+import { type Runners, SLOTS, type Worker } from './data'
 import { Glyph } from './glyph'
 import type { Ctx } from './types'
 import { words } from './words'
@@ -79,7 +79,7 @@ export function Bar({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
       <HomesChip ctx={ctx} />
       <span className={m.meter}>
         <Popover
-          label={`${ctx.home.name}’s load`}
+          label={ctx.home.hosted === null ? `${ctx.home.name}’s load` : ctx.home.name}
           placement="below"
           align="end"
           width={300}
@@ -145,17 +145,17 @@ function Figure({ name, figure, total, ours }: { name: string; figure: string; t
   )
 }
 
-/** A reading in the popover's form: its name and figure, a bar, and a line under it. */
+/** A reading in the popover's form: its name and figure, a bar where it is a share, and a line under it. */
 export function Reading({
   name,
   figure,
-  share,
+  share = null,
   ours = 0,
   note,
 }: {
   name: string
   figure: string
-  share: number
+  share?: number | null
   ours?: number
   note?: ReactNode
 }) {
@@ -163,49 +163,50 @@ export function Reading({
     <div className={lp.row}>
       <span className={lp.name}>{name}</span>
       <span className={lp.figure}>{figure}</span>
-      <SplitBar total={share} ours={ours} />
+      {share !== null && <SplitBar total={share} ours={ours} />}
       {note !== undefined && note !== null && <span className={lp.work}>{note}</span>}
     </div>
   )
 }
 
-/** Agents at work across the home's computers and runners, of as many as could work; the hosted home runs none itself. */
-export const across = (ctx: Ctx) => {
-  const reached = ctx.workers.filter((one) => one.offline === null && !one.home)
-  const runners = ctx.runners
-  const atWork = reached.reduce((n, one) => n + one.agents.length, 0) + (runners?.running.length ?? 0)
-  const most = reached.reduce((n, one) => n + one.atOnce, 0) + (runners?.atOnce ?? 0)
-  const free = reached.reduce((n, one) => n + freeOf(one), 0) + Math.max(0, (runners?.atOnce ?? 0) - (runners?.running.length ?? 0))
-  return { atWork, most, free }
+/** Agents at work across the home's workers and Althar Cloud; the hosted home runs none itself. */
+export const across = (ctx: Ctx) =>
+  ctx.workers.filter((one) => one.offline === null && !one.home).reduce((n, one) => n + one.agents.length, 0) +
+  (ctx.runners?.running.length ?? 0)
+
+/** This month's use of Althar Cloud against its limit, and where it ends at this pace. */
+export function SpendReading({ runners, name = words.thisMonth }: { runners: Runners; name?: string }) {
+  return (
+    <Reading
+      name={name}
+      figure={words.spend(runners)}
+      share={runners.limit === null ? null : runners.spent / runners.limit}
+      note={words.outlook(runners)}
+    />
+  )
 }
 
-/** A home hosted in Althar Cloud, in its readings' place: always on, where, its agents across its computers, its storage. */
-export function HostedReadings({ ctx, worker, region = true }: { ctx: Ctx; worker: Worker; region?: boolean }) {
-  const hosted = worker.hosted!
-  const { atWork, most, free } = across(ctx)
+/** A home hosted in Althar Cloud, in its readings' place: always on (where its head doesn't say so), its agents at work, this month's use. */
+export function HostedReadings({ ctx, status = true }: { ctx: Ctx; status?: boolean }) {
+  const runners = ctx.runners
+  const inCloud = runners?.running.length ?? 0
   return (
     <>
-      <div className={s.status}>
-        <span className={s.statusLine}>
-          <i className={s.ok} aria-hidden="true" />
-          {words.alwaysOn}
-        </span>
-        <span className={s.statusNote}>{region ? `${hosted.region} · Althar ${worker.version}` : `Althar ${worker.version}`}</span>
-      </div>
+      {status && (
+        <div className={s.status}>
+          <span className={s.statusLine}>
+            <i className={s.ok} aria-hidden="true" />
+            {words.alwaysOn}
+          </span>
+        </div>
+      )}
       <div className={lp.machine}>
         <Reading
           name={words.agents}
-          figure={words.atWork(atWork)}
-          share={atWork / Math.max(1, most)}
-          ours={atWork / Math.max(1, most)}
-          note={ctx.waiting.length > 0 ? words.waiting(ctx.waiting.length) : free > 0 ? words.room(free) : undefined}
+          figure={words.atWork(across(ctx))}
+          note={ctx.waiting.length > 0 ? words.waiting(ctx.waiting.length) : inCloud > 0 ? `${inCloud} in ${words.cloud}` : undefined}
         />
-        <Reading
-          name={words.storage}
-          figure={words.storageFigure(hosted.storage, hosted.room)}
-          share={hosted.storage / hosted.room}
-          note={words.projects(hosted.projects)}
-        />
+        {runners !== null && <SpendReading runners={runners} />}
       </div>
     </>
   )
@@ -370,7 +371,7 @@ export function Peek({
         <h2 className={lp.heading}>{worker.name}</h2>
         {side !== undefined && <span className={s.side}>{side}</span>}
       </span>
-      {worker.hosted !== null ? <HostedReadings ctx={ctx} worker={worker} /> : <Readings worker={worker} load={load} waiting={waiting} />}
+      {worker.hosted !== null ? <HostedReadings ctx={ctx} /> : <Readings worker={worker} load={load} waiting={waiting} />}
       {between}
       {worker.offline === null && worker.hosted === null && <Running ctx={ctx} load={load} close={close} title={running} />}
       {after}
@@ -411,29 +412,6 @@ export function Slider({
         ...(worker.here ? {} : { mark: () => words.mark(worker), value: (n: number) => String(n) }),
         note: (n, machine) => (n === worker.configured && said !== null ? said : agentsAtOnceText.note(n, machine)),
         short: short ?? lowered ?? agentsAtOnceText.short,
-      }}
-    />
-  )
-}
-
-/** Runners at once, on the kit's own slider: the home's number of cloud runners, Althar's suggestion marked. */
-export function RunnersSlider({ ctx, compact, short }: { ctx: Ctx; compact: boolean; short?: string }) {
-  const runners = ctx.runners!
-  return (
-    <AgentsAtOnce
-      compact={compact}
-      count={runners.atOnce}
-      own={runners.atOnce !== runners.suggested}
-      machine={{ count: runners.suggested, memory: 16, cores: 4 }}
-      most={ctx.most}
-      onChange={(n) => ctx.setRunners(n)}
-      text={{
-        title: words.runnersAtOnce,
-        mark: () => `${runners.suggested} · suggested`,
-        value: (n: number) => String(n),
-        note: (n) => (n === runners.suggested ? 'Each runs one task, then stops' : `${words.dollars(n * 0.42)} an hour with all at work`),
-        short: short ?? words.runnersNow(runners),
-        reset: 'Use the suggestion',
       }}
     />
   )

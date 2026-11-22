@@ -28,12 +28,12 @@ export interface Ctx {
   /** On studio or in the cloud: This Mac runs the home's tasks too. */
   lent: boolean
   setLent: (on: boolean) => void
-  /** The home's cloud runners, where it uses them. */
+  /** The home's use of Althar Cloud, where it has it. */
   runners: Runners | null
-  /** Their number; null goes back to the suggestion. */
-  setRunners: (n: number | null) => void
   setAuto: (on: boolean) => void
   setLimit: (limit: number | null) => void
+  /** Headless workers pictured apart from desktops. */
+  twoKinds: boolean
   /** Opens a task, from a row. */
   onOpen: (id: string) => void
   /** Says in the lab's bar what a press would do. */
@@ -61,14 +61,14 @@ export interface Place {
   worker: string | null
 }
 
-/** How a take tells the computers apart: a word over each name, headings over groups, or a picture of each. */
-export type Label = 'words' | 'sections' | 'pictures'
+/** Where a take puts Althar Cloud's use and limit: a module that opens, a panel on the page, or a page of its own. */
+export type CloudTake = 'module' | 'panel' | 'page'
 
-/** A take on Computers: B's modules, each told apart its own way. */
+/** A take on Althar Cloud in Computers. */
 export interface Take {
   key: string
   kbd: string
   label: string
   idea: string
-  style: Label
+  cloud: CloudTake
 }

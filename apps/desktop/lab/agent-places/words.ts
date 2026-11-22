@@ -1,5 +1,5 @@
 import { percent } from '../../../../packages/ui/src/chrome/LoadMeter/load'
-import { isLowered, type Places, type Runners, type Why, type Worker } from './data'
+import { isLowered, paceOf, type Places, RATE, type Runners, reachedOf, type Why, type Worker } from './data'
 
 /*
  * What the lab says, as little as each place needs. An agent place is an
@@ -17,7 +17,6 @@ const UNTIL: Record<Why, string> = { memory: 'until memory frees up', cpu: 'unti
 export const words = {
   agents: 'Agents',
   computers: 'Computers',
-  otherComputers: 'Other computers',
   runningOn: (name: string) => `Running on ${name}`,
   atOnce: 'Agents at once',
   home: 'Home',
@@ -56,8 +55,8 @@ export const words = {
   computer: (worker: Worker) => `${worker.system} · ${worker.machine.cores} cores · ${worker.machine.memory} GB`,
   takeTitle: 'Take new tasks',
   takeNote: 'Off, what runs there finishes and nothing new starts.',
-  add: 'Add a computer',
-  addTitle: (home: string) => `Add a computer to ${home}`,
+  add: 'Add a worker',
+  addTitle: (home: string) => `Add a worker to ${home}`,
   addNote: 'Run this on the computer you’re adding.',
   addWaiting: 'Waiting for it to join…',
   remove: (name: string) => `Remove ${name}`,
@@ -75,47 +74,49 @@ export const words = {
   /** The devices a home on a server is opened from. */
   devices: 'This Mac, and an iPhone 2 days ago',
 
-  /* ---- what each is, and where ---- */
+  /* ---- Computers' groups ---- */
 
-  /** The groups of Computers, where the take heads them. */
-  yours: 'Your computers',
+  workers: 'Workers',
+  cloudGroup: 'Cloud',
   cloud: 'Althar Cloud',
 
   /* ---- a home hosted in Althar Cloud ---- */
 
   alwaysOn: 'Always on',
-  storage: 'Storage',
-  storageFigure: (used: number, room: number) => `${used} GB of ${room} GB`,
-  projects: (n: number) => plural(n, 'project'),
-  region: 'Region',
-  /** Agents at work across the home's runners and computers, and what waits or how many more could start. */
+  /** Agents at work across the home's workers and the cloud. */
   atWork: (n: number) => `${n} at work`,
-  room: (n: number) => `Room for ${n} more`,
 
-  /* ---- cloud runners ---- */
+  /* ---- Althar Cloud: what runs there, its use this month, its limit ---- */
 
-  runners: 'Cloud runners',
-  runnersAtOnce: 'Runners at once',
-  /** The runners' count, beside the big figure. */
-  runnersOf: (runners: Runners) => `of ${runners.atOnce} runners`,
-  runnersFigure: (runners: Runners) => `${runners.running.length} of ${runners.atOnce}`,
-  runnersNow: (runners: Runners) => (runners.running.length === 0 ? 'None running' : `${runners.running.length} running`),
-  autoTitle: 'Start one when a task would wait',
-  autoNote: 'Off, a runner starts only from a task’s Run in cloud.',
-  /** How a runner starts, at a glance. */
-  starts: (runners: Runners) => (runners.auto ? 'Starts when a task would wait' : 'Starts from Run in cloud'),
+  /** How it takes tasks, at a glance. */
+  takes: (runners: Runners) => (runners.auto ? 'Runs tasks that would wait' : 'Runs tasks from Run in cloud'),
+  runningNow: 'Running now',
+  runningCount: (runners: Runners) => (runners.running.length === 0 ? 'Nothing running' : `${runners.running.length} running`),
   thisMonth: 'This month',
+  spent: 'Spent',
   spend: (runners: Runners) => (runners.limit === null ? dollars(runners.spent) : `${dollars(runners.spent)} of ${dollars(runners.limit)}`),
+  /** Under the spend: the limit reached, else where the month ends at this pace. */
+  outlook: (runners: Runners) =>
+    reachedOf(runners)
+      ? 'At the limit: tasks wait for a worker'
+      : runners.limit !== null && paceOf(runners) > runners.limit
+        ? `At this pace, the limit by ${Math.max(23, Math.floor((runners.limit / runners.spent) * 22))} November`
+        : `On pace for ${dollars(Math.round(paceOf(runners)))}`,
   resets: 'Resets on 1 December',
+  hours: 'Hours',
+  hoursFigure: (runners: Runners) => `${runners.hours} h`,
+  tasksRun: 'Tasks',
+  rate: 'Rate',
+  rateFigure: `${dollars(RATE)} an hour a task`,
+  daily: 'Each day',
+  autoTitle: 'Run tasks here when they would wait',
+  autoNote: 'Off, a task runs here only from its Run in cloud.',
   limitTitle: 'Monthly limit',
-  limitNote: 'At the limit no runner starts; those at work finish.',
+  limitNote: 'At the limit nothing new starts here; what runs finishes.',
   noLimit: 'No limit',
   dollars,
-  each: 'Each runner',
-  signedIn: 'With the home’s sign-ins',
   more: (n: number) => `and ${n} more`,
-  running: 'Running',
-  stopRunners: 'Stop using cloud runners',
-  /** A runner's line: its project and how long it has run. */
+  stopCloud: 'Stop using Althar Cloud',
+  /** A task's line there: its project and how long it has run. */
   run: (project: string, time: string) => `${project} · ${time}`,
 }

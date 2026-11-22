@@ -4,8 +4,9 @@ import { BrandMark, LinkButton } from '@althar/ui'
 import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
 import type { Worker } from './data'
 import { Glyph } from './glyph'
-import { Bar, Peek, RunnersSlider, ShowInBar, Slider } from './parts'
-import { KindGlyph, Runs } from './settings/pieces'
+import { Bar, Peek, ShowInBar, Slider, SpendReading } from './parts'
+import { Runs } from './settings/cloud'
+import { KindGlyph } from './settings/pieces'
 import { RUNNERS } from './settings/takes'
 import type { Ctx } from './types'
 import { words } from './words'
@@ -17,9 +18,10 @@ import b from './base.module.css'
  * computers under its readings, each a row of the popover's own with a
  * picture of what it is, opening in place (A); in the quick settings, the
  * home's Agents at once saying what is so now, and the same rows under it
- * (C). The home's cloud runners are a row like a computer's. Hosted in
- * Althar Cloud, the home runs no agents: its popover says it is always on,
- * and the quick settings' slider is its runners'.
+ * (C). Althar Cloud, where the home uses it, is a row like a computer's,
+ * this month's spend on its line. Hosted there, the home runs no agents: its
+ * popover says it is always on, and the quick settings show this month's use
+ * in the slider's place: the cloud has no number to set.
  */
 
 const others = (ctx: Ctx) => ctx.workers.filter((one) => !one.home)
@@ -54,7 +56,7 @@ function RowOf({ picture, name, line, figure }: { picture: ReactNode; name: stri
 function Computer({ ctx, worker }: { ctx: Ctx; worker: Worker }) {
   return (
     <RowOf
-      picture={<KindGlyph worker={worker} size={13} {...(worker.offline === null ? {} : { className: b.danger })} />}
+      picture={<KindGlyph ctx={ctx} worker={worker} size={13} {...(worker.offline === null ? {} : { className: b.danger })} />}
       name={worker.name}
       line={<Line ctx={ctx} worker={worker} />}
       figure={worker.offline === null ? words.of(worker) : null}
@@ -62,20 +64,21 @@ function Computer({ ctx, worker }: { ctx: Ctx; worker: Worker }) {
   )
 }
 
-function RunnersRow({ ctx }: { ctx: Ctx }) {
+/** Althar Cloud's row: this month's spend on its line, how many run there at the end. */
+function CloudRow({ ctx }: { ctx: Ctx }) {
   const runners = ctx.runners!
   return (
     <RowOf
       picture={<Glyph kind="cloud" size={13} />}
-      name={words.runners}
+      name={words.cloud}
       line={`${words.spend(runners)} ${words.thisMonth.toLowerCase()}`}
-      figure={words.runnersFigure(runners)}
+      figure={String(runners.running.length)}
     />
   )
 }
 
-/** Its number, and the way to change it in Settings. */
-function AtOnce({ ctx, id, title, n }: { ctx: Ctx; id: string; title: string; n: number }) {
+/** A setting's value, and the way to change it in Settings. */
+function AtOnce({ ctx, id, title, n }: { ctx: Ctx; id: string; title: string; n: number | string }) {
   return (
     <span className={b.number}>
       {title} · {n}
@@ -129,12 +132,17 @@ function Others({ ctx }: { ctx: Ctx }) {
     ctx.runners === null ? null : (
       <li>
         <button type="button" className={`${lp.share} ${lp.way}`} aria-expanded={open === RUNNERS} onClick={() => toggle(RUNNERS)}>
-          <RunnersRow ctx={ctx} />
+          <CloudRow ctx={ctx} />
         </button>
         {open === RUNNERS && (
           <div className={b.opened}>
             <Runs ctx={ctx} />
-            <AtOnce ctx={ctx} id={RUNNERS} title={words.runnersAtOnce} n={ctx.runners.atOnce} />
+            <AtOnce
+              ctx={ctx}
+              id={RUNNERS}
+              title={words.limitTitle}
+              n={ctx.runners.limit === null ? words.noLimit : words.dollars(ctx.runners.limit)}
+            />
           </div>
         )}
       </li>
@@ -142,7 +150,7 @@ function Others({ ctx }: { ctx: Ctx }) {
   return (
     <section className={lp.rows}>
       <span className={lp.rowsHead}>
-        <h3 className={lp.eyebrow}>{ctx.home.hosted === null ? words.otherComputers : words.computers}</h3>
+        <h3 className={lp.eyebrow}>{words.workers}</h3>
         <span className={lp.eyebrow}>{words.agents}</span>
       </span>
       <ul className={lp.list}>
@@ -198,7 +206,7 @@ function AtTheSlider({ ctx }: { ctx: Ctx }) {
         {!hosted && ctx.runners !== null && (
           <li>
             <button type="button" className={`${lp.share} ${lp.way}`} onClick={go(RUNNERS)}>
-              <RunnersRow ctx={ctx} />
+              <CloudRow ctx={ctx} />
             </button>
           </li>
         )}
@@ -215,11 +223,33 @@ function AtTheSlider({ ctx }: { ctx: Ctx }) {
 /** What is so now on the home: lowered for now, or how many work. */
 const now = (home: Worker) => words.lowered(home) ?? (home.agents.length === 0 ? 'None at work' : `${words.of(home)} at work`)
 
-/** The quick settings: the home's Agents at once, saying what is so now, and a row a computer under it; hosted, its runners'. */
+/** Hosted, in the slider's place: the home always on, and this month's use against the limit; pressed, Althar Cloud in Settings. */
+function CloudUse({ ctx }: { ctx: Ctx }) {
+  return (
+    <button
+      type="button"
+      className={b.use}
+      onClick={() => {
+        ctx.quick.set(false)
+        ctx.settings(RUNNERS)
+      }}
+    >
+      <span className={b.useHead}>
+        <span className={b.useName}>{ctx.home.name}</span>
+        <span className={lp.meta}>
+          {words.alwaysOn} · {words.runningCount(ctx.runners!)}
+        </span>
+      </span>
+      <SpendReading runners={ctx.runners!} />
+    </button>
+  )
+}
+
+/** The quick settings: the home's Agents at once, saying what is so now, and a row a computer under it; hosted, this month's use. */
 export const quick = (ctx: Ctx) => (
   <>
     {ctx.home.hosted !== null && ctx.runners !== null ? (
-      <RunnersSlider ctx={ctx} compact short={`${ctx.home.name} · ${words.runnersNow(ctx.runners)}`} />
+      <CloudUse ctx={ctx} />
     ) : (
       <Slider ctx={ctx} worker={ctx.home} compact short={anyOther(ctx) ? `${ctx.home.name} · ${now(ctx.home)}` : now(ctx.home)} />
     )}

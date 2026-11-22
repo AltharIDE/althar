@@ -1,20 +1,27 @@
-import { Cloud, Computer, Cpu, HomeSimple, Laptop, Server } from '../../../../packages/ui/node_modules/iconoir-react'
+import { Cloud, Computer, HomeSimple, Server } from '../../../../packages/ui/node_modules/iconoir-react'
 
-import type { Kind } from './data'
+import { headless, type Worker } from './data'
 
 /*
- * A computer's picture, from the kit's own set (Iconoir), at the kit's
- * weight: the kit's Icon has a laptop for this computer and a server for a
- * home, and nothing yet for a Mac mini, a GPU box, Althar Cloud or a home as
- * a house. Were one picked, these would join foundations/Icon/icons.ts.
+ * A picture in Computers, from the kit's own set (Iconoir), at the kit's
+ * weight. Few on purpose: the home a house, every worker a computer (or, with
+ * two kinds, a server where it has no screen of its own), the cloud a cloud.
+ * The kit's Icon has none of a house, a desktop or a cloud yet; were these
+ * picked, they would join foundations/Icon/icons.ts.
  */
 
-const DRAWINGS = { laptop: Laptop, desktop: Computer, server: Server, gpu: Cpu, cloud: Cloud, home: HomeSimple } as const
+export type Picture = 'home' | 'computer' | 'headless' | 'cloud'
+
+const DRAWINGS = { home: HomeSimple, computer: Computer, headless: Server, cloud: Cloud } as const
+
+/** A worker's picture: the home's house, else a computer, or a server where two kinds are told apart. */
+export const pictureOf = (worker: Worker, twoKinds: boolean): Picture =>
+  worker.home ? 'home' : twoKinds && headless(worker) ? 'headless' : 'computer'
 
 /** The kit's stroke for a size, as Icon draws it. */
 const stroke = (size: number) => Math.min(2.4, Math.max(1.5, (1.25 * 24) / size))
 
-export function Glyph({ kind, size = 14, className }: { kind: Kind | 'home'; size?: number; className?: string }) {
+export function Glyph({ kind, size = 14, className }: { kind: Picture; size?: number; className?: string }) {
   const Drawing = DRAWINGS[kind]
   return (
     <Drawing

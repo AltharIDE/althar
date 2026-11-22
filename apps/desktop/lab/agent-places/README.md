@@ -15,42 +15,45 @@ It answers at http://localhost:6161.
 
 ## What it shows
 
-Computers is B of the last round, the one picked: the kit's modules, each
-as large as it matters, the home wide with its trace, CPU, Memory and Agents,
-the other computers under it, three across. A computer opens out in place.
+Computers as picked: sections, Settings' own groups with a fainter rule
+between them (Home, Workers, Cloud), the kit's modules in each, each with a
+round picture of what it is. The home's is a house, in ink; every worker
+has the same computer (H pictures headless ones as servers instead), red
+where it is out of reach; the cloud is a cloud. A worker opens out in place.
 
-The takes are how it tells the computers apart, the home above all:
+Althar Cloud is a control panel, not a computer: what runs there now, this
+month's spend against the monthly limit (and where it ends at this pace),
+hours, tasks, each day's spend, whether it takes tasks that would wait, and
+the limit. No runner count to set, no sizes, regions or versions. The takes
+are where that lives:
 
-- **A · Words:** a word over each name says what it is. The home's says
-  Home, in ink, with a house; the rest say Linux server, Mac mini, GPU
-  server, Althar Cloud.
-- **B · Sections:** headings group them, as Settings groups its rows: Home,
-  Your computers (with Add a computer at its end), Althar Cloud.
-- **C · Pictures:** a round picture of what each is beside its name, as the
-  quick settings' cards have; the home's is a house, in ink, and one out of
-  reach is unlinked, in red.
+- **A · Module:** a wide module under Cloud, like the home's: this month's
+  spend against the limit, what runs now, hours and tasks. It opens out to
+  its figures and its two controls.
+- **B · Panel:** the control panel on the page, nothing to open: the month's
+  figures, each day's spend, what runs now, its controls, leaving it at the
+  foot.
+- **C · Own page:** Althar Cloud a section of Settings of its own, after
+  Computers; Computers keeps a line for it with this month's spend.
 
-The cloud, in every take:
+Hosted in Althar Cloud (3), the home is the cloud: the take's form of it
+stands under Home, always on, with pausing all where leaving would be; the
+workers that joined it, This Mac where lent, under Workers. The bar's meter
+reads This Mac there, and the quick settings show this month's use where
+the slider was. Busy (W) has reached the $40 limit, so tasks wait.
 
-- **Cloud runners (U):** any home can start runners in Althar Cloud, a
-  runner a task, when a task would wait. They are one wide module: how many
-  run of their number, what they run, this month's spend against its limit.
-  Opened, their number, whether they start by themselves, and the limit.
-- **A home hosted in Althar Cloud (3):** always on, and it runs no agents
-  itself: its module says where it is, its agents across its runners and
-  computers, and its storage. Its runners sit right under it; the computers
-  that joined it, This Mac where lent, after.
-
-The base: the popover lists the other computers under the home's readings,
-each with a picture of what it is, the runners a row like them; the quick
-settings' slider has the same rows under it. Hosted, the slider is the
-runners'. Up next keeps nothing beyond its cards' own "Next in line".
+The base: the popover lists the workers under the home's readings, Althar
+Cloud a row like them with this month's spend; the quick settings' slider
+has the same rows under it. Up next keeps nothing beyond its cards' own
+"Next in line".
 
 ## Keys
 
 A B C the take · 1 2 3 the home (This Mac, studio, hosted in Althar Cloud) ·
-U cloud runners · Q W E R the scene (lowered, busy, one offline, calm) ·
-K crowded · M the home alone · N narrow · S the board · D dark · G the quick
-settings · P the home's popover.
+U Althar Cloud in use · H headless workers pictured apart · Q W E R the
+scene (lowered, busy, one offline, calm) · K crowded · M the home alone ·
+N narrow · S the board · D dark · G the quick settings · P the home's
+popover.
 
+`still=1` in the address turns transitions and animations off, for pictures.
 Pictures go in `shots/`, which git ignores.
