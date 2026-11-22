@@ -612,39 +612,44 @@ export interface Planned {
   detail: string
 }
 
-/** What's next: a draft until it's agreed. */
+/**
+ * What's next: a draft until it's agreed. Staged as Linear has it on 22 Nov:
+ * the mobile app is 0.11.0's flagship and being built (DEV-131, althar-mobile);
+ * the rest is in Linear's backlog (DEV-202, DEV-164, DEV-9, DEV-130), save
+ * Windows signing, which Linear doesn't have.
+ */
 export const ROADMAP: readonly Planned[] = [
   {
     stage: 'now',
-    title: 'Windows signing',
-    detail: 'A signed installer, so Windows stops warning you the first time you open Althar.',
-  },
-  {
-    stage: 'now',
-    title: 'Event-based automations',
+    title: 'Mobile app',
     detail:
-      'Automations that start when something happens, not only at a time of day: a pull request opened, an issue filed, a check failing on main.',
+      'Pair your phone with your home and follow every task from it. What needs you reaches you as a notification, and you answer it there, while the work runs on your computer or your own server.',
   },
   {
     stage: 'next',
-    title: 'Mobile app',
+    title: 'Event-based automations',
     detail:
-      'See what needs you and answer it from your phone: allow a command, read a finished change, merge it. The work keeps running on your computer.',
+      'Automations that start when something happens, not only at a time of day: main going red, a check that keeps failing, a new security alert.',
   },
   {
     stage: 'next',
     title: 'Integrated simulators',
-    detail: 'Phone simulators beside the task. A lead runs the app it changed, tries the flow and brings back what it saw.',
+    detail: 'iOS simulators beside the task. A lead runs the app it changed, tries the flow and brings back what it saw.',
   },
   {
-    stage: 'later',
+    stage: 'next',
     title: 'Project knowledge store',
     detail:
       'What a project has learned, kept: its decisions, conventions and notes, each with where it came from. Every agent starts from it, whichever one you use next.',
   },
   {
     stage: 'later',
+    title: 'Windows signing',
+    detail: 'A signed installer, so Windows stops warning you the first time you open Althar.',
+  },
+  {
+    stage: 'later',
     title: 'Teams, in the cloud',
-    detail: 'Shared projects and hosted agents, for a team working on the same code.',
+    detail: 'Shared projects, and work that runs on machines in the cloud, for a team on the same code.',
   },
 ]

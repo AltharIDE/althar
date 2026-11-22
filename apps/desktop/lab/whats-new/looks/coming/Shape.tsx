@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Brand, BrandMark, Heading, Icon, LiveDot } from '@althar/ui'
 
@@ -10,45 +10,20 @@ import x from './shape.module.css'
 
 /*
  * Coming next, 6: shape it. Each coming thing as a card with the thing drawn
- * working, the most wanted first and largest, and a Want this on each that
- * counts the person in at once: the count turns over, a +1 rises from it.
- * Pressed again, it takes it back. Then where to say what's missing. The
- * counts are the lab's, and kept only while the page is open.
+ * working: what's being built first and largest, the mobile app, then
+ * what's next and later. On each, a way to say what you'd need from it, which opens
+ * an issue on GitHub with its name filled in: no votes yet, since a vote
+ * needs somewhere to be kept. Then where to say what's missing.
  */
 
-const count = new Intl.NumberFormat('en-GB')
+/** The one drawn largest: what's being built, 0.11.0's flagship. */
+const LEAD = 'Mobile app'
 
-/** The most wanted first, as the page opens; a press never moves a card from under the pointer. */
-const BY_WANTS = [...COMING].sort((a, b) => b.wants - a.wants)
+/** Being built, then next, then later, the lead first. */
+const ORDER = [...COMING].sort((a, b) => Number(b.title === LEAD) - Number(a.title === LEAD))
 
-function Want({ title, wants, wanted, onPress }: { title: string; wants: number; wanted: boolean; onPress: () => void }) {
-  const [presses, setPresses] = useState(0)
-  return (
-    <button
-      type="button"
-      className={x.want}
-      aria-pressed={wanted}
-      aria-label={`Want ${title}, ${count.format(wants)} want it`}
-      onClick={() => {
-        onPress()
-        setPresses((n) => n + 1)
-      }}
-    >
-      <Icon name={wanted ? 'check' : 'up'} size={13} />
-      <span>{wanted ? 'Wanted' : 'Want this'}</span>
-      <span className={x.count}>
-        <span key={wants} className={x.number} data-moved={presses > 0 || undefined}>
-          {count.format(wants)}
-        </span>
-      </span>
-      {wanted && presses > 0 && (
-        <span key={presses} className={x.plus} aria-hidden="true">
-          +1
-        </span>
-      )}
-    </button>
-  )
-}
+/** Where to say what you'd need from one: a new issue, its name filled in. */
+const sayFor = (one: Coming) => `${LINKS.issues}/new?title=${encodeURIComponent(`${one.title}: `)}`
 
 function Stage({ one }: { one: Coming }) {
   return (
@@ -60,16 +35,6 @@ function Stage({ one }: { one: Coming }) {
 }
 
 export function Shape({ back }: { back?: ReactNode }) {
-  const [wanted, setWanted] = useState<ReadonlySet<string>>(new Set())
-  const wantsOf = (one: Coming) => one.wants + (wanted.has(one.title) ? 1 : 0)
-  const all = COMING.reduce((sum, one) => sum + wantsOf(one), 0)
-  const toggle = (title: string) =>
-    setWanted((now) => {
-      const next = new Set(now)
-      if (next.has(title)) next.delete(title)
-      else next.add(title)
-      return next
-    })
   return (
     <div className={x.page}>
       {back !== undefined && <div className={x.back}>{back}</div>}
@@ -78,28 +43,25 @@ export function Shape({ back }: { back?: ReactNode }) {
         <Heading level={1} className={x.title}>
           Shape what’s next
         </Heading>
-        <p className={x.why}>
-          Press <b>Want this</b> on what you’d use first. The most wanted is on top.
-        </p>
-        <p className={x.tally}>
-          <b>{count.format(all)}</b> wants so far
-          {wanted.size > 0 && <span className={x.yours}> · {wanted.size} of them yours</span>}
-        </p>
+        <p className={x.why}>What we’re building, and what comes after. Tell us what you’d need from one before it’s built.</p>
       </header>
       <ol className={x.cards}>
-        {BY_WANTS.map((one, i) => (
+        {ORDER.map((one, i) => (
           <li key={one.title} className={i === 0 ? `${x.card} ${x.top}` : x.card}>
             <ComingPicture picture={one.picture} className={x.picture} />
             <div className={x.body}>
               <p className={x.meta}>
-                <span className={x.rank}>{i + 1}</span>
                 <Stage one={one} />
               </p>
               <Heading level={2} className={x.name}>
                 {one.title}
               </Heading>
               <p className={x.detail}>{one.detail}</p>
-              <Want title={one.title} wants={wantsOf(one)} wanted={wanted.has(one.title)} onPress={() => toggle(one.title)} />
+              <a className={x.say} href={sayFor(one)} target="_blank" rel="noreferrer">
+                <Icon name="comment" size={13} />
+                Say what you’d need
+                <Icon name="external" size={11} className={x.out} />
+              </a>
             </div>
           </li>
         ))}

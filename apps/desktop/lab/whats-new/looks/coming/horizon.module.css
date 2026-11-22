@@ -170,6 +170,13 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
+/* three, side by side, so none stands alone */
+.cards:has(> :nth-child(3)) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.cards:has(> :nth-child(3)) .cardPicture > * {
+  zoom: 0.8;
+}
 .card {
   display: grid;
   align-content: start;
@@ -304,7 +311,11 @@
   .nowTitle {
     font-size: 26px;
   }
-  .cards {
+  .cards,
+  .cards:has(> :nth-child(3)) {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .cards:has(> :nth-child(3)) .cardPicture > * {
+    zoom: 1;
   }
 }

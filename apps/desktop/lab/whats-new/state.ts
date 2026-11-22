@@ -73,7 +73,7 @@ let state: LabState = {
   skipped: params.get('from') === '0.8.0',
   ...arrival(d),
   look: LOOKS.find((one) => one.key === params.get('look'))?.key ?? 'launch',
-  coming: COMINGS.find((one) => one.key === params.get('coming'))?.key ?? 'horizon',
+  coming: COMINGS.find((one) => one.key === params.get('coming'))?.key ?? 'shape',
   // Opened on What's new's own address, its tab is open and it has been seen.
   ...(window.location.hash === '#/whats-new' && d !== 'c' ? { tab: true, unseen: false } : {}),
   ...(params.get('notes') === '1' ? { homeNotes: true, unseen: false } : {}),

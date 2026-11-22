@@ -60,7 +60,7 @@ function Installer() {
   )
 }
 
-/** Event-based automations: a pull request opens, the automation's rule takes it, a review starts. */
+/** Event-based automations: main goes red, the automation's rule takes it, a fix starts. */
 function Trigger() {
   return (
     <div className={p.trigger}>
@@ -69,8 +69,8 @@ function Trigger() {
           <BrandMark brand={Brand.GitHub} size={14} />
         </span>
         <span className={p.nodeWords}>
-          <b>Pull request opened</b>
-          <code>meridian-api #1191</code>
+          <b>Check failed on main</b>
+          <code>meridian-api · test</code>
         </span>
       </div>
       <span className={`${p.wire} ${p.wireA}`}>
@@ -81,8 +81,8 @@ function Trigger() {
           <Icon name="automation" size={14} />
         </span>
         <span className={p.nodeWords}>
-          <b>Review new pull requests</b>
-          <span>When a pull request opens</span>
+          <b>Fix main when it goes red</b>
+          <span>When a check fails on main</span>
         </span>
       </div>
       <span className={`${p.wire} ${p.wireB}`}>
@@ -93,7 +93,7 @@ function Trigger() {
           <BrandMark brand={Brand.ClaudeCode} size={14} />
         </span>
         <span className={p.nodeWords}>
-          <b>Review #1191</b>
+          <b>Fix the failing test</b>
           <span className={p.running}>
             <LiveDot pulse />
             Running

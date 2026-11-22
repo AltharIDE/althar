@@ -65,7 +65,7 @@ export function Horizon({ back }: { back?: ReactNode }) {
           <p className={h.eyebrow}>
             <span className={h.chip}>
               <LiveDot pulse />
-              {now.length} being built now
+              {now.length === 1 ? `${now[0]?.title ?? ''}, being built now` : `${now.length} being built now`}
             </span>
           </p>
           <Heading level={1} className={h.title}>

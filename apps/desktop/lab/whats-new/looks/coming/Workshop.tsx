@@ -37,10 +37,10 @@ import w from './workshop.module.css'
 
 /** What the running work does, one line at a time, as it happens. */
 const FEED = [
-  { who: Brand.ClaudeCode, what: 'Opus 5 pushed 2 commits to', where: 'althar/windows-signing' },
-  { who: Brand.Codex, what: 'Codex ran the tests on', where: 'althar/event-automations', after: '412 passed' },
-  { who: Brand.ClaudeCode, what: 'Sonnet 5 reviewed', where: 'althar/windows-signing', after: '1 finding, fixed' },
-  { who: Brand.ClaudeCode, what: 'Opus 5 wired the pull request event into', where: 'althar/event-automations' },
+  { who: Brand.ClaudeCode, what: 'Opus 5 pushed 2 commits to', where: 'althar/mobile-pairing' },
+  { who: Brand.Codex, what: 'Codex ran the tests on', where: 'althar/mobile-pairing', after: '212 passed' },
+  { who: Brand.ClaudeCode, what: 'Sonnet 5 reviewed', where: 'althar/mobile-threads', after: '1 finding, fixed' },
+  { who: Brand.ClaudeCode, what: 'Opus 5 paged long threads in', where: 'althar/mobile-threads' },
 ] as const
 
 function Feed() {
@@ -74,10 +74,11 @@ const UNNAMED = { task: () => '' }
 const open = (href: string) => () => void window.open(href, '_blank', 'noreferrer')
 
 export function Workshop({ back }: { back?: ReactNode }) {
-  const [now1, now2] = inStage('now')
+  const now = inStage('now')
+  const [now1, now2] = now
   const next = inStage('next')
   const later = inStage('later')
-  // The automations' lead hands its change to review a moment after the board opens.
+  // The second lead hands its change to review a moment after the board opens.
   const [reviewing, setReviewing] = useState(false)
   useEffect(() => {
     const timer = window.setTimeout(() => setReviewing(true), 4200)
@@ -137,7 +138,7 @@ export function Workshop({ back }: { back?: ReactNode }) {
               ))}
             </BoardList>
           </BoardColumn>
-          <BoardColumn lane={BoardLane.Running} count={2}>
+          <BoardColumn lane={BoardLane.Running} count={now.length}>
             {now1 !== undefined && (
               <WorkCard
                 task=""
@@ -168,9 +169,9 @@ export function Workshop({ back }: { back?: ReactNode }) {
           <BoardColumn lane={BoardLane.Yours} count={1}>
             <CallCard
               kind="Question"
-              title="Which event should start an automation first?"
-              because="Event-based automations is being built now. Say which you’d use first."
-              options={['A pull request opened', 'A check failing on main', 'An issue filed']}
+              title="What should the phone do first?"
+              because="The mobile app is being built now. Say what you’d use it for first."
+              options={['Answer what needs you', 'Follow a task as it runs', 'Merge a finished change']}
               from="Althar’s roadmap"
               next={
                 <NextStep signal onPress={open(COMMUNITY)}>

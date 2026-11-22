@@ -1,4 +1,4 @@
-import { type ReactNode, useRef } from 'react'
+import { type ReactNode, useId, useRef } from 'react'
 
 import { Brand, BrandMark, Icon, LiveDot } from '@althar/ui'
 
@@ -11,9 +11,11 @@ import w from './where.module.css'
  * the machines they are, the work going between them along the wires.
  *
  * The beats: a task leaves the window for the home, and the home hands its
- * lead to runner-1; the laptop closes, and the work goes on: the home hands
- * another task to runner-2, runner-1 runs the setup and the tests and sends
- * its commits back; the laptop opens again on the finished task. It holds,
+ * lead to runner-1, a current reaching along each wire as it goes; the
+ * laptop closes, its screen asleep and its wire to the home gone, and the
+ * work goes on: the home hands another task to runner-2, runner-1 runs the
+ * setup and the tests, and its current turns back to the home with the
+ * commits; the laptop wakes, its wire back, on the finished task. It holds,
  * and clears. It plays only on screen, and with motion reduced it rests on
  * the laptop open on the finished task.
  */
@@ -52,8 +54,21 @@ function Swap({ on, children }: { on: number; children: readonly ReactNode[] }) 
   )
 }
 
-/** The work, going along a wire: a spark with its trail, once. */
-const Spark = ({ along }: { along: string }) => <i className={w.spark} style={{ offsetPath: `path('${along}')` }} />
+/**
+ * A wire at work: its current reaches along it from where the work leaves to
+ * where it lands, then keeps flowing that way; off, it fades, and is gone.
+ */
+function Current({ along, on }: { along: string; on: boolean }) {
+  const id = `reach-${useId().replace(/[^\w-]/g, '')}`
+  return (
+    <g className={w.current} data-on={on}>
+      <mask id={id} maskUnits="userSpaceOnUse" x={0} y={-20} width={912} height={276}>
+        <path d={along} pathLength={1} className={w.reach} />
+      </mask>
+      <path d={along} className={w.flow} mask={`url(#${id})`} />
+    </g>
+  )
+}
 
 export function Where() {
   const ref = useRef<HTMLDivElement>(null)
@@ -71,22 +86,19 @@ export function Where() {
     >
       <div className={w.scene} aria-hidden="true">
         <svg className={w.wires} viewBox="0 0 912 236" width={912} height={236}>
-          {[WIRE.toHome, WIRE.toOne, WIRE.toTwo].map((d) => (
-            <path key={d} d={d} className={w.wire} />
-          ))}
-          <path d={WIRE.toHome} className={w.flow} data-on={!closed && !out} />
-          <path d={WIRE.toOne} className={w.flow} data-on={at(1, 4)} />
-          <path d={WIRE.toTwo} className={w.flow} data-on={at(2)} />
+          {/* the window's wire to its home goes while the laptop is closed */}
+          <path d={WIRE.toHome} className={w.wire} data-gone={closed} />
+          <path d={WIRE.toOne} className={w.wire} />
+          <path d={WIRE.toTwo} className={w.wire} />
+          <Current along={WIRE.toHome} on={at(0, 1)} />
+          <Current along={WIRE.fromHome} on={at(5)} />
+          <Current along={WIRE.toOne} on={at(1, 3)} />
+          <Current along={WIRE.fromOne} on={at(4, 4)} />
+          <Current along={WIRE.toTwo} on={at(2)} />
         </svg>
-        <span className={w.via}>
-          <Swap on={closed ? 1 : 0}>{['SSH', 'Window closed']}</Swap>
+        <span className={w.via} data-gone={closed}>
+          SSH
         </span>
-
-        {beat === 0 && <Spark key="0" along={WIRE.toHome} />}
-        {beat === 1 && <Spark key="1" along={WIRE.toOne} />}
-        {beat === 2 && <Spark key="2" along={WIRE.toTwo} />}
-        {beat === 4 && <Spark key="4" along={WIRE.fromOne} />}
-        {beat === 5 && <Spark key="5" along={WIRE.fromHome} />}
 
         <div className={w.laptop} data-closed={closed}>
           <div className={w.lid}>
@@ -103,8 +115,9 @@ export function Where() {
               </div>
               <p className={w.appSaid}>Let a refund be for part of a payment.</p>
               <div className={w.appState}>
-                <Swap on={back ? 1 : 0}>
+                <Swap on={back ? 2 : at(1) ? 1 : 0}>
                   {[
+                    'Starting on build-01',
                     <>
                       <LiveDot ping />
                       On runner-1

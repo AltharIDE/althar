@@ -1,4 +1,4 @@
-/* Coming next, 6: shape it. On the kit's tokens; a want is the person's own, in cobalt, not the violet of a call waiting on them. */
+/* Coming next, 6: shape it. On the kit's tokens. */
 
 .page {
   position: relative;
@@ -40,30 +40,13 @@
   font-size: 16px;
   line-height: 1.5;
   color: var(--t-2);
+  text-wrap: balance;
 }
 .why b {
   font-weight: 600;
   color: var(--t-1);
 }
-.tally {
-  margin-top: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  font-size: 12.5px;
-  color: var(--t-3);
-  font-variant-numeric: tabular-nums;
-}
-.tally b {
-  font-weight: 600;
-  color: var(--t-1);
-}
-.yours {
-  color: var(--live);
-}
-
-/* The cards: the most wanted large, two beside it, three under */
+/* The cards: the lead of what's being built large, two beside it, three under */
 .cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -95,12 +78,12 @@
   flex: 1;
   min-height: 380px;
 }
-/* the most wanted, drawn larger to fill its card */
+/* the lead, drawn larger to fill its card */
 .top .picture > * {
   zoom: 1.45;
 }
 .top .picture[data-picture='phone'] > * {
-  zoom: 1.7;
+  zoom: 2.3;
 }
 .body {
   display: grid;
@@ -118,7 +101,7 @@
 .top .detail {
   grid-column: 1;
 }
-.top .want {
+.top .say {
   grid-column: 2;
   grid-row: 1 / span 3;
   align-self: end;
@@ -127,23 +110,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.rank {
-  display: grid;
-  place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 7px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  font: 600 11px/1 var(--mono);
-  color: var(--t-1);
-}
-.top .rank {
-  background: var(--live);
-  box-shadow: none;
-  color: var(--on-dark);
 }
 .stage {
   display: inline-flex;
@@ -177,111 +143,37 @@
   font-size: 15px;
 }
 
-/* Want this: counts the person in at once, the number turning over and a +1 rising from it */
-.want {
-  position: relative;
+/* Say what you'd need: out to a new issue on GitHub, its name filled in */
+.say {
   justify-self: start;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
+  gap: 7px;
+  height: 32px;
   margin-top: 6px;
-  padding: 0 6px 0 12px;
-  border-radius: 10px;
+  padding: 0 12px;
+  border-radius: 9px;
   background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
+  box-shadow: inset 0 0 0 1px var(--line-2);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--t-1);
-  transition:
-    transform var(--fast) var(--ease-out),
-    background-color var(--fast) var(--ease-out),
-    color var(--fast) var(--ease-out);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--fast) var(--ease-out);
 }
-.want:hover {
+.say:hover {
   background: var(--hover-paper);
 }
-.want:active {
-  transform: scale(var(--scale-press, 0.97));
-}
-.want:focus-visible {
+.say:focus-visible {
   outline: 2px solid var(--live);
   outline-offset: 2px;
 }
-.want[aria-pressed='true'] {
-  background: var(--live-dim);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--live) 40%, transparent);
-  color: var(--live);
+.say > svg:first-child {
+  color: var(--t-3);
 }
-.count {
-  display: inline-grid;
-  min-width: 46px;
-  height: 24px;
-  padding: 0 8px;
-  overflow: hidden;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--n-2);
-  font: 600 12px/24px var(--mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--t-2);
-}
-.want[aria-pressed='true'] .count {
-  background: var(--paper);
-  color: var(--live);
-}
-.number[data-moved] {
-  animation: turnOver var(--enter) var(--ease-out);
-}
-@keyframes turnOver {
-  from {
-    opacity: 0;
-    transform: translateY(70%);
-  }
-}
-.plus {
-  position: absolute;
-  top: -4px;
-  right: 10px;
-  font: 600 12px/1 var(--mono);
-  color: var(--live);
-  pointer-events: none;
-  opacity: 0;
-  animation: rise 700ms var(--ease-out);
-}
-@keyframes rise {
-  0% {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  25% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-16px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .number[data-moved] {
-    animation: none;
-  }
-  .plus {
-    animation-name: fadeOnly;
-  }
-  @keyframes fadeOnly {
-    25% {
-      opacity: 1;
-    }
-    100% {
-      opacity: 0;
-    }
-  }
-  .want:active {
-    transform: none;
-  }
+.out {
+  color: var(--t-4);
 }
 
 /* What's missing: where to say it */
@@ -367,7 +259,7 @@
   .top .body {
     grid-template-columns: minmax(0, 1fr);
   }
-  .top .want {
+  .top .say {
     grid-column: 1;
     grid-row: auto;
     justify-self: start;

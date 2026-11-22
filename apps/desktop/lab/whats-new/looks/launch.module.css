@@ -593,10 +593,10 @@
 }
 .socials {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   width: 100%;
-  max-width: 720px;
+  max-width: 912px;
   margin: 28px 0 0;
   padding: 0;
   list-style: none;
@@ -685,7 +685,7 @@
     margin-inline: 32px;
   }
   .socials {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .tile,
   .big {
