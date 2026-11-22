@@ -74,7 +74,8 @@ import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schem
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Database, Ledger } from '@althar/persistence-sqlite'
-import { type BoardRow, boardProjections, boardRows, committedAt, homeRows, putProjection } from './boardProjections'
+import { type BoardRow, boardProjections, boardRows, committedAt, putProjection } from './boardProjections'
+import { homeRows, readHomeCards } from './readHomeCards'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
@@ -3681,17 +3682,17 @@ export class Queries extends Context.Service<
        */
       const homeTasks = (cached = false) =>
         Effect.gen(function* () {
-          const rows = yield* homeRows(SETTLED_SHOWN, cached)
-          const tasks = yield* Effect.forEach(
-            rows,
-            (row) =>
-              Effect.map(cached ? getProjected(row) : onBoard(row), (read) =>
-                read.flatMap((task) =>
-                  // A task kept for later waits on its board, not here.
-                  onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
-                ),
-              ),
-            { concurrency: AT_ONCE },
+          const sessions = yield* Sessions
+          const changes = yield* Changes
+          const rows = yield* homeRows(instance.deviceId, SETTLED_SHOWN, cached, AT_ONCE)
+          const active = new Set((yield* sessions.onTasks).map((one) => one.taskId))
+          // Give other calls a turn between cards. Keep the original history window for pruning worktree facts.
+          const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
+            Effect.gen(function* () {
+              if (!row.candidate && !active.has(row.id) && !(yield* changes.openingNext(row.id))) return []
+              const read = yield* cached ? getProjected(row) : onBoard(row)
+              return read.flatMap((task) => (onHome(task) ? [{ ...task, projectId: row.projectId }] : []))
+            }),
           )
           return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
         })

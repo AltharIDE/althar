@@ -84,23 +84,6 @@ export const boardRows = (projectId: string, deviceId: string, settled: number, 
     return yield* cached ? (yield* Database.ReadLane).read(read) : read
   })
 
-export const homeRows = (settled: number, cached: boolean) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const read = sql<BoardRow & { projectId: string }>`
-    SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at, ${cached ? sql`v.view` : sql`NULL`} AS view
-    FROM tasks k JOIN projects p ON p.id = k.project_id
-    ${cached ? sql`LEFT JOIN board_card_views v ON v.task_id = k.id` : sql``}
-    WHERE p.archived_at IS NULL AND (k.state IN ('open', 'draft') OR k.id IN (
-      -- A merged task the board still shows can be ready again.
-      SELECT id FROM (
-        SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
-        FROM tasks WHERE state IN ('done', 'abandoned'))
-      WHERE state = 'done' AND place <= ${settled}))
-    ORDER BY k.created_at, k.id`
-    return yield* cached ? (yield* Database.ReadLane).read(read) : read
-  })
-
 /** The worktree where a person commits outside Althar can move without a feed event. */
 export const committedAt = (path: string): Effect.Effect<string> =>
   path === ''

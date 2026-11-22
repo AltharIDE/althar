@@ -385,6 +385,10 @@ export interface Running {
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
+  /** When this live session became active, including one whose first words were withdrawn. */
+  readonly openedAt: number
+  /** Latest accepted input, including one withdrawn before a turn could take it. */
+  idleTouchedAt: number
   /**
    * A lead's or the coordinator's: when it was last told the person's local date and time, and in which zone (localTime.ts);
    * undefined before its brief, or since a compaction, which may have left it out.
@@ -478,7 +482,7 @@ export const heardContext = (running: Running, event: SessionEvent) => {
 export const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
 export type StopRequest =
-  | { readonly state: 'completed'; readonly reason: 'stopped' | 'shutdown' | 'settled' }
+  | { readonly state: 'completed'; readonly reason: 'stopped' | 'shutdown' | 'settled' | 'idle' }
   | { readonly state: 'lost' }
   | { readonly state: 'superseded'; readonly by: string }
 

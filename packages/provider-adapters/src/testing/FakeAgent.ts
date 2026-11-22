@@ -258,7 +258,14 @@ export const codexLikeMeanings = {
 
 export interface FakeAgentOptions {
   /** Lets a test deliver a connection failure between turns, or close ACP during one. */
-  readonly sessionControls?: (controls: { readonly lose: () => Promise<void>; readonly close: () => void }) => void
+  readonly sessionControls?: (controls: {
+    readonly id: string
+    readonly cwd: string
+    readonly live: () => boolean
+    readonly lose: () => Promise<void>
+    readonly close: () => void
+    readonly tool: (state: 'in_progress' | 'completed') => Promise<void>
+  }) => void
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
@@ -288,6 +295,8 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Holds a session close while a test sends another input. IDs are local to the fake connection. */
+  readonly beforeClose?: (sessionId: string, coordinator: boolean) => Promise<void>
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
   /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
@@ -1797,6 +1806,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       sessions.set(sessionId, session)
       options.sessionControls?.({
+        id: sessionId,
+        cwd: session.cwd,
+        live: () => !session.closed,
         lose: () =>
           client.notify(acp.methods.client.session.update, {
             sessionId,
@@ -1811,6 +1823,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             },
           }),
         close: () => connections.get(shared(client))?.close(),
+        tool: (state) =>
+          client.notify(acp.methods.client.session.update, {
+            sessionId,
+            update:
+              state === 'in_progress'
+                ? { sessionUpdate: 'tool_call', toolCallId: 'outside-turn', title: 'Read', kind: 'read', status: state }
+                : { sessionUpdate: 'tool_call_update', toolCallId: 'outside-turn', status: state },
+          }),
       })
       // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
       connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
@@ -1857,8 +1877,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
-    .onRequest(acp.methods.agent.session.close, ({ params }) => {
+    .onRequest(acp.methods.agent.session.close, async ({ params }) => {
       const closing = sessions.get(params.sessionId)
+      await options.beforeClose?.(params.sessionId, closing?.coordinator === true)
       if (closing !== undefined) closing.closed = true
       sessions.delete(params.sessionId)
       options.closed?.(params.sessionId)
@@ -1955,6 +1976,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
+      // A process-transport test can check cleanup of a child the agent never reported as a background job.
+      const childFile = /\[test-child:([^\]]+)\]/.exec(text)?.[1]
+      if (childFile !== undefined) {
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+        child.unref()
+        writeFileSync(childFile, String(child.pid))
+      }
       // A step of work between what it says, so each is a message of its own, as an agent's tool call between them makes it.
       let steps = 0
       const aloud = {
