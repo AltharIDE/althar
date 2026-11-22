@@ -1101,6 +1101,7 @@ export class Coordinator extends Context.Service<
           if (!aside && (yield* coordinatorProject(access.threadId)) !== null)
             yield* postCard(access.projectId as ProjectId, created.taskId)
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
+          // Althar's words, not the coordinator's, so not passed on as its: the thread would show them as something it relayed.
           if (again === undefined && request !== undefined) {
             const task = yield* taskOf(access, created.taskId)
             const body = alsoPlanned([task], true)
@@ -1109,7 +1110,7 @@ export class Coordinator extends Context.Service<
               yield* sessions.send({
                 envelope: yield* envelope('thread.send', { threadId: other.threadId, body }, undefined, instance.coordinatorId),
                 threadId: other.threadId,
-                body: passedOn(body),
+                body,
                 disposition: 'after_current',
                 quiet: true,
               })
@@ -2044,7 +2045,8 @@ export class Coordinator extends Context.Service<
             if (changed.lead === undefined && changed.review === undefined && held === undefined)
               said.push(`Nothing changed: ${task.slug} has that team already.`)
           }
-          // What the new lead is told first goes to the thread after the change, so the lead that takes over reads it.
+          // What the new lead is told first goes to the thread after the change, so the lead that takes over reads it. Quiet, as
+          // message_lead's: its thread shows it as passed on once the lead reads it, never as something the person said.
           const body = asked.message?.trim()
           if (body !== undefined && body !== '')
             yield* sessions
@@ -2053,6 +2055,7 @@ export class Coordinator extends Context.Service<
                 threadId: task.threadId,
                 body: passedOn(body, yield* ownTitle(access)),
                 disposition: 'after_current',
+                quiet: true,
               })
               .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar couldn't pass that on to ${task.slug}'s lead.` })))
           return `${said.join(' ')} ${threadsSaying(access, task)}.`

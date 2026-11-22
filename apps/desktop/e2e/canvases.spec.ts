@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { canvasView, inCanvas, pressIn, shoot } from './canvasViews'
-import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
+import { launch, openFirstProject, reveal, say, shown, startTask, toConversation } from './support'
 
 /*
  * The project's canvases (ADR-104), in a real window with the fake agents.
@@ -326,12 +326,15 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     await reply.press('Enter')
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByRole('button', { name: 'Open Sign-in, three directions', exact: true })).toBeVisible()
-    const answer = page.getByRole('paragraph').filter({ hasText: 'The repository also has' })
-    // The streamed answer gives way to the kept one: scrolled to once it stays.
-    await expect(async () => await answer.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()
+    const thread = page.getByRole('region', { name: 'Thread', exact: true })
+    const answer = thread.getByRole('paragraph').filter({ hasText: 'The repository also has' })
+    const readme = answer.getByRole('button', { name: 'Open README.md', exact: true })
+    await expect(readme).toBeVisible()
+    await expect(thread).not.toHaveAttribute('aria-busy')
+    await reveal(page, readme)
     await expect(doc).toBeInViewport()
     await shoot(page, electronApp, page, 'test-results/aside-canvas-beside.png')
-    await answer.getByRole('button', { name: 'Open README.md' }).click()
+    await readme.click()
     const file = page.getByRole('complementary', { name: 'README.md' })
     await expect(file.getByRole('heading', { name: 'meridian' })).toBeVisible()
     await shoot(page, electronApp, page, 'test-results/aside-file-beside.png')

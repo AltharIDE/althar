@@ -106,8 +106,10 @@ export const macKeyOf = (event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'altKey'
 }
 
 /** A path as a shell reads it, typed for a dropped file: quoted where it has anything a shell would split or expand. */
-export const quotedPath = (path: string, system: string = platform) =>
-  /^[\w@%+=:,./\\-]+$/.test(path) ? path : system === 'win32' ? `"${path}"` : `'${path.replaceAll("'", "'\\''")}'`
+export const quotedPath = (path: string, system: string = platform) => {
+  if (system === 'win32') return /^[\w@%+=:,./\\-]+$/.test(path) ? path : `"${path}"`
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`
+}
 
 /** The shortcuts the terminal answers itself, rather than sending them to the shell. */
 export type TerminalAction = 'copy' | 'paste' | 'selectAll' | 'clear' | 'find'

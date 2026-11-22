@@ -20,8 +20,9 @@ export const saveWorkerSnapshot = (connect: (window: BrowserWindow, signal: Abor
     window.webContents.on('did-start-navigation', navigator)
     try {
       const place = await dialog.showOpenDialog(window, {
-        title: 'Save a local copy',
-        buttonLabel: 'Save copy here',
+        title: 'Choose where the copy goes',
+        message: 'Choose the folder the task’s files are copied into',
+        buttonLabel: 'Copy here',
         properties: ['openDirectory', 'createDirectory'],
       })
       const folder = place.filePaths[0]
@@ -45,10 +46,10 @@ export const saveWorkerSnapshot = (connect: (window: BrowserWindow, signal: Abor
               const answer = yield* Effect.tryPromise(() =>
                 dialog.showMessageBox(window, {
                   type: 'question',
-                  title: 'Save the home’s copy?',
-                  message: 'The worker couldn’t make a new snapshot.',
-                  detail: 'The home’s copy may be older than the files on the worker.',
-                  buttons: ['Use home copy', 'Cancel'],
+                  title: 'Copy the home’s files instead?',
+                  message: 'The worker can’t send its files now.',
+                  detail: 'The home keeps a copy from the lead’s last checkpoint, which may miss its newest changes.',
+                  buttons: ['Copy the home’s files', 'Cancel'],
                   defaultId: 1,
                   cancelId: 1,
                 }),
@@ -78,8 +79,8 @@ export const saveWorkerSnapshot = (connect: (window: BrowserWindow, signal: Abor
       if (!window.isDestroyed() && !cancel.signal.aborted)
         await dialog.showMessageBox(window, {
           type: 'error',
-          message: 'Althar couldn’t save the workspace copy.',
-          detail: 'Check that the home is connected, Git is installed, and the destination has free space.',
+          message: 'Althar couldn’t copy the task’s files.',
+          detail: 'Check that the home is connected, Git is installed and the folder has room, then try again.',
         })
     } finally {
       saving.delete(window.id)

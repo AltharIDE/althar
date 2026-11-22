@@ -20,11 +20,11 @@ export const detectOs = (): Os | null => {
   const asked = askedOs()
   if (asked) return asked
   const ua = navigator.userAgent
-  if (/Android|iPhone|iPad|iPod/i.test(ua)) return null
+  if (/Android|iPhone|iPad|iPod|CrOS/i.test(ua)) return null
   if (/Windows/i.test(ua)) return 'windows'
   // An iPad asking for desktop sites says it is a Mac; its touch points give it away.
   if (/Macintosh|Mac OS X/i.test(ua)) return navigator.maxTouchPoints > 1 ? null : 'mac'
-  if (/Linux|X11|CrOS/i.test(ua)) return 'linux'
+  if (/Linux|X11/i.test(ua)) return 'linux'
   return null
 }
 

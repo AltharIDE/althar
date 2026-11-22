@@ -130,8 +130,7 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     await again.click()
     // The fake answers with all it was told, its brief and then the person's words: the turn that failed is under it. Its
     // brief is long enough that the thread no longer draws the person's own message far above, so look in the answer.
-    const answer = page.getByRole('article').filter({ has: page.getByText(/^echo: /) })
-    await expect(answer).toBeVisible()
+    const answer = page.getByRole('region', { name: 'Conversation' }).getByRole('article', { name: 'Coordinator' })
     await expect(answer.getByText('What is left on the checkout?', { exact: true })).toBeVisible()
     await expect(again).toHaveCount(0)
   } finally {

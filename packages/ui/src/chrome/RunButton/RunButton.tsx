@@ -43,6 +43,8 @@ export interface RunTargetRun {
   state: 'fetching' | 'unfetched' | 'starting' | 'running' | 'ended'
   /** Where it answers: localhost:5290. */
   url?: string
+  /** Where it runs, on one of the home's workers: Linux worker 3f9a2c. Its address is then the home's, and says preview. */
+  on?: string
   /** How long it has run, or when it ended or failed: 12m, 3m ago. */
   since?: string
   /** How it ended by itself: its exit code, null where unknown. */
@@ -78,6 +80,8 @@ export interface RunButtonText {
   retry: string
   clear: string
   open: (url: string) => string
+  /** Where it runs, on a worker: on Linux worker 3f9a2c. */
+  on: (where: string) => string
   starting: string
   fetching: string
   up: string
@@ -115,6 +119,7 @@ export const runButtonText: RunButtonText = {
   retry: 'Try again',
   clear: 'Clear',
   open: (url) => `Open ${url}`,
+  on: (where) => `on ${where}`,
   starting: 'Starting…',
   fetching: 'Fetching…',
   up: 'Running',
@@ -557,12 +562,19 @@ function Line({
       glyph: <LiveDot />,
       state:
         run.url === undefined ? (
-          <span className={s.quiet}>{t.up}</span>
+          <span className={s.quiet}>{run.on === undefined ? t.up : `${t.up} ${t.on(run.on)}`}</span>
         ) : (
-          <LinkButton className={s.url} title={t.open(run.url)} onClick={onOpen}>
-            {run.url}
-            <Icon name="external" size={10} />
-          </LinkButton>
+          <>
+            <LinkButton className={s.url} title={t.open(run.url)} onClick={onOpen}>
+              {run.url}
+              <Icon name="external" size={10} />
+            </LinkButton>
+            {run.on !== undefined && (
+              <span className={s.on} title={t.on(run.on)}>
+                {t.on(run.on)}
+              </span>
+            )}
+          </>
         ),
       ...(run.since === undefined ? {} : { since: run.since }),
       acts: (

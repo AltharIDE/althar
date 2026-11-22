@@ -23,6 +23,11 @@ describe('search ranking', () => {
     expect(search(entries, 'stf', context).map((one) => one.entry.id)).toEqual(['a', 'b'])
     expect(search(entries, 'search', context).map((one) => one.entry.id)).toEqual(['a', 'b'])
   })
+  it.each(['#845', '#84'])('finds a pull request by its number in a question (%s)', (key) => {
+    const entries = [entry('pull', 'Retry checkout deliveries', { kind: 'pull', keys: ['#845'] })]
+    const found = search(entries, `Where is ${key}?`, context, { any: true })
+    expect(found.map(({ entry, exact }) => ({ id: entry.id, exact }))).toEqual([{ id: 'pull', exact: key === '#845' }])
+  })
   it('shows the words around a deep note match', () => {
     const text = `${'Earlier words. '.repeat(30)}Never rebase a published branch.`
     const found = passageOf(text, ['rebase'], 60)!

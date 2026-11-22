@@ -16,7 +16,7 @@ import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
 
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
-import type { WindowAction } from '../renderer/data/services'
+import type { WelcomeMilestone, WindowAction } from '../renderer/data/services'
 import type { PageKey, PageState } from '../main/browser/page'
 import type { CanvasGroundNews, CanvasPointed } from '../main/canvases/boards'
 import type { GroundChange, GroundPin } from '../overlay/ground'
@@ -234,6 +234,7 @@ contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
+  welcomeUsage: (...milestone: WelcomeMilestone): void => ipcRenderer.send('althar:welcome-usage', ...milestone),
   onStartupStage: (listener: (stage: StartupStage) => void): (() => void) => {
     startupStages.add(listener)
     listener(startupStage)

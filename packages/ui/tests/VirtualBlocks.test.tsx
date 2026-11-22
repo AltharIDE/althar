@@ -128,6 +128,7 @@ const resized = () =>
 interface Block {
   readonly id: string
   readonly h: number
+  readonly before?: number
   readonly rhythm?: string
 }
 
@@ -149,9 +150,12 @@ function Column({ list, follow = true, navigator = false }: { list: ReadonlyArra
             count={list.length}
             keyOf={(i) => list[i]!.id}
             render={(i) => (
-              <div data-h={list[i]!.h} data-rhythm={list[i]!.rhythm} data-item={list[i]!.id}>
-                <button type="button">{`Block ${list[i]!.id}`}</button>
-              </div>
+              <>
+                {list[i]!.before === undefined ? null : <div data-h={list[i]!.before} />}
+                <div data-h={list[i]!.h} data-rhythm={list[i]!.rhythm} data-item={list[i]!.id}>
+                  <button type="button">{`Block ${list[i]!.id}`}</button>
+                </div>
+              </>
             )}
             holds={(i, itemId) => list[i]!.id === itemId}
             stopOf={(i) => (i % 2 === 0 ? { prompt: `Asked ${list[i]!.id}`, reply: '' } : null)}
@@ -244,6 +248,21 @@ describe('a thread drawn only near the view', () => {
     await frame()
     expect(topOf('item-299')).toBe(was)
     expect(scrolled).toBe(columnOf().height - VIEW)
+  })
+
+  it('keeps the visible part of a block still as an item above it grows within the same block', async () => {
+    const list = blocks(0, 300)
+    list[294] = { ...list[294]!, before: 60 }
+    const { rerender } = render(<Column list={list} />)
+    await frame()
+    await scrollBy(topOf('item-294'))
+    expect(topOf('item-294')).toBe(0)
+
+    const grown = list.map((block, index) => (index === 294 ? { ...block, before: 110 } : block))
+    rerender(<Column list={grown} />)
+    expect(topOf('item-294')).toBe(0)
+    await frame()
+    expect(topOf('item-294')).toBe(0)
   })
 
   it('leaves the bottom a little at a time, as a trackpad scrolls, without being pulled back to it', async () => {

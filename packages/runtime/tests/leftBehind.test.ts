@@ -1,6 +1,6 @@
 import { budget } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -58,10 +58,19 @@ const markedFor = (taskId: string) =>
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      const state = stat.charAt(stat.lastIndexOf(')') + 2)
+      return state !== 'Z' && state !== 'X'
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT'
+    }
+  }
+  return true
 }
 
 /** A process of its own that runs until stopped, outside every tree, marked as `work` says, or not at all. */
@@ -128,8 +137,8 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
   })
 
 /**
- * Waits until none of `pids` runs. One that was stopped loses its mark at once,
- * but answers to its pid until its parent has reaped it.
+ * Waits until none of `pids` runs. On Linux, an unreaped process can still
+ * answer to its pid after it has exited.
  */
 const stopped = (pids: ReadonlyArray<number>) =>
   until(
@@ -254,9 +263,9 @@ describe.skipIf(windows)('a task that settles', () => {
       assert.isBelow(took, 10_000)
       yield* stopped(marked)
       // Process death is visible before the run's finalizers finish and remove its entry from Launches.
+      yield* until((yield* Launches).ofProject(project.projectId), (launches) => launches.length === 0, 'merged task runs')
       yield* until((yield* LeftBehind).stopping, (stopping) => !stopping.has(task.taskId), 'merged task cleanup')
       assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-      assert.deepStrictEqual(yield* (yield* Launches).ofProject(project.projectId), [])
       // Keeping a place no longer lists it.
       assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
     }).pipe(

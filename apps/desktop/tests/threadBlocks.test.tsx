@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ThreadItem } from '@althar/contracts'
+import { logLines } from '@althar/ui'
 import { turnsById } from '../src/renderer/shared/turnTime'
 
-import { heardVerb, logLines, ThreadBlocks } from '../src/renderer/shared/ThreadBlocks'
+import { heardVerb, ThreadBlocks } from '../src/renderer/shared/ThreadBlocks'
 import { blocksOf } from '../src/renderer/shared/thread'
 import { fakeClient, items } from './fixtures'
 import { withServices } from './render'

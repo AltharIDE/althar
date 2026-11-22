@@ -383,6 +383,13 @@ export const useTask = (threadId: string): TaskModel => {
   const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
+  const { refetch } = thread
+  const lastShown = useRef<string | null>(null)
+  // A kept screen stops hearing items while hidden. Its latest page catches up when it shows again.
+  useEffect(() => {
+    if (lastShown.current === threadId) void refetch({ cancelRefetch: false })
+    lastShown.current = threadId
+  }, [refetch, threadId])
   // What the presses under way show of it, each held over the thread as read until a read after its answer is shown.
   const [shows, setShows] = useState<ReadonlyMap<number, Showing>>(new Map())
   // The messages taken back from the queue, out of it at once, until a read of each says so.
@@ -1013,13 +1020,16 @@ export const useTask = (threadId: string): TaskModel => {
       try {
         // As the cache has it now, not as this render had it: a head read may have landed since.
         const session = (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId)) ?? snapshot)?.session
-        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has:
-        // from what it was last picked to, else what the runtime holds for its next turn, else what it is on, so a pick back to what it is on cancels the one before.
-        if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, or another session takes it
+        // over after the one going out let it go, the choice changes the lead it has: from what it was last picked to, else what the runtime holds for its
+        // next turn, else what it is on, so a pick back to what it is on cancels the one before.
+        if (session == null || (!session.held && session.handover !== true)) await client.startSession(startOf(threadId, choice))
         else {
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
+          const holding = lastPick.current ?? runningOn(session)
           lastPick.current = choice
-          await moveTo(client, threadId, from, choice)
+          await moveTo(client, threadId, from, choice, holding)
         }
       } catch (failure) {
         // Said where the thread says what went wrong; the picker goes back to what it was.

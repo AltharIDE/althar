@@ -12,11 +12,13 @@ import {
   ChatPlusIn,
   Check,
   Clock,
+  Cloud,
   ClockRotateRight,
   CoffeeCup,
   CursorPointer,
   Community,
   Compress,
+  Computer,
   Cookie,
   Copy,
   Download,
@@ -34,6 +36,7 @@ import {
   GitPullRequest,
   Globe,
   HalfMoon,
+  HomeSimple,
   KanbanBoard,
   Laptop,
   LightBulb,
@@ -153,6 +156,12 @@ export const ICONS = {
   home: Server,
   /** This computer, as one of the homes. */
   computer: Laptop,
+  /** The home, among the computers it runs work on: it keeps the projects. */
+  house: HomeSimple,
+  /** A worker: a computer the home runs tasks on. */
+  worker: Computer,
+  /** Althar Cloud, where a home may run tasks that would wait. */
+  cloud: Cloud,
   /** A home's connection that dropped. */
   unlinked: LinkSlash,
   agents: Community,

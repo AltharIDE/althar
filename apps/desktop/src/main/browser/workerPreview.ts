@@ -60,7 +60,7 @@ export const workerPreviews = (connect: (owner: BrowserWindow, signal: AbortSign
     })
     const preview = new BrowserWindow({
       parent: owner,
-      title: 'Worker preview',
+      title: 'Preview',
       width: 1_080,
       height: 740,
       autoHideMenuBar: true,

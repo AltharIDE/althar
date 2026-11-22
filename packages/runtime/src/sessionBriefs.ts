@@ -7,7 +7,7 @@ import { thisDevice } from './device'
 import { errandLines } from './Errands'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
-import { PUSHED, git } from './git'
+import { PUSHED, git, looking } from './git'
 import { HANDED_OVER, type Recent, TOOK_OVER, coordinatorRecord, notesSection } from './handover'
 import type { InstanceInfo } from './Instance'
 import { quickIn } from './kinds'
@@ -298,7 +298,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         Effect.gen(function* () {
           const changed =
             repository.baseCommit === null ? '' : yield* quiet(git(repository.worktree, 'diff', '--stat', repository.baseCommit))
-          const status = yield* quiet(git(repository.worktree, 'status', '--short'))
+          const status = yield* quiet(looking(git(repository.worktree, 'status', '--short')))
           const named = (text: string) => (several && text !== '' ? `${repository.name}:\n${text}` : text)
           const commits =
             why.kind === 'start' || repository.baseCommit === null

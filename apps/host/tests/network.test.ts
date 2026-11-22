@@ -151,6 +151,8 @@ describe('opt-in HTTPS home configuration', () => {
           (yield* Effect.flip(runCommand({ ...options, command: 'revoke-device', revokeDeviceId: `dev_${'0'.repeat(32)}` }, io))).message,
           'Choose a connection device',
         )
+        yield* configureNetwork({ ...options, network: { ...options.network, origin: 'https://new-home.test' } })
+        assert.include((yield* Effect.flip(runCommand({ ...options, command: 'pair' }, io))).message, 'Restart the host')
         yield* runCommand({ ...options, command: 'disable-network' }, io)
         assert.isUndefined(yield* readNetworkConfiguration(options.profile))
         yield* Fiber.interrupt(host)
@@ -170,6 +172,37 @@ describe('opt-in HTTPS home configuration', () => {
       yield* disableNetwork(options.profile)
       assert.isUndefined(yield* readNetworkConfiguration(options.profile))
     }),
+  )
+
+  it.live('checks that pairing uses the direct connection settings active on the running home', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { root, options: original } = fixture()
+        if (original.network === undefined) throw new Error('Missing fixture configuration')
+        const port = yield* freePort
+        const options = { ...original, network: { ...original.network, port, origin: `https://127.0.0.1:${port}` } }
+        const dependencies = {
+          agents: Layer.succeed(Agents, Agents.from([])),
+          agentConfigs: { homeDir: root, folder: join(root, 'agent-sync') },
+        }
+        yield* initializeHome(options, dependencies)
+        const ready = yield* Deferred.make<HomeReady, unknown>()
+        const host = yield* Effect.forkScoped(
+          serveHome(options, (info) => Effect.asVoid(Deferred.succeed(ready, info)), dependencies).pipe(
+            Effect.catchCause((cause) => Effect.andThen(Deferred.failCause(ready, cause), Effect.failCause(cause))),
+          ),
+        )
+        yield* Deferred.await(ready)
+        // Configuration can be saved against a running home, but does not take effect until it restarts.
+        yield* configureNetwork(options)
+        const output: string[] = []
+        const io = { out: (text: string) => output.push(text), node: process.execPath, entry: '/unused', path: '/bin' }
+        const error = yield* Effect.flip(runCommand({ ...options, command: 'pair', json: true }, io))
+        assert.include(error.message, 'Restart the host')
+        assert.deepStrictEqual(output, [])
+        yield* Fiber.interrupt(host)
+      }),
+    ),
   )
 
   it.live('reports damaged settings and refuses to configure without HTTPS options', () =>
