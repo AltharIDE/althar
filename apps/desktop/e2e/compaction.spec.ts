@@ -24,7 +24,7 @@ test('a full coordinator answers a follow-up and compacts on its own while idle'
     await say(page, 'And what needs attention next? [answers-after:1s]')
     await expect(answer).toHaveCount(2)
     await expect(compacted).toHaveCount(0)
-    await expect(compacted).toBeVisible({ timeout: 12_000 })
+    await expect(compacted).toBeVisible()
     await expect(page.getByRole('button', { name: 'Context 10% used' })).toBeVisible()
     await expect(conversation.getByText(/Started .*afresh|Started a fresh session/)).toHaveCount(0)
     await compacted.scrollIntoViewIfNeeded()
