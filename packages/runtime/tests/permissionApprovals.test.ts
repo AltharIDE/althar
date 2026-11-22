@@ -269,6 +269,8 @@ describe('protected permission approvals', () => {
       expect((yield* Effect.flip(api.Answer(decision))).reason).toBe('PersonRequired')
       const approval = yield* preparePermissionApproval(target, sign, decision)
       const code = new URL(approval.url).hash.slice(1)
+      const opposite = yield* preparePermissionApproval(target, sign, { ...decision, decision: 'reject' })
+      const oppositeCode = new URL(opposite.url).hash.slice(1)
       const browser = (path: string, value: unknown, from = target.origin) =>
         Effect.promise(
           () =>
@@ -329,9 +331,19 @@ describe('protected permission approvals', () => {
       const proof = authenticator.response(publicKey.challenge, { from: target.origin, rp: publicKey.rpId })
       expect((yield* browser(route + '/answer', { code, proof })).status).toBe(200)
       yield* approval.wait
+      // A second real signature cannot replay the same command ID with a different answer.
+      const oppositeView = yield* browser(route + '/view', { code: oppositeCode })
+      expect(oppositeView.status).toBe(200)
+      const otherChallenge = (JSON.parse(oppositeView.body) as { publicKey: { challenge: string } }).publicKey.challenge
+      const otherProof = authenticator.response(otherChallenge, { from: target.origin, rp: publicKey.rpId, counter: 2 })
+      expect((yield* browser(route + '/answer', { code: oppositeCode, proof: otherProof })).status).toBe(403)
+      expect(JSON.parse((yield* browser(route + '/result', { code: oppositeCode })).body)).toEqual({ state: 'refused' })
       expect((yield* browser(route + '/answer', { code, proof })).status).toBe(403)
       expect((yield* Effect.flip(api.Answer({ ...decision, commandId: id() }))).reason).toBe('PersonRequired')
       yield* until(thread, (entry) => entry.attention.length === 0)
+      yield* Effect.flip(preparePermissionApproval(target, sign, { ...decision, commandId: id() }))
+      yield* identities.revoke(paired.deviceId)
+      expect((yield* browser(route + '/result', { code })).status).toBe(403)
     })
     await Effect.runPromise(
       Effect.scoped(
