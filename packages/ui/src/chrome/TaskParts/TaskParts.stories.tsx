@@ -159,12 +159,14 @@ export const AWorktree: Story = {
 const workerCopies = (pending: boolean): ReadonlyArray<TaskPartModel> => {
   const worktree = PARTS[0]
   if (worktree === undefined) return []
+  // On a worker: where it works is the worker, and its files come to this computer as a copy.
   return [
     {
       ...worktree,
+      facts: [...(worktree.facts ?? []).filter(([key]) => key !== 'Where'), ['Where', 'Linux worker 3f9a2c']],
       actions: [
         { label: 'See the changes', onClick: fn() },
-        { label: pending ? 'Saving local copy…' : 'Save a local copy', onClick: fn(), disabled: pending, variant: 'quiet' },
+        { label: pending ? 'Copying…' : 'Copy to this Mac…', onClick: fn(), disabled: pending, variant: 'quiet', icon: 'download' },
       ],
     },
   ]

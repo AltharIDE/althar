@@ -5,6 +5,8 @@ import { ApiError, ClientDeviceId, type ClientIdentity, type PermissionApproval 
 import type { WebAuthnCredential } from '@simplewebauthn/server'
 import { Schema } from 'effect'
 
+import { refusesHostsUnder } from './rules'
+
 const lifetimeMs = 90_000
 const maxPending = 64
 const maxPerDevice = 4
@@ -120,6 +122,12 @@ export const makePermissionApprovals = (origin: URL, homeId: string, registratio
         reason: entry.action.reason === undefined ? null : visible(entry.action.reason),
         scope: entry.action.always ?? null,
         remembered: entry.remembered === null ? null : visible(entry.remembered),
+        // A never for a host refuses the hosts under it too, as the rules will read it: the page says so.
+        under:
+          entry.action.decision === 'reject' &&
+          entry.action.always === 'exact' &&
+          entry.remembered !== null &&
+          refusesHostsUnder(entry.remembered),
         publicKey: {
           rpId: rpID,
           challenge: entry.challenge,

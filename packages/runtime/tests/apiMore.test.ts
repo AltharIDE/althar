@@ -404,7 +404,7 @@ describe('a normal task assigned to a worker', () => {
         const planId = plan?.id ?? ''
         yield* client.HoldPlan({ commandId: commandId(), planId })
         const rejected = yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId, workerId }))
-        assert.strictEqual(rejected.message, 'This worker is already running a task.')
+        assert.strictEqual(rejected.message, 'Linux worker 666666 is at work on another task.')
         const held = (yield* thread).items.find((one) => one.kind === 'task')
         assert.strictEqual(held?.kind === 'task' ? held.content.phase : null, 'held')
       }),
@@ -431,11 +431,11 @@ describe('a normal task assigned to a worker', () => {
         }
         const refused = (changes: Partial<Pick<typeof request, 'steps'>> & { repositories?: string[]; chat?: boolean }) =>
           Effect.flip(client.StartTask({ ...request, ...changes, commandId: commandId() })).pipe(Effect.map((error) => error.message))
-        assert.strictEqual(yield* refused({ repositories: ['api', 'web'] }), 'A worker needs a task with one repository.')
-        assert.strictEqual(yield* refused({ chat: true }), 'This task stays on its home.')
+        assert.strictEqual(yield* refused({ repositories: ['api', 'web'] }), 'A worker takes one repository at a time.')
+        assert.strictEqual(yield* refused({ chat: true }), 'An aside runs on the home.')
         assert.strictEqual(
           yield* refused({ repositories: ['api'], steps: [{ ...request.steps[0]!, agentId: 'claude-code' }] }),
-          'This worker does not have the lead’s agent.',
+          'Linux worker 555555 doesn’t have the lead’s agent.',
         )
         assert.lengthOf((yield* client.ListTasks({ projectId: project.id })).tasks, 0)
         assert.strictEqual(opened, 0)
@@ -650,9 +650,9 @@ describe('a normal task assigned to a worker', () => {
             rows: 24,
           }),
         )
-        assert.include(remoteRunShell.message, 'This command runs on a worker')
+        assert.include(remoteRunShell.message, 'It runs on Linux worker')
         previewMode = 'refuse'
-        assert.include((yield* Effect.flip(client.ReadLaunchPreview(readPreview))).message, 'could not read this preview')
+        assert.include((yield* Effect.flip(client.ReadLaunchPreview(readPreview))).message, 'couldn’t reach the app')
         yield* Effect.flip(client.OpenLaunchPreviewSocket(previewRun))
         previewMode = 'closed'
         yield* Effect.flip(client.OpenLaunchPreviewSocket(previewRun))
@@ -707,7 +707,7 @@ describe('a normal task assigned to a worker', () => {
             rows: 24,
           }),
         )
-        assert.include(shell.message, 'This task runs on a worker')
+        assert.include(shell.message, 'To work in its files here, copy them from its Worktree.')
         const requested = { projectId: project.id, taskId: task.id, source: 'worker' as const }
         yield* Effect.flip(client.PrepareWorkerSnapshot({ ...requested, projectId: 'proj_' + '0'.repeat(32) }))
         const copy = yield* client.PrepareWorkerSnapshot(requested)
