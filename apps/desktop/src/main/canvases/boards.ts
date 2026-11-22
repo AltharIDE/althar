@@ -30,6 +30,12 @@ export const boardsAt = async (root: string, manifest: string): Promise<CanvasBo
 
 /** A part of a board the person pointed at, with a picture of the canvas to write the comment over, as the window gets it. */
 export interface CanvasPointed {
+  /**
+   * The canvas and version the view had loaded when the part was pointed at: what its comment is on, whatever the window
+   * shows by the time it hears of it.
+   */
+  readonly canvasId: string
+  readonly version: number
   readonly page: string
   readonly board: string
   readonly picked: Picked

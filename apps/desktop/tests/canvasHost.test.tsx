@@ -625,6 +625,8 @@ describe('a canvas of boards', () => {
     say({
       kind: 'pointed',
       pointed: {
+        canvasId: CANVAS,
+        version: 1,
         page: 'Checkout',
         board: 'Phone',
         picked,
@@ -646,6 +648,64 @@ describe('a canvas of boards', () => {
     await waitFor(() => expect(vi.mocked(canvases.show).mock.calls.at(-1)?.[1]).toMatchObject({ version: 2 }))
     await userEvent.type(field, 'Say Send it{Enter}')
     expect(commentsOf(DRAFT)).toMatchObject([{ note: 'Say Send it', on: { kind: 'canvas', version: 1, title: 'Checkout' } }])
+    measured.mockRestore()
+  })
+
+  it('files a part on the version the view had loaded as it was pointed at, and a draft’s pin opened on a newer one keeps its part', async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
+    const { canvases, say } = views()
+    const both = detail([
+      version(1, { kind: 'boards', title: 'Checkout', entry: 'canvas.json' }),
+      version(2, { kind: 'boards', title: 'Checkout, v2', entry: 'canvas.json' }),
+    ])
+    const { client } = canvasClient(both, BOARDS)
+    render(
+      <ServicesProvider value={servicesFor(client, fakeHost({ canvases }))}>
+        <CanvasHost threadId={THREAD} open={latest} draft={DRAFT} onVersion={vi.fn()} onClose={vi.fn()} />
+      </ServicesProvider>,
+    )
+    // The window has moved on to v2 by the time it hears of a part pointed at while the view had v1.
+    await waitFor(() => expect(vi.mocked(canvases.show).mock.calls.at(-1)?.[1]).toMatchObject({ version: 2 }))
+    const picked = {
+      selector: 'button.go',
+      label: 'button.go',
+      text: 'Send the gift',
+      rect: { x: 10, y: 20, width: 120, height: 40 },
+      font: '14px · 500 · Inter',
+      colour: '#ffffff',
+      background: '#c2552d',
+      page: { width: 390, height: 844 },
+    }
+    const pointed = (version: number, over: object = {}) => ({
+      canvasId: CANVAS,
+      version,
+      page: 'Checkout',
+      board: 'Phone',
+      picked,
+      crop: null,
+      cropSize: null,
+      still: 'data:image/jpeg;base64,CCCC',
+      at: { x: 40, y: 60, width: 60, height: 20 },
+      ...over,
+    })
+    // One from another canvas, the view having moved on to it, opens nothing.
+    say({ kind: 'pointed', pointed: pointed(1, { canvasId: `cnv_${'f6'.repeat(16)}` }) })
+    expect(screen.queryByRole('textbox', { name: 'Comment on button.go' })).toBeNull()
+    expect(canvases.clear).toHaveBeenCalledWith(THREAD)
+    say({ kind: 'pointed', pointed: pointed(1) })
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment on button.go' }), 'Say Send it{Enter}')
+    const anchor = { kind: 'element', selector: 'button.go', label: 'button.go', text: 'Send the gift', page: 'Checkout', board: 'Phone' }
+    expect(commentsOf(DRAFT)).toMatchObject([{ note: 'Say Send it', crop: null, on: { version: 1, title: 'Checkout', anchor } }])
+
+    // Its pin, pressed on v2, opens it where its part shows there; changed, it keeps the part and picture it was made on, on v1.
+    vi.mocked(canvases.find!).mockResolvedValue(
+      pointed(2, { picked: { ...picked, text: 'Send it now' }, crop: 'data:image/png;base64,TkVX', cropSize: { width: 10, height: 10 } }),
+    )
+    say({ kind: 'pin', n: 1 })
+    const again = await screen.findByRole('textbox', { name: 'Comment on button.go' })
+    await userEvent.clear(again)
+    await userEvent.type(again, 'Say Send it now{Enter}')
+    expect(commentsOf(DRAFT)).toMatchObject([{ note: 'Say Send it now', crop: null, on: { version: 1, title: 'Checkout', anchor } }])
     measured.mockRestore()
   })
 
@@ -682,6 +742,8 @@ describe('a canvas of boards', () => {
     say({
       kind: 'pointed',
       pointed: {
+        canvasId: CANVAS,
+        version: 1,
         page: 'Checkout',
         board: 'Phone',
         picked,

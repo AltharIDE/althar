@@ -292,6 +292,8 @@ export const startCanvases = (options: CanvasesOptions) => {
   /** Starts the ground on a load of a canvas of boards, and passes on what it says until the next load. */
   const ground = async (one: View, load: number) => {
     const script = options.ground?.()
+    // What this load is of: each part pointed at in it is on that version, however long its picture takes.
+    const loaded = { canvasId: one.target.canvasId, version: one.target.version }
     const boards = await boardsAt(options.root, one.target.manifest)
     if (script === undefined || boards === null || !live(one, load)) return
     const started = await run<GroundNews>(
@@ -310,7 +312,7 @@ export const startCanvases = (options: CanvasesOptions) => {
       one.wanted = { view: news.state.view, page: news.state.page, board: news.state.board, tool: news.state.tool }
       for (const event of news.events) {
         if (event.kind === 'pointed') {
-          const pointed = await pictureOf(one, event)
+          const pointed = await pictureOf(one, event, loaded)
           if (pointed !== null && live(one, load)) {
             send(one, { kind: 'pointed', pointed })
             // The comment is written in the window: the keyboard goes back to it.
@@ -323,7 +325,11 @@ export const startCanvases = (options: CanvasesOptions) => {
   }
 
   /** A part pointed at, with a crop of it and a picture of the canvas to write over, in the window's pixels. */
-  const pictureOf = async (one: View, part: GroundPart): Promise<CanvasPointed | null> => {
+  const pictureOf = async (
+    one: View,
+    part: GroundPart,
+    loaded: { readonly canvasId: string; readonly version: number },
+  ): Promise<CanvasPointed | null> => {
     const picked = pickedOf(part.picked)
     if (picked === null) return null
     const contents = one.view.webContents
@@ -340,6 +346,7 @@ export const startCanvases = (options: CanvasesOptions) => {
     const shown = cropped === null || cropped.isEmpty() ? null : smaller(cropped)
     const zoom = one.window.webContents.getZoomFactor()
     return {
+      ...loaded,
       page: part.page,
       board: part.board,
       picked,
@@ -415,11 +422,12 @@ export const startCanvases = (options: CanvasesOptions) => {
   const find = async (key: string, part: { readonly page: string; readonly board: string; readonly selector: string }) => {
     const one = boardsView(key)
     if (one === null) return null
+    const loaded = { canvasId: one.target.canvasId, version: one.target.version }
     const found = await run<GroundPart | null>(
       one,
       `globalThis.__altharGround?.find(${JSON.stringify(part.page)}, ${JSON.stringify(part.board)}, ${JSON.stringify(part.selector)}) ?? null`,
     ).catch(() => null)
-    return found === null ? null : pictureOf(one, found)
+    return found === null ? null : pictureOf(one, found, loaded)
   }
 
   /** Takes the outline off what was pointed at: its comment is written, or set aside. */

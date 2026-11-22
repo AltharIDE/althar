@@ -11,7 +11,7 @@ import { pictureUrl } from '../../../main/pictureAddress'
 import { messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { type CanvasSpot, canvasPlace, drop, gather, savePageComment, useComments } from '../../shared/comments'
+import { type CanvasSpot, canvasPlace, drop, gather, rewrite, savePageComment, useComments } from '../../shared/comments'
 import { useCovered } from '../browser/cover'
 import { boardsOfText, pinsOf, useGround } from './boards'
 import { DownloadCanvas } from './DownloadCanvas'
@@ -171,7 +171,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
     boards,
     draft,
     pinned,
-    shown: version === null ? null : { version: version.number, title: version.title },
+    titleOf: (number) => detail.data?.versions.find((one) => one.number === number)?.title ?? null,
     onChip: (key) => (key === 'open' ? pressed.current.open?.() : key === 'comment' ? pressed.current.comment() : pressed.current.close()),
     onVersion: (step) => {
       if (version === null) return
@@ -356,6 +356,11 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
                   onSubmit={(note) => {
                     const { pointed, comment: was } = ground.writing ?? { pointed: null, comment: null }
                     if (pointed === null) return
+                    // A draft's comment opened again changes its words alone: it stays on the part, version and picture it was made on.
+                    if (was !== null) {
+                      rewrite(draft, was.id, note)
+                      return ground.done()
+                    }
                     const on = ground.writing?.on ?? { version: version.number, title: version.title }
                     const spot: CanvasSpot = {
                       kind: 'canvas',
@@ -373,7 +378,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
                       },
                       picked: pointed.picked,
                     }
-                    savePageComment(draft, was?.id ?? null, note, spot, pointed.crop)
+                    savePageComment(draft, null, note, spot, pointed.crop)
                     ground.done()
                   }}
                   onCancel={ground.done}
@@ -398,7 +403,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, 
 interface Writing {
   readonly pointed: CanvasPointed
   readonly comment: { readonly id: string; readonly note: string } | null
-  /** The version the part was pointed at on, as it showed then: the comment is on it, whatever is published while it is written. */
+  /** The version the part was pointed at on, as the view had it loaded: the comment is on it, whatever shows by the time it is written. */
   readonly on: { readonly version: number; readonly title: string }
 }
 
@@ -414,7 +419,7 @@ function useBoards({
   boards,
   draft,
   pinned,
-  shown,
+  titleOf,
   onChip,
   onVersion,
 }: {
@@ -423,8 +428,8 @@ function useBoards({
   boards: CanvasBoards | null
   draft: string | null
   pinned: ReturnType<typeof pinsOf>
-  /** The version showing now: what a part pointed at now is on. */
-  shown: { readonly version: number; readonly title: string } | null
+  /** A version's title, by its number, where the canvas has it. */
+  titleOf: (version: number) => string | null
   /** Its chip's Open and close, beside a conversation, drawn by the ground beside its zoom. */
   onChip: (key: 'open' | 'close' | 'comment') => void
   onVersion: (step: -1 | 1) => void
@@ -434,10 +439,12 @@ function useBoards({
   const [room, setRoom] = useState({ width: 0, height: 0 })
   const drafts = useComments(draft ?? '')
   const ground = useGround(threadId, canvasId, boards, {
-    // A part pointed at opens its comment, where there is a draft to keep it in.
-    // It is on the version showing as it is pointed at: one published while it is written doesn't move it.
+    // A part pointed at opens its comment, where there is a draft to keep it in. It is on the version the view had loaded
+    // as it was pointed at, which the point carries: neither the window moving on before it hears of it, nor a version
+    // published while it is written, moves it.
     pointed: (pointed) => {
-      if (draft !== null && shown !== null) setWriting({ pointed, comment: null, on: shown })
+      const title = pointed.canvasId === canvasId ? titleOf(pointed.version) : null
+      if (draft !== null && title !== null) setWriting({ pointed, comment: null, on: { version: pointed.version, title } })
       else views?.clear?.(threadId)
     },
     pin: (n) => {
@@ -448,7 +455,7 @@ function useBoards({
       if (mine.on.kind !== 'canvas' || mine.on.anchor.kind !== 'element') return
       const { page, board, selector } = mine.on.anchor
       if (page === undefined || board === undefined) return
-      // Opened again on the version it was made on.
+      // Opened again where its part shows now, to change its words: it stays on the version, part and picture it was made on.
       const on = { version: mine.on.version, title: mine.on.title }
       void views?.find?.(threadId, { page, board, selector }).then((pointed) => {
         if (pointed !== null) setWriting({ pointed, comment: { id: mine.id, note: mine.note }, on })
