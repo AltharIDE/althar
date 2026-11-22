@@ -26,6 +26,7 @@ import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
+import type { ComputerAnswer, ComputerCall, ComputerOwner } from './computerBridge'
 import type { SkillsConfig } from './Skills'
 import type { WorkerExecutionPlatform } from './workerExecution'
 
@@ -110,6 +111,8 @@ export interface RuntimeOptions {
    * Without it, the page tools say this Althar can't drive pages.
    */
   readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
+  readonly computer?: (owner: ComputerOwner, call: ComputerCall) => Effect.Effect<ComputerAnswer, string>
+  readonly computerEnded?: (owner: ComputerOwner) => void
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */

@@ -87,6 +87,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',
+  'thread/ComputerUse/ComputerUse.tsx': 'the latest view a task took of an app or the display, which opens full size',
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
   'thread/Code/CodeRef.tsx': 'a name that names code inside prose, as a chip or as its underlined words',
   'thread/Code/CodeView.tsx': 'a file to open instead, as a path’s chip; the way to the other version, a word at the end of a note',
