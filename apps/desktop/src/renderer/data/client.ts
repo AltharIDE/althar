@@ -10,7 +10,7 @@ import {
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
-import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection, ClientPage, PairingCodeMade, PairingStatus, PhoneAccess, ShipRoute } from '@althar/contracts'
 
 import {
   type ShownTerminal,
@@ -345,6 +345,16 @@ export interface Client {
   readonly signInToolServer: (agent: SyncedAgent, name: string) => Promise<void>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
+  /** Whether phones reach the home, and whether this window can let them in (This Mac's own). */
+  readonly phoneAccess: () => Promise<PhoneAccess>
+  readonly setPhoneAccess: (on: boolean) => Promise<PhoneAccess>
+  /** A pairing code for a phone, its link, and what to ask after. */
+  readonly createPairingCode: () => Promise<PairingCodeMade>
+  readonly pairingStatus: (tokenHash: string) => Promise<PairingStatus>
+  /** The devices paired with the home, a page at a time. */
+  readonly pairedDevices: (after?: string) => Promise<ClientPage>
+  /** Takes a paired device off: the home no longer accepts its key. */
+  readonly removePairedDevice: (deviceId: string) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-056). */
@@ -1215,6 +1225,12 @@ export const connect = async (
     rollBackSkill: (id) => command((commandId) => api.RollBackSkill({ commandId, id })),
     uninstallSkill: (id) => command((commandId) => api.UninstallSkill({ commandId, id })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    phoneAccess: () => settle(api.GetPhoneAccess({})),
+    setPhoneAccess: (on) => command((commandId) => api.SetPhoneAccess({ commandId, on })),
+    createPairingCode: () => command((commandId) => api.CreatePairingCode({ commandId })),
+    pairingStatus: (tokenHash) => settle(api.GetPairingStatus({ tokenHash })),
+    pairedDevices: (after) => settle(api.ListClientDevices({ limit: 100, ...(after === undefined ? {} : { after }) })),
+    removePairedDevice: (deviceId) => command((commandId) => api.RevokeConnectionDevice({ commandId, deviceId })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),

@@ -29,8 +29,8 @@ export type PairPhoneState =
   | { readonly kind: 'waiting'; readonly code: string; readonly link: string; readonly left: number }
   | { readonly kind: 'expired'; readonly code: string; readonly link: string }
   | { readonly kind: 'paired'; readonly code: string; readonly device: string }
-  /** The home couldn't make a code: why, in its words. */
-  | { readonly kind: 'failed'; readonly problem: string }
+  /** The home couldn't make a code: why, in its words; `again` where trying again may help. */
+  | { readonly kind: 'failed'; readonly problem: string; readonly again?: boolean }
 
 export interface PairPhoneProps {
   /** The home, as the window names it: This Mac, or a remote home's name. */
@@ -151,9 +151,11 @@ export function PairPhone({ home, state, layout = 'wide', reach, onLetIn, onNewC
         <div className={s.side}>
           <span className={s.lead}>No code this time</span>
           <span className={s.problem}>{state.problem}</span>
-          <span className={s.actions}>
-            <Button onClick={onNewCode}>Try again</Button>
-          </span>
+          {state.again !== false && (
+            <span className={s.actions}>
+              <Button onClick={onNewCode}>Try again</Button>
+            </span>
+          )}
         </div>
       </div>,
     )

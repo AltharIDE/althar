@@ -6,6 +6,7 @@ import type { Host } from '../../data/services'
 import { useServices } from '../../data/services'
 import { ConnectHome } from './ConnectHome'
 import { ManageHomes } from './ManageHomes'
+import { PhonesDialog } from '../phones/PhonesDialog'
 import { SetupChip } from './SetUp'
 import { homesUi, livenessOf, openedAgo, useHomeSetup, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
 import s from './Homes.module.css'
@@ -14,7 +15,8 @@ import s from './Homes.module.css'
  * The window's home is one chip at the end of its bar: in a home's window,
  * its name; in this computer's, a plug, including before the first connection.
  * Its menu is the chooser: this computer and each
- * home, Connect a home…, Manage homes…. A dropped connection shows in the
+ * home, Connect a home…, Manage homes…, then Pair a phone… for the window's
+ * home. A dropped connection shows in the
  * chip itself, with Reconnect beside it: the window stays as it was,
  * readable, and nothing covers it.
  */
@@ -91,6 +93,10 @@ function HomesMenu({
           Manage homes…
         </MenuItem>
       )}
+      <MenuSeparator />
+      <MenuItem icon="phone" onSelect={() => homesUi.set({ dialog: 'phones' })}>
+        Pair a phone…
+      </MenuItem>
     </Menu>
   )
 }
@@ -190,6 +196,8 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
   const close = () => homesUi.set({ dialog: null })
   if (dialog === 'connect')
     return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} />
+  if (dialog === 'phones' && here !== null)
+    return <PhonesDialog home={here.current.kind === 'local' ? 'This Mac' : here.current.home.name} onClose={close} />
   if (dialog === 'manage')
     return (
       <ManageHomes

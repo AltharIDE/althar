@@ -48,7 +48,7 @@ export const useHomeSetup = (homes: HomesHost | undefined): HomeSetup | null => 
 /** Asks the window to show its homes, as File › Homes… does: the chip's menu, or Connect a home where there's no chip yet. */
 export const showHomes = () => window.dispatchEvent(new Event('althar:show-homes'))
 
-export type HomesDialog = 'connect' | 'manage' | null
+export type HomesDialog = 'connect' | 'manage' | 'phones' | null
 interface HomesUi {
   readonly menu: boolean
   readonly dialog: HomesDialog
