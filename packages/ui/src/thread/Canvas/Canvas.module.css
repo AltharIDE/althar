@@ -257,14 +257,18 @@
 /* its pages and view at the start, its tools in the middle, its zoom at the end */
 .boardsBar {
   flex: none;
+  container: boards-bar / inline-size;
+  height: 44px;
+  border-top: 1px solid var(--line);
+  background: var(--chrome);
+}
+.boardsInner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  height: 44px;
+  height: 100%;
   padding: 0 10px;
-  border-top: 1px solid var(--line);
-  background: var(--chrome);
 }
 .boardsStart {
   min-width: 0;
@@ -276,6 +280,12 @@
   min-width: 0;
   display: flex;
   justify-content: flex-end;
+}
+/* A narrow bar: its start takes the room the zoom doesn't need, so a page's and a board's names aren't cut to a letter; the tools go off the middle. */
+@container boards-bar (max-width: 760px) {
+  .boardsInner {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
 }
 .pageMenu {
   min-width: 0;

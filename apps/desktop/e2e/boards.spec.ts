@@ -95,6 +95,11 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect(panel.getByText('2 of 6')).toBeVisible()
     await expect(panel.getByText('The card leads', { exact: true })).toBeVisible()
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('iframe')?.contentDocument?.querySelector('nav') != null`))
+      .toBe(true)
+    // A board's frame is drawn a moment after its page loads: the picture waits for it.
+    await page.waitForTimeout(1_500)
     await shoot(page, electronApp, panel, 'test-results/boards-one.png')
 
     // Every page at once, a row each.
@@ -176,6 +181,8 @@ test('a canvas of boards in dark, and in a narrow window', async () => {
     await panel.getByRole('radio', { name: 'One board at a time' }).click()
     await expect(panel.getByText('1 of 6')).toBeVisible()
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await expect.poll(() => frames(electronApp)).toBe(1)
+    await page.waitForTimeout(1_500)
     await shoot(page, electronApp, panel, 'test-results/boards-dark-one.png')
   } finally {
     await electronApp.close()

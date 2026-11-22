@@ -95,90 +95,92 @@ export function BoardsBar({ pages, view, page, board, zoom, tool, onView, onPage
   const pageName = page === -1 ? t.everyPage : (pages[page]?.name ?? '')
   return (
     <div className={s.boardsBar}>
-      <div className={s.boardsStart}>
-        {pages.length > 1 && (
+      <div className={s.boardsInner}>
+        <div className={s.boardsStart}>
+          {pages.length > 1 && (
+            <Menu
+              label={t.pages}
+              placement="above"
+              trigger={
+                <Button variant="quiet" size="small" trailingIcon="chevronD" className={s.pageMenu} aria-label={`${t.pages}: ${pageName}`}>
+                  <span className={s.pageWord}>{pageName}</span>
+                </Button>
+              }
+            >
+              <MenuRadioGroup label={t.pages} value={String(page)} onChange={(value) => onPage(Number(value))}>
+                <MenuRadioItem value="-1" hint={String(all.length)}>
+                  {t.everyPage}
+                </MenuRadioItem>
+                <MenuSeparator />
+                {pages.map((one, p) => (
+                  <MenuRadioItem key={one.name} value={String(p)} hint={String(one.boards.length)}>
+                    {one.name}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </Menu>
+          )}
+          <Segmented
+            label={t.boards}
+            value={view}
+            onChange={onView}
+            options={[
+              { value: 'every', label: t.every, icon: 'boards', tooltip: { label: t.every } },
+              { value: 'one', label: t.one, icon: 'board', tooltip: { label: t.one } },
+            ]}
+          />
+          {view === 'one' && shown !== undefined && (
+            <span className={s.stepper}>
+              <IconButton icon="chevronL" label={t.before} kbd="←" size="small" disabled={at <= 0} onClick={() => onStep(-1)} />
+              <span className={s.stepName} title={shown.name}>
+                {shown.name}
+              </span>
+              {all.length > 1 && <span className={s.stepCount}>{t.of(at + 1, all.length)}</span>}
+              <IconButton icon="chevron" label={t.after} kbd="→" size="small" disabled={at >= all.length - 1} onClick={() => onStep(1)} />
+            </span>
+          )}
+        </div>
+        <div className={s.tools} role="toolbar" aria-label={t.tools}>
+          {TOOLS.map((one) => (
+            <IconButton
+              key={one.tool}
+              icon={one.icon}
+              label={t[one.tool]}
+              kbd={one.kbd}
+              size="small"
+              aria-pressed={tool === one.tool}
+              onClick={() => onTool(one.tool)}
+            />
+          ))}
+        </div>
+        <div className={s.boardsEnd}>
           <Menu
-            label={t.pages}
+            label={t.zoom}
             placement="above"
+            align="end"
             trigger={
-              <Button variant="quiet" size="small" trailingIcon="chevronD" className={s.pageMenu} aria-label={`${t.pages}: ${pageName}`}>
-                <span className={s.pageWord}>{pageName}</span>
+              <Button variant="quiet" size="small" trailingIcon="chevronD" className={s.zoom} aria-label={`${t.zoom}: ${t.percent(zoom)}`}>
+                {t.percent(zoom)}
               </Button>
             }
           >
-            <MenuRadioGroup label={t.pages} value={String(page)} onChange={(value) => onPage(Number(value))}>
-              <MenuRadioItem value="-1" hint={String(all.length)}>
-                {t.everyPage}
-              </MenuRadioItem>
-              <MenuSeparator />
-              {pages.map((one, p) => (
-                <MenuRadioItem key={one.name} value={String(p)} hint={String(one.boards.length)}>
-                  {one.name}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
+            <MenuItem onSelect={() => onZoom('in')} kbd="+">
+              {t.zoomIn}
+            </MenuItem>
+            <MenuItem onSelect={() => onZoom('out')} kbd="−">
+              {t.zoomOut}
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem onSelect={() => onZoom('fit')} kbd="⇧1">
+              {view === 'one' ? t.fitOne : t.fit}
+            </MenuItem>
+            <MenuItem onSelect={() => onZoom(0.5)}>{t.percent(0.5)}</MenuItem>
+            <MenuItem onSelect={() => onZoom(1)} kbd="⇧0">
+              {t.percent(1)}
+            </MenuItem>
+            <MenuItem onSelect={() => onZoom(2)}>{t.percent(2)}</MenuItem>
           </Menu>
-        )}
-        <Segmented
-          label={t.boards}
-          value={view}
-          onChange={onView}
-          options={[
-            { value: 'every', label: t.every, icon: 'boards', tooltip: { label: t.every } },
-            { value: 'one', label: t.one, icon: 'board', tooltip: { label: t.one } },
-          ]}
-        />
-        {view === 'one' && shown !== undefined && (
-          <span className={s.stepper}>
-            <IconButton icon="chevronL" label={t.before} kbd="←" size="small" disabled={at <= 0} onClick={() => onStep(-1)} />
-            <span className={s.stepName} title={shown.name}>
-              {shown.name}
-            </span>
-            {all.length > 1 && <span className={s.stepCount}>{t.of(at + 1, all.length)}</span>}
-            <IconButton icon="chevron" label={t.after} kbd="→" size="small" disabled={at >= all.length - 1} onClick={() => onStep(1)} />
-          </span>
-        )}
-      </div>
-      <div className={s.tools} role="toolbar" aria-label={t.tools}>
-        {TOOLS.map((one) => (
-          <IconButton
-            key={one.tool}
-            icon={one.icon}
-            label={t[one.tool]}
-            kbd={one.kbd}
-            size="small"
-            aria-pressed={tool === one.tool}
-            onClick={() => onTool(one.tool)}
-          />
-        ))}
-      </div>
-      <div className={s.boardsEnd}>
-        <Menu
-          label={t.zoom}
-          placement="above"
-          align="end"
-          trigger={
-            <Button variant="quiet" size="small" trailingIcon="chevronD" className={s.zoom} aria-label={`${t.zoom}: ${t.percent(zoom)}`}>
-              {t.percent(zoom)}
-            </Button>
-          }
-        >
-          <MenuItem onSelect={() => onZoom('in')} kbd="+">
-            {t.zoomIn}
-          </MenuItem>
-          <MenuItem onSelect={() => onZoom('out')} kbd="−">
-            {t.zoomOut}
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem onSelect={() => onZoom('fit')} kbd="⇧1">
-            {view === 'one' ? t.fitOne : t.fit}
-          </MenuItem>
-          <MenuItem onSelect={() => onZoom(0.5)}>{t.percent(0.5)}</MenuItem>
-          <MenuItem onSelect={() => onZoom(1)} kbd="⇧0">
-            {t.percent(1)}
-          </MenuItem>
-          <MenuItem onSelect={() => onZoom(2)}>{t.percent(2)}</MenuItem>
-        </Menu>
+        </div>
       </div>
     </div>
   )
