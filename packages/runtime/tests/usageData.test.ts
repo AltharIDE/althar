@@ -182,6 +182,72 @@ describe('usage data', () => {
     }).pipe(Effect.provide(withUsage())),
   )
 
+  it.live('measures failed and interrupted first turns with bucketed time and a bounded failure category', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projectId = (yield* opened()).projectId as ProjectId
+      const projects = yield* Projects
+      const { systemId } = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const turns = [
+        { state: 'failed', model: 'gpt-6-exact-model', errorClass: 'auth_required', seconds: 15 },
+        { state: 'interrupted', model: null, errorClass: null, seconds: 90 },
+        { state: 'failed', model: 'private/exact-model', errorClass: null, seconds: 420 },
+      ]
+      for (const [index, turn] of turns.entries()) {
+        const { threadId } = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: `Private task ${index}`,
+        })
+        const key = String(index + 1).padStart(32, '0')
+        const providerSessionId = `sess_${key}`
+        const turnId = `turn_${key}`
+        const endedAt = yield* timestamp
+        const requestedAt = new Date(Date.parse(endedAt) - turn.seconds * 1_000).toISOString()
+        yield* sql`INSERT INTO provider_sessions ${sql.insert({
+          id: providerSessionId,
+          projectId,
+          threadId,
+          agentId: 'codex',
+          state: 'active',
+          startedAt: requestedAt,
+        })}`
+        yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+          id: turnId,
+          projectId,
+          threadId,
+          providerSessionId,
+          controllerGeneration: 1,
+          requestedAt,
+          endedAt,
+          state: turn.state,
+          errorClass: turn.errorClass,
+          model: turn.model,
+          prompt: 'Private prompt',
+        })}`
+        yield* fact({
+          projectId,
+          aggregateType: 'turn_delivery',
+          aggregateId: turnId,
+          revision: 1,
+          type: `turn_delivery.${turn.state}`,
+          actorId: systemId,
+        })
+      }
+      yield* awaiting(events, (seen) => named(seen, 'task_first_turn_finished').length === 3)
+      assert.deepStrictEqual(
+        named(events, 'task_first_turn_finished').map((event) => event.properties),
+        [
+          { outcome: 'failed', agent: 'codex', family: 'gpt', took: '10s_to_1m', failure: 'auth_required' },
+          { outcome: 'interrupted', agent: 'codex', family: 'default', took: '1m_to_5m' },
+          { outcome: 'failed', agent: 'codex', family: 'other', took: 'over_5m', failure: 'unknown' },
+        ],
+      )
+      yield* stop
+    }).pipe(Effect.provide(withUsage())),
+  )
+
   it.live('says a review started when its lead is told to start, by the coordinator', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
