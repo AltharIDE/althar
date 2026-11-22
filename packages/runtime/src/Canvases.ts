@@ -140,6 +140,7 @@ interface VersionRow {
   readonly bytes: number
   readonly taskId: string | null
   readonly taskTitle: string | null
+  readonly threadId: string
   readonly createdAt: string
 }
 
@@ -156,8 +157,8 @@ const factsOf = (row: VersionRow): CanvasVersionFacts => ({
   bytes: row.bytes,
   by:
     row.taskId === null
-      ? { role: 'coordinator', taskId: null, taskTitle: null }
-      : { role: 'lead', taskId: row.taskId, taskTitle: row.taskTitle },
+      ? { role: 'coordinator', taskId: null, taskTitle: null, threadId: row.threadId }
+      : { role: 'lead', taskId: row.taskId, taskTitle: row.taskTitle, threadId: row.threadId },
   at: row.createdAt,
 })
 
@@ -178,7 +179,7 @@ export const CANVAS_TOOLS = [
 ] as const
 
 /** Selects a project's canvases with their latest versions. */
-const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.created_at`
+const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.thread_id, v.created_at`
 
 export class Canvases extends Context.Service<
   Canvases,

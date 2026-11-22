@@ -48,6 +48,8 @@ export interface CanvasHostProps {
   readonly draft: string | null
   readonly onVersion: (version: number) => void
   readonly onClose: () => void
+  /** Back to where it was opened from: every artifact of the project. */
+  readonly onBack?: () => void
 }
 
 const LONGEST_SELECTION = 240
@@ -105,7 +107,7 @@ export const svgAddress = (svg: string) => {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-export function CanvasHost({ threadId, open, draft, onVersion, onClose }: CanvasHostProps) {
+export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }: CanvasHostProps) {
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
   const version = detail.data === undefined ? null : shownVersion(detail.data, open)
@@ -205,6 +207,7 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose }: Canvas
       selected={passage?.text ?? null}
       comments={comments}
       onClose={onClose}
+      {...(onBack === undefined ? {} : { onBack })}
       fill={fill}
       loading={loading}
       {...(comment === undefined ? {} : { onComment: comment })}

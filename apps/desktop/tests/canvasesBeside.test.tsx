@@ -306,6 +306,8 @@ describe('a canvas as the Artifacts view lists it', () => {
       when: '2h ago',
       at: NOW,
       openComments: 2,
+      picture: null,
+      saved: null,
     })
     const coordinator = version(1, { by: { role: 'coordinator', taskId: null, taskTitle: null } })
     expect(rowOf(summary(OTHER, 'plan', coordinator), now).by).toBe('Coordinator')
@@ -324,6 +326,7 @@ describe('the project’s Artifacts view', () => {
   it('lists the project’s canvases, opens one in its place at its latest, steps it, and closes back to the list', async () => {
     const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
     withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'List' }))
     const table = await screen.findByRole('table', { name: 'The project’s artifacts' })
     expect(within(table).getByText('Coordinator')).toBeTruthy()
     expect(within(table).getByText('Lead of Redesign sign-in')).toBeTruthy()
@@ -349,10 +352,57 @@ describe('the project’s Artifacts view', () => {
   it('opens nothing where the project has no coordinator’s conversation yet', async () => {
     const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
     withServices(<ArtifactsView projectId={PROJECT} threadId={null} draft={null} />, client)
-    const table = await screen.findByRole('table', { name: 'The project’s artifacts' })
-    await userEvent.click(within(table).getByRole('button', { name: 'The plan' }))
-    expect(screen.getByRole('table', { name: 'The project’s artifacts' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
+    await userEvent.click(within(cards).getByRole('button', { name: /^The plan/ }))
+    expect(screen.getByRole('list', { name: 'The project’s artifacts' })).toBeTruthy()
     expect(client.getCanvas).not.toHaveBeenCalled()
+  })
+
+  it('show as cards, each with its facts and where it is saved, narrowed by Filter, and open beside the conversation that drew them', async () => {
+    const drawn = summary(
+      CANVAS,
+      'sign-in-flow',
+      version(3, { by: { role: 'lead', taskId: 'task_1', taskTitle: 'Redesign sign-in', threadId: 'thr_drew' } }),
+      2,
+    )
+    const saved = {
+      ...summary(OTHER, 'plan', version(1, { title: 'The plan', by: { role: 'coordinator', taskId: null, taskTitle: null } })),
+      saved: {
+        repositoryId: 'repo_1',
+        repository: 'kiln',
+        path: 'design/plan/',
+        how: 'pr' as const,
+        follow: true,
+        version: 1,
+        commit: 'abc1234',
+        pullRequest: null,
+        state: 'saved' as const,
+        problem: null,
+      },
+    }
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => [drawn, saved]) })
+    const onBeside = vi.fn()
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} onBeside={onBeside} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
+    expect(within(cards).getByText('In git at kiln/design/plan/')).toBeTruthy()
+    expect(within(cards).getByLabelText('2 open comments')).toBeTruthy()
+
+    // Filter keeps those saved to a repository; the count says how many of all show.
+    await userEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Saved to a repository' }))
+    await userEvent.keyboard('{Escape}')
+    expect(within(cards).queryByRole('button', { name: /^Sign-in flow/ })).toBeNull()
+    expect(screen.getByText('1 of 2')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Filter · 1' }))
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Saved to a repository' }))
+    await userEvent.keyboard('{Escape}')
+
+    // One drawn in a conversation opens beside it, by its thread and task.
+    await userEvent.click(within(cards).getByRole('button', { name: /^Sign-in flow, take 3/ }))
+    expect(onBeside).toHaveBeenCalledWith(CANVAS, 'thr_drew', 'task_1')
+    expect(screen.queryByRole('complementary')).toBeNull()
   })
 
   it('says why the list couldn’t be read', async () => {

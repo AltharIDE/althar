@@ -326,6 +326,8 @@ export const CanvasBy = Schema.Struct({
   taskId: Schema.NullOr(Schema.String),
   /** The task's title, as it is now; null for the coordinator. */
   taskTitle: Schema.NullOr(Schema.String),
+  /** The conversation it was published from: a task's, an aside's or the coordinator's, where the artifact is talked about. */
+  threadId: Schema.optional(Schema.String),
 })
 export type CanvasBy = typeof CanvasBy.Type
 

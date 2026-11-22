@@ -4,20 +4,23 @@ import { Icon } from '../../foundations/Icon/Icon'
 import type { IconName } from '../../foundations/Icon/icons'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { Menu, MenuCheckboxItem, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { type CanvasKind, canvasKindWords } from '../../thread/Canvas/canvas'
 import s from './Artifacts.module.css'
 
 /*
  * A project's Artifacts view (ADR-104): what its agents made to keep, every
- * lead's and the coordinator's together, as one table. Canvases are its first
- * kind; more join later, and the table holds them as it holds many. A filter
- * by kind, where there is more than one, and a search narrow it; its columns
- * sort it, by when each was last updated unless the person says. A row
- * opens its artifact in the view's place, and its Close comes back to the
- * table. Empty, a wall of faint drawings of what agents draw stands where
- * the table will be and fades out, with what will be here where it thins.
+ * lead's and the coordinator's together, as cards with a picture of each, or
+ * as one table. Canvases are its first kind; more join later. A filter by
+ * kind, where there is more than one, a search, and Filter (saved to a
+ * repository, with open comments) narrow it; Sort orders the cards, and the
+ * table's columns sort it, by when each was last updated unless the person
+ * says. One pressed opens where its host opens it. Empty, a wall of faint
+ * drawings of what agents draw stands where they will be and fades out, with
+ * what will be here where it thins.
  */
 
 export interface ArtifactsText {
@@ -34,6 +37,19 @@ export interface ArtifactsText {
   emptyTitle: string
   empty: string
   kinds: Readonly<Record<CanvasKind, string>>
+  layout: string
+  cards: string
+  list: string
+  filter: string
+  saved: string
+  commented: string
+  sort: string
+  sorts: Readonly<Record<'updated' | 'title' | 'comments', string>>
+  versions: (n: number) => string
+  openComments: (n: number) => string
+  inGit: (path: string) => string
+  savingTo: (path: string) => string
+  saveFailed: string
 }
 
 export const artifactsText: ArtifactsText = {
@@ -50,6 +66,19 @@ export const artifactsText: ArtifactsText = {
   emptyTitle: 'No artifacts yet',
   empty: 'Mockups, diagrams and charts your agents draw are kept here.',
   kinds: canvasKindWords,
+  layout: 'Show as',
+  cards: 'Cards',
+  list: 'List',
+  filter: 'Filter',
+  saved: 'Saved to a repository',
+  commented: 'With open comments',
+  sort: 'Sort',
+  sorts: { updated: 'Updated', title: 'Name', comments: 'Open comments' },
+  versions: (n) => (n === 1 ? '1 version' : `${n} versions`),
+  openComments: (n) => (n === 1 ? '1 open comment' : `${n} open comments`),
+  inGit: (path) => `In git at ${path}`,
+  savingTo: (path) => `Saving to ${path}`,
+  saveFailed: 'Saving failed',
 }
 
 /** An artifact as its row shows it. Today every one is a canvas. */
@@ -67,6 +96,10 @@ export interface ArtifactRow {
   readonly when: string
   readonly at: string
   readonly openComments: number
+  /** A picture of it as drawn, where there is one: its card shows it, else a drawing of its kind. */
+  readonly picture?: string | null
+  /** Where it is saved in git, where it is: the folder in its repository, and how its last save went. */
+  readonly saved?: { readonly repository: string; readonly path: string; readonly state: 'saving' | 'saved' | 'failed' } | null
 }
 
 /** What the table sorts by: a column. */
@@ -143,6 +176,16 @@ const Sequence = () => (
 
 const DRAWINGS = [Mockup, Diagram, Chart, Document, Picture, Sequence]
 
+/** What a card shows of a kind with no picture of its own yet. */
+const DRAWING_OF: Readonly<Record<CanvasKind, () => ReactNode>> = {
+  boards: Mockup,
+  html: Mockup,
+  markdown: Document,
+  mermaid: Diagram,
+  svg: Chart,
+  picture: Picture,
+}
+
 /** Three rows of six, each row shifted two along, so no column repeats down the wall. */
 const WALL = Array.from({ length: 18 }, (_, i) => DRAWINGS[(i * 5 + Math.floor(i / 6) * 2) % DRAWINGS.length]!)
 
@@ -190,11 +233,31 @@ export const shownRows = (
     })
 }
 
+/** How the artifacts show: as cards, each with its picture, or as the table. */
+export type ArtifactsLayout = 'cards' | 'list'
+
+/** What Filter keeps: those saved to a repository, those with open comments. */
+export interface ArtifactsFilter {
+  readonly saved: boolean
+  readonly commented: boolean
+}
+
+export const filtered = (rows: ReadonlyArray<ArtifactRow>, filter: ArtifactsFilter) =>
+  rows.filter((row) => (!filter.saved || (row.saved ?? null) !== null) && (!filter.commented || row.openComments > 0))
+
+const NO_FILTER: ArtifactsFilter = { saved: false, commented: false }
+
 export type ArtifactsProps = RootProps<
   'div',
   {
     canvases: ReadonlyArray<ArtifactRow>
     onOpen: (artifact: ArtifactRow) => void
+    /** Cards or the table: as it starts, or held by the host where it says when it changes. */
+    layout?: ArtifactsLayout
+    onLayout?: (layout: ArtifactsLayout) => void
+    /** What Filter keeps: as it starts, or held by the host where it says when it changes. */
+    filter?: ArtifactsFilter
+    onFilter?: (filter: ArtifactsFilter) => void
     /** The artifact open, drawn by the host: it takes the view. */
     open?: ReactNode
     error?: string
@@ -203,15 +266,44 @@ export type ArtifactsProps = RootProps<
   }
 >
 
-export function Artifacts({ canvases, onOpen, open, error, headingLevel = 1, text, className, ...rest }: ArtifactsProps) {
+export function Artifacts({
+  canvases,
+  onOpen,
+  layout: givenLayout,
+  onLayout,
+  filter: givenFilter,
+  onFilter,
+  open,
+  error,
+  headingLevel = 1,
+  text,
+  className,
+  ...rest
+}: ArtifactsProps) {
   const t = { ...artifactsText, ...text }
   const [kind, setKind] = useState<CanvasKind | 'all'>('all')
   const [words, setWords] = useState('')
   const [sort, setSort] = useState<Sort>({ key: 'updated', descending: true })
+  const [ownLayout, setLayout] = useState<ArtifactsLayout>(givenLayout ?? 'cards')
+  const [ownFilter, setFilter] = useState<ArtifactsFilter>(givenFilter ?? NO_FILTER)
+  const layout = onLayout !== undefined && givenLayout !== undefined ? givenLayout : ownLayout
+  const filter = onFilter !== undefined && givenFilter !== undefined ? givenFilter : ownFilter
   const present = useMemo(() => KINDS.filter((one) => canvases.some((row) => row.kind === one)), [canvases])
   // A kind no artifact has any longer shows nothing: back to all of them.
   const chosen = kind === 'all' || present.includes(kind) ? kind : 'all'
-  const rows = useMemo(() => shownRows(canvases, chosen, words, sort, t.kinds), [canvases, chosen, words, sort, t.kinds])
+  const rows = useMemo(
+    () => filtered(shownRows(canvases, chosen, words, sort, t.kinds), filter),
+    [canvases, chosen, words, sort, t.kinds, filter],
+  )
+  const lay = (next: ArtifactsLayout) => {
+    setLayout(next)
+    onLayout?.(next)
+  }
+  const narrow = (next: ArtifactsFilter) => {
+    setFilter(next)
+    onFilter?.(next)
+  }
+  const filters = Number(filter.saved) + Number(filter.commented)
 
   if (open !== undefined && open !== null && open !== false)
     return (
@@ -284,63 +376,178 @@ export function Artifacts({ canvases, onOpen, open, error, headingLevel = 1, tex
                 />
               </label>
               <span className={s.count}>{t.shown(rows.length, canvases.length)}</span>
-            </div>
-            <table className={s.table} aria-label={t.table}>
-              <thead>
-                <tr>
-                  {header('title')}
-                  {header('kind', false, s.wide)}
-                  {header('versions', true, s.wide)}
-                  {header('comments', true)}
-                  {header('by', false, s.wide)}
-                  {header('updated', true)}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className={s.noMatch}>
-                      {t.noMatch(words.trim())}
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => (
-                    <tr key={row.id} className={s.row} onClick={() => onOpen(row)}>
-                      <td>
-                        <span className={s.name}>
-                          <span className={s.glyph} aria-hidden="true">
-                            <Icon name={GLYPHS[row.kind]} size={14} />
-                          </span>
-                          <span className={s.words}>
-                            {/* The row opens it; this is its way in from the keyboard, and its name to assistive technology. */}
-                            <button type="button" className={s.open} onClick={(e) => (e.stopPropagation(), onOpen(row))}>
-                              {row.title}
-                            </button>
-                            <span className={s.slug}>{row.name}</span>
-                          </span>
-                        </span>
-                      </td>
-                      <td className={s.wide}>{t.kinds[row.kind]}</td>
-                      <td className={cx(s.num, s.wide)}>{row.version}</td>
-                      <td className={s.num}>
-                        {row.openComments === 0 ? (
-                          <span className={s.zero} aria-label={t.none}>
-                            —
-                          </span>
-                        ) : (
-                          <span className={s.comments}>{row.openComments}</span>
-                        )}
-                      </td>
-                      <td className={cx(s.by, s.wide)}>{row.by}</td>
-                      <td className={cx(s.num, s.when)}>{row.when}</td>
-                    </tr>
-                  ))
+              <span className={s.toolsEnd}>
+                <Menu
+                  label={t.filter}
+                  align="end"
+                  trigger={
+                    <Button variant="quiet" size="small" trailingIcon="chevronD" aria-pressed={filters > 0}>
+                      {filters === 0 ? t.filter : `${t.filter} · ${filters}`}
+                    </Button>
+                  }
+                >
+                  <MenuCheckboxItem checked={filter.saved} onCheckedChange={(saved) => narrow({ ...filter, saved })} keepOpen>
+                    {t.saved}
+                  </MenuCheckboxItem>
+                  <MenuCheckboxItem checked={filter.commented} onCheckedChange={(commented) => narrow({ ...filter, commented })} keepOpen>
+                    {t.commented}
+                  </MenuCheckboxItem>
+                </Menu>
+                {layout === 'cards' && (
+                  <Menu
+                    label={t.sort}
+                    align="end"
+                    trigger={
+                      <Button variant="quiet" size="small" trailingIcon="chevronD">
+                        {t.sorts[sort.key === 'title' || sort.key === 'comments' ? sort.key : 'updated']}
+                      </Button>
+                    }
+                  >
+                    <MenuRadioGroup
+                      label={t.sort}
+                      value={sort.key === 'title' || sort.key === 'comments' ? sort.key : 'updated'}
+                      onChange={(key) => setSort({ key: key as SortKey, descending: FIRST_DESCENDING.has(key as SortKey) })}
+                    >
+                      {(['updated', 'title', 'comments'] as const).map((key) => (
+                        <MenuRadioItem key={key} value={key}>
+                          {t.sorts[key]}
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </Menu>
                 )}
-              </tbody>
-            </table>
+                <Segmented
+                  label={t.layout}
+                  value={layout}
+                  onChange={lay}
+                  options={[
+                    { value: 'cards', label: t.cards, icon: 'boards', tooltip: { label: t.cards } },
+                    { value: 'list', label: t.list, icon: 'list', tooltip: { label: t.list } },
+                  ]}
+                />
+              </span>
+            </div>
+            {layout === 'cards' ? (
+              rows.length === 0 ? (
+                <p className={s.noMatchLine}>{t.noMatch(words.trim())}</p>
+              ) : (
+                <ul className={s.cards} aria-label={t.table}>
+                  {rows.map((row) => (
+                    <li key={row.id}>
+                      <Card row={row} t={t} onOpen={() => onOpen(row)} />
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : (
+              <table className={s.table} aria-label={t.table}>
+                <thead>
+                  <tr>
+                    {header('title')}
+                    {header('kind', false, s.wide)}
+                    {header('versions', true, s.wide)}
+                    {header('comments', true)}
+                    {header('by', false, s.wide)}
+                    {header('updated', true)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className={s.noMatch}>
+                        {t.noMatch(words.trim())}
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((row) => (
+                      <tr key={row.id} className={s.row} onClick={() => onOpen(row)}>
+                        <td>
+                          <span className={s.name}>
+                            <span className={s.glyph} aria-hidden="true">
+                              <Icon name={GLYPHS[row.kind]} size={14} />
+                            </span>
+                            <span className={s.words}>
+                              {/* The row opens it; this is its way in from the keyboard, and its name to assistive technology. */}
+                              <button type="button" className={s.open} onClick={(e) => (e.stopPropagation(), onOpen(row))}>
+                                {row.title}
+                              </button>
+                              <span className={s.slug}>{row.name}</span>
+                            </span>
+                          </span>
+                        </td>
+                        <td className={s.wide}>{t.kinds[row.kind]}</td>
+                        <td className={cx(s.num, s.wide)}>{row.version}</td>
+                        <td className={s.num}>
+                          {row.openComments === 0 ? (
+                            <span className={s.zero} aria-label={t.none}>
+                              —
+                            </span>
+                          ) : (
+                            <span className={s.comments}>{row.openComments}</span>
+                          )}
+                        </td>
+                        <td className={cx(s.by, s.wide)}>{row.by}</td>
+                        <td className={cx(s.num, s.when)}>{row.when}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </div>
     </div>
+  )
+}
+
+/** An artifact as a card: a picture of it (or a drawing of its kind), then its facts, the most wanted first. */
+function Card({ row, t, onOpen }: { row: ArtifactRow; t: ArtifactsText; onOpen: () => void }) {
+  const Drawing = DRAWING_OF[row.kind]
+  const saved = row.saved ?? null
+  return (
+    <button type="button" className={s.card} onClick={onOpen}>
+      <span className={s.cardPicture} aria-hidden="true">
+        {row.picture !== undefined && row.picture !== null ? (
+          <img src={row.picture} alt="" draggable={false} />
+        ) : (
+          <span className={s.cardDrawing}>
+            <Drawing />
+          </span>
+        )}
+      </span>
+      <span className={s.cardWords}>
+        <span className={s.cardTitle}>{row.title}</span>
+        <span className={s.cardFacts}>
+          <span className={s.cardKind}>
+            <Icon name={GLYPHS[row.kind]} size={12} />
+            {t.kinds[row.kind]}
+          </span>
+          <span>{t.versions(row.version)}</span>
+          <span className={s.cardWhen}>{row.when}</span>
+        </span>
+        <span className={s.cardFacts}>
+          <span className={s.cardBy}>{row.by}</span>
+          {row.openComments > 0 && (
+            <span className={s.cardComments} aria-label={t.openComments(row.openComments)}>
+              <Icon name="comment" size={12} />
+              {row.openComments}
+            </span>
+          )}
+        </span>
+        {saved !== null && (
+          <span className={cx(s.cardSaved, saved.state === 'failed' && s.cardFailed)}>
+            <Icon name="commit" size={12} />
+            <span className={s.cardPath}>
+              {saved.state === 'failed'
+                ? t.saveFailed
+                : saved.state === 'saving'
+                  ? t.savingTo(`${saved.repository}/${saved.path}`)
+                  : t.inGit(`${saved.repository}/${saved.path}`)}
+            </span>
+          </span>
+        )}
+      </span>
+    </button>
   )
 }

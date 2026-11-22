@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Markdown } from '../Markdown/Markdown'
 import { ThreadShellProvider } from '../Shell/Shell'
+import { BoardsBar } from './BoardsBar'
 import { CanvasLine } from './CanvasLine'
 import { CanvasPanel } from './CanvasPanel'
 import s from './Canvas.module.css'
@@ -189,4 +190,79 @@ export const InTheThread: StoryObj<typeof CanvasLine> = {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Open Sign-in page beside the conversation' })).toHaveAttribute('aria-pressed', 'true')
   },
+}
+
+const BOARDS = [
+  { name: 'Directions', boards: [{ name: 'A present first' }, { name: 'The card leads' }, { name: 'Pick the class' }, { name: 'Phone' }] },
+  { name: 'Receipt', boards: [{ name: 'Desktop' }, { name: 'Email' }] },
+]
+
+/** A canvas of boards: drawn on Althar's ground by a view of its own (here, a frame stands in), with its own bar along the bottom and its comments numbered as their pins. */
+export const ABoardsCanvas: Story = {
+  args: {
+    kind: 'boards',
+    title: 'Gift a class',
+    name: 'gift-a-class',
+    fill: true,
+    onReload: fn(),
+    onCommentPick: fn(),
+    comments: [
+      { id: 'c1', version: 3, body: 'Say what happens: Send Ana her class.', place: 'button.go on A present first', answered: false, n: 1 },
+      {
+        id: 'c2',
+        version: 2,
+        body: 'The card should lead.',
+        place: 'div.card on The card leads',
+        answered: true,
+        answer: 'Moved it first, in v3.',
+        n: 2,
+      },
+    ],
+    bar: (
+      <BoardsBar
+        pages={BOARDS}
+        view="every"
+        page={0}
+        board={{ page: 0, board: 0 }}
+        zoom={0.18}
+        tool="point"
+        onView={fn()}
+        onPage={fn()}
+        onStep={fn()}
+        onZoom={fn()}
+        onTool={fn()}
+      />
+    ),
+    children: <div className={s.page} style={{ background: 'var(--n-1)' }} />,
+  },
+  decorators: [beside],
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('toolbar', { name: 'Tools' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Pin 1' })).toBeInTheDocument()
+  },
+}
+
+/** One board at a time, stepped through every page's boards. */
+export const OneBoardAtATime: Story = {
+  args: {
+    ...ABoardsCanvas.args,
+    comments: [],
+    bar: (
+      <BoardsBar
+        pages={BOARDS}
+        view="one"
+        page={0}
+        board={{ page: 0, board: 1 }}
+        zoom={0.62}
+        tool="hand"
+        onView={fn()}
+        onPage={fn()}
+        onStep={fn()}
+        onZoom={fn()}
+        onTool={fn()}
+      />
+    ),
+  },
+  decorators: [beside],
 }

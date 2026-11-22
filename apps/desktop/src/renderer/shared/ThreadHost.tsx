@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import {
   type ComponentProps,
   type CSSProperties,
@@ -20,6 +21,7 @@ import {
   type FoundCode,
   type ImageRef,
   Lightbox,
+  Room,
   type ThreadShell,
   isMarkdownPath,
   TaskFace,
@@ -34,6 +36,7 @@ import { useServices } from '../data/services'
 import type { PageOpener } from '../features/browser/opener'
 import { pages, usePage } from '../features/browser/pages'
 import { PageView } from '../features/browser/PageView'
+import { type AskedBeside, useAskedBeside } from '../features/canvases/beside'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { pictureOf } from './code/FilePicture'
@@ -138,7 +141,8 @@ export const useThreadHost = (
   const [pictures, setPictures] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [doc, setDoc] = useState<DocRef | null>(null)
   const [opened, setOpen] = useState<(CodeOpen & { readonly threadId: string | null }) | null>(null)
-  const [canvas, setCanvas] = useState<(OpenCanvas & { readonly threadId: string | null }) | null>(null)
+  const [canvas, setCanvas] = useState<(OpenCanvas & { readonly threadId: string | null; readonly from?: string }) | null>(null)
+  const navigate = useNavigate()
   const owner = page?.owner ?? null
   const beside = usePage(owner, useServices().host.pages).where === 'beside' && conversation
   // A page opened beside the conversation takes the workbench from a document or a file; one of those opened takes it back.
@@ -166,6 +170,17 @@ export const useThreadHost = (
       setCanvas({ canvasId, version, follow, threadId })
     },
     [owner, threadId],
+  )
+  // An artifact opened from the project's Artifacts view opens here, with a way back to every artifact.
+  useAskedBeside(
+    threadId,
+    useCallback(
+      (ask: AskedBeside) => {
+        openCanvas(ask.canvasId, null, false)
+        setCanvas({ canvasId: ask.canvasId, version: null, follow: false, threadId, from: ask.from })
+      },
+      [openCanvas, threadId],
+    ),
   )
   // The file open is the thread's: another thread's names name other files.
   const open = opened !== null && opened.threadId === threadId ? opened : null
@@ -234,6 +249,18 @@ export const useThreadHost = (
           draft={page?.draft ?? null}
           onVersion={(version) => setCanvas({ ...shownCanvas, version, follow: false })}
           onClose={() => setCanvas(null)}
+          {...(shownCanvas.from === undefined
+            ? {}
+            : {
+                onBack: () => {
+                  setCanvas(null)
+                  void navigate({
+                    to: '/projects/$projectId',
+                    params: { projectId: shownCanvas.from ?? '' },
+                    search: { room: Room.Artifacts },
+                  })
+                },
+              })}
         />
       ) : null
     if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null && shown === null) return undefined
