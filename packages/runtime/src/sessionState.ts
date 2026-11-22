@@ -442,11 +442,17 @@ export const BASELINE_WITHIN = Duration.seconds(5)
 /** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
 export const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
-export const automaticCompactionDue = (running: Running) => {
+export const idleSince = (running: Running) =>
+  Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt)
+
+export const canCompactWhileIdle = (running: Running) => {
   const { thread } = running
   return (
     !running.stopping &&
     running.brief === undefined &&
+    running.nextLead === undefined &&
+    !running.settingLead &&
+    !running.moved &&
     running.handover === 'none' &&
     running.deliveryHeld === null &&
     !running.compactAttempted &&
@@ -457,6 +463,9 @@ export const automaticCompactionDue = (running: Running) => {
     canCompact(running.entry.definition.id)
   )
 }
+
+export const idleCompactionDue = (running: Running, now: number, idleFor: number) =>
+  canCompactWhileIdle(running) && now - idleSince(running) >= idleFor
 
 export const markCompacted = (running: Running) => {
   const { thread } = running

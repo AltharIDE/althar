@@ -392,9 +392,10 @@ describe('an aside opened with +', () => {
           assert.notInclude(lost, 'gather evidence')
           assert.isTrue(lost.endsWith('And the backoff? [lead:lost-once]'))
 
-          // A full aside compacts in place and reads the next words with current project records.
+          // A manual compaction refreshes the aside's brief and current project records.
           const again = yield* said('Look again. [context:25/1000000]')
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
+          yield* client.CompactContext({ commandId: commandId(), threadId: aside.threadId })
           const afterCompact = yield* said('And now? [context:1/1000000]')
           assert.include(afterCompact, 'Current Althar records after compaction.')
           assert.include(afterCompact, "You are an aside of this project's coordinator")

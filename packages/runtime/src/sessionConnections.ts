@@ -47,7 +47,6 @@ import {
   type Store,
   type ThreadContext,
   agentLost,
-  automaticCompactionDue,
   cwdOf,
   foldersOf,
   heardContext,
@@ -1055,9 +1054,6 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 )
                 yield* Effect.andThen(heardWork(running, event), heardBackground(running, event))
                 yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
-                // Idle updates can make compaction due as well as the events in a turn.
-                if (thread.role === 'coordinator' && !running.turnRunning && automaticCompactionDue(running))
-                  yield* Queue.offer(running.wake, undefined)
               })
             }),
           ),

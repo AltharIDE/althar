@@ -135,13 +135,15 @@ People choose who does work by model, not by the tool that runs it. The coordina
 
 ## Keeping context small
 
-A task's lead keeps its session as its context fills. When a lead reaches
-200,000 tokens or 80% of its window, whichever comes first, Althar can ask it
-to compact before its next message or goal round. The [coordinator](coordinator.md#compaction-and-session-recovery)
-compacts while idle at 80% of its window. Althar sends `/compact` on Claude Code, Codex and
-OpenCode. Other agents can manage their own compaction, as can a reviewer.
-An automatic request is attempted once while the reported context remains
-above the threshold. The next turn proceeds if the command fails.
+A task's lead keeps its session as its context fills. At 200,000 tokens or
+80% of its window, whichever comes first, it is eligible for the same
+[idle compaction](coordinator.md#compaction-and-session-recovery) as the
+coordinator. Althar sends `/compact` on Claude Code, Codex and OpenCode after
+an hour of inactivity, using that delay to estimate prompt cache expiry.
+A message or goal round can start on a full session. The agent can use its
+own compaction when it needs more room, and reviewers manage their own
+compaction. Althar makes one automatic attempt while usage remains above
+the threshold.
 
 The next ordinary turn after compaction gets the task brief, the lead's
 standing instructions, current project notes and open errands, and the
