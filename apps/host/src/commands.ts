@@ -167,7 +167,10 @@ ${readable}`,
       case 'pair': {
         const configured = yield* configuredHome(options)
         const invitation = yield* issuePairing(configured)
-        return yield* out(invitation, `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}`)
+        return yield* out(
+          invitation,
+          `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}\nFor a phone, show this link as a QR; its camera opens it:\n${invitation.link}`,
+        )
       }
       case 'devices': {
         const page = yield* listConnectionDevices(options)

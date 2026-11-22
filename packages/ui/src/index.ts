@@ -329,3 +329,6 @@ export { MOTION, reducedMotion, SCALE } from './lib/motion'
 export { useTypedTitle } from './lib/typedTitle'
 
 export * from './composer/Goal/Goal'
+export * from './setup/Phones/PairPhone'
+export * from './setup/Phones/PhoneList'
+export { printSeed, wordsOf } from './setup/Phones/print'
