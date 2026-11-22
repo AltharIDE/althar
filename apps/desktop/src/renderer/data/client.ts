@@ -83,6 +83,8 @@ import {
   type LineComment,
   type FolderHeld,
   type FolderReading,
+  type HomeFolders,
+  type Machine,
   type MadeRepository,
   type PreparedFolder,
   type HostRepository,
@@ -174,6 +176,10 @@ export interface Client {
   readonly listProjectWorkers: (projectId: string) => Promise<ReadonlyArray<ProjectWorker>>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** Where on the home a new project's code can come from and go, as the home finds it: for a window on another computer. */
+  readonly findHomeFolders: () => Promise<HomeFolders>
+  /** What the home's computer is: its system, cores, memory, room and git. */
+  readonly getMachine: () => Promise<Machine>
   /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
   readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
   /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
@@ -1050,6 +1056,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     listProjects: () => settle(api.ListProjects()),
     listProjectWorkers: (projectId) => settle(api.ListProjectWorkers({ projectId })),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    findHomeFolders: () => settle(api.FindHomeFolders({})),
+    getMachine: () => settle(api.GetMachine({})),
     lookElsewhere: (at) => settle(api.LookElsewhere(at)),
     bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),

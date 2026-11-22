@@ -105,6 +105,8 @@ const nameOf = (connection: ConnectionSummary, all: ReadonlyArray<ConnectionSumm
 
 export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList | null): SetupModel & SetupActions => {
   const { client, host: system } = useServices()
+  // On another computer's home, a host or tracker is connected on that computer, not from this window: none is offered.
+  const remoteHome = client.connection !== undefined
   const read = reads(client)
   const [connecting, setConnecting] = useState<Service | null>(null)
   const change = (next: (now: Draft) => Draft) => store.change(draft.id, next)
@@ -224,9 +226,11 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
           brand: productBrand(connection.product),
           thing: thingOf(serviceOfProduct(connection.product)),
         })),
-        away: hosts
-          .filter((host) => !host.connected)
-          .map((host) => ({ service: host.id as Service, name: host.name, brand: host.brand, thing: host.thing })),
+        away: remoteHome
+          ? []
+          : hosts
+              .filter((host) => !host.connected)
+              .map((host) => ({ service: host.id as Service, name: host.name, brand: host.brand, thing: host.thing })),
         owners: ownerList,
         ownersFailed: owners.isError,
         retryOwners: () => void owners.refetch(),
@@ -274,7 +278,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
 
   return {
     way,
-    hosts,
+    hosts: remoteHome ? hosts.filter((one) => one.connected) : hosts,
     repositories,
     failed,
     pasted,
@@ -303,7 +307,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       containers: trackerChoice.kind === 'tracker' ? (containers.data?.map((one) => ({ id: one.id, name: one.name })) ?? null) : null,
       container: container?.id ?? null,
       away:
-        trackers.length > 0
+        trackers.length > 0 || remoteHome
           ? []
           : TRACKER_SERVICES.map((service) => ({ service, name: serviceName(service), brand: serviceBrand(service) })),
     },

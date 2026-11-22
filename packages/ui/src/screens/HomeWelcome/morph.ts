@@ -1,7 +1,7 @@
 /*
- * A step morphing into the next: each piece marked `data-morph="key"` on the
- * page before goes into the piece with the same key on the page after; what
- * has no match fades out, and what's new fades in. Nothing blurs.
+ * A home's welcome turning a page: each piece marked `data-morph="key"` on
+ * the page before goes into the piece with the same key on the page after;
+ * what has no match fades out, and what's new fades in. Nothing blurs.
  *
  * - Words move and scale to where their match stands, at its size, the old
  *   clearing before the new comes in, so they never read over each other.

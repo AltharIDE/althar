@@ -3,6 +3,7 @@ import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
@@ -78,6 +79,7 @@ import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestRevi
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
+import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
@@ -420,6 +422,9 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // The person's home on this computer, where they keep code: what a window on another computer finds folders in.
+    const personHome = config.elsewhere?.home ?? homedir()
+    const onHome = homeFolders((path) => folders.allow(path), personHome)
     // What About › Storage measures: kept for the session, and stopped when the window gives up.
     const sizes =
       config.storage === undefined
@@ -1048,6 +1053,8 @@ export const handlers = apiLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
+      FindHomeFolders: () => api(onHome),
+      GetMachine: () => api(machineFacts(personHome)),
       PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
       MakeRepository: ({ grant, name }) =>
         api(

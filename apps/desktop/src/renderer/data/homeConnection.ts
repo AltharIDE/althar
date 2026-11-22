@@ -1,7 +1,7 @@
 import type { DomMessagePort } from '@althar/contracts'
 
 import type { HomeState } from '../../homes'
-import { receivePort } from './client'
+import { type Client, receivePort } from './client'
 import type { Host } from './services'
 
 /** Local-only capabilities cannot interpret paths or localhost URLs originating on a remote home. */
@@ -23,6 +23,28 @@ export const hostForHome = (host: Host, state: HomeState): Host => {
     tryAgain: unavailable,
     clipboardToken: () => Promise.resolve(null),
     editorPicture: () => Promise.resolve(null),
+  }
+}
+
+/**
+ * A window on another computer makes a project from what the home finds on
+ * its own disk: its repositories, each by a grant the home made, which is
+ * the id it's found by, and the place a clone or a new repository goes. There
+ * is no folder picker there, and nothing dropped from this computer is on it.
+ */
+export const foldersOnHome = (host: Host, client: Pick<Client, 'findHomeFolders'>): Host => {
+  const place = async () => (await client.findHomeFolders()).place
+  return {
+    ...host,
+    findRepositories: async () => {
+      const found = await client.findHomeFolders()
+      return { lookedIn: found.lookedIn, repositories: found.repositories.map(({ grant, ...one }) => ({ ...one, id: grant })) }
+    },
+    grantFound: async (id) => id,
+    clonePlace: place,
+    pickClonePlace: place,
+    pickPlace: async () => (await place()).grant,
+    openFolderAccess: async () => false,
   }
 }
 

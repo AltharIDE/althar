@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, parse, sep } from 'node:path'
 
@@ -192,7 +192,7 @@ export const whyCloneFailed = (stderr: string): { readonly reason: 'sso' | 'not_
 }
 
 /**
- * Clones a repository into a folder of its name in `parent`, the folder
+ * Clones a repository into a folder of its name in `parent`, each folder
  * made where it isn't there: its path. An empty folder of that name is used
  * as it is; one with something in it is refused, as it may be someone's
  * work. What this made is taken away again where the clone fails, or is
@@ -212,6 +212,8 @@ export const cloneRepository = (input: {
     if (input.folder === '' || input.folder === '.' || input.folder === '..' || dirname(path) !== parent)
       return yield* new FolderRefused({ reason: 'taken', path })
     if (!free(path)) return yield* new FolderRefused({ reason: 'taken', path })
+    // The place itself is made where it isn't there yet, as a home's first place for projects is.
+    yield* Effect.sync(() => mkdirSync(parent, { recursive: true }))
     // git clones into an empty folder as well as making one; what it left where it failed goes, the empty folder staying.
     const there = existsSync(path)
     // What is in it is read as it is taken away, so what the clone had put there by then goes too.

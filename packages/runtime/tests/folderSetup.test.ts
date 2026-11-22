@@ -279,6 +279,22 @@ describe('a clone', () => {
     }),
   )
 
+  it.effect('makes the place it goes in where it isn’t there yet, as a home’s first place for projects is', () =>
+    Effect.gen(function* () {
+      const bare = bareWith({ 'README.md': '# Tidepool' })
+      const parent = join(temp(), 'projects')
+      const path = yield* cloneRepository({
+        parent,
+        remote: 'balazs/tidepool',
+        host: 'GitHub',
+        folder: 'tidepool',
+        target: { url: bare, header: null },
+      })
+      assert.strictEqual(path, join(realpathSync(parent), 'tidepool'))
+      assert.strictEqual(readFileSync(join(path, 'README.md'), 'utf8'), '# Tidepool')
+    }),
+  )
+
   it.effect('uses an empty folder of its name, and refuses one with something in it', () =>
     Effect.gen(function* () {
       const bare = bareWith({ 'a.md': '' })

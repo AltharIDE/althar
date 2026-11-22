@@ -23,6 +23,7 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
 import { connectionList, fakeClient, fakeHost, githubConnection, project } from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
 
 /*
  * A new project, in a tab of its own: named on its left, set up on its right.
@@ -778,5 +779,50 @@ describe('where code is hosted', () => {
       account: null,
     })
     expect([changesOn('gitlab'), changesOn('github'), changesOn(null)]).toEqual(['merge requests', 'pull requests', 'pull requests'])
+  })
+})
+
+describe('a new project on a home on another computer', () => {
+  const homeId = `home_${'1'.repeat(32)}`
+  const SITE = repo('/home/althar/code/site', 'git@github.com:acme/site.git')
+  /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
+  const onHome = () => {
+    const fake = fakeClient({
+      connection: {
+        identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
+        hostDeviceId: `dev_${'3'.repeat(32)}`,
+        apiVersion: 1,
+        appVersion: 'fixture',
+        position: { homeId, cursor: 0, checkpoint: null },
+      },
+      readFolder: vi.fn(async (grant: string) =>
+        grant === 'grant_site' ? { kind: 'repository' as const, name: 'site', repositories: [SITE], project: null } : readings.grant_ops!,
+      ),
+    })
+    const host = fakeHost()
+    draftsOf(fake.client).start()
+    withServices(<NewProject onCreated={vi.fn()} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
+    return { ...fake, host }
+  }
+
+  it('offers the repositories the home found, each read by the grant the home made, and no folder picker', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^A folder/))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    await userEvent.click(within(list).getByRole('checkbox', { name: /^site/ }))
+    await waitFor(() => expect(at.client.readFolder).toHaveBeenCalledWith('grant_site'))
+    expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
+    expect(at.host.pickFolders).not.toHaveBeenCalled()
+    expect(at.host.findRepositories).not.toHaveBeenCalled()
+  })
+
+  it('starts a new repository where the home keeps code, with nowhere else to choose', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalledWith('grant_code', 'Tide Tables'))
+    expect(screen.queryByRole('button', { name: /^Change/ })).toBeNull()
+    expect(at.host.pickPlace).not.toHaveBeenCalled()
   })
 })

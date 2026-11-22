@@ -1,5 +1,18 @@
 import { type RefObject, useEffect, useRef, useState } from 'react'
-import { Button, Dialog, Icon, IconButton, ListMotion, LiveDot, Menu, MenuItem, MenuSeparator, Problem, ProjectMark } from '@althar/ui'
+import {
+  Button,
+  Dialog,
+  Icon,
+  IconButton,
+  LinkButton,
+  ListMotion,
+  LiveDot,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  Problem,
+  ProjectMark,
+} from '@althar/ui'
 
 import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 import { kitInk } from '../../shared/inks'
@@ -194,7 +207,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
                 </span>
               )}
             </div>
-            <Shelf projects={overview?.projects.local} local onOpen={(projectId) => open('local', projectId)} />
+            <Shelf projects={overview?.projects.local} local onOpen={(projectId) => open('local', projectId)} onNew={() => open('local')} />
           </li>
           {saved.shown.map((home) => (
             <Home
@@ -332,7 +345,7 @@ function Home({
       {editing === 'connection' ? (
         <Connection home={home} homes={homes} onDone={() => onEdit(null)} />
       ) : (
-        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} />
+        <Shelf projects={overview?.projects[keyOf(home)]} live={live === 'live'} onOpen={onOpen} onNew={() => onOpen()} />
       )}
     </li>
   )
@@ -381,22 +394,28 @@ const doing = (working: number, yours: number) => {
   return working > 0 ? `${working} running` : 'Nothing running'
 }
 
-/** The projects on a home, each a press from being opened there. */
+/** The projects on a home, each a press from being opened there; with none, a press opens its window on its welcome, to make one. */
 function Shelf({
   projects,
   live = projects?.live === true,
   local = false,
   onOpen,
+  onNew,
 }: {
   projects: HomeProjects | undefined
   live?: boolean
   local?: boolean
   onOpen: (projectId: string) => void
+  onNew: () => void
 }) {
   if (projects === undefined)
     return <p className={s.empty}>{local ? 'Its projects show here once a window on it opens.' : 'Open it to see its projects here.'}</p>
   if (projects.list.length === 0)
-    return <p className={s.empty}>{local ? 'Add a project and it shows here.' : 'Add a project on the host and it shows here.'}</p>
+    return (
+      <p className={s.empty}>
+        No projects yet. <LinkButton onClick={onNew}>New project</LinkButton>
+      </p>
+    )
   const alive = live && projects.live
   return (
     <ul className={s.shelf} data-rest={!alive || undefined}>

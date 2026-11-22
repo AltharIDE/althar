@@ -1165,6 +1165,48 @@ export const FolderReading = Schema.Struct({
 })
 export type FolderReading = typeof FolderReading.Type
 
+/** A repository found on a home's disk where people keep code, by the grant it opens by and where it is as the person knows it (~/code/site). */
+export const HomeRepository = Schema.Struct({
+  grant: Schema.String,
+  name: Schema.String,
+  where: Schema.String,
+  /** The branch checked out, or null where none is. */
+  branch: Schema.NullOr(Schema.String),
+  /** When it was last worked on, as ms since the epoch. */
+  worked: Schema.Number,
+})
+export type HomeRepository = typeof HomeRepository.Type
+
+/**
+ * Where on a home a new project's code can come from and go, as the home
+ * finds it, for a window that can't show its folder picker there: the
+ * repositories in the usual places (~/code, ~/projects and the like), newest
+ * work first, and the folder a clone or a new repository goes in. Each by a
+ * grant the home made, so the window still names no path of its own.
+ */
+export const HomeFolders = Schema.Struct({
+  /** The places looked in that there are, as the person knows them. */
+  lookedIn: Schema.Array(Schema.String),
+  repositories: Schema.Array(HomeRepository),
+  /** Where a clone or a new repository goes: the folder most of those found are in, else the usual one, made when first used. */
+  place: Schema.Struct({ grant: Schema.String, where: Schema.String }),
+})
+export type HomeFolders = typeof HomeFolders.Type
+
+/** What a home's computer is, as it says when asked: for the window to say what it's on. */
+export const Machine = Schema.Struct({
+  /** As the system names itself: Ubuntu 24.04.1 LTS, macOS 26.1. */
+  system: Schema.String,
+  cores: Schema.Int,
+  /** In bytes. */
+  memory: Schema.Number,
+  /** The room on the disk projects go on, in bytes; null where it can't be read. */
+  disk: Schema.NullOr(Schema.Struct({ free: Schema.Number, size: Schema.Number })),
+  /** git's version (2.43.0), or null where it isn't installed. */
+  git: Schema.NullOr(Schema.String),
+})
+export type Machine = typeof Machine.Type
+
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
@@ -5057,6 +5099,19 @@ const socketCalls = new Set<string>([
   'SetModel',
   'SetEffort',
   'GetRepositoryScripts',
+  // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
+  // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
+  'FindHomeFolders',
+  'GetMachine',
+  'ListConnections',
+  'ListHostRepositories',
+  'GetRepositories',
+  'ReadFolder',
+  'PlaceRepository',
+  'MakeRepository',
+  'PrepareFolder',
+  'CloneRepository',
+  'OpenProject',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -5103,6 +5158,10 @@ const ProjectApi = RpcGroup.make(
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
+  /** Where on the home a new project's code can come from and go: what it finds where people keep code, and where a new one goes. */
+  call('FindHomeFolders', {}, HomeFolders),
+  /** What the home's computer is: its system, cores, memory, room and git. */
+  call('GetMachine', {}, Machine),
   /**
    * Where a new repository named after `name` would go, in the folder the
    * person chose by `grant`, read without making anything: refused where a
@@ -6029,8 +6088,8 @@ const WorkApi = RpcGroup.make(
     },
     Schema.Void,
   ),
-  /** The connections on this Mac, and the code hosts and trackers a person can connect. */
-  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
+  /** The connections on the home, and the code hosts and trackers a person can connect. */
+  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }).annotate(SocketAllowed, socketCanCall('ListConnections')),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
   command(
     'StartSignIn',

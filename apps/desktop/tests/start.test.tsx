@@ -19,19 +19,22 @@ import { type StartModel, useStart } from '../src/renderer/features/start/useSta
 import { shortFolder } from '../src/renderer/shared/folders'
 import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
   return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} />
 }
 
-function Start({ onProject }: { onProject: (id: string) => void }) {
+function Start({ onProject, onNew = () => {} }: { onProject: (id: string) => void; onNew?: () => void }) {
   const start = useStart()
   return (
     <StartView
       model={start}
       accounts={useAccountSignIn(start)}
       onProject={onProject}
+      onNew={onNew}
       home={() => <Home start={start} onProject={onProject} />}
     />
   )
@@ -954,7 +957,7 @@ describe('the start', () => {
   })
 })
 
-it('shows an empty remote home without offering desktop folders or agent installation', async () => {
+it('welcomes an empty remote home with what it found there, and goes into New project the way chosen', async () => {
   const homeId = `home_${'1'.repeat(32)}`
   const { client } = fakeClient({
     connection: {
@@ -967,9 +970,16 @@ it('shows an empty remote home without offering desktop folders or agent install
     listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
   })
   const host = fakeHost()
-  withServices(<Start onProject={() => {}} />, client, host)
-  expect(await screen.findByRole('heading', { name: 'No projects on this home yet' })).not.toBeNull()
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
+  expect(await screen.findByRole('heading', { name: /^This is / })).not.toBeNull()
+  expect(await screen.findByText('Ubuntu 24.04.1 LTS')).not.toBeNull()
   expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
   expect(host.pickFolder).not.toHaveBeenCalled()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(host.findRepositories).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('2 repositories found on this home')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
+  expect(onNew).toHaveBeenCalledOnce()
+  expect(draftsOf(client).get()?.way).toBe('new')
 })

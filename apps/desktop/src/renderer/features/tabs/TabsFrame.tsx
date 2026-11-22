@@ -5,7 +5,6 @@ import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room
 
 import { useServices } from '../../data/services'
 import { HomeButton } from '../homes/HomeConnections'
-import { showHomes } from '../homes/useHomes'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
 import { SearchNotice } from '../finder/SearchNotice'
@@ -109,7 +108,7 @@ function TabsBar({
   quick: boolean
   onQuick: (open: boolean) => void
 }) {
-  const { host, client } = useServices()
+  const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
   const online = useOnline()
@@ -146,7 +145,7 @@ function TabsBar({
       onClose={tabs.close}
       onReorder={tabs.reorder}
       onOpen={tabs.open}
-      onNewProject={client.connection === undefined ? tabs.newProject : showHomes}
+      onNewProject={tabs.newProject}
       end={
         <>
           <HomeButton />
@@ -207,9 +206,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState(false)
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
   const [quick, setQuick] = useState(false)
-  const { select, current, newProject: createProject, none, openSettings } = tabs
-  const { client } = useServices()
-  const newProject = client.connection === undefined ? createProject : showHomes
+  const { select, current, newProject, none, openSettings } = tabs
   const { open: settingsOpen, current: onSettings } = tabs.settings
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')

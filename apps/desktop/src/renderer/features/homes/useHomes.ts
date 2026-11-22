@@ -1,6 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 
+import { useServices } from '../../data/services'
+import { device } from '../../shared/device'
+
 /*
  * What the window's homes share: where its own home stands, what main knows
  * of every home (kept current as main says it changes), and what is open over
@@ -38,6 +41,18 @@ const useFollowed = <A>(read: (() => Promise<A>) | undefined, follow: ((listener
 }
 
 export const useHomeState = (homes: HomesHost | undefined): HomeState | null => useFollowed(homes?.state, homes?.onState)
+
+/**
+ * The home the window is on, as its words name it: another computer's by its
+ * name (runner-1), this one's as this computer is named (this Mac).
+ */
+export const useHomeName = (): { readonly remote: boolean; readonly name: string } => {
+  const { client, host } = useServices()
+  const state = useHomeState(host.homes)
+  const remote = client.connection !== undefined
+  if (!remote) return { remote, name: device.this }
+  return { remote, name: state !== null && state.current.kind !== 'local' ? state.current.home.name : 'this home' }
+}
 
 /** Every home, as main knows it; null until first read. */
 export const useHomesOverview = (homes: HomesHost | undefined): HomesOverview | null => useFollowed(homes?.overview, homes?.onOverview)

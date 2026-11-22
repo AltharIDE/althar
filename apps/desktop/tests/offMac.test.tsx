@@ -44,7 +44,7 @@ vi.mock('../src/renderer/shared/device', async (importOriginal) => {
 
 function Start({ onProject = vi.fn() }: { onProject?: (id: string) => void }) {
   const start = useStart()
-  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} home={() => null} />
+  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} onNew={() => {}} home={() => null} />
 }
 
 describe('the first screen off a Mac', () => {
