@@ -11,6 +11,7 @@ mkdirSync(out, { recursive: true })
 const click = (name) => async (page) => page.getByRole('button', { name }).first().click()
 const item = (name) => async (page) => page.getByRole('menuitem', { name }).first().click()
 const key = (k) => async (page) => page.keyboard.press(k)
+const home = async (page) => page.locator('button', { hasText: 'Keeps your projects' }).first().click()
 const meter = async (page) => page.locator('button', { hasText: 'CPU' }).first().click()
 const homes = async (page) =>
   page
@@ -39,12 +40,12 @@ const shots = [
   ['a-17-narrow', 'd=a&narrow=1', [click('Add a phone')]],
   // B · part of the home
   ['b-1-computers', 'd=b', []],
-  ['b-2-home', 'd=b', [click(/^This Mac/)]],
-  ['b-3-pair', 'd=b', [click(/^This Mac/), click('Pair a phone')]],
-  ['b-4-paired', 'd=b', [click(/^This Mac/), click('Pair a phone'), key('s')]],
-  ['b-5-empty', 'd=b&phones=none', [click(/^This Mac/)]],
-  ['b-6-studio', 'd=b&home=studio', [click(/^studio/)]],
-  ['b-7-dark', 'd=b&theme=dark', [click(/^This Mac/), click('Pair a phone')]],
+  ['b-2-home', 'd=b', [home]],
+  ['b-3-pair', 'd=b', [home, click('Pair a phone')]],
+  ['b-4-paired', 'd=b', [home, click('Pair a phone'), key('s')]],
+  ['b-5-empty', 'd=b&phones=none', [home]],
+  ['b-6-studio', 'd=b&home=studio', [home]],
+  ['b-7-dark', 'd=b&theme=dark', [home, click('Pair a phone')]],
   // C · in the popover
   ['c-1-popover', 'd=c', [meter]],
   ['c-2-pair', 'd=c', [meter, click('Pair a phone')]],
