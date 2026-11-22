@@ -1,4 +1,4 @@
 export { WorkerHomeError } from './errors'
-export { workerExecution } from './execution'
+export { workerExecution, type WorkerLedger } from './execution'
 export { configureWorkers, listenWorkers, workerCertificate, type WorkerConfiguration, type WorkerHomePaths } from './network'
-export { openWorkerStore, withWorkerStore } from './store'
+export { openWorkerStore, withWorkerStore, type EnrolledWorker } from './store'

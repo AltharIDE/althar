@@ -86,7 +86,12 @@ export const serveHome = (
       const context = yield* Layer.build(
         runtime(options, vault.secrets, {
           ...dependencies,
-          workers: dependencies.workers ?? workerExecution(() => worker?.agentWorkers),
+          workers:
+            dependencies.workers ??
+            workerExecution(
+              () => worker?.agentWorkers,
+              () => worker,
+            ),
         }),
       )
       const instance = Context.get(context, Instance)

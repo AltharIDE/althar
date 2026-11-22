@@ -13,6 +13,8 @@ import {
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
 
+import type { EnrolledWorker } from './store'
+
 const unavailable = (error: unknown): string => {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : 'The worker connection was lost.'
@@ -24,7 +26,20 @@ const setupOutcome = (report: { exitCode: number; timedOut: boolean; outputTail:
   output: Buffer.from(report.outputTail).toString('utf8'),
 })
 
-export const workerExecution = (active: () => AgentWorkerPool | undefined): WorkerExecutionPlatform => {
+/** The home's ledger of its workers, as its listener keeps it open: who is enrolled, and taking one out. */
+export interface WorkerLedger {
+  readonly workers: () => ReadonlyArray<EnrolledWorker>
+  readonly revoke: (workerId: string) => void
+}
+
+/**
+ * Where a task's work runs when it runs on a worker, from the pool of workers connected now (`active`); with the
+ * home's ledger (`ledger`), its own list of every worker it enrolled, connected or not, and taking one out.
+ */
+export const workerExecution = (
+  active: () => AgentWorkerPool | undefined,
+  ledger?: () => WorkerLedger | undefined,
+): WorkerExecutionPlatform => {
   const workspaces = new Map<
     string,
     {
@@ -52,6 +67,32 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
           busy: busy || preparing.has(workerId),
           ...(capacity === undefined ? {} : { capacity }),
         }
+      }),
+    enrolled: () => {
+      const listing = ledger?.()
+      if (listing === undefined) return null
+      const live = new Map((active()?.connected() ?? []).map((worker) => [worker.workerId, worker]))
+      return listing.workers().map(({ workerId, projectIds }) => {
+        const worker = live.get(workerId)
+        if (worker === undefined) return { workerId, connected: false, busy: false, providers: [], projectIds }
+        return {
+          workerId,
+          connected: true,
+          busy: worker.busy || preparing.has(workerId),
+          ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
+          providers: [...new Set(worker.capabilities.map(({ providerId }) => providerId))],
+          projectIds,
+        }
+      })
+    },
+    revoke: (workerId) =>
+      Effect.try({
+        try: () => {
+          const listing = ledger?.()
+          if (listing === undefined) throw new Error('This home takes no workers.')
+          listing.revoke(workerId)
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),
       }),
     startCommand: (input) =>
       Effect.gen(function* () {

@@ -2481,6 +2481,31 @@ export const ProjectWorker = Schema.Struct({
   capacity: Schema.optionalKey(WorkerCapacity),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
+export type WorkerCapacity = typeof WorkerCapacity.Type
+
+/**
+ * A worker the home enrolled, as Settings › Computers and the load popover
+ * list it (ADR-103): whether it is connected now, whether it runs a task (one
+ * at a time) and which, what it reported last, the agents it can run and the
+ * projects it may work on.
+ */
+export const HomeWorker = Schema.Struct({
+  workerId: Schema.String,
+  connected: Schema.Boolean,
+  busy: Schema.Boolean,
+  /** What it reported last, while that is current; none while it is offline or hasn't said. */
+  capacity: Schema.optionalKey(WorkerCapacity),
+  /** The agents it can run, by id; empty while it is offline. */
+  providers: Schema.Array(Schema.String),
+  projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** The home's task it runs now, where it runs one. */
+  task: Schema.NullOr(Schema.Struct({ taskId: Schema.String, threadId: Schema.String, title: Schema.String, project: Schema.String })),
+})
+export type HomeWorker = typeof HomeWorker.Type
+
+/** The home's workers: whether it takes workers at all (it is set up to listen for them), and each it enrolled. */
+export const HomeWorkers = Schema.Struct({ enabled: Schema.Boolean, workers: Schema.Array(HomeWorker) })
+export type HomeWorkers = typeof HomeWorkers.Type
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
 export const PlanStep = Schema.Struct({
@@ -5101,6 +5126,7 @@ const socketCalls = new Set<string>([
   'GetSettings',
   'GetLoad',
   'GetPlaces',
+  'GetWorkers',
   'SearchTasks',
   'GetSearchDocuments',
   'GetSearchFiles',
@@ -6348,6 +6374,10 @@ const WorkApi = RpcGroup.make(
   call('GetLoad', {}, Load),
   /** The agents this computer runs at once as they stand: at work, the number, fewer for now and why, what waits. */
   call('GetPlaces', {}, Places),
+  /** The workers this home enrolled, connected or not, and what each runs and reported. */
+  call('GetWorkers', {}, HomeWorkers),
+  /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
+  command('RemoveWorker', { workerId: Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u)) }, Schema.Void),
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */

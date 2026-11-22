@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
   AGENTS_BUSY,
@@ -14,6 +14,7 @@ import {
   LOAD_SLOTS,
   LOAD_UNKNOWN_WORK,
 } from '../../fixtures/load'
+import { LOAD_WORKERS } from '../../fixtures/computers'
 import { States } from '../../storybook/States'
 import { LoadPeek } from './LoadPeek'
 
@@ -36,6 +37,18 @@ export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT, agents: AGE
 /** The CPU busy for a while: fewer for now, for the CPU. */
 export const FewerForTheCpu: Story = { args: { load: LOAD_NEAR_MAX, agents: AGENTS_FEWER_CPU } }
 export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING, agents: AGENTS_IDLE } }
+/** A home with workers: each under the home's readings, where it stands; a row opens it in Settings › Computers. */
+export const WithWorkers: Story = {
+  args: { workers: LOAD_WORKERS, onWorker: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: 'Workers' })).toBeInTheDocument()
+    await expect(c.getByRole('heading', { name: 'Running on This Mac' })).toBeInTheDocument()
+    await expect(c.getByText('Offline')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: /Linux worker 98b21d/ }))
+    await expect(args.onWorker).toHaveBeenCalledWith(LOAD_WORKERS[1]?.id)
+  },
+}
 /** Where its agents can't be read, as from a home on an older Althar: CPU and memory alone. */
 export const AgentsUnknown: Story = { args: { agents: null } }
 /** Just opened: one reading. */

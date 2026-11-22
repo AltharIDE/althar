@@ -53,12 +53,14 @@ function Quick({ onSettings = vi.fn() }: { onSettings?: (section: Section | null
 
 /* The Settings tab on a section, as its route has it: the agents asked again as it opens. */
 function Settings({ at = 'agents', onSection }: { at?: Section; onSection?: (section: Section, focus?: SettingsFocus) => void }) {
-  const [place, setPlace] = useState<{ section: Section; focus?: SettingsFocus }>({ section: at })
+  const [place, setPlace] = useState<{ section: Section; focus?: SettingsFocus; worker?: string }>({ section: at })
   return (
     <SettingsPage
       start={useStart({ recheck: true })}
       section={place.section}
       {...(place.focus === undefined ? {} : { focus: place.focus })}
+      {...(place.worker === undefined ? {} : { worker: place.worker })}
+      onComputer={(worker) => setPlace(worker === null ? { section: 'computers' } : { section: 'computers', worker })}
       onSection={(section, focus) => {
         onSection?.(section, focus)
         setPlace(focus === undefined ? { section } : { section, focus })
@@ -583,6 +585,82 @@ describe('the Settings tab', () => {
     await userEvent.click(load)
     expect(host.setPreference).toHaveBeenLastCalledWith('showLoad', false)
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('lists the home and its workers, opens one out, and takes one out at once once the person says so', async () => {
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
+    const free = {
+      workerId: `wrk_${'1'.repeat(32)}`,
+      connected: true,
+      busy: false,
+      capacity,
+      providers: ['codex'],
+      projects: [{ id: 'p1', name: 'Meridian' }],
+      task: null,
+    }
+    const working = {
+      ...free,
+      workerId: `wrk_${'2'.repeat(32)}`,
+      busy: true,
+      task: { taskId: 't1', threadId: 'thr_1', title: 'Fix the login redirect', project: 'Meridian' },
+    }
+    const away = { workerId: `wrk_${'3'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null }
+    let workers = [free, working, away]
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, workers })),
+      removeWorker: vi.fn(async (id: string) => {
+        workers = workers.filter((one) => one.workerId !== id)
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    // The home, with its agents as its popover has them, and each worker where it stands.
+    expect(await within(page).findByText('Keeps your projects')).toBeTruthy()
+    const tile = await within(page).findByRole('button', { name: /Linux worker 111111/ })
+    expect(tile.textContent).toContain('Linux · arm64 · 8 cores')
+    expect(tile.textContent).toContain('Free')
+    expect(tile.textContent).toContain('12.4 GB')
+    expect(within(page).getByRole('button', { name: /Linux worker 222222/ }).textContent).toContain('Fix the login redirect · Meridian')
+    expect(within(page).getByRole('button', { name: /Linux worker 333333/ }).textContent).toContain('Offline')
+
+    // Opened out: what it is, the agents it can run and its projects; taken out once the person says so, off the list at once.
+    await userEvent.click(tile)
+    expect(await within(page).findByRole('heading', { name: 'Linux worker 111111' })).toBeTruthy()
+    expect(within(page).getByText('Meridian')).toBeTruthy()
+    await userEvent.click(within(page).getByRole('button', { name: 'Remove Linux worker 111111' }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Remove Linux worker 111111?' })).getByRole('button', { name: 'Remove' }),
+    )
+    expect(client.removeWorker).toHaveBeenCalledWith(free.workerId)
+    expect(within(page).queryByRole('button', { name: /Linux worker 111111/ })).toBeNull()
+    expect(within(page).getByRole('button', { name: /Linux worker 222222/ })).toBeTruthy()
+
+    // One at work keeps its task: its Remove waits for it.
+    await userEvent.click(within(page).getByRole('button', { name: /Linux worker 222222/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
+    const worker = { workerId: `wrk_${'4'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null }
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+      removeWorker: vi.fn(async () => {
+        throw new ApiError({ reason: 'WorkerNotRemoved', message: 'The worker ledger is busy.' })
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 444444/ }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Remove Linux worker 444444' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }))
+    expect(await alert()).toBe('The worker ledger is busy.')
+    expect(await within(page).findByRole('button', { name: /Linux worker 444444/ })).toBeTruthy()
+
+    // The home takes workers already: adding one is enrolling it, then starting it.
+    await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(within(adding).queryByText(/althar workers configure/)).toBeNull()
+    expect(within(adding).getByText(/althar workers enroll/)).toBeTruthy()
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

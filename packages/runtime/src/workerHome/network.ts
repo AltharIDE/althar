@@ -144,6 +144,10 @@ export const listenWorkers = (options: WorkerHomePaths, homeId: string) =>
               return {
                 port: bound.port,
                 agentWorkers,
+                /** The home's enrolled workers, connected or not, for its own list of them. */
+                workers: () => store.workers(),
+                /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
+                revoke: (workerId: string) => store.revoke(workerId),
                 close: () => {
                   stopRelay?.()
                   bound.close()

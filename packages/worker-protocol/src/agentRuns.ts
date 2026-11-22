@@ -896,6 +896,17 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           }
         })
         .filter((item) => item.capabilities.length > 0),
+    /** Every worker connected now, whatever it may work on: for the home's own list of its workers, not for placing work. */
+    connected: (): ReadonlyArray<AvailableAgentWorker> =>
+      [...slots.values()].map(({ workerId, capabilities, busy, capacity }) => {
+        const reported = capacity()
+        return {
+          workerId,
+          capabilities: capabilities.map(({ projectId, providerId }) => ({ projectId, providerId })),
+          busy: busy(),
+          ...(reported === undefined ? {} : { capacity: reported }),
+        }
+      }),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {
       const { checkout, repositories, toolPort, skills } = options

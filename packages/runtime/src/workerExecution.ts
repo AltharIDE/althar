@@ -71,8 +71,26 @@ export interface CapturedWorkerCheckout {
   readonly index: string
 }
 
+/** A worker the home enrolled, as the home's own list of them has it: connected now or not, what it runs and reported. */
+export interface EnrolledWorkerState {
+  readonly workerId: string
+  readonly connected: boolean
+  /** Running a task: a worker runs one at a time. */
+  readonly busy: boolean
+  /** What it reported last, while that is current. */
+  readonly capacity?: ProjectWorker['capacity']
+  /** The agents it can run, by id, for any project. */
+  readonly providers: ReadonlyArray<string>
+  /** The projects it may work on. */
+  readonly projectIds: ReadonlyArray<string>
+}
+
 export interface WorkerExecutionPlatform {
   readonly list: (projectId: string) => ReadonlyArray<ProjectWorker>
+  /** Every worker the home enrolled, connected or not, in the order they were; null while it isn't listening for workers. */
+  readonly enrolled?: () => ReadonlyArray<EnrolledWorkerState> | null
+  /** Takes a worker out of this home for good: its certificate is no longer accepted. Fails with words to show. */
+  readonly revoke?: (workerId: string) => Effect.Effect<void, string>
   readonly startCommand?: (input: AssignedCommand) => Effect.Effect<WorkerManagedProcess, AgentStartFailed, Scope.Scope>
   readonly readFile?: (
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'> & { readonly path: string },

@@ -77,6 +77,22 @@ export interface LoadAgents {
   waiting: number
 }
 
+/**
+ * Where one of the home's workers stands: at work on a task (one at a time), free for the next, out of memory or disk
+ * space, or not connected.
+ */
+export type WorkerState = 'working' | 'free' | 'full' | 'offline'
+
+/** One of the home's workers, as the peek lists it under the home's own readings. */
+export interface LoadWorker {
+  id: string
+  /** As the person knows it: Linux worker 3f9a2c. */
+  name: string
+  state: WorkerState
+  /** Under the name: the task it runs and its project, or what it has free. */
+  detail: string
+}
+
 /** Fewer than the number may work for now, and why; null while as many may as it says. */
 export const fewerOf = ({ atOnce, configured, why }: Pick<LoadAgents, 'atOnce' | 'configured' | 'why'>) =>
   why !== null && atOnce < configured ? { atOnce, why } : null

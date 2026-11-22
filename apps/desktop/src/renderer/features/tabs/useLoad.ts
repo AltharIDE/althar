@@ -2,12 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import type { Load, LoadShare } from '@althar/contracts'
-import { type LoadAgents, type LoadGlance, type LoadMeterText, type LoadRow, MemoryPressure, Room } from '@althar/ui'
+import { type LoadAgents, type LoadGlance, type LoadMeterText, type LoadRow, type LoadWorker, MemoryPressure, Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
 import { device } from '../../shared/device'
 import { usePlaces } from '../../shared/usePlaces'
+import { loadWorkerOf, useWorkers } from '../../shared/useWorkers'
 import { usePreferences } from '../../shared/usePreferences'
 
 /*
@@ -18,11 +19,12 @@ import { usePreferences } from '../../shared/usePreferences'
  * runtime reads the computer on its own every three seconds, a window in view
  * or not (the app tells it as `showLoad` changes), and keeps two minutes of
  * it, so the peek opens onto the time before it. Beside CPU and memory the
- * peek shows this computer's agents (`usePlaces`), read alongside, so they are
- * there as it opens. Turned off, in Settings or
- * the peek's switch, for every window, nothing is read. A row of the peek
- * opens its work: a task's thread, a project's conversation for its
- * coordinator, its front for its default branch running.
+ * peek shows this computer's agents (`usePlaces`), and under them the home's
+ * workers (`useWorkers`), each read alongside, so they are there as it opens.
+ * Turned off, in Settings or the peek's switch, for every window, nothing is
+ * read. A row of the peek opens its work: a task's thread, a project's
+ * conversation for its coordinator, its front for its default branch
+ * running; a worker's row opens it in Settings › Computers.
  */
 
 /** How often the meter reads again while it shows. */
@@ -109,6 +111,10 @@ export interface LoadModel {
   readonly glance: LoadGlance | null
   /** This computer's agents, beside CPU and memory in the peek; null where they can't be read. */
   readonly agents: LoadAgents | null
+  /** The home's workers, under its readings in the peek; null where it has none to say, or they can't be read. */
+  readonly workers: readonly LoadWorker[] | null
+  /** Opens a worker in Settings › Computers, by its id. */
+  readonly openWorker: (id: string) => void
   /** Opens a piece of work from its row, by its id. */
   readonly open: (id: string) => void
   /** Takes the meter out of the bar, as Settings would. */
@@ -137,6 +143,7 @@ export const useLoad = (projects: boolean): LoadModel => {
   })
   const load = on ? reading.data : undefined
   const agents = usePlaces(on)
+  const workers = useWorkers(on)
 
   const open = (id: string) => {
     const share = load?.shares?.find((one) => idOf(one) === id)
@@ -147,5 +154,12 @@ export const useLoad = (projects: boolean): LoadModel => {
     else void navigate({ to: '/projects/$projectId', params: { projectId: share.projectId } })
   }
 
-  return { glance: load === undefined ? null : glanceOf(load), agents, open, hide: () => set('showLoad', false) }
+  return {
+    glance: load === undefined ? null : glanceOf(load),
+    agents,
+    workers: workers === null ? null : workers.workers.map(loadWorkerOf),
+    openWorker: (id) => void navigate({ to: '/settings/$section', params: { section: 'computers' }, search: { worker: id } }),
+    open,
+    hide: () => set('showLoad', false),
+  }
 }

@@ -375,6 +375,85 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('lists the home’s workers with the task each runs and the projects it may work on, and takes one out', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '4'.repeat(32)
+        const away = 'wrk_' + '3'.repeat(32)
+        const workerPath = repository()
+        const capacity = { platform: 'linux', architecture: 'x64', cpuCores: 16, freeMemoryMib: 30_000, freeDiskMib: 200_000 } as const
+        let projectId = ''
+        let busy = false
+        const revoked: string[] = []
+        const { client, grant } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['codex'], busy }],
+            enrolled: () => [
+              { workerId, connected: true, busy, capacity, providers: ['codex'], projectIds: [projectId] },
+              { workerId: away, connected: false, busy: false, providers: [], projectIds: [projectId, 'proj_' + '0'.repeat(32)] },
+            ],
+            revoke: (id) => (id === away ? Effect.sync(() => void revoked.push(id)) : Effect.fail('It runs a task.')),
+            open: (request) =>
+              Effect.gen(function* () {
+                busy = true
+                return {
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  transport: yield* openFakeWorker(workerPath),
+                  checkpoint: Effect.void,
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        projectId = project.id
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          workerId,
+          title: 'Run it on the worker',
+          description: '[lead:permission] [lead:finish]',
+          end: 'ready',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        })
+        yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
+          thread.attention.some((attention) => attention.kind === 'permission'),
+        )
+        const { enabled, workers } = yield* client.GetWorkers({})
+        assert.isTrue(enabled)
+        assert.deepStrictEqual(workers, [
+          {
+            workerId,
+            connected: true,
+            busy: true,
+            capacity,
+            providers: ['codex'],
+            projects: [{ id: project.id, name: project.name }],
+            task: { taskId: task.id, threadId: task.threadId, title: 'Run it on the worker', project: project.name },
+          },
+          // A project the home no longer has isn't named.
+          { workerId: away, connected: false, busy: false, providers: [], projects: [{ id: project.id, name: project.name }], task: null },
+        ])
+        yield* client.RemoveWorker({ commandId: commandId(), workerId: away })
+        assert.deepStrictEqual(revoked, [away])
+        const refused = yield* Effect.flip(client.RemoveWorker({ commandId: commandId(), workerId }))
+        assert.strictEqual(refused.message, 'It runs a task.')
+      }),
+    ),
+  )
+
+  it.live('says a home that isn’t listening for workers takes none', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({ workers: { list: () => [], enrolled: () => null, open: () => Effect.die('No worker') } })
+        assert.deepStrictEqual(yield* client.GetWorkers({}), { enabled: false, workers: [] })
+        const { client: plain } = yield* connected({})
+        assert.deepStrictEqual(yield* plain.GetWorkers({}), { enabled: false, workers: [] })
+      }),
+    ),
+  )
+
   it.live('projects the held plan’s requirements and rechecks the selected worker at Start', () =>
     Effect.scoped(
       Effect.gen(function* () {
