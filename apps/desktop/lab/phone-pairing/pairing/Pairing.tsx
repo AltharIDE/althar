@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button, Code, CopyButton, Icon, LinkButton } from '@althar/ui'
 
@@ -92,6 +92,9 @@ function Reach({ home, layout }: { home: LabHome; layout: 'wide' | 'narrow' }) {
   )
 }
 
+/** Where a phone's camera goes to get Althar: a page that sends iPhones to the App Store and the rest to Google Play (a stand-in; TestFlight today). */
+const GET_APP = 'https://althar.dev/phone'
+
 export interface PairingProps {
   layout: 'wide' | 'narrow'
   /** Done, once a phone is paired: back to where it was opened from. */
@@ -119,6 +122,8 @@ function Body({ layout, onDone }: PairingProps) {
   const { reach, short } = useLab()
   const { home, invitation } = usePhones()
   const left = useLeft(home.key, invitation)
+  // No Althar on the phone yet: the tile shows where to get it, for the phone's own camera, and back.
+  const [getting, setGetting] = useState(false)
   // The code is made as the panel opens, and put away as it goes: it ran out, or it paired.
   useEffect(() => {
     if (!reach) return
@@ -146,6 +151,39 @@ function Body({ layout, onDone }: PairingProps) {
       </div>
     )
   const expired = invitation.state === 'expired'
+  if (getting && !expired)
+    return (
+      <div className={s.pairing} data-layout={layout}>
+        <div className={s.qrColumn}>
+          <div className={s.tile}>
+            <Qr text={GET_APP} size={qrSize} />
+          </div>
+          <span className={s.under}>
+            <span className={s.waiting}>The pairing code waits</span>
+            <span className={s.left} aria-label={`${mmss(left)} left`}>
+              {mmss(left)}
+            </span>
+          </span>
+        </div>
+        <div className={s.side}>
+          <span className={s.lead}>Get Althar on your phone</span>
+          <span className={s.note}>Scan this with your phone's camera. It opens the App Store on an iPhone, Google Play on Android.</span>
+          <span className={s.stores}>
+            <span className={s.store}>
+              <Icon name={PHONE} size={13} />
+              iPhone · iOS 17 or later
+            </span>
+            <span className={s.store}>
+              <Icon name={PHONE} size={13} />
+              Android 10 or later
+            </span>
+          </span>
+          <span className={s.actions}>
+            <Button onClick={() => setGetting(false)}>I have it, show the code</Button>
+          </span>
+        </div>
+      </div>
+    )
   return (
     <div className={s.pairing} data-layout={layout}>
       <div className={s.qrColumn}>
@@ -187,6 +225,11 @@ function Body({ layout, onDone }: PairingProps) {
           <Code className={s.commandLine}>{code}</Code>
           <CopyButton value={code} ghost disabled={expired} />
         </span>
+        {!expired && (
+          <span className={s.getApp}>
+            No Althar on your phone yet? <LinkButton onClick={() => setGetting(true)}>Get it</LinkButton>
+          </span>
+        )}
       </div>
     </div>
   )

@@ -37,6 +37,8 @@ const shots = [
   ['a-14-short-code', 'd=a&short=1', [click('Add a phone')]],
   ['a-15-dark', 'd=a&theme=dark', [click('Add a phone')]],
   ['a-16-dark-computers', 'd=a&theme=dark', []],
+  ['a-18-get-app', 'd=a', [click('Add a phone'), click('Get it')]],
+  ['a-19-get-app-dark', 'd=a&theme=dark', [click('Add a phone'), click('Get it')]],
   ['a-17-narrow', 'd=a&narrow=1', [click('Add a phone')]],
   // B · part of the home
   ['b-1-computers', 'd=b', []],
@@ -57,6 +59,7 @@ const shots = [
   // D · from the homes menu
   ['d-1-menu', 'd=d', [homes]],
   ['d-2-dialog', 'd=d', [homes, item(/^Pair a phone/)]],
+  ['d-8-get-app', 'd=d', [homes, item(/^Pair a phone/), click('Get it')]],
   ['d-3-paired', 'd=d', [homes, item(/^Pair a phone/), key('s')]],
   ['d-4-studio-menu', 'd=d&home=studio', [homes]],
   ['d-5-studio', 'd=d&home=studio', [homes, item(/^Pair a phone/)]],
