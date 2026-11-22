@@ -563,6 +563,22 @@ describe('a canvas of boards', () => {
     expect(screen.getByRole('button', { name: 'Move around' }).getAttribute('aria-pressed')).toBe('true')
     await userEvent.click(screen.getByRole('button', { name: 'Point at a part' }))
     expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { tool: 'point' })
+
+    // Its keys work from anywhere on the panel but a field: the tools and the zoom.
+    for (const [key, change] of [
+      ['h', { tool: 'hand' }],
+      ['u', { tool: 'use' }],
+      ['!', { zoom: 'fit' }],
+      ['=', { zoom: 'in' }],
+      ['-', { zoom: 'out' }],
+    ] as const) {
+      fireEvent.keyDown(screen.getByRole('toolbar', { name: 'Tools' }), { key })
+      expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, change)
+    }
+    const calls = vi.mocked(canvases.ground!).mock.calls.length
+    fireEvent.keyDown(screen.getByRole('toolbar', { name: 'Tools' }), { key: 'h', metaKey: true })
+    fireEvent.keyDown(document.body, { key: 'h' })
+    expect(vi.mocked(canvases.ground!).mock.calls.length).toBe(calls)
     measured.mockRestore()
   })
 

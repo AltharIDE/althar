@@ -190,6 +190,40 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }
           window.getSelection()?.removeAllRanges()
         }
 
+  // A canvas of boards' keys, as its ground takes them, from anywhere on the panel but a field: the tools, and the zoom.
+  const change = ground.change
+  useEffect(() => {
+    if (kind !== 'boards') return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (!(target instanceof Node) || body?.closest('aside')?.contains(target) !== true) return
+      const key = event.key.toLowerCase()
+      const asked =
+        key === 'v'
+          ? { tool: 'point' as const }
+          : key === 'h'
+            ? { tool: 'hand' as const }
+            : key === 'u'
+              ? { tool: 'use' as const }
+              : event.key === '!' || (event.key === '1' && event.shiftKey)
+                ? { zoom: 'fit' as const }
+                : event.key === ')' || (event.key === '0' && event.shiftKey)
+                  ? { zoom: 1 }
+                  : event.key === '=' || event.key === '+'
+                    ? { zoom: 'in' as const }
+                    : event.key === '-'
+                      ? { zoom: 'out' as const }
+                      : null
+      if (asked === null) return
+      event.preventDefault()
+      change(asked)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [kind, body, change])
+
   // Its words are only waited for once there is a version to read them from: a canvas that can't be read says why.
   const loading = detail.isPending || (drawsText && version !== null && text.isPending)
   const error = detail.isError ? messageOf(detail.error) : drawsText && text.isError ? messageOf(text.error) : undefined

@@ -119,6 +119,22 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     // Its pin is on the part, drawn as a draft.
     await expect.poll(async () => (await canvasView(electronApp)) !== null).toBe(true)
     await shoot(page, electronApp, page, 'test-results/boards-pinned.png')
+
+    // The project's Artifacts view has it as a card, with a picture of it as it was drawn; opened, it goes beside its conversation.
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
+    const cards = page.getByRole('list', { name: 'The project’s artifacts' })
+    const card = cards.getByRole('button', { name: /^Gift a class/ })
+    await expect(card).toBeVisible()
+    await expect(card.locator('img')).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/boards-artifacts.png')
+    await card.click()
+    await expect(page.getByRole('complementary', { name: 'Gift a class' })).toBeVisible()
+    await expect.poll(() => frames(electronApp)).toBe(4)
+    // And back to every artifact.
+    await page.getByRole('complementary', { name: 'Gift a class' }).getByRole('button', { name: /^Back/ }).click()
+    await expect(cards).toBeVisible()
   } finally {
     await electronApp.close()
   }
