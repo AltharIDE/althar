@@ -13,7 +13,8 @@ import { launch, openFirstProject, say, shown, startTask, toConversation } from 
  * for boards, a task's lead lays out designs on two pages; the canvas opens
  * beside its conversation on Althar's ground: every board of a page side by
  * side, one board at a time with a step through them, and every page at
- * once, from the bar along its bottom. The person points at a part of a
+ * once, from the controls floating over its boards, which the ground draws
+ * in the canvas's own page. The person points at a part of a
  * board and says what to change; the comment waits in the composer with the
  * part, its board and its page, and is a pin on the part. The screenshots it
  * takes are this change's evidence (test-results/boards-*.png).
@@ -45,6 +46,31 @@ const pressIn = (electronApp: ElectronApplication, at: { readonly x: number; rea
   }, at)
 
 const frames = (electronApp: ElectronApplication) => inCanvas<number>(electronApp, 'document.querySelectorAll("iframe").length')
+
+/** The middle of a control floating over the boards (or of an item of a menu it opened), by its name, in the view's pixels. */
+const controlAt = (electronApp: ElectronApplication, name: string) =>
+  inCanvas<{ readonly x: number; readonly y: number } | null>(
+    electronApp,
+    `(() => {
+      const want = new RegExp(${JSON.stringify(name)})
+      const all = [...document.querySelectorAll('button, [role="radio"], [role="menuitemradio"], [role="menuitem"]')]
+      const one = all.find((el) => want.test(el.getAttribute('aria-label') ?? '') || want.test(el.textContent ?? ''))
+      if (one === undefined) return null
+      const box = one.getBoundingClientRect()
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    })()`,
+  )
+
+/** Presses a control over the boards, as the person's mouse does. */
+const pressControl = async (electronApp: ElectronApplication, name: string) => {
+  await expect.poll(() => controlAt(electronApp, name)).not.toBeNull()
+  const at = await controlAt(electronApp, name)
+  if (at !== null) await pressIn(electronApp, at)
+}
+
+/** What the controls over the boards say. */
+const controlsSay = (electronApp: ElectronApplication) =>
+  inCanvas<string>(electronApp, `document.querySelector('.althar-controls')?.innerText ?? ''`)
 
 const open = async (home: string, size = { width: 1440, height: 900 }, scheme?: 'system') => {
   const projects = join(home, 'Projects')
@@ -79,21 +105,27 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page, panel } = await open(home)
   try {
-    // Every board of the first page, side by side, fitted; the bar along the bottom.
+    // Every board of the first page, side by side, fitted; its controls float over them, drawn in the canvas's own page.
     await expect(panel.getByText('Boards · The lead of Gift a class')).toBeVisible()
-    await expect(panel.getByRole('toolbar', { name: 'Tools' })).toBeVisible()
-    await expect(panel.getByRole('button', { name: /^Zoom: \d+%$/ })).toBeVisible()
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('.althar-controls [role="toolbar"]') !== null`))
+      .toBe(true)
+    await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions[\s\S]*\d+%/)
+    // None of them is the window's: the panel has no bar of its own.
+    await expect(panel.getByRole('toolbar', { name: 'Tools' })).toHaveCount(0)
     // The ground runs in a world of its own: the canvas's page never sees it.
     expect(await inCanvas<string>(electronApp, 'typeof window.__altharGround')).toBe('undefined')
     await shoot(page, electronApp, page, 'test-results/boards-every.png')
 
     // One board at a time, stepped through.
-    await panel.getByRole('radio', { name: 'One board at a time' }).click()
-    await expect(panel.getByText('1 of 6')).toBeVisible()
+    await pressControl(electronApp, '^One board at a time')
+    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 6')
     await expect.poll(() => frames(electronApp)).toBe(1)
-    await panel.getByRole('button', { name: 'Next board' }).click()
-    await expect(panel.getByText('2 of 6')).toBeVisible()
-    await expect(panel.getByText('The card leads', { exact: true })).toBeVisible()
+    await pressControl(electronApp, '^Next board')
+    await expect.poll(() => controlsSay(electronApp)).toContain('2 of 6')
+    await expect.poll(() => controlsSay(electronApp)).toContain('The card leads')
+    // The keys still step it, from the canvas.
+    await expect.poll(() => inCanvas<boolean>(electronApp, `document.activeElement === document.body`)).toBe(true)
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
     await expect
       .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('iframe')?.contentDocument?.querySelector('nav') != null`))
@@ -102,17 +134,21 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.waitForTimeout(1_500)
     await shoot(page, electronApp, panel, 'test-results/boards-one.png')
 
-    // Every page at once, a row each.
-    await panel.getByRole('radio', { name: 'Every board' }).click()
-    await panel.getByRole('button', { name: /^Pages: / }).click()
-    await page.getByRole('menuitemradio', { name: /Every page/ }).click()
+    // Every page at once, a row each, from the pages menu, which opens over the boards.
+    await pressControl(electronApp, '^Every board$')
+    await pressControl(electronApp, '^Pages: ')
+    await expect.poll(() => controlAt(electronApp, 'Every page')).not.toBeNull()
+    // The menu fades in, and the boards laid out again paint a moment after they load: the picture waits for both.
+    await page.waitForTimeout(1_200)
+    await shoot(page, electronApp, panel, 'test-results/boards-pages-menu.png')
+    await pressControl(electronApp, '^Every page')
     await expect.poll(() => frames(electronApp)).toBe(6)
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
     await shoot(page, electronApp, panel, 'test-results/boards-every-page.png')
 
     // Back to the directions, the person points at the button on the first board and says what to change.
-    await panel.getByRole('button', { name: /^Pages: / }).click()
-    await page.getByRole('menuitemradio', { name: /^Directions/ }).click()
+    await pressControl(electronApp, '^Pages: ')
+    await pressControl(electronApp, '^Directions')
     await expect.poll(() => frames(electronApp)).toBe(4)
     // Its boards are counted as they're laid out, before their pages have loaded.
     await expect
@@ -148,7 +184,7 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.keyboard.press('Escape')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
 
-    // The project's Artifacts view has it as a card, with a picture of it as it was drawn; opened, it goes beside its conversation.
+    // The project's Artifacts view has it as a card, with a picture of it as it was drawn; opened, it is itself, with its own chat.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
@@ -159,11 +195,16 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await shoot(page, electronApp, page, 'test-results/boards-artifacts.png')
     await card.click()
     await expect(page.getByRole('complementary', { name: 'Gift a class' })).toBeVisible()
+    const chat = page.getByRole('region', { name: 'Its chat' })
+    await expect(chat.getByRole('button', { name: /^Gift a class/ })).toBeVisible()
+    await expect(chat.getByText('Lead of Gift a class')).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
     await expect.poll(() => frames(electronApp)).toBe(4)
+    await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
+    await page.waitForTimeout(1_000)
     await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
     // And back to every artifact.
-    await page.getByRole('complementary', { name: 'Gift a class' }).getByRole('button', { name: /^Back/ }).click()
+    await chat.getByRole('button', { name: 'Back to Artifacts' }).click()
     await expect(cards).toBeVisible()
   } finally {
     await electronApp.close()
@@ -177,9 +218,10 @@ test('a canvas of boards in dark, and in a narrow window', async () => {
   const { electronApp, page, panel } = await open(home, { width: 1100, height: 760 }, 'system')
   try {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
     await shoot(page, electronApp, page, 'test-results/boards-dark.png')
-    await panel.getByRole('radio', { name: 'One board at a time' }).click()
-    await expect(panel.getByText('1 of 6')).toBeVisible()
+    await pressControl(electronApp, '^One board at a time')
+    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 6')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
     await expect.poll(() => frames(electronApp)).toBe(1)
     await page.waitForTimeout(1_500)

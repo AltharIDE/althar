@@ -539,33 +539,19 @@ describe('a canvas of boards', () => {
     return { canvases, say: (news: unknown) => act(() => listen?.(THREAD, news as never)) }
   }
 
-  it('is drawn on Althar’s ground, with its pages, every board or one at a time, its tools and its zoom along the bottom', async () => {
+  it('is drawn on Althar’s ground, its controls the ground’s own over the boards, and its keys work from the panel', async () => {
     const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
-    const { canvases, say } = views()
+    const { canvases } = views()
     const { client } = canvasClient(held(), BOARDS)
     show(client, { canvases })
     const target = { projectId: PROJECT, canvasId: CANVAS, version: 1, manifest: '1'.repeat(64), boards: true }
     await waitFor(() => expect(canvases.show).toHaveBeenLastCalledWith(THREAD, target, { x: 640, y: 120, width: 640, height: 700 }))
-    expect(screen.getByRole('toolbar', { name: 'Tools' })).not.toBeNull()
-
-    // One board at a time shows at once, before the ground says so, and the ground is asked.
-    await userEvent.click(screen.getByRole('radio', { name: 'One board at a time' }))
-    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { view: 'one' })
-    expect(screen.getByText('1 of 3')).not.toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Next board' }))
-    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { step: 1 })
-    expect(screen.getByText('2 of 3')).not.toBeNull()
-    expect(screen.getByText('Phone')).not.toBeNull()
-
-    // The ground's word stands: its zoom, and the board it shows.
-    say({ kind: 'state', state: { view: 'one', page: 1, board: { page: 1, board: 0 }, zoom: 0.42, tool: 'hand' } })
-    expect(screen.getByRole('button', { name: 'Zoom: 42%' })).not.toBeNull()
-    expect(screen.getByText('3 of 3')).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Move around' }).getAttribute('aria-pressed')).toBe('true')
-    await userEvent.click(screen.getByRole('button', { name: 'Point at a part' }))
-    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { tool: 'point' })
+    // The ground draws the pages, the view, the tools and the zoom over the boards: the panel has no bar of its own.
+    expect(screen.queryByRole('toolbar', { name: 'Tools' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'One board at a time' })).toBeNull()
 
     // Its keys work from anywhere on the panel but a field: the tools and the zoom.
+    const panel = screen.getByRole('complementary')
     for (const [key, change] of [
       ['h', { tool: 'hand' }],
       ['u', { tool: 'use' }],
@@ -573,11 +559,11 @@ describe('a canvas of boards', () => {
       ['=', { zoom: 'in' }],
       ['-', { zoom: 'out' }],
     ] as const) {
-      fireEvent.keyDown(screen.getByRole('toolbar', { name: 'Tools' }), { key })
+      fireEvent.keyDown(panel, { key })
       expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, change)
     }
     const calls = vi.mocked(canvases.ground!).mock.calls.length
-    fireEvent.keyDown(screen.getByRole('toolbar', { name: 'Tools' }), { key: 'h', metaKey: true })
+    fireEvent.keyDown(panel, { key: 'h', metaKey: true })
     fireEvent.keyDown(document.body, { key: 'h' })
     expect(vi.mocked(canvases.ground!).mock.calls.length).toBe(calls)
     measured.mockRestore()

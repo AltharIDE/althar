@@ -253,39 +253,43 @@
   user-select: none;
 }
 
-/* ---- A canvas of boards' own bar, along the bottom ------------------- */
-/* its pages and view at the start, its tools in the middle, its zoom at the end */
-.boardsBar {
-  flex: none;
-  container: boards-bar / inline-size;
-  height: 44px;
-  border-top: 1px solid var(--line);
-  background: var(--chrome);
+/* ---- A canvas of boards' controls, floating over its boards ---------- */
+/* its pages and view at the top left, its zoom at the top right, its tools along the bottom: each a small raised surface */
+.boardsControls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
-.boardsInner {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  height: 100%;
-  padding: 0 10px;
-}
-.boardsStart {
-  min-width: 0;
+.float {
+  position: absolute;
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.boardsEnd {
+  gap: 4px;
   min-width: 0;
-  display: flex;
-  justify-content: flex-end;
+  /* one height for each, whatever it holds, so they line up across the top */
+  height: 38px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--float);
+  box-shadow: var(--lift-pop);
+  pointer-events: auto;
 }
-/* A narrow bar: its start takes the room the zoom doesn't need, so a page's and a board's names aren't cut to a letter; the tools go off the middle. */
-@container boards-bar (max-width: 760px) {
-  .boardsInner {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-  }
+/* the start leaves the zoom its room, and gives way before it does */
+.floatStart {
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 136px);
+}
+.floatEnd {
+  top: 12px;
+  right: 12px;
+}
+.floatTools {
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 2px;
 }
 .pageMenu {
   min-width: 0;
@@ -319,14 +323,6 @@
   color: var(--t-3);
   font-variant-numeric: tabular-nums;
   padding-right: 2px;
-}
-.tools {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 9px;
-  background: var(--segment-track);
 }
 /* the zoom's figure keeps its width as it changes, so nothing beside it moves */
 .zoom {

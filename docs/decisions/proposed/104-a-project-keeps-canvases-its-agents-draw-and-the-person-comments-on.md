@@ -652,10 +652,17 @@ design tool lays out frames.
   runs in; nothing of it is in Althar's window.
 - **It shows every board of a page, every page at once, or one board at a
   time.** A page's boards wrap into as many lines as shows them largest in
-  the view. The panel's bar along the bottom (the kit's `BoardsBar`) holds
-  the page, every board or one at a time with a step through every page's
-  boards, the tools and the zoom. A press shows at once and the ground
-  confirms it. There is no viewport switch: the boards are the sizes.
+  the view. Its controls float over the boards, as a design tool's do
+  (the kit's `BoardsControls`): at the top left the page, and every board
+  or one at a time with a step through every page's boards; at the top
+  right the zoom; along the bottom the tools. Nothing of Althar's window
+  can be drawn over the canvas's view, so the ground draws them in the
+  canvas's own page, the kit's components in React with the kit's styles
+  and type, over the canvas's tokens (dark as the system's scheme is); a
+  press changes the ground at once, and the window hears it with the rest
+  of its news. Their menus open over the boards; an open menu has the
+  keys, and a control pressed gives them back to the boards. There is no
+  viewport switch: the boards are the sizes.
 - **Pointing at a part is how the person says what to change.** The point
   tool outlines and names the part under the pointer (a part the design
   names with `data-part` first). A press takes it: the view steps aside for

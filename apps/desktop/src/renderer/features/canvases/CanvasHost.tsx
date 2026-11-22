@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { CanvasAnchor, CanvasBoards, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
-import { BoardsBar, CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, Markdown } from '@althar/ui'
+import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, Markdown } from '@althar/ui'
 
 import { sized } from '../../../main/browser/elementWords'
 import type { CanvasPointed } from '../../../main/canvases/boards'
@@ -271,21 +271,6 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }
         : {})}
       {...(kind === 'boards' && boards !== null && !loading && error === undefined
         ? {
-            bar: (
-              <BoardsBar
-                pages={boards.pages}
-                view={ground.state.view}
-                page={ground.state.page}
-                board={ground.state.board}
-                zoom={ground.state.zoom}
-                tool={ground.state.tool}
-                onView={(view) => ground.change({ view })}
-                onPage={(page) => ground.change({ page, view: 'every' })}
-                onStep={(step) => ground.change({ step })}
-                onZoom={(zoom) => ground.change({ zoom })}
-                onTool={(tool) => ground.change({ tool })}
-              />
-            ),
             onCommentPick: (id: string) => {
               const one = sent.find((c) => c.id === id)
               if (one?.anchor.kind === 'element' && one.anchor.page !== undefined && one.anchor.board !== undefined)

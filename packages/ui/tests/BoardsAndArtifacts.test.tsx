@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type ArtifactRow, Artifacts, filtered } from '../src/screens/Artifacts/Artifacts'
-import { BoardsBar, type BoardsTool, type BoardsView } from '../src/thread/Canvas/BoardsBar'
+import { BoardsControls, type BoardsTool, type BoardsView } from '../src/thread/Canvas/BoardsControls'
 import { CanvasPagePlace, CanvasPanel } from '../src/thread/Canvas/CanvasPanel'
 
 /*
@@ -26,7 +26,7 @@ function Bar({ onZoom = () => {}, onPage = () => {} }: { onZoom?: (zoom: unknown
   const [board, setBoard] = useState({ page: 0, board: 0 })
   const all = PAGES.flatMap((page, p) => page.boards.map((_, b) => ({ page: p, board: b })))
   return (
-    <BoardsBar
+    <BoardsControls
       pages={PAGES}
       view={view}
       page={0}
@@ -90,7 +90,7 @@ describe('a canvas of boards’ bar', () => {
 
   it('names no pages where a canvas has only one', () => {
     render(
-      <BoardsBar
+      <BoardsControls
         pages={[PAGES[0]!]}
         view="one"
         page={0}

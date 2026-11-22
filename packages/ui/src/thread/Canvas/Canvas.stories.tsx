@@ -3,7 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Markdown } from '../Markdown/Markdown'
 import { ThreadShellProvider } from '../Shell/Shell'
-import { BoardsBar } from './BoardsBar'
+import { BoardsControls } from './BoardsControls'
 import { CanvasLine } from './CanvasLine'
 import { CanvasPanel } from './CanvasPanel'
 import s from './Canvas.module.css'
@@ -197,7 +197,7 @@ const BOARDS = [
   { name: 'Receipt', boards: [{ name: 'Desktop' }, { name: 'Email' }] },
 ]
 
-/** A canvas of boards: drawn on Althar's ground by a view of its own (here, a frame stands in), with its own bar along the bottom and its comments numbered as their pins. */
+/** A canvas of boards: drawn on Althar's ground by a view of its own (here, a frame stands in), its controls floating over its boards, and its comments numbered as their pins. */
 export const ABoardsCanvas: Story = {
   args: {
     kind: 'boards',
@@ -218,22 +218,23 @@ export const ABoardsCanvas: Story = {
         n: 2,
       },
     ],
-    bar: (
-      <BoardsBar
-        pages={BOARDS}
-        view="every"
-        page={0}
-        board={{ page: 0, board: 0 }}
-        zoom={0.18}
-        tool="point"
-        onView={fn()}
-        onPage={fn()}
-        onStep={fn()}
-        onZoom={fn()}
-        onTool={fn()}
-      />
+    children: (
+      <div className={s.page} style={{ background: 'var(--n-1)' }}>
+        <BoardsControls
+          pages={BOARDS}
+          view="every"
+          page={0}
+          board={{ page: 0, board: 0 }}
+          zoom={0.18}
+          tool="point"
+          onView={fn()}
+          onPage={fn()}
+          onStep={fn()}
+          onZoom={fn()}
+          onTool={fn()}
+        />
+      </div>
     ),
-    children: <div className={s.page} style={{ background: 'var(--n-1)' }} />,
   },
   decorators: [beside],
   play: async ({ canvasElement }) => {
@@ -248,20 +249,22 @@ export const OneBoardAtATime: Story = {
   args: {
     ...ABoardsCanvas.args,
     comments: [],
-    bar: (
-      <BoardsBar
-        pages={BOARDS}
-        view="one"
-        page={0}
-        board={{ page: 0, board: 1 }}
-        zoom={0.62}
-        tool="hand"
-        onView={fn()}
-        onPage={fn()}
-        onStep={fn()}
-        onZoom={fn()}
-        onTool={fn()}
-      />
+    children: (
+      <div className={s.page} style={{ background: 'var(--n-1)' }}>
+        <BoardsControls
+          pages={BOARDS}
+          view="one"
+          page={0}
+          board={{ page: 0, board: 1 }}
+          zoom={0.62}
+          tool="hand"
+          onView={fn()}
+          onPage={fn()}
+          onStep={fn()}
+          onZoom={fn()}
+          onTool={fn()}
+        />
+      </div>
     ),
   },
   decorators: [beside],

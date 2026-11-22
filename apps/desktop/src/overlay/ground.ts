@@ -1,4 +1,5 @@
 import type { Box, Picked } from '../main/browser/picked'
+import { controlsIn } from './controls'
 import { describe } from './describe'
 
 /*
@@ -157,6 +158,7 @@ const STYLE = `
   .althar-catch[data-tool='hand'], .althar-catch[data-moving] { cursor: grab; }
   .althar-catch[data-dragging] { cursor: grabbing; }
   .althar-catch[data-tool='use']:not([data-moving]) { pointer-events: none; }
+  .althar-controls { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
   [hidden] { display: none !important; }
 `
 
@@ -222,12 +224,17 @@ const install = (): Ground => {
   name.hidden = true
   const pinLayer = document.createElement('div')
   root.append(overlayStyle, outline, name, pinLayer)
+  // The controls float over the boards and the catcher, in the kit's type; its menus open on the body, over them.
+  const layer = document.createElement('div')
+  layer.className = 'althar-controls ch-root'
+  document.body.classList.add('ch-root')
 
   /* Kept in the page: a board that rewrites its parent's document can take them out with it. */
   const mounted = () => {
     if (!style.isConnected) document.head.append(style)
     if (!world.isConnected) document.body.append(world)
     if (!catcher.isConnected) document.body.append(catcher)
+    if (!layer.isConnected) document.body.append(layer)
     if (!host.isConnected) document.documentElement.append(host)
   }
 
@@ -251,7 +258,10 @@ const install = (): Ground => {
   let spaceHeld = false
 
   const news = (): GroundNews => ({ seq, state, events: [] })
+  /* Drawn again as the ground changes; made once `set` is. */
+  let showControls = () => {}
   const changed = () => {
+    showControls()
     seq += 1
     const ready = waiting
     waiting = []
@@ -404,6 +414,7 @@ const install = (): Ground => {
     // A board too narrow on screen for its name and its size keeps its name.
     for (const one of placed) one.node.toggleAttribute('data-narrow', one.def.width * state.zoom < 260)
     redraw()
+    showControls()
   }
 
   /** Fits what shows into the view, with room for the names over it; never larger than its own size. */
@@ -631,7 +642,7 @@ const install = (): Ground => {
   )
 
   document.addEventListener('keydown', (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return
+    if (event.metaKey || event.ctrlKey || event.altKey || controls.owns(event)) return
     const key = event.key
     if (key === ' ') {
       event.preventDefault()
@@ -686,7 +697,7 @@ const install = (): Ground => {
     fit()
   })
 
-  /* ——— What the main process asks ——— */
+  /* ——— What the main process asks, and the controls over the boards ——— */
 
   const set = (change: GroundChange): GroundNews => {
     mounted()
@@ -752,6 +763,8 @@ const install = (): Ground => {
     changed()
     return news()
   }
+  const controls = controlsIn(layer, (change) => void set(change))
+  showControls = () => controls.show(pages, state)
 
   return {
     start: (given, asked) => {
