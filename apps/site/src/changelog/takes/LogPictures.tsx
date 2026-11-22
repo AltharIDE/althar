@@ -1170,34 +1170,29 @@ function Undo() {
 
 /*
  * The beats: Althar on your computer, its window open on a home on your own
- * server, a task at work there; the window closes, and the server carries
- * on: its tasks keep working and the task finishes. Beside them, on the
- * home's command line, as the worker preview is run today: you queue the
- * project's check on a worker, read its log and its result, a pass. The
- * window opens again on the finished task. Then it holds, and clears.
+ * server, a task at work there, its lead running on a worker of yours; the
+ * window closes, and the server carries on: the worker runs the project's
+ * setup and its tests for the task, and sends its commits back to the home,
+ * and the task finishes. The window opens again on the finished task. Then
+ * it holds, and clears.
  */
 const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
 
-/** The server's tasks, and the beat each finishes on, if it does. */
+/** The server's tasks, and the beat each finishes on, if it does. The first one's lead runs on the worker. */
 const ON_HOME = [
-  { name: 'Partial refunds', agent: Agent.Claude, done: 4 },
-  { name: 'Webhook retries', agent: Agent.Codex, done: null },
-  { name: 'Payout export', agent: Agent.Claude, done: null },
+  { name: 'Partial refunds', agent: Agent.Claude, done: 5, worker: true },
+  { name: 'Webhook retries', agent: Agent.Codex, done: null, worker: false },
+  { name: 'Payout export', agent: Agent.Claude, done: null, worker: false },
 ] as const
 
-/** The worker's and project's IDs, and the run's, in the forms the home gives them. */
-const RUNNER = 'wrk_5b0e2c7a91d34f68a2c1e9b07d4f3a16'
-const TALLY = 'proj_8c41f9e2a07b4d35b6e1c2f08a9d7e43'
-const ATTEMPT = 'wpr_3f9c1a7e5d2b4c80a6e1f94b7c02d58e'
-
-/** The home's command line, as its preview is run today: what you type, what it answers, and the beat each line comes on. */
-const CHECK = [
-  { at: 2, line: `althar-host worker-project-run --worker-id ${RUNNER} --project-id ${TALLY} --command-name check`, typed: true },
-  { at: 3, line: `Project run queued as ${ATTEMPT}`, typed: false },
-  { at: 3, line: `althar-host worker-log --attempt-id ${ATTEMPT}`, typed: true },
-  { at: 4, line: '✓ 23 passed  refunds, settlement', typed: false },
-  { at: 5, line: `althar-host worker-result --attempt-id ${ATTEMPT}`, typed: true },
-  { at: 5, line: `${ATTEMPT} succeeded`, typed: false },
+/** What the worker does for the task: the commands it runs typed, what comes back not, and the beat each line comes on. */
+const ON_WORKER = [
+  { at: 0, line: 'Lead for Partial refunds · Claude Code', typed: false },
+  { at: 2, line: 'bun install', typed: true },
+  { at: 2, line: 'Setup done in 4.2 s', typed: false },
+  { at: 3, line: 'bun test src/refunds', typed: true },
+  { at: 4, line: '✓ 23 passed', typed: false },
+  { at: 5, line: '2 commits back to build-01', typed: false },
 ] as const
 
 function Home() {
@@ -1206,12 +1201,11 @@ function Home() {
   const out = beat === HOSTED.beats.length - 1
   const at = (from: number) => beat >= from && !out
   const closed = beat >= 1 && beat <= 5
-  const passed = at(5)
-  const running = at(3) && !passed
-  const queued = at(2) && !running && !passed
+  const sent = at(5)
+  const working = !out && !sent
   return (
     <Frame
-      label="Your own host: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work; on the home's command line, the project's check is queued on a worker, and its log and result read back, a pass; the window opens again on the finished task"
+      label="Your own host and workers: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work; a task's lead runs on a worker of yours, which runs the project's setup and tests and sends its commits back to the home; the window opens again on the finished task"
       w={64}
       n={32}
     >
@@ -1229,11 +1223,11 @@ function Home() {
               <p>Let a refund be for part of a payment.</p>
             </div>
             <div className={p.brAfter}>
-              <span className={p.brLive} data-shown={!at(4)}>
+              <span className={p.brLive} data-shown={!at(5)}>
                 <i />
                 <span>Writing src/refunds/refund.ts</span>
               </span>
-              <div className={p.brLead} data-shown={at(4)}>
+              <div className={p.brLead} data-shown={at(5)}>
                 <span className={p.mk}>
                   <AgentMark agent={Agent.Claude} size={13} />
                 </span>
@@ -1281,7 +1275,7 @@ function Home() {
                     ) : (
                       <>
                         <i />
-                        At work
+                        {task.worker ? 'On runner-1' : 'At work'}
                       </>
                     )}
                   </span>
@@ -1289,31 +1283,29 @@ function Home() {
               )
             })}
           </ul>
-          <span className={p.hoLabel}>Worker · preview</span>
+          <span className={p.hoLabel}>Worker</span>
           <div className={p.hoWorker}>
             <div className={p.hoRun}>
               <code>runner-1</code>
-              <span key={passed ? 'passed' : running ? 'running' : queued ? 'queued' : 'idle'} className={p.hoState} data-done={passed}>
-                {passed ? (
+              <span key={sent ? 'sent' : working ? 'working' : 'idle'} className={p.hoState} data-done={sent}>
+                {sent ? (
                   <>
                     <Icon name="check" size={11} />
-                    Succeeded
+                    Sent back
                   </>
-                ) : running ? (
+                ) : working ? (
                   <>
                     <i />
-                    Running check
+                    Running a lead
                   </>
-                ) : queued ? (
-                  'Queued'
                 ) : (
-                  'Idle'
+                  'Free'
                 )}
               </span>
             </div>
-            {/* The home's own terminal: the preview's runs are started and read from its command line. */}
+            {/* What the worker runs for the task, as its run shows it. */}
             <ol className={p.hoLog}>
-              {CHECK.map((line) => (
+              {ON_WORKER.map((line) => (
                 <li key={line.line} data-shown={at(line.at)} data-typed={line.typed}>
                   {/* Each word whole: a line breaks between its arguments, never inside a flag or an ID. */}
                   {line.line.split(' ').map((word, i) => (

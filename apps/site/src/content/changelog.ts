@@ -43,7 +43,43 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Open a home from Althar over SSH, or pair with a one-time code over HTTPS. From its window, start tasks, talk to their leads and read what they changed; answering asks and merging there come later.',
+        text: 'Set one up from Althar: Connect a home installs the host on your server over SSH, step by step, and carries on with the dialog closed. Or pair with a one-time code over HTTPS.',
+      },
+      {
+        kind: 'new',
+        text: 'Make projects on a home from its window: clone a repository, pick a folder the home found, or start empty. An empty home welcomes you with what it has and what it still needs.',
+      },
+      {
+        kind: 'new',
+        text: 'From a home’s window, start tasks, talk to their leads and read what they changed. Answer an agent’s asks there with a security key you hold; merging there comes later.',
+      },
+      {
+        kind: 'new',
+        text: 'Your own workers: enroll a Linux machine, and a task’s lead runs on it, signed in to its own agent. The home keeps the task, its asks and its tools, and takes the worker’s commits back.',
+      },
+      {
+        kind: 'new',
+        text: 'Choose a worker when you start, or Best available worker: the home picks by free memory, disk and CPU, and the card says where the lead, setup and review will run before you start.',
+      },
+      {
+        kind: 'new',
+        text: 'On a worker, the project’s setup runs first, and Run’s builds, tests and dev servers run there too. A dev server opens in a private window through the home, live reload and all.',
+      },
+      {
+        kind: 'new',
+        text: 'A task can send up to eight repositories to its worker, its helpers can join it there, and its skills and MCP servers come along. Save a local copy brings the work to your computer.',
+      },
+      {
+        kind: 'new',
+        text: 'Workers work for a home on your server, or for Althar on your Mac. Each connects straight to its home, or both dial out to a relay, and ending a project’s grant stops its work there.',
+      },
+      {
+        kind: 'new',
+        text: 'Settings › Computers: your home and each worker, what it runs and what it has free, with Add a worker and Remove. This Mac’s popover lists them too, and how many agents are at work.',
+      },
+      {
+        kind: 'new',
+        text: 'Workers run on Linux for now, and you enroll them from the home’s command line. Reviews run on the home.',
       },
       {
         kind: 'new',
@@ -51,15 +87,35 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Workers, in preview: enroll a Linux machine of your own, then run your project’s check on it from the home’s command line and read back what it printed and how it ended, every run kept. Cancel stops every process it started.',
-      },
-      {
-        kind: 'new',
-        text: 'A worker connects straight to its home, or both dial out to a relay. For now each runs the one command you set it up with, for up to a minute.',
-      },
-      {
-        kind: 'new',
         text: 'A managed home can take signed updates: give it a release key and a release feed, and each update is checked as it downloads and applied when you say.',
+      },
+      {
+        kind: 'new',
+        text: 'Computer use: a task’s lead uses the apps on your computer, with one ask a turn. Its card shows what it’s doing and its latest screenshot, with Take over and Stop, and what it saw can be kept as evidence.',
+      },
+      {
+        kind: 'new',
+        text: 'Artifacts you talk to: open one beside its own chat, point at a part and say what you think, and its agent draws a new version. Lay out boards side by side, every board or one at a time, save it to a repository, or download it.',
+      },
+      {
+        kind: 'new',
+        text: 'Goals: give a task’s lead a `/goal`, and it keeps working toward it turn after turn, reporting as it goes, until it’s met, blocked or you pause it. The goal follows the task when its lead changes.',
+      },
+      {
+        kind: 'new',
+        text: 'The thread shows what agents look up and hand off: web searches and pages read, sub-agents with what they did, and each compaction with its summary.',
+      },
+      {
+        kind: 'new',
+        text: 'Work on a contributor’s pull request from their fork, on GitHub or GitLab, where they allow maintainers’ edits.',
+      },
+      {
+        kind: 'new',
+        text: 'Leads hear the review bots a project trusts, such as CodeRabbit, Copilot or Claude’s review, as findings to weigh. Trust one from the thread or the project’s settings.',
+      },
+      {
+        kind: 'new',
+        text: 'Codex offers GPT-6.2 Sol. When a plan runs low, the work moves to the same model through another agent or account before a different model, and the task says which.',
       },
       {
         kind: 'new',
@@ -96,7 +152,13 @@ export const RELEASES: readonly Release[] = [
       { kind: 'new', text: 'Ship says where it takes the change: a review first or not, then a push, ready or merged.' },
       { kind: 'new', text: 'About Althar shows where Althar keeps its data and how much, with Free up space beside it.' },
       { kind: 'new', text: 'Agents pick up `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, for a gateway of your own.' },
-      { kind: 'improved', text: 'Althar answers at once, however busy your computer is, the model picker included.' },
+      { kind: 'improved', text: 'Althar answers at once, however busy your computer is: the model picker, search and the board included.' },
+      { kind: 'improved', text: 'Switching a lead’s model shows the new one at once.' },
+      {
+        kind: 'improved',
+        text: 'Althar stays light with nothing running: idle coordinators rest after half an hour and wake on your message, and Home opens fast in a long-used profile.',
+      },
+      { kind: 'improved', text: 'A full session compacts in place and carries on, rather than starting afresh.' },
       { kind: 'improved', text: 'Agents running at once share the computer’s CPU, so none starves the rest.' },
       { kind: 'improved', text: 'Long threads open and scroll smoothly, at any length.' },
       {
@@ -122,6 +184,11 @@ export const RELEASES: readonly Release[] = [
         text: 'Running settings: long lists search, and Ask the coordinator puts your request in its composer, unsent.',
       },
       { kind: 'improved', text: 'An issue’s card says what merging does to it: Closes it, or Part of it.' },
+      { kind: 'improved', text: 'Only the checks a code host requires hold a change back; an optional one that fails is a quiet note.' },
+      { kind: 'improved', text: 'Running settings show each repository’s setup command, who set it, and let you change it.' },
+      { kind: 'improved', text: 'GitLab reviews post their summary and line comments together.' },
+      { kind: 'improved', text: 'Comments you haven’t sent stay in the composer across restarts.' },
+      { kind: 'improved', text: 'Asides start in a project of several repositories.' },
       { kind: 'improved', text: 'When git fails, its own error says why, and a worktree whose link broke is repaired.' },
       { kind: 'improved', text: 'The conversation bar lists recent conversations, with a search.' },
       { kind: 'improved', text: 'Merge shows the queue at once, and lands with a burst.' },
@@ -129,7 +196,14 @@ export const RELEASES: readonly Release[] = [
       { kind: 'improved', text: 'The thread says when a lead is handed on at a usage limit.' },
       { kind: 'improved', text: 'A small change’s card lets you pick its team.' },
       { kind: 'improved', text: 'Claude Code’s adapter is 0.109.0 and Codex’s is 2.8.0.' },
+      { kind: 'fixed', text: 'Dictation tries a failed transcription again before saying it failed.' },
       { kind: 'fixed', text: 'A lost agent connection ends the turn, rather than saying Following up.' },
+      { kind: 'fixed', text: 'Gemini takes Althar’s tools.' },
+      { kind: 'fixed', text: 'Screenshots reach a pull request on GitHub again.' },
+      { kind: 'fixed', text: 'Ship shows for commits held before a task’s first pull request.' },
+      { kind: 'fixed', text: 'A fork is recognised whatever its remotes are called.' },
+      { kind: 'fixed', text: 'Run servers nothing owns any more stop.' },
+      { kind: 'fixed', text: 'Board cards stay in their column while you move the divider.' },
       { kind: 'fixed', text: 'A message sent to an idle agent never flashes as queued.' },
       { kind: 'fixed', text: 'The chat holds still while nothing changes.' },
       { kind: 'fixed', text: 'Pictures over GitHub’s 10 MB limit still reach the pull request.' },

@@ -54,7 +54,7 @@ export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
   '0.10.0': [
     {
       title: 'Your own host, your own workers',
-      why: 'Run Althar’s host on a Linux server of yours, and your projects, tasks and agents live there. Close the laptop and the work goes on; open it again from Althar over SSH or with a pairing code. And, in preview, enroll Linux machines of your own as workers: from the home’s command line, run your project’s check on one and read back how it went.',
+      why: 'Run Althar on a server of yours, and your own machines as its workers. Close the laptop, and the work goes on.',
       picture: 'home',
       covers: [0],
     },
