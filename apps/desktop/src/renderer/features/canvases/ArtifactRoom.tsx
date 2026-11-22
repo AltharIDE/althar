@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ArtifactChat, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
 import { ArtifactHead, type ArtifactHeadArtifact, Button, Problem } from '@althar/ui'
@@ -39,6 +39,12 @@ export const artifactRoomText = {
   again: 'Try again',
   drawing: 'Drawing the first version',
 }
+
+/*
+ * Each artifact's chat as it starts, by its canvas, outside any room: what was sent before it was ready goes to that
+ * artifact's own chat once it is, whether the person stayed, went to another artifact, or left every artifact.
+ */
+const starting = new Map<string, Promise<ArtifactChat | null>>()
 
 /** The artifact open: a canvas by its id, or one still drawing its first version by its chat's task; at a version, or the latest. */
 export interface OpenArtifact {
@@ -84,9 +90,9 @@ export function ArtifactRoom({
   // A chat started here, until the canvas's own read names it.
   const [started, setStarted] = useState<(ArtifactChat & { readonly canvasId: string }) | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
-  // Words sent before the chat was ready: they wait in the composer's queue, and go as it is.
-  const [queued, setQueued] = useState<string | null>(null)
-  const sending = useRef(false)
+  // Words sent before the chat was ready, with the artifact they were sent to: they wait in its composer's queue, and go
+  // to its own chat as it is ready.
+  const [queued, setQueued] = useState<{ readonly canvasId: string; readonly words: string } | null>(null)
   const known = summary?.chat ?? (drawn === null ? null : drawn) ?? (started !== null && started.canvasId === canvasId ? started : null)
   const chatTask = known?.taskId ?? null
   const chatThread = known?.threadId ?? null
@@ -95,42 +101,61 @@ export function ArtifactRoom({
     [chatTask, chatThread],
   )
   const draft = draftKey.artifact(canvasId ?? open.id)
-  const starting = useRef<string | null>(null)
   // Where the canvas's versions and actions go: the end of the artifact's row.
   const [actions, setActions] = useState<HTMLSpanElement | null>(null)
 
-  const start = useCallback(() => {
-    if (chat !== null || canvasId === null || summary === null || lead === null || starting.current === canvasId) return
-    starting.current = canvasId
+  /** This artifact's chat: the one it has, or the one starting, or a new one started now; null where it can't start. */
+  const start = useCallback((): Promise<ArtifactChat | null> => {
+    if (chat !== null) return Promise.resolve(chat)
+    if (canvasId === null || summary === null || lead === null) return Promise.resolve(null)
+    const going = starting.get(canvasId)
+    if (going !== undefined) return going
     setFailed(null)
     const taskId = newTaskId()
-    client.startTask({ projectId, title: summary.latest.title, steps: [lead], chat: true, artifact: { canvasId }, taskId }).then(
-      (made) => {
-        // Read while the person writes: their first words open a ready conversation.
-        void cache.prefetchQuery(reads(client).thread(made.threadId))
-        setStarted({ canvasId, taskId: made.id, threadId: made.threadId })
-      },
-      (error: unknown) => {
-        starting.current = null
-        setFailed(artifactRoomText.startFailed(messageOf(error)))
-      },
-    )
+    const made = client
+      .startTask({ projectId, title: summary.latest.title, steps: [lead], chat: true, artifact: { canvasId }, taskId })
+      .then(
+        (one) => {
+          // Read while the person writes: their first words open a ready conversation.
+          void cache.prefetchQuery(reads(client).thread(one.threadId))
+          setStarted({ canvasId, taskId: one.id, threadId: one.threadId })
+          return { taskId: one.id, threadId: one.threadId }
+        },
+        (error: unknown) => {
+          setFailed(artifactRoomText.startFailed(messageOf(error)))
+          return null
+        },
+      )
+      // Once it has started or failed, its canvas names it, or a new ask may start it again: the runtime answers with the same.
+      .finally(() => starting.delete(canvasId))
+    starting.set(canvasId, made)
+    return made
   }, [chat, canvasId, summary, lead, projectId, client, cache])
-  useEffect(() => {
-    if (chat === null || queued === null || sending.current) return
-    sending.current = true
-    void sendFirst(client.send, chat.threadId, draft, queued).then(
-      () => {
-        sending.current = false
-        setQueued(null)
-      },
-      (error: unknown) => {
-        sending.current = false
-        setQueued(null)
-        setFailed(artifactRoomText.sendFailed(messageOf(error)))
-      },
-    )
-  }, [chat, queued, client, draft])
+
+  /** Words sent before the chat is ready: they go to this artifact's own chat, with its pointed parts, as it is ready. */
+  const sendSoon = (words: string) => {
+    if (canvasId === null) return
+    const to = { canvasId, words, draft }
+    setFailed(null)
+    setQueued({ canvasId, words })
+    setDraftText(draft, '')
+    const settled = (failure: string | null) => {
+      setQueued((now) => (now?.canvasId === to.canvasId && now.words === to.words ? null : now))
+      if (failure !== null) setFailed(failure)
+    }
+    void start().then((ready) => {
+      if (ready === null) {
+        // Its words go back where they were written, for the person to send again.
+        setDraftText(to.draft, (now) => (now.trim() === '' ? to.words : `${to.words}\n\n${now}`))
+        return settled(null)
+      }
+      return sendFirst(client.send, ready.threadId, to.draft, to.words).then(
+        () => settled(null),
+        (error: unknown) => settled(artifactRoomText.sendFailed(messageOf(error))),
+      )
+    })
+  }
+  const waiting = queued !== null && queued.canvasId === canvasId ? queued.words : null
 
   const title = summary?.latest.title ?? drawn?.title ?? ''
   const artifacts: ReadonlyArray<ArtifactHeadArtifact> = useMemo(
@@ -166,7 +191,7 @@ export function ArtifactRoom({
       />
       <div className={s.body}>
         <section className={s.chat} aria-label={artifactRoomText.chat}>
-          {chat !== null && queued === null ? (
+          {chat !== null && waiting === null ? (
             <Conversation
               key={chat.threadId}
               threadId={chat.threadId}
@@ -178,19 +203,11 @@ export function ArtifactRoom({
           ) : (
             <FirstWords
               draft={draft}
-              queued={queued}
-              onStart={start}
-              onSend={(words) => {
-                setFailed(null)
-                setQueued(words)
-                setDraftText(draft, '')
-                start()
-              }}
+              queued={waiting}
+              onStart={() => void start()}
+              onSend={sendSoon}
               failed={failed}
-              onAgain={() => {
-                starting.current = null
-                start()
-              }}
+              onAgain={() => void start()}
             />
           )}
         </section>

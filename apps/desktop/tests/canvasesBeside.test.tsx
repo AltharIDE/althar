@@ -388,6 +388,44 @@ describe('the project’s Artifacts view', () => {
     expect(client.startTask).toHaveBeenCalledTimes(1)
   })
 
+  it('sends words written before its chat started to that artifact’s own chat, even after going to another', async () => {
+    const talked = { ...listed[1]!, chat: { taskId: 'task_chat', threadId: 'thr_chat' } }
+    let ready: (started: { id: string; threadId: string }) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((resolve) => (ready = resolve as never)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => [listed[0]!, talked]), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    const field = await screen.findByPlaceholderText('Ask about it, or say what to change')
+    await userEvent.type(field, 'Make it calmer{Enter}')
+    expect(startTask).toHaveBeenCalledTimes(1)
+    // To another artifact, which has a chat of its own, before the first one's has started.
+    await userEvent.click(screen.getByRole('button', { name: /Sign-in flow, take 3/ }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'The plan' }))
+    await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    expect(client.send).toHaveBeenCalledTimes(1)
+    expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thr_new', body: 'Make it calmer' }))
+  })
+
+  it('sends words written before its chat started even after leaving every artifact', async () => {
+    let ready: (started: { id: string; threadId: string }) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((resolve) => (ready = resolve as never)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    await userEvent.type(await screen.findByPlaceholderText('Ask about it, or say what to change'), 'Bigger photos{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'Back to Artifacts' }))
+    expect(await screen.findByRole('list', { name: 'The project’s artifacts' })).toBeTruthy()
+    await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thr_new', body: 'Bigger photos' })))
+  })
+
   it('show as cards, each with its facts and where it is saved, those still being drawn first, narrowed by Filter', async () => {
     const drawn = summary(
       CANVAS,
