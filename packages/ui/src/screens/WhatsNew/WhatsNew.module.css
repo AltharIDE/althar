@@ -4,6 +4,8 @@
   height: 100%;
   overflow-y: auto;
   background: var(--n-2);
+  /* narrow by its own width, which is the window's */
+  container: news / inline-size;
 }
 
 /* ---- the release, on the light ---- */
@@ -533,15 +535,11 @@
   padding-left: 20px;
   box-shadow: inset 1px 0 0 var(--line);
 }
-.felt b {
-  font: 620 15px/1.3 var(--font-display);
-  letter-spacing: -0.01em;
-  color: var(--t-1);
-}
 .felt span {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--t-2);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--t-1);
+  text-wrap: pretty;
 }
 
 /* Follow what's next: the light again, closing what's new */
@@ -671,7 +669,7 @@
 
 /* ---- the narrowest window ---- */
 
-@container window (width < 960px) {
+@container news (width < 960px) {
   .title {
     font-size: 42px;
   }

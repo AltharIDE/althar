@@ -64,6 +64,7 @@ import {
   ShieldCheck,
   SidebarExpand,
   SoundHigh,
+  Sparks,
   Square,
   TaskList,
   Terminal,
@@ -210,6 +211,8 @@ export const ICONS = {
   info: InfoCircle,
   /** Something failed: the mark before the words that say what, in the danger colour. */
   problem: WarningCircle,
+  /** Althar's own news: its tab, with what's new in an update and what's coming next. */
+  news: Sparks,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

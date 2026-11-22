@@ -5,6 +5,8 @@
   height: 100%;
   overflow-y: auto;
   background: var(--n-2);
+  /* narrow by its own width, which is the window's */
+  container: news / inline-size;
 }
 .page :where(h1, h2, p) {
   margin: 0;
@@ -227,7 +229,7 @@
 
 /* ---- the narrowest window ---- */
 
-@container window (width < 960px) {
+@container news (width < 960px) {
   .title {
     font-size: 40px;
   }

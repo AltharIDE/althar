@@ -1,10 +1,23 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-import { Brand, BrandMark, Button, Icon, LiveDot, Logo } from '@althar/ui'
+import { Brand } from '../../foundations/brands/brands'
+import { Icon } from '../../foundations/Icon/Icon'
+import { Logo } from '../../foundations/Logo/Logo'
+import { BrandMark } from '../../foundations/Marks/Marks'
+import { cx } from '../../lib/cx'
+import { Button } from '../../primitives/Button/Button'
+import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import p from './RoadmapPicture.module.css'
 
-import { OsMark } from '../../../../../site/src/shared/OsMark'
-import type { PictureKey } from './roadmap'
-import p from './pictures.module.css'
+/** The things on the roadmap the kit draws. */
+export type RoadmapPictureKey = 'installer' | 'trigger' | 'phone' | 'simulator' | 'knowledge' | 'team'
+
+/** Windows' mark, in the ink around it. */
+const WindowsMark = () => (
+  <svg viewBox="0 0 24 24" width={11} height={11} aria-hidden="true">
+    <path fill="currentColor" d="M3 3h8.5v8.5H3zM12.5 3H21v8.5h-8.5zM3 12.5h8.5V21H3zM12.5 12.5H21V21h-8.5z" />
+  </svg>
+)
 
 /*
  * Each coming thing, drawn as it will work, in the app's own marks and type:
@@ -21,7 +34,7 @@ function Installer() {
     <div className={p.installer}>
       <div className={p.dialog}>
         <div className={p.dialogBar}>
-          <OsMark id="windows" size={11} />
+          <WindowsMark />
           <span>Althar Setup</span>
         </div>
         <div className={p.dialogBody}>
@@ -287,7 +300,7 @@ function Team() {
   )
 }
 
-const DRAWN: Record<PictureKey, () => ReactNode> = {
+const DRAWN: Record<RoadmapPictureKey, () => ReactNode> = {
   installer: Installer,
   trigger: Trigger,
   phone: Phone,
@@ -297,10 +310,10 @@ const DRAWN: Record<PictureKey, () => ReactNode> = {
 }
 
 /** A coming thing's picture, filling the frame it's given. */
-export function ComingPicture({ picture, className }: { picture: PictureKey; className?: string }) {
+export function RoadmapPicture({ picture, className }: { picture: RoadmapPictureKey; className?: string }) {
   const Drawn = DRAWN[picture]
   return (
-    <div className={className === undefined ? p.frame : `${p.frame} ${className}`} data-picture={picture} aria-hidden="true">
+    <div className={cx(p.frame, className)} data-picture={picture} aria-hidden="true">
       <Drawn />
     </div>
   )

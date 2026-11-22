@@ -461,7 +461,7 @@
   }
 }
 
-@container window (width < 960px) {
+@container news (width < 960px) {
   .figure {
     zoom: 0.84;
   }

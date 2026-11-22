@@ -1,4 +1,4 @@
-/* What every look shares: the notes, and the releases as rows. On the kit's tokens. */
+/* Every release, each opening its notes in place. On the kit's tokens. */
 
 .notes {
   display: grid;
@@ -98,7 +98,7 @@
   text-decoration: underline;
 }
 
-@container window (width < 960px) {
+@container news (width < 960px) {
   .releaseNotes {
     padding-left: 6px;
   }

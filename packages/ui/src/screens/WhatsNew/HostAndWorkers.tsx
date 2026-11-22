@@ -1,12 +1,16 @@
 import { type ReactNode, useId, useRef } from 'react'
 
-import { Brand, BrandMark, Icon, LiveDot } from '@althar/ui'
-
-import { type Timeline, useBeat } from './beat'
-import w from './where.module.css'
+import { Brand } from '../../foundations/brands/brands'
+import { Icon } from '../../foundations/Icon/Icon'
+import { BrandMark } from '../../foundations/Marks/Marks'
+import { cx } from '../../lib/cx'
+import type { RootProps } from '../../lib/props'
+import { type Timeline, useBeat } from '../../lib/useBeat'
+import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import w from './HostAndWorkers.module.css'
 
 /*
- * Where the work runs now, as one picture rather than three cards: this
+ * Where the work runs, as one picture rather than three cards: this
  * computer, a home on your own server, and two workers of yours, drawn as
  * the machines they are, the work going between them along the wires.
  *
@@ -70,8 +74,28 @@ function Current({ along, on }: { along: string; on: boolean }) {
   )
 }
 
-export function Where() {
-  const ref = useRef<HTMLDivElement>(null)
+export interface HostAndWorkersText {
+  /** What the picture shows, for whoever can't see it. */
+  label: string
+  computer: { name: string; what: string }
+  home: { name: string; what: string }
+  workers: { name: string; what: string }
+}
+
+export const hostAndWorkersText: HostAndWorkersText = {
+  label:
+    'This computer hands a task to your home, build-01, which runs its lead on runner-1. The laptop closes and the work goes on: runner-2 takes another task, runner-1 runs the setup and the tests and sends its commits back. The laptop opens on the finished task.',
+  computer: { name: 'This computer', what: 'Where you talk to tasks. Close it; the work goes on.' },
+  home: { name: 'Your home', what: 'Projects, their tasks, and each agent’s asks and tools.' },
+  workers: { name: 'Your workers', what: 'A task’s lead, its setup and its Run.' },
+}
+
+export type HostAndWorkersProps = RootProps<'figure', { text?: Partial<HostAndWorkersText> }>
+
+/** 0.10.0's flagship drawn: this computer, a home on your own server, and two workers, the work going between them. */
+export function HostAndWorkers({ text, className, ...rest }: HostAndWorkersProps) {
+  const t = { ...hostAndWorkersText, ...text }
+  const ref = useRef<HTMLElement>(null)
   const beat = useBeat(ref, WHERE)
   const out = beat === WHERE.beats.length - 1
   const at = (from: number, to = 6) => !out && beat >= from && beat <= to
@@ -79,11 +103,7 @@ export function Where() {
   const finished = at(4)
   const back = at(5)
   return (
-    <figure
-      ref={ref}
-      className={w.figure}
-      aria-label="This computer hands a task to your home, build-01, which runs its lead on runner-1. The laptop closes and the work goes on: runner-2 takes another task, runner-1 runs the setup and the tests and sends its commits back. The laptop opens on the finished task."
-    >
+    <figure ref={ref} className={cx(w.figure, className)} aria-label={t.label} {...rest}>
       <div className={w.scene} aria-hidden="true">
         <svg className={w.wires} viewBox="0 0 912 236" width={912} height={236}>
           {/* the window's wire to its home goes while the laptop is closed */}
@@ -223,15 +243,11 @@ export function Where() {
       </div>
 
       <figcaption className={w.captions}>
-        <span>
-          <b>This computer</b> Where you talk to tasks. Close it; the work goes on.
-        </span>
-        <span>
-          <b>Your home</b> Projects, their tasks, and each agent’s asks and tools.
-        </span>
-        <span>
-          <b>Your workers</b> A task’s lead, its setup and its Run.
-        </span>
+        {[t.computer, t.home, t.workers].map((one) => (
+          <span key={one.name}>
+            <b>{one.name}</b> {one.what}
+          </span>
+        ))}
       </figcaption>
     </figure>
   )

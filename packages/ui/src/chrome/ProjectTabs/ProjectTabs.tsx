@@ -34,7 +34,9 @@ import { type Dragging, useReorder } from '../../lib/useReorder'
  * bar to change the order, the others giving way; the home's stays first.
  * While Althar's settings are open they
  * have a tab too, beside the home's, as the app's and no project's: a gear
- * and their name, closed by its ×. On macOS the system draws the traffic
+ * and their name, closed by its ×. After them, Althar's own tab, its news:
+ * sparks and its name, with a quiet dot while an update hasn't been looked
+ * at, closed by its × until the next. On macOS the system draws the traffic
  * lights over its start, so it keeps their space; where the system draws
  * none, the same three dots are the window's own buttons (close, minimize,
  * maximize), and the app behind them does what they ask.
@@ -67,6 +69,17 @@ export interface PageTab {
   onClose: () => void
 }
 
+/** Althar's own tab: what's new in an update, and what's coming next. */
+export interface AltharTab {
+  /** It has the window: no other tab does. */
+  current: boolean
+  /** An update the person hasn't looked at yet: a quiet dot, not the violet of what waits on them. */
+  news?: boolean
+  onSelect: () => void
+  /** Closed, it goes until the next update. */
+  onClose?: () => void
+}
+
 /** Althar's settings, while they have a tab of their own. */
 export interface SettingsTab {
   /** It has the window: no other tab does. */
@@ -81,6 +94,10 @@ export interface ProjectTabsText {
   /** The settings' tab, and closing it. */
   settings: string
   closeSettings: string
+  /** Althar's own tab, closing it, and what its dot says. */
+  althar: string
+  closeAlthar: string
+  news: string
   close: (name: string) => string
   /** The pages' tabs, as a list. */
   pages: string
@@ -105,6 +122,9 @@ export const projectTabsText: ProjectTabsText = {
   home: 'Home',
   settings: 'Settings',
   closeSettings: 'Close Settings',
+  althar: 'Althar',
+  closeAlthar: 'Close Althar',
+  news: 'what’s new in this version',
   close: (name) => `Close ${name}`,
   pages: 'Pages',
   yours: (n) => (n === 1 ? '1 call waits on you' : `${n} calls wait on you`),
@@ -142,6 +162,8 @@ export type ProjectTabsProps = RootProps<
     others?: readonly ProjectTab[]
     /** Althar's settings, beside the home's tab, while they are open. */
     settings?: SettingsTab
+    /** Althar's own tab, after the settings'. */
+    althar?: AltharTab
     /** Web pages in tabs of their own, after the projects'. */
     pages?: readonly PageTab[]
     /** Gives one of the others a tab. Without it, the + offers none of them. */
@@ -202,6 +224,7 @@ export function ProjectTabs({
   yours = 0,
   others = [],
   settings,
+  althar,
   pages,
   onOpen,
   onNewProject,
@@ -217,9 +240,10 @@ export function ProjectTabs({
   ...rest
 }: ProjectTabsProps) {
   const t = { ...projectTabsText, ...text }
-  // While the settings' tab, or a page's, has the window, neither the home's nor a project's does.
-  const onSettings = settings?.current === true || (pages ?? []).some((page) => page.current)
-  const current = onSettings ? undefined : route
+  const onSettings = settings?.current === true
+  // While the settings' tab, Althar's, or a page's, has the window, neither the home's nor a project's does.
+  const elsewhere = onSettings || althar?.current === true || (pages ?? []).some((page) => page.current)
+  const current = elsewhere ? undefined : route
   const offered = onOpen ? others : []
   const list = useRef<HTMLUListElement>(null)
   // Where the projects' tabs scroll to, when more are open than fit: more before, more after.
@@ -320,6 +344,23 @@ export function ProjectTabs({
                 <span className={s.name}>{t.settings}</span>
               </button>
               <IconButton icon="close" label={t.closeSettings} size="small" className={s.close} onClick={settings.onClose} />
+            </li>
+          )}
+          {althar !== undefined && (
+            <li className={cx(s.tab, s.project, althar.current && s.current)}>
+              <button type="button" className={s.select} aria-current={althar.current ? 'page' : undefined} onClick={althar.onSelect}>
+                <Icon name="news" size={15} className={s.logo} />
+                <span className={s.name}>{t.althar}</span>
+                {althar.news === true && (
+                  <>
+                    <span className={cx(s.yours, s.news)} aria-hidden="true" />
+                    <VisuallyHidden>, {t.news}</VisuallyHidden>
+                  </>
+                )}
+              </button>
+              {althar.onClose !== undefined && (
+                <IconButton icon="close" label={t.closeAlthar} size="small" className={s.close} onClick={althar.onClose} />
+              )}
             </li>
           )}
         </ul>
