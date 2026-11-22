@@ -100,6 +100,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
+  'setup/Computers/Computers.tsx': 'a home’s or a worker’s module, as Control Center draws one, the whole of which opens it',
+  'setup/Computers/Cloud.tsx':
+    'Althar Cloud’s line, a module as Control Center draws one, the whole of which opens its page; the way back to Computers at that page’s head, a chevron and the word in a pill',
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',

@@ -173,7 +173,7 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
     await meter.click()
     const load = page.getByRole('dialog', { name: /’s load$/ })
     const row = load.getByRole('button', { name: new RegExp(`^${name}`) })
-    await expect(row).toBeVisible({ timeout: 15_000 })
+    await expect(row).toBeVisible()
     await expect(row).toContainText('Free')
     await shoot(page, 'worker-popover')
 
@@ -186,7 +186,7 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
 
     // It drops: Offline, on the next reading.
     worker.close()
-    await expect(main).toContainText('Offline', { timeout: 15_000 })
+    await expect(main).toContainText('Offline')
     await expect(main).toContainText('Not connected to this home')
 
     // Removed: off the list, after a reload too, and its certificate refused.

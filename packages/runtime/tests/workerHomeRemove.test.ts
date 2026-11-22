@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, it } from '@effect/vitest'
+import { until } from '@althar/testing/effect'
 import { AgentRunOutcome, type AgentWorkerHello } from '@althar/worker-protocol'
 import { Effect } from 'effect'
 
@@ -49,17 +50,6 @@ const hello = (workerId: string): AgentWorkerHello => ({
     },
   ],
 })
-
-/** Until the listing says so: the pool hears a stream end a moment after the worker drops it. */
-const until = <A>(read: () => A, holds: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let i = 0; i < 100; i++) {
-      const value = read()
-      if (holds(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return read()
-  })
 
 it.live('keeps a worker that dropped mid-run until it says that run stopped, then takes it out for good', () =>
   Effect.scoped(
@@ -110,7 +100,7 @@ it.live('keeps a worker that dropped mid-run until it says that run stopped, the
       const { runId } = started.value
       first.close()
       yield* Effect.promise(() => pending.then(() => undefined).catch(() => undefined))
-      const dropped = yield* until(standing, (worker) => worker?.connected === false)
+      const dropped = yield* until(Effect.sync(standing), (worker) => worker?.connected === false)
       // Offline, it still holds the workspace, and the task with it: taking it out now would leave it held for good.
       assert.deepStrictEqual(dropped, { workerId, connected: false, busy: true, providers: [], projectIds: [projectId], workspaceId })
       assert.strictEqual(
@@ -131,7 +121,7 @@ it.live('keeps a worker that dropped mid-run until it says that run stopped, the
       })
       // The home ends that stream once the run is settled: the workspace is free, and so is the worker.
       assert.isUndefined(yield* Effect.promise(() => back.read()))
-      const settled = yield* until(standing, (worker) => worker?.connected === false)
+      const settled = yield* until(Effect.sync(standing), (worker) => worker?.connected === false)
       assert.deepStrictEqual(settled, { workerId, connected: false, busy: false, providers: [], projectIds: [projectId] })
 
       // Now it can be taken out, and it stays out: off the list, a fresh read of the ledger included, and refused.
