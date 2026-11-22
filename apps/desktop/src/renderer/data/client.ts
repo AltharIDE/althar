@@ -307,9 +307,12 @@ export interface Client {
       readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
-  readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
+  /** The thread's model, of `agentId` as the picker showed it: the one on the thread where left out. */
+  readonly setModel: (input: { readonly threadId: string; readonly agentId?: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
-  readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
+  readonly setEffort: (input: { readonly threadId: string; readonly agentId?: string; readonly effort: string }) => Promise<void>
+  /** The thread's agent picked with nothing of its own chosen: picked back over another waiting to take over, it keeps the thread. */
+  readonly setAgent: (input: { readonly threadId: string; readonly agentId: string }) => Promise<void>
   /** The models each agent offers, and its efforts, as far as they are known. */
   readonly getModels: () => Promise<ReadonlyArray<AgentModels>>
   /** The person's default effort for one of an agent's models: every session on it starts there. */
@@ -1139,6 +1142,7 @@ export const connect = async (
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
     setEffort: (input) => command((commandId) => api.SetEffort({ commandId, ...input })),
+    setAgent: (input) => command((commandId) => api.SetAgent({ commandId, ...input })),
     getModels: () => settle(api.GetModels({})),
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
