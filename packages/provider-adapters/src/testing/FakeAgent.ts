@@ -1257,6 +1257,18 @@ const playRole = async (
         if (!visual && !verified.includes('Reviewed report')) return `Reader did not confirm the note. ${exported} ${transfer} ${verified}`
         const evidence = await ask({ op: 'evidence', target: reader.id, caption: 'Reader shows the transferred note.' })
         await ask({ op: 'release' })
+        // It hands that capture as its evidence too, as a lead does, where it has a step to hand it to.
+        const capture = /computer_capture: (\S+?)\.?$/.exec(evidence)?.[1]
+        if (capture !== undefined && available.has('finish_step')) {
+          const report = {
+            summary: 'Transferred the note from Writer to Reader.',
+            built: 'The reviewed note passes from Writer to Reader through their own Export and Import, and Reader shows it.',
+            evidence: [{ kind: 'screenshot', caption: 'Reader shows the transferred note', computer_capture: capture, view: 'Reader' }],
+          }
+          const answer = await call('finish_step', report)
+          if (answer.startsWith("Write the description of the task's pull request"))
+            await call('finish_step', { ...report, descriptions: [{ text: DESCRIBED }] })
+        }
         return visual
           ? `Opened the handoff in Reader. ${written} ${exported} ${transfer} ${evidence}`
           : `Writer and Reader both show Reviewed report. ${evidence}`

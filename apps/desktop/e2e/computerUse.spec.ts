@@ -2,12 +2,12 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication, expect, test } from '@playwright/test'
+import { _electron as electron, type ElectronApplication, expect, type Locator, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
-test('a task asks once to use the computer, transfers a note between two apps and keeps a screenshot', async () => {
+test('a task asks once to use the computer, transfers a note between two apps and keeps a screenshot that opens full size', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-computer-'))
   const repo = repository(home)
   const file = join(home, 'handoff.txt')
@@ -51,6 +51,35 @@ test('a task asks once to use the computer, transfers a note between two apps an
       const reader = fixtures[1]
       if (reader === undefined) throw new Error('Reader did not launch.')
       await expect((await reader.firstWindow()).getByRole('textbox', { name: 'Note' })).toHaveValue('Reviewed report')
+    }
+
+    // What it kept: in its conversation, where it took it, and as its evidence atop Outputs, opening full size; light and dark.
+    // With the native driver, a real capture of Reader (test-results/computer-use-*.png).
+    const picture = (button: Locator) => button.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      const named = scheme === 'dark' ? '-dark' : ''
+      const inThread = page.getByRole('button', { name: 'View Reader shows the transferred note. full size', exact: true })
+      await inThread.scrollIntoViewIfNeeded()
+      await expect.poll(() => picture(inThread)).toBeGreaterThan(0)
+      await still(page)
+      await page.screenshot({ path: `test-results/computer-use-thread${named}.png` })
+      await page
+        .getByRole('radiogroup', { name: 'Face' })
+        .getByRole('radio', { name: /Outputs/ })
+        .click()
+      const inOutputs = page.getByRole('button', { name: 'View Reader shows the transferred note full size', exact: true })
+      await expect.poll(() => picture(inOutputs)).toBeGreaterThan(0)
+      await still(page)
+      await page.screenshot({ path: `test-results/computer-use-outputs${named}.png` })
+      await inOutputs.click()
+      const dialog = page.getByRole('dialog')
+      await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+      await still(page)
+      await page.screenshot({ path: `test-results/computer-use-full-size${named}.png` })
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+      await toConversation(page)
     }
   } finally {
     await Promise.allSettled(fixtures.map((fixture) => fixture.close()))
