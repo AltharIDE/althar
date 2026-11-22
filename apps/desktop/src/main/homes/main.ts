@@ -9,7 +9,7 @@ import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess,
 import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
-import { homeController } from './controller'
+import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
@@ -45,6 +45,7 @@ export const startHomeConnections = ({
   open,
   log,
   protect,
+  usage,
 }: {
   readonly protect: ProtectCredential
   readonly profile: string
@@ -52,6 +53,7 @@ export const startHomeConnections = ({
   readonly mine: (contents: WebContents) => boolean
   readonly open: (home: WindowHome, projectId?: string) => void
   readonly log: (message: string) => void
+  readonly usage: (event: HomeUsageEvent) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
   const approvals = new Map<number, AbortController>()
@@ -140,6 +142,7 @@ export const startHomeConnections = ({
     changed: tell,
     overviewChanged,
     glances,
+    usage,
   })
   // A home being set up over SSH: one for the whole app, told to every window as it goes.
   const source = releaseSource()

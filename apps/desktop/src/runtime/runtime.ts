@@ -304,7 +304,9 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot })
+  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot }, (outcome) => {
+    parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+  })
   const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
   const context = yield* startup(
     'services',

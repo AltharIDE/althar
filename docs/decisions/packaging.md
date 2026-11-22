@@ -281,6 +281,12 @@ has no wait bucket. Integration connections, work imports and automation run
 outcomes show adoption. Report delivery is counted after the reports service
 accepts it. These events join at the install level, with no task or project id.
 
+For remote homes, `home_pairing` and `home_ssh_check` show the outcomes of
+pairing and SSH checks. `home_connection` shows the transport and whether
+the window connected, failed to connect, or lost an established connection.
+`worker_connection` counts accepted agent-worker connections and their ends
+on the desktop home. These carry fixed outcomes and transport categories.
+
 ## Problem reports
 
 When a tester says "it just stopped", the logs and their words are what

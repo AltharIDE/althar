@@ -83,6 +83,22 @@ describe('what usage data may carry', () => {
       }),
     ).toEqual({ name: 'task_first_turn_finished', properties: { agent: 'other', outcome: 'failed' } })
   })
+
+  it('keeps connection outcomes without carrying home or worker details', () => {
+    expect(
+      usageEventOf({
+        name: 'home_connection',
+        properties: { transport: 'ssh', outcome: 'failed', address: 'me@private.test', problem: 'bad key', homeId: 'private-home' },
+      }),
+    ).toEqual({ name: 'home_connection', properties: { transport: 'ssh', outcome: 'failed' } })
+    expect(
+      usageEventOf({ name: 'worker_connection', properties: { outcome: 'connected', workerId: 'private-worker', provider: 'codex' } }),
+    ).toEqual({ name: 'worker_connection', properties: { outcome: 'connected' } })
+    expect(usageEventOf({ name: 'home_pairing', properties: { outcome: 'expired token: private-code' } })).toEqual({
+      name: 'home_pairing',
+      properties: {},
+    })
+  })
 })
 
 describe('DO_NOT_TRACK', () => {

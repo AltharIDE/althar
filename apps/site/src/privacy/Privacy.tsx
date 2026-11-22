@@ -59,6 +59,7 @@ const PARTS: Part[] = [
           <li>How the first agent turn on a task went, with the agent kind, model family, rough duration and failure category</li>
           <li>Asks opened and answered, who answered them, and roughly how long they waited</li>
           <li>A service connected, work imported, an automation set up or run, or a problem report successfully sent</li>
+          <li>How pairing and connections to other homes went, and when workers connected to or disconnected from the desktop home</li>
         </ul>
         <p>
           Each carries Althar’s version, the system and the processor, and a random id that lets us count return visits to this install.

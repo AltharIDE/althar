@@ -5,6 +5,7 @@ import type { AgentId } from '@althar/provider-adapters'
 import type { UsageEvent as Said, Settled, Took } from '@althar/runtime'
 import { PostHog, type PostHogOptions } from 'posthog-node'
 
+import type { HomeUsageEvent } from './homes/controller'
 import { readPreferences, writePreference } from './preferences'
 
 /*
@@ -62,8 +63,8 @@ const version: Holds = (value) => typeof value === 'string' && /^\d{1,4}\.\d{1,4
 /** How long a task took, as a bucket: never its own times. */
 export const TOOK = ['under_10m', '10m_to_1h', '1h_to_1d', 'over_1d'] as const satisfies ReadonlyArray<Took>
 
-/** Each event the runtime says, with a check for each of its properties: one the runtime adds must be named here before it can go. */
-type FromRuntime = { readonly [E in Said as E['name']]: { readonly [P in keyof E['properties']]: Holds } }
+/** Each event observed in the runtime or home controller must have a check for each property. */
+type Observed = { readonly [E in Said | HomeUsageEvent as E['name']]: { readonly [P in keyof E['properties']]: Holds } }
 
 /** How a task settled. */
 export const SETTLED = ['merged_here', 'pull_request', 'abandoned', 'reviewed', 'seen', 'marked'] as const satisfies ReadonlyArray<Settled>
@@ -113,6 +114,10 @@ export const USAGE_EVENTS = {
   /** An agent's account reached its usage limit. */
   usage_limit_hit: { agent },
   integration_connected: { product: oneOf(...Product.literals) },
+  home_pairing: { outcome: oneOf('paired', 'failed', 'cancelled') },
+  home_ssh_check: { outcome: oneOf('verified', 'failed', 'cancelled') },
+  home_connection: { transport: oneOf('ssh', 'https'), outcome: oneOf('connected', 'failed', 'disconnected') },
+  worker_connection: { outcome: oneOf('connected', 'disconnected') },
   automation_created: {},
   automation_run_finished: { trigger: oneOf('schedule', 'now'), outcome: oneOf('made', 'nothing', 'failed', 'skipped', 'missed') },
   automation_paused_after_failures: {},
@@ -120,7 +125,7 @@ export const USAGE_EVENTS = {
   problem_reported: {},
   /** Althar opened on another version than last time, from this one. */
   update_installed: { from: version },
-} as const satisfies FromRuntime & Readonly<Record<string, Readonly<Record<string, Holds>>>>
+} as const satisfies Observed & Readonly<Record<string, Readonly<Record<string, Holds>>>>
 
 export type UsageEventName = keyof typeof USAGE_EVENTS
 
