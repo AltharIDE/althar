@@ -59,6 +59,7 @@ import {
   Refresh,
   Search,
   Server,
+  SmartphoneDevice,
   ServerConnection,
   Settings,
   ShieldCheck,
@@ -146,6 +147,8 @@ export const ICONS = {
   plug: ServerConnection,
   /** A home: one of the person's own computers that keeps Althar's work, reached over SSH. */
   home: Server,
+  /** A phone a home opens on: pairing one, and those it has paired. */
+  phone: SmartphoneDevice,
   /** This computer, as one of the homes. */
   computer: Laptop,
   /** A home's connection that dropped. */
