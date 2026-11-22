@@ -405,7 +405,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)), checkpoints TEXT CHECK (json_valid(checkpoints)), undone_at TEXT,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)), checkpoints TEXT CHECK (json_valid(checkpoints)), undone_at TEXT, goal_revision INTEGER, goal_round INTEGER NOT NULL DEFAULT 0 CHECK (goal_round IN (0, 1)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -1894,3 +1894,19 @@ CREATE TRIGGER finder_task_title AFTER UPDATE OF title ON tasks WHEN new.title !
     INSERT INTO finder_dirty (source, source_id) SELECT 'link', id FROM external_links WHERE task_id = new.id
       ON CONFLICT(source, source_id) DO NOTHING;
   END;
+
+CREATE TABLE thread_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'complete', 'limited', 'cleared')),
+    rounds INTEGER NOT NULL CHECK (rounds >= 0),
+    round_limit INTEGER NOT NULL CHECK (round_limit > 0),
+    launch_agent TEXT,
+    launch_model TEXT,
+    launch_effort TEXT,
+    progress TEXT,
+    detail TEXT
+  ) STRICT;
+
+CREATE INDEX active_thread_goals ON thread_goals (thread_id) WHERE status = 'active';

@@ -1,3 +1,4 @@
+import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
@@ -4306,7 +4307,6 @@ export class Queries extends Context.Service<
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
-          // The images and files the person sent with what they asked for, as the coordinator's chat shows them.
           const sentWith = yield* sql<{ content: string }>`
             SELECT ti.content FROM task_request_inputs r JOIN thread_items ti ON ti.user_input_id = r.user_input_id AND ti.kind = 'user_message'
             WHERE r.task_id = ${head.taskId} ORDER BY r.position, ti.sequence`
@@ -4458,6 +4458,7 @@ export class Queries extends Context.Service<
             host,
             task: {
               id: head.taskId,
+              goal: yield* readGoal(threadId),
               title: head.title,
               description: head.description,
               request: head.request,

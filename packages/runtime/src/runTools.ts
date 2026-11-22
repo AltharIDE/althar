@@ -1,3 +1,4 @@
+import { reportGoal } from './threadGoals'
 import { join } from 'node:path'
 import { pictureViewKey, viewOfKey } from '@althar/contracts'
 import { Ids, type InvalidTransition, type NodeAttemptId, type ProjectId, newId } from '@althar/domain'
@@ -897,6 +898,20 @@ export const makeRunTools = (dependencies: RunToolsDependencies) =>
     })
 
     yield* toolServer.serve('lead', [
+      tool(
+        'report_goal',
+        'Records progress or the outcome of the Althar goal given to this turn. Complete requires concrete evidence that meets the objective. Blocked requires the specific issue that prevents further work. Use the task’s wait tools for external changes or questions.',
+        {
+          type: 'object',
+          properties: {
+            turn: { type: 'string', description: 'The turn identifier from the current Althar goal brief.' },
+            status: { type: 'string', enum: ['progress', 'complete', 'blocked'] },
+            detail: { type: 'string', minLength: 1, maxLength: 4000 },
+          },
+          required: ['turn', 'status', 'detail'],
+        },
+        reportGoal,
+      ),
       tool(
         'read_gallery',
         'Reads this task’s complete visual collection, including its revision, stable view IDs, captions and report times. Use its revision for explicit removal, invalidation or replacement in finish_step. A new image with the same view updates it; unrelated views stay.',
