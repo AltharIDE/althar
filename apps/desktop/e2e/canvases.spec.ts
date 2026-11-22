@@ -106,6 +106,20 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await chipIn('html')
     await inCanvas(electronApp, `document.getElementById('modal').showModal()`)
     await chipIn('#modal')
+    // Two modals opened in one go, the later in the page first: the chip goes inside the one opened last, the topmost, where
+    // it can be pressed, never the one under it, which is inert.
+    await inCanvas(
+      electronApp,
+      `(() => {
+        document.getElementById('modal').close()
+        const whole = 'width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0'
+        document.body.insertAdjacentHTML('beforeend', '<dialog id="first" style="' + whole + '">First in the page</dialog>' +
+          '<dialog id="second" style="' + whole + '">Second in the page</dialog>')
+        document.getElementById('second').showModal()
+        document.getElementById('first').showModal()
+      })()`,
+    )
+    await chipIn('#first')
     const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
       electronApp,
       `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,

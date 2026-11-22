@@ -127,8 +127,28 @@ const install = (): Chip => {
   host.addEventListener('pointerdown', (pressed) => pressed.stopPropagation())
 
   let wanted = false
-  /** The page's modal dialogs open, in the order they opened: the topmost last. */
+  const modal = (one: Node) => {
+    try {
+      return one instanceof Element && one !== host && one.matches(':modal')
+    } catch {
+      // A page engine without `:modal` has none to go inside.
+      return false
+    }
+  }
+  /**
+   * The page's modal dialogs open, in the order they opened, the topmost last: as the observer hears them open, in the
+   * order the page opened them, never the order they sit in the page. Two opened in one go, the later in the page first,
+   * are told apart so.
+   */
   let modals: Array<Element> = []
+  const heard = (records: ReadonlyArray<MutationRecord>) => {
+    for (const record of records) {
+      if (record.type !== 'attributes' || record.target === host) continue
+      const target = record.target as Element
+      modals = modals.filter((one) => one !== target)
+      if (modal(target)) modals.push(target)
+    }
+  }
   const topmostModal = () => {
     let open: Array<Element> = []
     try {
@@ -136,7 +156,8 @@ const install = (): Chip => {
     } catch {
       // A page engine without `:modal` has none to go inside.
     }
-    modals = [...modals.filter((one) => open.includes(one)), ...open.filter((one) => !modals.includes(one))]
+    // Any open before the chip was there to hear them came first, in the page's order: the ones it heard are above them.
+    modals = [...open.filter((one) => !modals.includes(one)), ...modals.filter((one) => open.includes(one))]
     return modals.at(-1) ?? null
   }
   /**
@@ -160,6 +181,7 @@ const install = (): Chip => {
   // A page that rewrites its document, or takes the chip out, has it put back at once; one that opens or closes a dialog
   // has it go over the dialog, or inside it where it is modal, or back out.
   new MutationObserver((records) => {
+    heard(records)
     if (!wanted) return
     const dialogs = records.some((one) => one.type === 'attributes' && one.target !== host)
     if (dialogs || !host.isConnected) place(dialogs)
