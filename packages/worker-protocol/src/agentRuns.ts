@@ -274,10 +274,19 @@ const validSetupResult = (current: Run, result: AgentWorkspaceSetupResult | unde
   )
 }
 
+export type AgentWorkerConnection = 'connected' | 'disconnected'
+
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
-export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
+export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: (outcome: AgentWorkerConnection) => void) => {
   const slots = new Map<string, Slot>()
   const previews = makePreviewTunnels()
+  const reportConnection = (outcome: AgentWorkerConnection): void => {
+    try {
+      connectionChanged?.(outcome)
+    } catch {
+      // Reporting must never interrupt worker execution or cleanup.
+    }
+  }
 
   const connect = (call: ServerDuplexStream<Buffer, Buffer>, homeId: string, enrolledWorker: () => string | undefined): void => {
     let slot: Slot | undefined
@@ -320,7 +329,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (closed) return
       closed = true
       clearTimeout(timer)
-      if (slot !== undefined && slots.get(slot.workerId) === slot) slots.delete(slot.workerId)
+      if (slot !== undefined && slots.get(slot.workerId) === slot) {
+        slots.delete(slot.workerId)
+        reportConnection('disconnected')
+      }
       if (run !== undefined) {
         clearTimeout(run.starting)
         clearTimeout(run.stopping)
@@ -590,6 +602,9 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           STOP_TIMEOUT_MS,
         )
         current.stopping.unref()
+        // An unread provider stream may have paused this call. Stop and its
+        // confirmation must still get through after the provider is released.
+        call.resume()
         sendControl({ case: 'stop', value: create(AgentRunStopSchema, { runId: current.id }) })
       }
       return current.exit.promise
@@ -639,6 +654,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
+          reportConnection('connected')
           sendControl({
             case: 'hello',
             value: create(AgentHomeHelloSchema, {
@@ -787,6 +803,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           const { data } = payload.value
           if (current.phase === 'starting' || data.byteLength === 0 || data.byteLength > MAX_AGENT_CHUNK)
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent output.')
+          if (current.phase === 'stopping') return
           if (!current.output.write(data)) {
             call.pause()
             current.output.once('drain', () => {

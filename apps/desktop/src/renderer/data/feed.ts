@@ -287,10 +287,11 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
   })
 
   const heard = (event: WatchEvent) => {
-    if (event._tag === 'Changed') {
+    if (event._tag === 'Changed' || event._tag === 'Launches') {
       heardSoFar += 1
-      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
-      for (const read of wholeReads(cache, event)) {
+      // A run starting or ending changes whether a finished task's folder can be cleaned up.
+      const reads = event._tag === 'Changed' ? wholeReads(cache, event) : [{ key: keys.folders, offScreen: false }]
+      for (const read of reads) {
         const hash = hashKey(read.key)
         // Only a read the cache holds can be under way, and needs its change remembered.
         if (cache.getQueryCache().get(hash) !== undefined) {
@@ -301,6 +302,9 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
+    }
+    if (event._tag === 'Changed') {
+      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
       // A thread on screen reads its own changes item by item, and its head as its project's rules change; a project's new name it reads again whole, at once.
       const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
@@ -326,6 +330,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
       if (watched) {
         void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
         void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+        void cache.invalidateQueries({ queryKey: keys.folders, exact: true })
       }
       watched = true
       for (const listener of rewatching) listener()

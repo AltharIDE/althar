@@ -6,6 +6,7 @@ import { assert, it } from '@effect/vitest'
 import { configureWorkers, openWorkerStore, workerCertificate } from '@althar/runtime/workerHome'
 import { removeTreeSync } from '@althar/testing'
 import { Effect } from 'effect'
+import { vi } from 'vitest'
 
 import { testAgentWorker } from '../../../packages/worker-protocol/integration/worker-agent-client'
 import { workerCertificates } from '../../../packages/worker-protocol/integration/worker-certificates'
@@ -38,46 +39,53 @@ it.live('opens the Desktop profile’s worker listener and exposes only workers 
         ledger.close()
       }
     })
-    const home = yield* workersForProfile(paths)
+    const changes: string[] = []
+    const home = yield* workersForProfile(paths, (outcome) => void changes.push(outcome))
     if (home === undefined) throw new Error('The profile should have its worker transport')
     assert.deepStrictEqual(home.execution.list(projectId), [])
     yield* Effect.scoped(
       Effect.gen(function* () {
         const port = yield* home.listen(homeId)
         if (port === undefined) throw new Error('The configured listener should open a port')
-        const worker = yield* Effect.acquireRelease(
-          Effect.sync(() => testAgentWorker(port, certificates)),
-          (worker) => Effect.sync(() => worker.close()),
-        )
-        const hello = yield* Effect.promise(() =>
-          worker.hello({
-            $typeName: 'althar.worker.v1.AgentWorkerHello',
-            reserveBeforeTransfer: false,
-            version: 1,
-            workerId,
-            journalId: 'wjn_' + '3'.repeat(32),
-            capabilities: [
-              {
-                $typeName: 'althar.worker.v1.AgentWorkerCapability',
-                projectId,
-                providerId: 'codex',
-                workspaceSetup: false,
-                managedCommands: false,
-                managedPreview: false,
-                workspaceSets: false,
-                helperAgents: false,
-                skillFiles: false,
-                helperSkillFiles: false,
-                helperCheckouts: false,
-                fileReads: false,
-                workspaceIndex: false,
-              },
-            ],
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const worker = yield* Effect.acquireRelease(
+              Effect.sync(() => testAgentWorker(port, certificates)),
+              (worker) => Effect.sync(() => worker.close()),
+            )
+            const hello = yield* Effect.promise(() =>
+              worker.hello({
+                $typeName: 'althar.worker.v1.AgentWorkerHello',
+                reserveBeforeTransfer: false,
+                version: 1,
+                workerId,
+                journalId: 'wjn_' + '3'.repeat(32),
+                capabilities: [
+                  {
+                    $typeName: 'althar.worker.v1.AgentWorkerCapability',
+                    projectId,
+                    providerId: 'codex',
+                    workspaceSetup: false,
+                    managedCommands: false,
+                    managedPreview: false,
+                    workspaceSets: false,
+                    helperAgents: false,
+                    skillFiles: false,
+                    helperSkillFiles: false,
+                    helperCheckouts: false,
+                    fileReads: false,
+                    workspaceIndex: false,
+                  },
+                ],
+              }),
+            )
+            assert.strictEqual(hello?.case, 'hello')
+            assert.deepStrictEqual(home.execution.list(projectId), [{ workerId, providers: ['codex'], busy: false }])
+            assert.deepStrictEqual(home.execution.list('proj_' + '9'.repeat(32)), [])
+            assert.deepStrictEqual(changes, ['connected'])
           }),
         )
-        assert.strictEqual(hello?.case, 'hello')
-        assert.deepStrictEqual(home.execution.list(projectId), [{ workerId, providers: ['codex'], busy: false }])
-        assert.deepStrictEqual(home.execution.list('proj_' + '9'.repeat(32)), [])
+        yield* Effect.promise(() => vi.waitFor(() => assert.deepStrictEqual(changes, ['connected', 'disconnected'])))
       }),
     )
     assert.deepStrictEqual(home.execution.list(projectId), [])

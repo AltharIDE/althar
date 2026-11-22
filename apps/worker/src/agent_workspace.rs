@@ -334,8 +334,11 @@ pub(crate) async fn workspace_patch(
     } else {
         None
     };
+    // When copying staged files, begin from what Git tracks in the live index.
+    // A force-added ignored file can have both staged and working contents.
+    let tracked = saved_index.as_ref().map_or(head.as_str(), |(_, tree)| tree);
     let mut git = checkpoint_git();
-    git.args(["read-tree", &head]);
+    git.args(["read-tree", tracked]);
     if !git.status().await?.success() {
         return Err(invalid("Could not start the worker's workspace checkpoint"));
     }
@@ -612,6 +615,15 @@ mod tests {
             run_git(&worker, &["status", "--porcelain"]).await?.trim(),
             "AM stage.txt\n?? draft.txt"
         );
+
+        fs::write(worker.join(".gitignore"), "ignored.txt\n")?;
+        fs::write(worker.join("ignored.txt"), "Forced into the index\n")?;
+        run_git(&worker, &["add", "-f", "ignored.txt"]).await?;
+        fs::write(worker.join("ignored.txt"), "New working contents\n")?;
+        let copied = workspace_patch(&worker, "copy", &tree, &head, true).await?;
+        let (_, index_patch) = copied.index.expect("Requested staged tree");
+        assert!(String::from_utf8_lossy(&index_patch).contains("+Forced into the index"));
+        assert!(String::from_utf8_lossy(&copied.patch).contains("+New working contents"));
         Ok(())
     }
 }

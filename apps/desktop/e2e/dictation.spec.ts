@@ -53,7 +53,9 @@ test('offers the speech model on the first press, downloads it, listens, and wri
     await expect(page.getByText('Also check the webhook retry path.', { exact: true })).toBeHidden()
 
     // From now on the microphone listens at once, from the shortcut too; Escape throws it away.
-    await page.keyboard.press('Control+Shift+KeyD')
+    await expect(box).toHaveJSProperty('readOnly', false)
+    await box.focus()
+    await box.press('ControlOrMeta+Shift+KeyD')
     await expect(stop).toBeVisible()
     await expect(tray).toBeHidden()
     await page.keyboard.press('Escape')

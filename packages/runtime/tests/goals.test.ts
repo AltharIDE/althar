@@ -9,7 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { Sessions } from '../src/Sessions'
+import { COMPACT, Sessions } from '../src/Sessions'
 import { controlGoal, readGoal } from '../src/threadGoals'
 import { callTool, repository, runtime, turns, until } from './support'
 
@@ -46,6 +46,32 @@ const liveGoal = (threadId: string, except: string | null = null) =>
   })
 
 describe('thread goals', () => {
+  it.live('compacts a full lead before the next goal round and restores its instructions', () => {
+    const gate = holds()
+    return Effect.gen(function* () {
+      const { threadId } = yield* newTask()
+      const sessions = yield* Sessions
+      yield* sessions.start({ threadId, ...lead })
+      const [first] = yield* until(turns(threadId), (rows) => rows[0]?.state === 'completed')
+      const body = 'What has passed so far? [context:85]'
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body })
+      yield* until(turns(threadId), (rows) => rows[1]?.state === 'completed')
+
+      const { goal } = yield* setGoal(threadId)
+      yield* sessions.kickGoal(threadId, goal?.revision ?? 0, lead)
+      const round = yield* liveGoal(threadId)
+      const log = yield* turns(threadId)
+      assert.lengthOf(log, 4)
+      assert.strictEqual(log[2]?.prompt, COMPACT)
+      assert.strictEqual(round?.sessionId, first?.providerSessionId)
+      assert.include(round?.prompt ?? '', objective)
+      assert.include(round?.prompt ?? '', "When you have done the task, call Althar's finish_step tool")
+      assert.strictEqual((yield* readGoal(threadId))?.rounds, 1)
+      yield* controlGoal(threadId, { action: 'pause' })
+      gate.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtime(':memory:', { holds: gate })), Effect.scoped)
+  })
+
   it.live('recovers a goal accepted before its first lead could start', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'althar-cold-goal-')), 'home.sqlite')
     const gate = holds()

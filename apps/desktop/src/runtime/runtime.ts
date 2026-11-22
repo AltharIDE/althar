@@ -304,7 +304,9 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot })
+  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot }, (outcome) => {
+    parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+  })
   const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
   const context = yield* startup(
     'services',
@@ -365,7 +367,9 @@ const program = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning('The private local API could not start', error)),
     )
   yield* Effect.forkScoped(
-    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+    Stream.runForEach(Context.get(context, UsageData).events, ({ event, at }) =>
+      Effect.sync(() => parent.postMessage({ type: 'usage', usage: event, usageAt: at })),
+    ),
   )
   // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
   yield* Effect.forkScoped(

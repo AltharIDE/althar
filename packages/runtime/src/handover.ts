@@ -17,63 +17,6 @@ import { PlanParameters } from './Runs'
 import { instructionsSection, repositoryInstructions } from './repositoryInstructions'
 import { type ItemKind, lastWithin, piecesOf, transcriptLines } from './threads'
 
-/*
- * Handing the coordinator to a fresh session before its context fills
- * (ADR-031). An agent left to fill its context compacts it on its own, at a
- * moment of its choosing, mid-reply even, and what was decided only in
- * conversation may not survive its summary. So Althar watches how full the
- * coordinator's context is, as the agent says, and once it reaches
- * HANDOVER_AT, between turns, starts a fresh session on the same agent,
- * model and effort. The new session is briefed from Althar's records, not
- * the raw thread: the project, its open tasks and where each stands, the
- * project's notes, and the last few messages, so the conversation carries
- * on. The rest of the thread is read through the tools.
- */
-
-/** How full the coordinator's context may get, as a share of its size, before Althar hands it to a fresh session. */
-export const HANDOVER_AT = 0.8
-
-/** Whether a coordinator whose context is this full is handed to a fresh session: once its agent has said how full, at the threshold or past it. */
-export const dueForHandover = (context: { readonly used: number; readonly size: number } | null) =>
-  context !== null && context.size > 0 && context.used >= context.size * HANDOVER_AT
-
-/**
- * How full a task's lead's context may get, in tokens, before Althar hands it
- * to a fresh session between turns, whatever its window holds (ADR-038): a
- * million-token window never comes near 80%, and every call reads all of it
- * again.
- */
-export const LEAD_HANDOVER_TOKENS = 200_000
-
-/**
- * Whether a lead whose context is this full is handed to a fresh session
- * before its next turn: only once it is full, past `LEAD_HANDOVER_TOKENS` or
- * 80% of its window, whichever comes first. A break in its work (a step done,
- * the task made a change, a pause past its prompt cache's life) hands nothing
- * over at any size, so coming back to a task carries the conversation on (a
- * task is a conversation plus parts, "A lead's session lasts until it's full").
- */
-export const dueForLeadHandover = (context: { readonly used: number; readonly size: number } | null) =>
-  context !== null && context.size > 0 && context.used >= Math.min(context.size * HANDOVER_AT, LEAD_HANDOVER_TOKENS)
-
-/** About how many characters a token holds, in the words and code a brief is written in: to judge a brief's size before an agent reads it. */
-const CHARS_PER_TOKEN = 4
-
-/** Whether a lead's brief is well under the context it replaces: a handover that saves little isn't worth the lead's thread of thought. */
-export const shrinks = (brief: string, context: { readonly used: number } | null) =>
-  context === null || brief.length / CHARS_PER_TOKEN < context.used / 2
-
-/** The most of a fresh session's context its brief may take: a session that would start fuller would soon be due again. */
-export const FRESH_ROOM = 0.4
-
-/**
- * Whether a brief this long leaves a fresh session room in a context the
- * size the session handed over says it has. One that doesn't isn't started:
- * it would be due again at once, and again after it.
- */
-export const roomFor = (brief: string, context: { readonly size: number } | null) =>
-  context === null || context.size <= 0 || brief.length / CHARS_PER_TOKEN < context.size * FRESH_ROOM
-
 /** How many of the conversation's last messages a handover brief carries word for word, and in how many characters at most. */
 export const RECENT_MESSAGES = 12
 export const RECENT_BUDGET = 16_000
@@ -393,9 +336,9 @@ type Copies = ReadonlyArray<{ readonly name: string; readonly root: string; read
  * records rather than the agent's memory: the project, its notes, what its
  * repositories tell agents, its open tasks and those finished last, its
  * errands, and the conversation. Every session gets it, a fresh one on
- * opening the project as much as one taking over a full context; only how
- * much of the conversation it carries word for word differs. And how many
- * tasks are open, for the line the person sees.
+ * opening the project as much as one recovering a lost session. After
+ * compaction the agent already has the conversation, so it gets the project
+ * record on its own.
  *
  * Each part reads on its own, so they are read at once: a brief is in the
  * way of the person's first words to the session.
@@ -406,7 +349,7 @@ export const coordinatorRecord = (input: {
   readonly modelOf: ModelNamer
   readonly working: (threadId: string) => boolean
   readonly copies?: Copies
-  readonly recent: Recent
+  readonly recent?: Recent
 }) =>
   Effect.gen(function* () {
     // A part Althar can't read says so, and the session starts without it: its tools read the same again.
@@ -423,7 +366,7 @@ export const coordinatorRecord = (input: {
         }),
         orSaid(recentlyFinished(input.projectId), 'the tasks finished last', "Althar couldn't read the tasks finished last just now."),
         errandLines(input.projectId),
-        conversation(input.threadId, input.recent),
+        input.recent === undefined ? Effect.succeed([]) : conversation(input.threadId, input.recent),
       ],
       { concurrency: 'unbounded' },
     )
@@ -441,12 +384,12 @@ export const coordinatorRecord = (input: {
     }
   })
 
-/** What a session handed a full context over carries of the conversation word for word: its last few messages. */
+/** What a session recovering a lost session carries of the conversation word for word: its last few messages. */
 export const HANDED_OVER: Recent = { budget: RECENT_BUDGET, last: RECENT_MESSAGES, kinds: ['user_message', 'agent_message', 'question'] }
 
-/** The line a session handed a full context over is told first, after its role. */
+/** The line a session recovering a lost session is told first, after its role. */
 export const TOOK_OVER =
-  "You are taking over this conversation from an earlier session of yours, whose context was filling up: Althar started you fresh, from its records of the project rather than the whole conversation. Earlier messages are below in short; for anything they don't say, read it with read_thread (without a task, it reads this conversation), read_task, or the code, rather than guess. Carry the conversation on from where it stands."
+  "You are taking over this conversation from an earlier session of yours, which was lost: Althar started you fresh, from its records of the project rather than the whole conversation. Earlier messages are below in short; for anything they don't say, read it with read_thread (without a task, it reads this conversation), read_task, or the code, rather than guess. Carry the conversation on from where it stands."
 
 /**
  * What a fresh coordinator session is told of the conversation it takes

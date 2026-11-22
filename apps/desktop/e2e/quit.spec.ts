@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { type ElectronApplication, expect, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, mainWindow, openFirstProject, pastTheTour, still, startTask } from './support'
@@ -32,6 +32,27 @@ const quitAnyway = async (electronApp: ElectronApplication, child: ChildProcess)
   await exited
 }
 
+/** Waits for the lead to be at work, including delivery of the turn that Quit must interrupt. */
+const workingLead = async (page: Page, home: string) => {
+  await startTask(page, 'Keep the session alive', '[lead:wait]')
+  await expect
+    .poll(() => {
+      const store = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+      try {
+        return (
+          store
+            .prepare(`SELECT t.id FROM turn_deliveries d
+          JOIN threads t ON t.id = d.thread_id JOIN tasks k ON k.id = t.task_id
+          WHERE k.title = 'Keep the session alive' AND d.state = 'delivered' LIMIT 1`)
+            .get() !== undefined
+        )
+      } finally {
+        store.close()
+      }
+    })
+    .toBe(true)
+}
+
 test('Quit with a lead at work asks first; Cancel keeps it working, Quit anyway stops it and records it', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const first = await launch(home, ASKS)
@@ -39,8 +60,7 @@ test('Quit with a lead at work asks first; Cancel keeps it working, Quit anyway 
     const { electronApp, page, child } = first
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
 
     // Quit asks, and names what it would stop.
     await electronApp.evaluate(({ app }) => app.quit())
@@ -91,8 +111,7 @@ test('Quit twice in a row quits without asking again', async () => {
   try {
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
 
     await electronApp.evaluate(({ app }) => app.quit())
     await expect(page.getByRole('dialog', { name: 'Quit Althar?' })).toBeVisible()
@@ -111,8 +130,7 @@ test('Quit asks even when the runtime has not said what is at work, and says it 
   try {
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
 
     await electronApp.evaluate(({ app }) => app.quit())
     const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
@@ -135,8 +153,7 @@ test('Keep working in the background closes the windows and leaves the lead work
   try {
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
 
     await electronApp.evaluate(({ app }) => app.quit())
     const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
@@ -173,8 +190,7 @@ test('Closing the last window with work running asks once, and quits only when t
   try {
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
 
     await page.close()
     const asked = await mainWindow(electronApp)
@@ -236,8 +252,7 @@ test('remembers background closing across launch and reopening, while an explici
   const { electronApp, page, child } = await launch(home, ASKS)
   try {
     await openFirstProject(electronApp, page, repository(home))
-    await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await workingLead(page, home)
     await page.close()
     expect(child.exitCode).toBeNull()
     await electronApp.evaluate(({ app }) => app.emit('activate'))

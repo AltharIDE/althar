@@ -384,7 +384,7 @@ describe('protected permission approvals', () => {
               agents: fakeAgents(),
               secrets: Secrets.memory(),
               connectors: fakeConnectors({}),
-              busy: { machine: ROOMY },
+              busy: { machine: ROOMY, pressure: false },
             }),
           ),
         ),

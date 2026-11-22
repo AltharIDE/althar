@@ -215,6 +215,28 @@ describe('the usage reader', () => {
     expect(seen).toHaveLength(3)
   })
 
+  it.each([401, 403, 302, 500])('keeps usage error %i visible with the last windows until a fresh read', async (status) => {
+    const home = fakeHome()
+    let time = Date.parse('2026-10-15T12:00:00Z')
+    let reply: Reply = {}
+    const { seen, fetch } = server(() => reply)
+    const r = reader({ fetch, now: () => new Date(time) })
+    const observedAt = new Date(time).toISOString()
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: false })
+
+    time += MIN_INTERVAL
+    reply = { status }
+    const failed = await r.read('codex-chatgpt', codex(home))
+    expect(failed).toMatchObject({ kind: 'fault', last: { observedAt } })
+    expect(await r.read('codex-chatgpt', codex(home), true)).toEqual(failed)
+    expect(seen).toHaveLength(2)
+
+    time += MIN_INTERVAL
+    reply = {}
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: false })
+    expect(seen).toHaveLength(3)
+  })
+
   it('makes one GET to the allowlisted host and path, carrying the token and the account it is for, and reads the windows', async () => {
     const home = fakeHome()
     const { seen, fetch } = server({})

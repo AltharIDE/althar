@@ -4,7 +4,7 @@ import { isIP } from 'node:net'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { bindWorkerHandshake, workerCertificateFingerprint } from '@althar/worker-protocol/grpc'
-import { makeAgentWorkerPool } from '@althar/worker-protocol/agent-runs'
+import { makeAgentWorkerPool, type AgentWorkerConnection } from '@althar/worker-protocol/agent-runs'
 import { connectHomeRelay, validateHomeRelay } from '@althar/worker-protocol/relay'
 import { Clock, Effect, Schema } from 'effect'
 
@@ -113,7 +113,7 @@ export const configureWorkers = (options: WorkerHomePaths, config: WorkerConfigu
     catch: configureFailure,
   })
 
-export const listenWorkers = (options: WorkerHomePaths, homeId: string) =>
+export const listenWorkers = (options: WorkerHomePaths, homeId: string, connectionChanged?: (outcome: AgentWorkerConnection) => void) =>
   Clock.clockWith((clock) =>
     Effect.acquireRelease(
       Effect.tryPromise({
@@ -130,7 +130,7 @@ export const listenWorkers = (options: WorkerHomePaths, homeId: string) =>
             let listener: Awaited<ReturnType<typeof bindWorkerHandshake>> | undefined
             try {
               const ip = config.address.includes(':') ? `[${config.address}]` : config.address
-              const agentWorkers = makeAgentWorkerPool(store.agents)
+              const agentWorkers = makeAgentWorkerPool(store.agents, connectionChanged)
               const bound = await bindWorkerHandshake(`${ip}:${config.port}`, {
                 homeId,
                 ...tls,

@@ -245,25 +245,47 @@ Anonymous counts of how people get through setting up, starting tasks and
 coming back, from the main process alone (`main/usageData.ts`), to PostHog's
 US cloud over Electron's own network.
 
-- **Named events only, each with named properties:** Althar opened, first
-  screen done, an agent signed in, a project made, a task started and
-  settled, an ask answered, a usage limit hit, an update installed. Each
-  property is a count, a word from a short list, or an agent's or model
-  family's id. The main process drops anything else, so its list is all that
-  can ever leave. Each event carries the app's version, the system, the
-  processor and a random install id kept in `desktop.json`. Person profiles
-  are off and GeoIP is never looked up.
+- **Named events and fields only.** The schema is in `main/usageData.ts`.
+  Each event carries the app's version, system and processor, and a random
+  install id kept in `desktop.json`. Agent kinds and model families come from
+  fixed lists. Custom agents count as `other`. Person profiles and GeoIP stay off.
 - **The window has no analytics SDK,** so nothing is captured automatically,
-  and its Content Security Policy keeps `connect-src 'none'`.
+  and its Content Security Policy keeps `connect-src 'none'`. The welcome
+  tells main which step was shown, whether creating a project worked, and
+  when the person opened that project at the end of setup.
 - **The runtime says what happened, from the record** (`UsageData`): it reads
-  `record_events` as the ledger grows, so no workflow sends events itself.
+  `record_events` as the ledger grows and gives main the time the event occurred.
+  No workflow sends events itself.
 - **On by default, turned off in Settings** ("Usage data"). The first screen
   doesn't ask, so setting up stays about agents and repositories. The switch
-  is checked before each request, so nothing leaves once it is off.
+  is checked before each request. A change drops pending events from before
+  the change, including retries and events still being read from the ledger.
   `DO_NOT_TRACK` keeps it off, and so does a `desktop.json` that can't be
   read.
 - **Only a release sends.** PostHog's key goes to a packaged build alone.
   Development builds, end-to-end tests and forks send nothing.
+
+For activation, start with `app_window_opened` and break down
+`onboarding_step_seen` by `step`. Compare project attempts by source and
+outcome, and use `onboarding_completed` for the final Open action.
+`first_screen_done` still means the first project was created. Measure day-1
+and day-7 window retention with `app_window_opened`, at most once per UTC day
+per running app. `app_opened` counts process launches, including login launches.
+
+For work, read task creation and plan decisions alongside task starts and the
+first lead turn's outcome. Use `task_merged` for completed merges, including
+merges on a code host. `task_settled` still includes opening a PR or abandoning
+work. Use `ask_opened` to count requests and `ask_answered.took` to see how long
+they waited. A permission handled by the coordinator before it became an ask
+has no wait bucket. Integration connections, work imports and automation run
+outcomes show adoption. Report delivery is counted after the reports service
+accepts it. These events join at the install level, with no task or project id.
+
+For remote homes, `home_pairing` and `home_ssh_check` show the outcomes of
+pairing and SSH checks. `home_connection` shows the transport and whether
+the window connected, failed to connect, or lost an established connection.
+`worker_connection` counts accepted agent-worker connections and their ends
+on the desktop home. These carry fixed outcomes and transport categories.
 
 ## Problem reports
 

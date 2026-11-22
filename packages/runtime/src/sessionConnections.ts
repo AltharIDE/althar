@@ -24,7 +24,6 @@ import { touchCard } from './cards'
 import { type AgentEntry, RuntimeConfig, type RuntimeOptions, SIGNED_OUT_GIT_CONFIG } from './Config'
 import { SessionFailed } from './errors'
 import type { FailuresService } from './Failures'
-import { dueForHandover } from './handover'
 import type { InstanceInfo } from './Instance'
 import { type LeftRunning, stillBusy } from './leftRunning'
 import type { Limits } from './Limits'
@@ -47,6 +46,7 @@ import {
   type Store,
   type ThreadContext,
   agentLost,
+  automaticCompactionDue,
   cwdOf,
   foldersOf,
   heardContext,
@@ -925,6 +925,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           })
         }),
       )
+      const openedAt = yield* Clock.currentTimeMillis
       const running: Running = {
         sessionId,
         entry,
@@ -970,6 +971,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         handover: 'none',
         turnStartedAt: null,
         turnEndedAt: null,
+        openedAt,
+        idleTouchedAt: openedAt,
         nextLead: undefined,
         leadLock: Semaphore.makeUnsafe(1),
         settingLead: false,
@@ -1032,27 +1035,17 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 running.stopping = true
                 return Effect.asVoid(Deferred.succeed(running.stopRequest, { state: 'lost' }))
               }
-              return Effect.andThen(
-                Effect.andThen(
-                  Effect.andThen(
-                    Effect.andThen(
-                      Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
-                        heardPlan(running, event),
-                      ),
-                      heard.record(event),
-                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                    Effect.andThen(heardWork(running, event), heardBackground(running, event)),
-                  ),
-                  live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
-                ),
-                // A coordinator that says between turns its context is filling up is handed over now, not at its next turn.
-                Effect.suspend(() =>
-                  event._tag === 'ContextUsage' && thread.role === 'coordinator' && !running.turnRunning && dueForHandover(running.context)
-                    ? Queue.offer(running.wake, undefined)
-                    : Effect.void,
-                ),
-              )
+              return Effect.gen(function* () {
+                heardContext(running, event)
+                yield* Effect.andThen(heardPlan(running, event), heard.record(event)).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)),
+                )
+                yield* Effect.andThen(heardWork(running, event), heardBackground(running, event))
+                yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
+                // Idle updates can make compaction due as well as the events in a turn.
+                if (thread.role === 'coordinator' && !running.turnRunning && automaticCompactionDue(running))
+                  yield* Queue.offer(running.wake, undefined)
+              })
             }),
           ),
         ),

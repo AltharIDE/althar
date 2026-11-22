@@ -32,7 +32,9 @@ test('says over the composer why the task waits, and in the load popover how man
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await startTask(page, 'Add a retry', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Add a retry', exact: true })).toContainText('Running')
     await startTask(page, 'Check links', '[lead:wait]')
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(1)
     await startTask(page, 'Tidy the docs', '[lead:wait]')
     await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(2)
     await page
@@ -73,6 +75,7 @@ test('says over the composer why the task waits, and in the load popover how man
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
     await page.keyboard.press('Escape')
     // The second in line, opened from the board.
+    await expect(next.locator('[data-row]')).toContainText(['Check links', 'Tidy the docs'])
     await next.getByRole('button', { name: 'Tidy the docs', exact: true }).click()
     await toConversation(page)
 

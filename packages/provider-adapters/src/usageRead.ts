@@ -141,24 +141,28 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
       before !== undefined &&
       at < before.notBefore &&
       !(afterLimit && before.usage !== undefined && before.strikes === 0 && before.said === undefined)
-    )
+    ) {
+      // During a provider-requested wait the last windows are shown. Other failures stay visible until a fresh read.
+      if (before.strikes === 0 && before.said !== undefined) return before.said
       return before.usage !== undefined
         ? { kind: 'usage', usage: before.usage, stale: true }
         : (before.said ?? fault('unreachable', 'The provider asked Althar to wait before reading again.'))
+    }
 
     const every = source.every ?? MIN_INTERVAL
     // The interval is taken before anything is awaited, so no second read can start inside it.
     const remember = (patch: Memory) => memory.set(key, patch)
     remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + every, strikes: before?.strikes ?? 0 })
     const failed = (kind: UsageFault, message: string, strikes = 0, wait = every) => {
+      const said = fault(kind, message, before?.usage)
       // What it said, as it said it: a read failed for another reason isn't shown as a wait the provider asked for.
       remember({
         ...(before?.usage === undefined ? {} : { usage: before.usage }),
         notBefore: at + wait,
         strikes,
-        said: fault(kind, message),
+        said,
       })
-      return fault(kind, message, before?.usage)
+      return said
     }
 
     // The token lives in this call only.

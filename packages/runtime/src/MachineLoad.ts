@@ -304,9 +304,8 @@ export class MachineLoad extends Context.Service<
           let before = last !== null && at - last.at <= every * GAP ? last : null
           let now = at
           let reading = yield* reader
-          // A first reading, one after a gap, or one whose times count differently from the one before, as once the Mac's
-          // reader is built: a moment's start to measure from, and the readings begin afresh.
-          if (before === null || before.reading.reaped !== reading.reaped) {
+          // A first reading or one after a gap needs a moment's start to measure from, and begins the history afresh.
+          if (before === null) {
             before = { at: now, reading }
             history = []
             pointAt = null
@@ -314,13 +313,26 @@ export class MachineLoad extends Context.Service<
             now = yield* Clock.currentTimeMillis
             reading = yield* reader
           }
+          // A seed followed immediately by a read can fall within the same OS tick. Wait for a useful interval rather than
+          // drawing zero CPU as though it were a measurement.
+          if (reading.cores.total <= before.reading.cores.total) {
+            yield* Effect.sleep(settle)
+            now = yield* Clock.currentTimeMillis
+            reading = yield* reader
+          }
           const ticks = reading.cores.total - before.reading.cores.total
           const cpu = ticks > 0 ? clamp((reading.cores.busy - before.reading.cores.busy) / ticks) : 0
-          // Still counted differently, the reader built in between: what each holds shows, and its CPU from the next reading.
-          const from = before.reading.reaped === reading.reaped ? before.reading : reading
-          const { shares, althar, total } = yield* sharesOf(yield* roots, from, reading, rows)
+          // The process reader may have built between samples. Core counters are comparable, but process CPU accounting
+          // changed: report its shares as unknown until the next reading, never as a fabricated zero.
+          const comparable = before.reading.reaped === reading.reaped
+          const { shares, althar, total } = comparable
+            ? yield* sharesOf(yield* roots, before.reading, reading, rows)
+            : { shares: null, althar: null, total: 0 }
           const work = Math.min(cpu, clamp(total))
-          if (pointAt === null || now - pointAt >= every) {
+          if (!comparable) {
+            history = []
+            pointAt = null
+          } else if (pointAt === null || now - pointAt >= every) {
             history = [...history, { cpu, work }].slice(-HISTORY)
             pointAt = now
           }
@@ -355,11 +367,28 @@ export class MachineLoad extends Context.Service<
       // Sampling must never stop the program: a reading that fails is tried again next time.
       yield* Effect.forkScoped(Effect.forever(Effect.sleep(sample).pipe(Effect.andThen(Effect.ignore(background)))))
 
+      // The app enables the meter before its window asks for a load. Seed the first CPU/process counters then, without
+      // waiting for a second sample, so that first window read can measure against these instead of sleeping for `settle`.
+      const enable = one.withPermits(1)(
+        Effect.gen(function* () {
+          if (!metering) return
+          const at = yield* Clock.currentTimeMillis
+          if (last !== null && at - last.at <= every * GAP) return
+          const reading = yield* lean
+          if (!metering) return
+          last = { at, reading }
+          history = []
+          pointAt = null
+        }),
+      )
+
       return MachineLoad.of({
         now: one.withPermits(1)(measure),
         meter: (on) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
+            const was = metering
             metering = on
+            if (on && !was) yield* Effect.ignore(enable)
           }),
       })
     }),

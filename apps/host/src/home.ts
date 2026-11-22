@@ -96,6 +96,7 @@ export const serveHome = (
       )
       const instance = Context.get(context, Instance)
       const network = yield* readNetworkConfiguration(options.profile)
+      let networkFingerprint: string | undefined
       if (network !== undefined) {
         const files = yield* networkFiles(options, network)
         yield* Effect.gen(function* () {
@@ -109,9 +110,10 @@ export const serveHome = (
             ...(files.approvalKeys === undefined ? {} : { approvalCredentials: files.approvalKeys.credentials }),
           })
         }).pipe(Effect.provideContext(context), Effect.ensuring(Effect.sync(() => files.key.fill(0))))
+        networkFingerprint = files.networkFingerprint
       }
       worker = yield* listenWorkers(options, instance.homeId)
-      const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))
+      const endpoint = yield* listenLocalApi(options.profile, networkFingerprint).pipe(Effect.provideContext(context))
       yield* ready({
         homeId: endpoint.homeId,
         hostDeviceId: instance.deviceId,

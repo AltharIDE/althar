@@ -103,14 +103,14 @@ one.
 | 028 | Linux windows, packages and the keyring | [packaging § Off a Mac: windows and the keyring](packaging.md#off-a-mac-windows-and-the-keyring) |
 | 029 | How hard the computer works is read by the runtime, only while a window shows it | [scheduling § Althar's share of the load](scheduling.md#althars-share-of-the-load) |
 | 030 | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge | [code-hosts § Conflicts](code-hosts.md#conflicts) |
-| 031 | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes | [coordinator § Handover before its context fills](coordinator.md#handover-before-its-context-fills) |
+| 031 | The coordinator compacts in place, with current project records | [coordinator § Compaction and session recovery](coordinator.md#compaction-and-session-recovery) |
 | 032 | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn | [scheduling § How many agents work at once](scheduling.md#how-many-agents-work-at-once) |
 | 033 | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node | [agents § The Node the adapters run on](agents.md#the-node-the-adapters-run-on) |
 | 034 | A task goes back to work whenever its lead does, and ships again in a pull request of its own | [tasks § Rounds: back to work, and shipping again](tasks.md#rounds-back-to-work-and-shipping-again), [reviews § How a review round runs](reviews.md#how-a-review-round-runs) |
 | 035 | A task's kind is read from what it has, and its card has nothing to press | [tasks § Kinds, read from what a task has](tasks.md#kinds-read-from-what-a-task-has), [reviews § Reviewing someone else's pull request](reviews.md#reviewing-someone-elses-pull-request) |
 | 036 | Anonymous usage data goes from the main process, named events only | [packaging § Usage data](packaging.md#usage-data) |
 | 037 | What the person does goes first, a task keeps its place between its steps, and new work waits | [scheduling § What goes first](scheduling.md#what-goes-first) |
-| 038 | A task's lead starts afresh before its context grows large | [agents § Keeping context small](agents.md#keeping-context-small) |
+| 038 | A task's lead compacts its context in place | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 039 | The person can have an agent compact its context, at once, with the agent's own command | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 040 | Until the person has looked, a change's checks are Althar's to see through | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |
 | 041 | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |
