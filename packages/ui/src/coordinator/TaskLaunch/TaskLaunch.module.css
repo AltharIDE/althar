@@ -9,6 +9,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: 12px;
   padding: 14px 16px 10px;
+  container-type: inline-size;
 }
 .kicker {
   grid-column: 1;
@@ -98,6 +99,20 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--t-3);
+}
+/* After the rules above, which it overrides: in a narrow card that offers where it runs, where it works and runs go under
+   the title, so the title keeps its width. */
+@container (max-width: 540px) {
+  .head:has(.place) .kicker,
+  .head:has(.place) .title {
+    grid-column: 1 / -1;
+  }
+  .where:has(.place) {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-self: start;
+    margin-top: 10px;
+  }
 }
 /*
  * The roster: a row for each step down a dotted line through their nodes,
