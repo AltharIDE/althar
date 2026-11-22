@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { createServer as createTcpServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,8 +14,10 @@ import { createHash, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
 import { makeAgentWorkerPool, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
+import { agentToolsMethod } from '../src/agentTools.ts'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
 import { AgentHomeFrameSchema, AgentRunOutcome, AgentWorkerFrameSchema, type AgentWorkerFrame } from '../src/index.ts'
+import { AgentToolsRequestSchema, AgentToolsResponseSchema, type AgentToolsRequest } from '../src/gen/althar/worker/v1/control_pb.ts'
 import { workerCertificates } from './worker-certificates.ts'
 
 const homeId = 'home_' + '1'.repeat(32)
@@ -33,9 +36,12 @@ const fixture = async (t: TestContext) => {
   const fingerprint = workerCertificateFingerprint(new X509Certificate(read('enrolled.pem')).raw)
   const enrolled = new Map([[fingerprint, workerId]])
   const outstanding = new Map<string, AgentRunAssignment>()
+  const withdrawn = new Set<string>()
   const journals = new Map<string, string>()
+  let granted = true
   const pool = makeAgentWorkerPool({
-    permits: (id, project) => id === workerId && project === projectId,
+    permits: (id, project) => granted && id === workerId && project === projectId,
+    permitsRun: (id, runId) => granted && outstanding.get(id)?.runId === runId && !withdrawn.has(runId),
     bind: (id, bound) => {
       if (!journals.has(id)) journals.set(id, bound)
       return journals.get(id) === bound
@@ -73,9 +79,37 @@ const fixture = async (t: TestContext) => {
         const next = await received.next()
         return next.done === true ? undefined : fromBinary(AgentHomeFrameSchema, next.value).payload
       },
+      tools: () => {
+        const { path, requestSerialize, responseDeserialize } = agentToolsMethod
+        const tools = client.makeBidiStreamRequest(path, requestSerialize, responseDeserialize, { deadline: Date.now() + 12_000 })
+        const frames = tools[Symbol.asyncIterator]()
+        return {
+          send: (payload: AgentToolsRequest['payload']) =>
+            tools.write(Buffer.from(toBinary(AgentToolsRequestSchema, create(AgentToolsRequestSchema, { payload })))),
+          read: async () => {
+            const next = await frames.next()
+            return next.done === true ? undefined : fromBinary(AgentToolsResponseSchema, next.value).data
+          },
+        }
+      },
     }
   }
-  return { pool, connect, home, root, path, revoke: () => enrolled.delete(fingerprint) }
+  return {
+    pool,
+    connect,
+    home,
+    root,
+    path,
+    revoke: () => enrolled.delete(fingerprint),
+    unassign: () => {
+      const run = outstanding.get(workerId)
+      if (run !== undefined) withdrawn.add(run.runId)
+      granted = false
+    },
+    reassign: () => {
+      granted = true
+    },
+  }
 }
 
 const hello = (id = workerId, journal = journalId): AgentWorkerFrame['payload'] => ({
@@ -162,12 +196,62 @@ void test('revocation withdraws the lease and leaves the in-flight stop unconfir
     value: { $typeName: 'althar.worker.v1.AgentRunReady', runId: start.value.runId, workspacePath: '/private/checkout', toolsPort: 0 },
   })
   const agent = await pending
+  equal(agent.ownsRun(), true)
   revoke()
+  equal(agent.ownsRun(), false)
+  await rejects(agent.write(Buffer.from('new input')), /no longer owns/)
+  await rejects(agent.readPatch('a'.repeat(40), 'b'.repeat(40)), /cannot check/)
   const unconfirmed = rejects(agent.exit, /not enrolled/)
   worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
   await rejects(worker.read(), { code: status.UNAUTHENTICATED })
   await unconfirmed
   deepEqual(pool.list(projectId), [])
+})
+
+void test('withdrawing one project grant rejects new work and lets the enrolled worker confirm stop', { timeout: 15_000 }, async (t) => {
+  const { pool, connect, unassign, reassign } = await fixture(t)
+  const received: string[] = []
+  const toolServer = createTcpServer((socket) => {
+    socket.on('data', (data) => {
+      received.push(data.toString())
+      socket.write(data)
+    })
+    socket.on('error', () => undefined)
+  }).listen(0, '127.0.0.1')
+  t.after(() => toolServer.close())
+  await once(toolServer, 'listening')
+  const worker = connect()
+  worker.send(hello())
+  await worker.read()
+  const pending = pool.start(workerId, placement, { toolPort: (toolServer.address() as AddressInfo).port })
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const runId = start.value.runId
+  worker.send({
+    case: 'ready',
+    value: { $typeName: 'althar.worker.v1.AgentRunReady', runId, workspacePath: '/private/checkout', toolsPort: 5001 },
+  })
+  const agent = await pending
+  const tunnel = worker.tools()
+  tunnel.send({ case: 'runId', value: runId })
+  tunnel.send({ case: 'data', value: Buffer.from('granted') })
+  equal(Buffer.from((await tunnel.read()) ?? []).toString(), 'granted')
+  unassign()
+  equal(agent.ownsRun(), false)
+  equal(
+    pool.openTools(workerId, runId, () => undefined),
+    undefined,
+  )
+  await rejects(pool.start(workerId, placement), /unavailable/)
+  reassign()
+  equal(agent.ownsRun(), false)
+  tunnel.send({ case: 'data', value: Buffer.from('withdrawn') })
+  await rejects(tunnel.read(), { code: status.PERMISSION_DENIED })
+  deepEqual(received, ['granted'])
+  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  equal((await worker.read())?.case, 'stop')
+  worker.send({ case: 'exit', value: { $typeName: 'althar.worker.v1.AgentRunExit', runId, outcome: AgentRunOutcome.STOPPED } })
+  equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
 
 const native = fileURLToPath(new URL('../../../target/debug/althar-worker', import.meta.url))

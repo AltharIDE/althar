@@ -71,6 +71,7 @@ export interface WorkerCheckout {
 export interface AgentRunLedger {
   readonly bind: (workerId: string, journalId: string) => boolean
   readonly permits: (workerId: string, projectId: string) => boolean
+  readonly permitsRun: (workerId: string, runId: string) => boolean
   readonly outstanding: (workerId: string) => AgentRunAssignment | undefined
   readonly begin: (workerId: string, run: AgentRunAssignment) => boolean
   readonly finish: (workerId: string, result: AgentRunExit) => boolean
@@ -91,6 +92,7 @@ export interface WorkerAgentProcess {
   readonly exit: Promise<AgentRunExit>
   readonly write: (chunk: Uint8Array) => Promise<void>
   readonly stop: () => Promise<AgentRunExit>
+  readonly ownsRun: () => boolean
   readonly readPatch: (baseTree: string, baseHead: string) => Promise<WorkerPatch>
 }
 
@@ -104,7 +106,7 @@ interface Slot {
   readonly workerId: string
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
-  readonly openTools: (runId: string, invalidate: () => void) => { port: number; release: () => void } | undefined
+  readonly openTools: (runId: string, invalidate: () => void) => { port: number; active: () => boolean; release: () => void } | undefined
   readonly busy: () => boolean
 }
 
@@ -189,24 +191,26 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
     let sequence = 0
     let timer: NodeJS.Timeout
 
+    const ownsRun = (current: Run): boolean =>
+      !closed &&
+      run === current &&
+      current.phase === 'running' &&
+      slot !== undefined &&
+      enrolledWorker() === slot.workerId &&
+      ledger.permitsRun(slot.workerId, current.id)
+
     const closeTools = (current: Run): void => {
       for (const invalidate of current.tunnels) invalidate()
       current.tunnels.clear()
     }
     const openTools: Slot['openTools'] = (runId, invalidate) => {
       const current = run
-      if (
-        closed ||
-        current === undefined ||
-        current.id !== runId ||
-        current.phase !== 'running' ||
-        current.toolPort === undefined ||
-        current.tunnels.size >= 4
-      )
+      if (current === undefined || current.id !== runId || !ownsRun(current) || current.toolPort === undefined || current.tunnels.size >= 4)
         return
       current.tunnels.add(invalidate)
       return {
         port: current.toolPort,
+        active: () => ownsRun(current),
         release: () => {
           current.tunnels.delete(invalidate)
         },
@@ -273,13 +277,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       pending.result.reject(error)
     }
     const readPatch = (current: Run, baseTree: string, baseHead: string): Promise<WorkerPatch> => {
-      if (
-        run !== current ||
-        current.phase !== 'running' ||
-        current.snapshot !== undefined ||
-        !objectId.test(baseTree) ||
-        !objectId.test(baseHead)
-      )
+      if (!ownsRun(current) || current.snapshot !== undefined || !objectId.test(baseTree) || !objectId.test(baseHead))
         return Promise.reject(new Error('The worker cannot check that workspace now.'))
       const result = deferred<WorkerPatch>()
       const timer = setTimeout(
@@ -329,7 +327,17 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         signal?.removeEventListener('abort', abort)
         transfer.abort()
       }
-      run = { id, starting, output, ready: deferred<WorkerAgentProcess>(), exit, cleanup, toolPort, tunnels: new Set(), phase: 'starting' }
+      run = {
+        id,
+        starting,
+        output,
+        ready: deferred<WorkerAgentProcess>(),
+        exit,
+        cleanup,
+        toolPort,
+        tunnels: new Set(),
+        phase: 'starting',
+      }
       signal?.addEventListener('abort', abort, { once: true })
       const current = run
       const source = checkout === undefined ? undefined : { size: checkout.size, sha256: checkout.sha256, head: checkout.head }
@@ -350,7 +358,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
     }
     const write = async (current: Run, bytes: Uint8Array): Promise<void> => {
       for (let offset = 0; offset < bytes.byteLength; offset += MAX_AGENT_CHUNK) {
-        if (current !== run || current.phase !== 'running') throw new Error('The worker agent is no longer running.')
+        if (!ownsRun(current)) throw new Error('The worker agent no longer owns this run.')
         const data = bytes.subarray(offset, offset + MAX_AGENT_CHUNK)
         await send({ case: 'input', value: create(AgentRunBytesSchema, { runId: current.id, data }) })
       }
@@ -410,6 +418,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           if (recovering !== undefined) sendControl({ case: 'reconcile', value: create(AgentRunReconcileSchema, recovering) })
           return
         }
+        // A project grant can end independently of the worker certificate. Let the same
+        // stream confirm stop, while rejecting any further effect from its withdrawn run.
+        if (run !== undefined && !ledger.permitsRun(workerId, run.id)) {
+          void stop(run).catch(() => undefined)
+          if (payload.case !== 'heartbeat' && payload.case !== 'exit') return
+        }
         if (payload.case === 'heartbeat') {
           if (payload.value.sequence !== sequence + 1) return fail(status.INVALID_ARGUMENT, 'The worker heartbeat was out of order.')
           sequence = payload.value.sequence
@@ -460,6 +474,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             exit: current.exit.promise,
             write: (chunk) => write(current, chunk),
             stop: () => stop(current),
+            ownsRun: () => ownsRun(current),
             readPatch: (baseTree, baseHead) => readPatch(current, baseTree, baseHead),
           })
           return

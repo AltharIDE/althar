@@ -170,7 +170,7 @@ printf 'Certificate directory %s\n' "$tls"
 
 For a worker on another machine, use a reachable private bind address on the home and a name covered by its certificate. Each worker gets its own client certificate. If both machines can reach a gateway, you can use the [worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay).
 
-Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate on new connections and on the next message of an existing connection. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
+Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate. Add `--project-id "$PROJECT_ID"` to remove the grant for agent execution on that project. When the grant ends, the home refuses new agent runs and checkpoints and asks the enrolled worker to stop its active run. The home keeps the reservation until the worker confirms stop. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
 
 ## Run a project command on a Linux worker
 
@@ -242,6 +242,11 @@ Use a host, worker and Desktop built from the same revision for this flow. It su
 5. Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. Try a follow-up and stop a task while the agent is working. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
 
 The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
+
+Publish from the home, where the project's Git credentials and approval
+rules apply. The worker checkout's Git hook directs pushes back to the home.
+The worker's own operator account and filesystem permissions define what
+the provider can reach on that machine.
 
 ## Managed releases and updates
 

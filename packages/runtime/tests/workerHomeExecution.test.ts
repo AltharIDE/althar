@@ -61,6 +61,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         outcome(exit)
         return exit
       },
+      ownsRun: () => true,
       readPatch: async (baseline, parent) => {
         if (!reachable) throw new Error('Worker disconnected.')
         assert.strictEqual(baseline, tree)
@@ -84,6 +85,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
           exit: worker.exit,
           write: worker.write,
           stop: worker.stop,
+          ownsRun: worker.ownsRun,
           readPatch: worker.readPatch,
         }
       },

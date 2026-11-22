@@ -48,8 +48,9 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
       const checkpoint = writes.withPermits(1)(
         Effect.gen(function* () {
           const incoming = yield* Effect.tryPromise({ try: () => agent.readPatch(base.tree, base.head), catch: unavailable })
-          yield* acceptWorkerPatch(worktree, base, incoming)
+          yield* acceptWorkerPatch(worktree, base, incoming, agent.ownsRun)
           base = { head: incoming.head, tree: incoming.tree }
+          if (!agent.ownsRun()) return yield* Effect.fail('The worker no longer owns this run.')
         }).pipe(
           Effect.mapError(
             (error) => new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: unavailable(error) }),

@@ -151,6 +151,7 @@ impl WorkspaceTransfer {
         )
         .await?;
         run_git(&checkout, &["reset", "--quiet", "--mixed", &source.head]).await?;
+        install_git_guard(&checkout).await?;
         renameat_with(
             CWD,
             &checkout,
@@ -167,6 +168,28 @@ impl WorkspaceTransfer {
         .sync_all()?;
         Ok(self.destination.clone())
     }
+}
+
+/// Published changes flow through the home, which holds the project's Git credentials and approvals.
+async fn install_git_guard(checkout: &Path) -> io::Result<()> {
+    let hooks = checkout.join(".git/althar-hooks");
+    private_directory(&hooks)?;
+    let mut hook = OpenOptions::new()
+        .create_new(true)
+        .mode(0o700)
+        .write(true)
+        .open(hooks.join("pre-push"))?;
+    hook.write_all(
+        b"#!/bin/sh\nprintf '%s\\n' 'Publish this task from its Althar home.' >&2\nexit 1\n",
+    )?;
+    hook.sync_all()?;
+    run_git(
+        checkout,
+        &["config", "--local", "core.hooksPath", ".git/althar-hooks"],
+    )
+    .await?;
+    run_git(checkout, &["config", "--local", "credential.helper", ""]).await?;
+    Ok(())
 }
 
 impl Drop for WorkspaceTransfer {
@@ -453,6 +476,26 @@ mod tests {
         }
         let worker = transfer.install(&specification).await?;
         assert_eq!(fs::read_to_string(worker.join("README.md"))?, "Home\n");
+        let push = Command::new("/usr/bin/git")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "push",
+                source
+                    .to_str()
+                    .ok_or_else(|| invalid("Source path must be UTF-8"))?,
+                "HEAD:refs/heads/from-worker",
+            ])
+            .current_dir(&worker)
+            .output()
+            .await?;
+        assert!(!push.status.success());
+        assert!(
+            String::from_utf8_lossy(&push.stderr)
+                .contains("Publish this task from its Althar home.")
+        );
         fs::write(worker.join("README.md"), "On the worker\n")?;
         run_git(&worker, &["add", "README.md"]).await?;
         run_git(&worker, &commit).await?;

@@ -526,11 +526,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
       }
-      // What the agent's hold and settings read first, such as Claude Code's sandbox probe, once a launch and usually in already.
-      const waiting = definition.ready?.()
+      // A sandbox probe describes the machine running it. A worker starts its own provider process.
+      const waiting = selectedWorker === null ? definition.ready?.() : undefined
       if (waiting !== undefined) yield* Effect.promise(() => waiting)
       // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
-      const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
+      const hold = selectedWorker === null ? definition.holds?.(reads ? 'reader' : 'lead', sessionOptions) : undefined
       let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
       // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
       let remote: WorkerExecution | undefined

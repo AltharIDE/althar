@@ -39,8 +39,6 @@ const connected = (
   } = {},
 ) =>
   Effect.gen(function* () {
-    const channel = new MessageChannel()
-    yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
     const context = yield* Layer.build(
       services({
         database: ':memory:',
@@ -59,18 +57,24 @@ const connected = (
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
-    yield* Effect.forkScoped(
-      Layer.launch(
-        connection(
-          emitterPort(channel.port1, (data) => data),
-          { kind: 'window' },
-        ),
-      ).pipe(Effect.provideContext(context)),
-    )
-    const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
-    const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+    const connect = (kind: 'window' | 'socket') =>
+      Effect.gen(function* () {
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
+        const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+        return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      })
+    const client = yield* connect('window')
     const grant = (path: string) => Context.get(context, Folders).allow(path)
-    return { client, grant }
+    return { client, grant, connect }
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
@@ -331,7 +335,33 @@ describe('a normal task assigned to a worker', () => {
         const workerPath = repository()
         let expectedProject: string | undefined
         const placed: Array<{ workspace: string; site: string }> = []
-        const { client, grant } = yield* connected({
+        let homeSandboxProbes = 0
+        const homeAgents = Layer.effect(
+          Agents,
+          Effect.gen(function* () {
+            const fakes = yield* Agents
+            const withHomeSandbox = (entry: AgentEntry): AgentEntry =>
+              entry.definition.id !== 'codex'
+                ? entry
+                : {
+                    ...entry,
+                    definition: {
+                      ...entry.definition,
+                      ready: () => {
+                        homeSandboxProbes += 1
+                        return undefined
+                      },
+                      holds: () => {
+                        homeSandboxProbes += 1
+                        return undefined
+                      },
+                    },
+                  }
+            return Agents.of({ list: fakes.list.map(withHomeSandbox), get: (id) => Effect.map(fakes.get(id), withHomeSandbox) })
+          }),
+        ).pipe(Layer.provide(fakeAgents()))
+        const { client, grant, connect } = yield* connected({
+          agents: homeAgents,
           workers: {
             list: (projectId) => (projectId === expectedProject ? [{ workerId, providers: ['codex'], busy: false }] : []),
             open: (request) =>
@@ -372,6 +402,7 @@ describe('a normal task assigned to a worker', () => {
         })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         expectedProject = project.id
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
         assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), [
           { workerId, providers: ['codex'], busy: false },
         ])
@@ -380,10 +411,21 @@ describe('a normal task assigned to a worker', () => {
           projectId: project.id,
           workerId,
           title: 'Work on the worker',
-          description: '[lead:edit] [lead:finish]',
+          description: '[lead:permission] [lead:edit] [lead:finish]',
           end: 'ready',
           steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
         })
+        const permission = (thread: ThreadSnapshot) =>
+          thread.attention.find((call) => call.kind === 'permission' && call.command === 'make deploy')
+        const approval = yield* until(
+          client.GetThread({ threadId: task.threadId, fresh: true }),
+          (thread) => permission(thread) !== undefined,
+        )
+        const decision = { attentionId: permission(approval)!.id, decision: 'allow' as const }
+        const socket = yield* connect('socket')
+        const refused = yield* Effect.flip(socket.Answer({ ...decision, commandId: commandId() }))
+        assert.strictEqual(refused.reason, 'PersonRequired')
+        yield* client.Answer({ ...decision, commandId: commandId() })
         const snapshot = yield* until(
           client.GetThread({ threadId: task.threadId, fresh: true }),
           (view) =>
@@ -391,8 +433,10 @@ describe('a normal task assigned to a worker', () => {
             view.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
         )
         assert.lengthOf(placed, 1)
+        assert.strictEqual(homeSandboxProbes, 0)
         assert.strictEqual(snapshot.task.worktree, placed[0]?.site)
         assert.isTrue(existsSync(join(workerPath, 'change.txt')))
+        assert.isUndefined(permission(snapshot))
       }),
     ),
   )

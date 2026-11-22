@@ -2205,6 +2205,20 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
+      if (text.includes('[lead:permission]') && !session.played.has('[lead:permission]') && !session.coordinator) {
+        session.played.add('[lead:permission]')
+        const toolCall = {
+          toolCallId: 'lead-deploy',
+          title: 'Run make deploy',
+          kind: 'execute' as const,
+          rawInput: { command: 'make deploy' },
+        }
+        await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+        const chosen = await ask(toolCall, commandOptions)
+        const allowed = chosen.startsWith('allow')
+        await update({ sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: allowed ? 'completed' : 'failed' })
+        if (!allowed || session.cancelled) return { stopReason: 'cancelled' }
+      }
 
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)

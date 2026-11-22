@@ -371,6 +371,8 @@ impl AgentUnit {
                 "--property=KillMode=control-group",
                 "--property=TimeoutStopSec=2s",
                 "--property=Delegate=no",
+                "--property=NoNewPrivileges=yes",
+                "--property=UMask=0077",
             ])
             .arg("--working-directory")
             .arg(cwd)
