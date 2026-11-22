@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MESSAGE_IMAGES } from '@althar/contracts'
+import { MESSAGE_FILES, MESSAGE_IMAGES } from '@althar/contracts'
 import { AttachmentKind } from '@althar/ui'
 
+import type { Attached } from '../src/main/attachments'
 import {
   INPUT_LIMIT,
   previewOf,
@@ -291,6 +292,23 @@ describe('the images waiting in a composer', () => {
     act(() => result.current.props(codex).onAddFiles([], 'paste'))
     await waitFor(() => expect(result.current.props(codex).files.map((one) => one.name)).toEqual(['shot.png', 'run.log']))
     expect(result.current.props(codex).images).toEqual([])
+  })
+
+  it('respects the attachment limits when a pending paste resolves after a drop', async () => {
+    const bytes = png(1, 1)
+    const clipboard = Promise.withResolvers<Attached[]>()
+    const attached = (name: string) => ({ ok: true as const, grant: `grant:${name}`, name, kind: 'file' as const, bytes: 1, entries: null })
+    const host = { attach: async (file: File) => attached(file.name), attachPasted: () => clipboard.promise }
+    const { result } = renderHook(() => useAttachments('thread:th1', host, asIs))
+    act(() => result.current.props(claude).onAddFiles([], 'paste'))
+    const images = Array.from({ length: MESSAGE_IMAGES.count }, (_, index) => fileOf(bytes, `${index}.png`))
+    const files = Array.from({ length: MESSAGE_FILES.count }, (_, index) => new File([''], `${index}.txt`))
+    act(() => result.current.props(claude).onAddFiles([...images, ...files], 'drop'))
+    await act(async () => {
+      clipboard.resolve([{ ...attached('pasted.png'), picture: { type: 'image/png', data: bytes } }, attached('pasted.txt')])
+    })
+    expect(result.current.props(claude).images.map((image) => image.name)).toEqual(images.map((file) => file.name))
+    expect(result.current.props(claude).files.map((file) => file.name)).toEqual(files.map((file) => file.name))
   })
 
   it('takes none for an agent that doesn’t take images, and holds back those added before it was picked, saying why', async () => {

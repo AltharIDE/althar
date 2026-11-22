@@ -590,6 +590,9 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           STOP_TIMEOUT_MS,
         )
         current.stopping.unref()
+        // An unread provider stream may have paused this call. Stop and its
+        // confirmation must still get through after the provider is released.
+        call.resume()
         sendControl({ case: 'stop', value: create(AgentRunStopSchema, { runId: current.id }) })
       }
       return current.exit.promise
@@ -787,6 +790,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           const { data } = payload.value
           if (current.phase === 'starting' || data.byteLength === 0 || data.byteLength > MAX_AGENT_CHUNK)
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent output.')
+          if (current.phase === 'stopping') return
           if (!current.output.write(data)) {
             call.pause()
             current.output.once('drain', () => {

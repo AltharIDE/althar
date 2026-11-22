@@ -1606,6 +1606,7 @@ export class Sessions extends Context.Service<
           if (undo !== undefined) yield* Deferred.await(undo)
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
+          let acceptedNow = false
           const accepted = yield* commands.execute({
             envelope: input.envelope,
             projectId: thread.projectId,
@@ -1721,9 +1722,12 @@ export class Sessions extends Context.Service<
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
+              acceptedNow = true
               return { inputId, sequence }
             }),
           })
+          // Only a newly accepted message can resume a held turn or answer a wait.
+          if (!acceptedNow) return accepted
           const running = threads.get(input.threadId)
           if (running !== undefined) running.idleTouchedAt = yield* Clock.currentTimeMillis
           if (running !== undefined && input.quiet !== true && input.envelope.actorId === instance.personId) {

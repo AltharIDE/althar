@@ -106,13 +106,14 @@ export const findDocuments = Effect.fn('Finder.search')(function* (input: Finder
   const reader = yield* Database.ReadLane
   const words = input.text.trim()
   const wordsOf = words.match(/[\p{L}\p{N}]+/gu)?.slice(0, 12) ?? []
+  const matchAny = input.matchAny === true
   const match =
     wordsOf
       .map((word) => {
         const stem = word.replace(/(es|s|ed|ing)$/u, '')
         return stem !== word && stem.length >= 3 ? `(${matchOf(word)} OR ${matchOf(stem)})` : matchOf(word)
       })
-      .join(' AND ') || null
+      .join(matchAny ? ' OR ' : ' AND ') || null
   if (words !== '' && match === null) return { documents: [], next: null, indexed: true } satisfies SearchDocuments
   const kinds = input.kinds ?? (words === '' ? ['task'] : ['task', 'pull', 'issue', 'said', 'note', 'conversation'])
   if (kinds.length === 0) return { documents: [], next: null, indexed: true } satisfies SearchDocuments
@@ -152,7 +153,7 @@ export const findDocuments = Effect.fn('Finder.search')(function* (input: Finder
   const exact = yield* lookup(matches, selected, score)
   // When the index finds no exact matches, look for initials and letters
   // in order in headings. The window applies its usual ranking to these.
-  const loose = exact[0]?.id === null && wordsOf.length > 0 && wordsOf.every((word) => word.length >= 2 && word.length <= 12)
+  const loose = !matchAny && exact[0]?.id === null && wordsOf.length > 0 && wordsOf.every((word) => word.length >= 2 && word.length <= 12)
   const patterns = loose ? wordsOf.map((word) => `%${[...word].join('%')}%`) : []
   const rows =
     patterns.length === 0

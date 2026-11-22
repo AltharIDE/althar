@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { setInterval } from 'node:timers/promises'
+import { setInterval, setTimeout as delay } from 'node:timers/promises'
 import { createHash, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
@@ -246,6 +246,39 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
+})
+
+void test('confirms agent stop while provider output is backpressured', { timeout: 12_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello())
+  equal((await worker.read())?.case, 'hello')
+  const opening = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const { runId } = start.value
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await opening
+  for (let chunk = 0; chunk < 128; chunk++) {
+    worker.send({ case: 'output', value: create(AgentRunBytesSchema, { runId, data: Buffer.alloc(2048) }) })
+  }
+  for (let check = 0; !agent.output.writableNeedDrain && check < 100; check++) await delay(10)
+  ok(agent.output.writableNeedDrain)
+
+  const stopping = agent.stop()
+  equal((await worker.read())?.case, 'stop')
+  worker.send({ case: 'exit', value: create(AgentRunExitSchema, { runId, outcome: AgentRunOutcome.STOPPED }) })
+  equal((await stopping).outcome, AgentRunOutcome.STOPPED)
 })
 
 void test('receives only verified files for the exact active checkout', { timeout: 15_000 }, async (t) => {
