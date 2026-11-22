@@ -1,25 +1,21 @@
-import { DesktopBody } from './bodies/desktop/DesktopBody'
 import { Footer } from '../shared/footer/Footer'
 import { Nav, NavSpace } from '../shared/Nav'
-import { RunsOn } from './bodies/RunsOn'
 import s from './Home.module.css'
 import { Hero } from './Hero'
+import { Story } from './story/Story'
 
 /*
- * The developer page: the lens for a nav, the first screen an orrery in the
- * night (Hero), the systems it runs on in the same night, the product shown
- * (bodies/desktop), and the footer (shared/footer).
+ * The developer page, in daylight: the lens for a nav, the first screen with
+ * the flat orrery (Hero), the product told scene by scene as you scroll
+ * (story/), and the footer (shared/footer).
  */
 
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Nav opening />
+      <Nav />
       <Hero nav={<NavSpace />} />
-      <div className={s.night}>
-        <RunsOn />
-      </div>
-      <DesktopBody />
+      <Story />
       <Footer />
     </div>
   )

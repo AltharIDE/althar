@@ -1190,6 +1190,8 @@
   let last = 0;
   let raf = 0;
   let seen = false;
+  /* Driven from outside (rv-drive), it doesn't play by itself: rv-seek sets its moment. */
+  let driven = false;
   const frame = (now) => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
@@ -1199,7 +1201,7 @@
   };
   const still = () => render(STILL[0], STILL[1], true);
   const update = () => {
-    const go = seen && !document.hidden && !mq.matches;
+    const go = !driven && seen && !document.hidden && !mq.matches;
     if (go && !raf) {
       last = performance.now();
       raf = requestAnimationFrame(frame);
@@ -1234,6 +1236,10 @@
   document.addEventListener('visibilitychange', update);
   mq.addEventListener?.('change', () => {
     if (mq.matches) still();
+    update();
+  });
+  root.addEventListener('rv-drive', (e) => {
+    driven = !!e.detail;
     update();
   });
   root.addEventListener('rv-seek', (e) => {

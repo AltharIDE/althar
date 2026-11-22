@@ -1,132 +1,161 @@
-/* The first screen, an orrery (Hero.tsx): Althar at the middle of the
-   night sky, the system drawn over it (hero/Orrery.module.css); the words
-   in a band along the foot under a hairline rule. The script turns the
-   system; here the drawing fades up once it is measured. In depth: the
-   sky, the grain, the drawing (2); over it, the words (20). */
+/* The first screen, in daylight: as tall as the window, the words on the left, the orrery off the right edge, a foot along the bottom. */
 
 .hero {
   position: relative;
-  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
   overflow: hidden;
-  height: clamp(640px, 100svh, 1060px);
-  background: #070605;
-  color: #fff;
-  container-type: size;
-  --ink-2: #a8a197;
-  --ink-3: #8f887e;
-  --hair: rgba(255, 244, 232, 0.11);
-  --lit: #b4bcff;
-  /* The band's sides: the site's measure. */
-  --side: max(var(--gut), calc(50cqw - 592px));
+  background: var(--n-2);
+  color: var(--t-1);
 }
-
-/* The whole first screen is dark under the nav. */
-.under { top: 0; bottom: 0; }
-
-/* The sky: a breath of warmth round the sun, and at the very foot the faintest cobalt, as the night pages' lit edge; the grain over it, still. */
-.sky, .grain { position: absolute; inset: 0; pointer-events: none; }
-.sky {
-  z-index: 0;
-  background:
-    radial-gradient(ellipse 34% 30% at 50% 40%, rgba(255, 226, 196, 0.045), transparent 70%),
-    radial-gradient(ellipse 60% 22% at 50% 100%, rgba(43, 59, 255, 0.13), transparent 75%);
+.inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: calc(var(--wrap) + 2 * var(--gut));
+  margin: 0 auto;
+  padding: 0 var(--gut);
 }
-.grain { z-index: 1; background-size: 128px 128px; opacity: 0.45; mix-blend-mode: overlay; }
-
-/* ---- the drawing ---- */
-
-/* Up out of the dark once the script has measured the frame; at once for a look at one frame. Only coming up fades: dark is dark at once, so a page styled before its stylesheet arrives never shows the drawing fading out. */
-.drawing { z-index: 2; opacity: 0; }
-.hero[data-drawn] .drawing { opacity: 1; transition: opacity 900ms var(--ease-out); }
-.hero[data-frame] .drawing { transition: none; }
-
-/* ---- the band: the caption on its rule, the headline at the left, the lead and the ways to get it at the right ---- */
-
-.band {
-  position: absolute;
-  z-index: 20;
-  left: var(--side);
-  right: var(--side);
-  bottom: clamp(30px, 5cqh, 56px);
+.grid {
+  position: relative;
+  flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 470px);
-  grid-template-areas: 'caption caption' 'head side';
-  align-items: start;
-  column-gap: 64px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 48px;
+  padding: 33px 0 36px;
 }
 
-/* The figure's caption along a hairline, as the flight log's stamps run. */
-.caption {
-  grid-area: caption;
+.copy { position: relative; z-index: 2; display: flex; flex-direction: column; }
+.lead { max-width: 460px; margin-top: 30px; font-size: 16px; line-height: 1.55; letter-spacing: -0.01em; color: var(--t-2); }
+.h1 {
+  margin-top: auto;
+  padding-top: 50px;
+  font-size: clamp(42px, 5.05vw, 74px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+.line { display: block; padding-bottom: 0.06em; white-space: nowrap; }
+.h1 b { font-weight: 700; color: var(--cobalt); }
+
+.ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.get,
+.star {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 24px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+/* The download grows from its left edge as it is fed (hero/feed.ts), and the button beside it moves over. */
+.get {
+  position: relative;
+  transform-origin: left center;
+  background: var(--cobalt);
+  color: #fff;
+  transition: background var(--fast) var(--ease);
+}
+.get svg { stroke: #b4bcff; transition: stroke var(--fast) var(--ease); }
+.get:hover { background: #1f35c8; }
+.hero[data-feeding] .get { background: #2433f0; }
+.hero[data-feeding] .get svg { stroke: #fff; animation: down 1.5s cubic-bezier(0.5, 0, 0.3, 1) infinite; }
+@keyframes down {
+  0% { transform: translateY(-3px); opacity: 0; }
+  35% { opacity: 1; }
+  70% { transform: translateY(2px); opacity: 1; }
+  100% { transform: translateY(4px); opacity: 0; }
+}
+.star {
+  position: relative;
+  z-index: 1;
+  background: var(--n-2);
+  color: var(--t-1);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 23, 0.18);
+  transition: color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.star:hover { color: var(--cobalt); box-shadow: inset 0 0 0 1px var(--cobalt); }
+
+/* The orrery, 1400×760, from a little left of the middle, off the right edge; its left side fades into the words. */
+.art {
+  position: absolute;
+  left: calc(50% - 250px);
+  top: 50%;
+  z-index: 1;
+  width: 1400px;
+  height: 760px;
+  transform: translateY(-52%);
+  pointer-events: none;
+  mask-image: linear-gradient(90deg, transparent 4%, #000 30%);
+}
+
+.foot {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin: 0 0 clamp(26px, 4cqh, 40px);
-  font: 500 10.5px/1 var(--mono);
-  letter-spacing: 0.13em;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 20px 0 26px;
+}
+.label { font: 500 13px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
+.runs { display: flex; align-items: center; gap: 28px; font-size: 15px; color: var(--t-2); }
+.system { display: flex; align-items: center; gap: 8px; }
+.system svg { color: var(--t-1); }
+.soon {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(43, 59, 255, 0.1);
+  color: var(--cobalt);
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--ink-3);
 }
-.caption b { font-weight: 500; color: var(--lit); }
-.rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
-
-.h1 {
-  grid-area: head;
-  margin: 0;
-  font-family: 'Inter Display', var(--display);
-  font-size: clamp(46px, min(5.3cqw, 8.3cqh), 78px);
-  font-weight: 300;
-  line-height: 0.98;
-  letter-spacing: -0.045em;
-  color: #fff;
+.install {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 100%;
+  height: 52px;
+  padding: 0 12px 0 20px;
+  border-radius: 14px;
+  background: var(--chrome);
 }
-.line { display: block; }
-/* "fast.", set apart by its weight alone, as the footer's statement sets its middle line. */
-.fast { font-weight: 640; letter-spacing: -0.05em; }
+.install code { font: 14px var(--mono); color: var(--t-1); white-space: nowrap; }
 
-.side { grid-area: side; display: grid; justify-items: start; }
-.lead { max-width: 31em; margin: 0 0 24px; font-size: 15px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.74); }
-.ways > p { margin-top: 8px; }
+/* The pointer's dot, and the canvas the feeding is drawn on. */
+.dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 350ms var(--ease);
+}
+.dot[data-in] { opacity: 1; }
+.hero[data-feeding] .dot { opacity: 0; }
+.feed { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; }
 
-.install { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
-.label { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-3); }
-.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.16); }
-.command code { font: 13px/1 var(--mono); color: rgba(255, 248, 240, 0.92); white-space: nowrap; }
-.command code span { color: rgba(255, 248, 240, 0.45); }
-.command button { width: 26px; padding: 0; justify-content: center; color: rgba(255, 248, 240, 0.6); }
-.command button:hover { color: #fff; }
-.command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-/* ---- a phone: the orrery smaller and higher, the words stacked under it ---- */
-
-/* The words in the flow at the foot, the nav's room at the top, and between them a least room for the orrery (its top at 336px): where the screen is too short for all three, the first screen is taller than it, rather than the orrery running into the words. */
-@media (max-width: 760px) {
-  .hero {
-    --side: 18px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    height: auto;
-    min-height: clamp(640px, 100svh, 1060px);
-    container-type: inline-size;
-  }
-  .band {
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    margin: 268px var(--side) 22px;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'caption' 'head' 'side';
-  }
-  .caption { margin-bottom: 22px; }
-  .caption > span:nth-of-type(1) { display: none; }
-  .h1 { margin: 0 0 18px; font-size: clamp(38px, 11cqw, 46px); line-height: 1; }
-  .lead { margin-bottom: 20px; font-size: 15px; }
-  .side, .ways { justify-items: stretch; }
-  .ways > div { display: grid; gap: 8px; }
-  .ways > div a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
-  /* No installing from a phone. */
-  .install { display: none; }
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .art { position: relative; left: auto; top: auto; width: 100%; height: auto; aspect-ratio: 1400 / 760; transform: none; mask-image: none; }
+  .foot { flex-direction: column; align-items: flex-start; }
+  .runs { flex-wrap: wrap; gap: 16px 24px; }
+  .line { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot, .feed { display: none; }
 }

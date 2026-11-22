@@ -1,0 +1,206 @@
+/* The story under the first screen: paper, ink and cobalt, the measures of the first screen, and pictures that follow the scroll (scroll.ts writes each scene's --p). */
+
+.story { position: relative; background: var(--n-2); color: var(--t-1); }
+.wrap { position: relative; width: 100%; max-width: calc(var(--wrap) + 2 * var(--gut)); margin: 0 auto; padding: 0 var(--gut); }
+.scene { position: relative; padding-top: 80px; }
+/* A pinned picture holds under the nav; scroll.ts sets where and makes its scene tall enough. */
+.stick { position: sticky; top: 76px; }
+.under { position: absolute; inset: 0; pointer-events: none; }
+
+.label { font: 500 13px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
+.title { font-size: clamp(34px, 4vw, 58px); font-weight: 700; line-height: 1; letter-spacing: -0.045em; }
+.title b { font-weight: 700; }
+.lead { max-width: 34em; font-size: 20px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); }
+.small { font-size: 15px; line-height: 1.5; color: var(--t-2); }
+.head { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 64px; align-items: end; margin-top: 32px; }
+.frame { overflow: hidden; border-radius: 22px; background: #fff; }
+.frame img { display: block; width: 100%; height: auto; }
+
+/* 01 The board: pinned, played by the scroll, poured cobalt by the pointer (waterfall.ts). */
+.board { padding-top: 0; }
+.board .stick { z-index: 1; padding-top: 56px; }
+.heads { position: relative; }
+.white { position: absolute; inset: 0; pointer-events: none; user-select: none; clip-path: inset(0 0 100% 0); }
+.white .head { margin-top: 0; }
+.white .title, .white .title b { color: #fff; }
+.white .lead { color: rgba(255, 255, 255, 0.86); }
+.boardShot {
+  position: relative;
+  max-width: min(1180px, calc((100svh - 370px) * 1.846));
+  margin: 36px auto 0;
+  --board-frame: 0 0 0 1px rgba(20, 20, 23, 0.08), 0 34px 90px -34px rgba(20, 20, 23, 0.32);
+}
+/* AtWork's own margins are for the old page: here it fills the frame. */
+.boardShot > * { max-width: none; margin: 0; padding: 0; }
+.fall { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; }
+.dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 350ms var(--ease),
+    background 500ms var(--ease),
+    width 300ms var(--ease-out),
+    height 300ms var(--ease-out),
+    margin 300ms var(--ease-out);
+}
+.dot[data-in] { opacity: 1; }
+.dot[data-swell] { width: 30px; height: 30px; margin: -15px 0 0 -15px; }
+.board[data-poured] .dot { background: #fff; }
+
+/* 02 The coordinator: its words hold while its thread rises beside them. */
+.coord { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 80px; align-items: start; margin-top: 40px; }
+.coordWords { position: sticky; top: 140px; display: grid; gap: 28px; padding-top: 24px; }
+.ask { padding: 24px 28px; border-radius: 18px; background: #fff; font-size: 18px; line-height: 1.45; letter-spacing: -0.01em; }
+.ask .label { display: block; margin-bottom: 10px; color: var(--cobalt); }
+.coordShot { padding: 0; transform: translateY(calc((1 - var(--p, 1)) * 120px)); }
+
+/* 03 The review: on its dark, pinned, played by the scroll; it grows by its width, so its text stays sharp. */
+.review { margin-top: 88px; padding: 0 0 80px; background: #0b0a08; color: #f4efe7; }
+.review .stick { padding-top: 80px; }
+.review .lead { color: rgba(244, 239, 231, 0.66); }
+.revWrap { max-width: calc((0.9 + var(--p, 1) * 0.1) * 1160px); margin: 40px auto 0; opacity: calc(0.55 + var(--p, 1) * 0.45); }
+
+/* 04 Flow: the features drawn large run sideways; the small ones and the rest under them. */
+.track { position: relative; margin-top: 40px; }
+.track .stick { display: flex; align-items: center; height: calc(100svh - 76px); overflow: hidden; }
+.row { display: flex; gap: 24px; width: max-content; transform: translateX(var(--x, 0px)); will-change: transform; }
+.row > * { flex: none; width: min(560px, 78vw); }
+.card { display: flex; flex-direction: column; overflow: hidden; border-radius: 22px; background: #fff; }
+.cardHead { display: grid; gap: 8px; padding: 26px 26px 0; }
+.no { font: 500 13px var(--mono); letter-spacing: 0.12em; color: var(--cobalt); }
+.cardTitle { font-size: 24px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; }
+.cardTitle b { font-weight: 700; }
+.pic { flex: 1; max-height: 190px; margin-top: 16px; overflow: hidden; }
+.mini { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+.mini .card { gap: 10px; padding: 22px 20px; }
+.mini .cardHead { padding: 0; }
+.mini .cardTitle { font-size: 20px; }
+.mini .small { font-size: 13.5px; }
+.also { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 40px; align-items: baseline; margin-top: 48px; }
+.also ul { display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 0; padding: 0; list-style: none; font-size: 19px; letter-spacing: -0.01em; }
+.more { margin-top: 28px; font-size: clamp(34px, 3.8vw, 54px); font-weight: 700; line-height: 1; letter-spacing: -0.05em; }
+
+/* 05 Connections: on white, each name lighting as the list comes up the window. */
+.connect { margin-top: 88px; padding: 126px 0 72px; background: #fff; }
+.connect .head { margin-top: 0; }
+.groups { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; margin: 48px 0 0; padding: 0; list-style: none; }
+.groups ul { display: grid; gap: 4px; margin: 16px 0 0; padding: 0; list-style: none; }
+.groups .wide ul { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; }
+.groups ul li { font-size: 21px; font-weight: 600; letter-spacing: -0.03em; color: rgba(20, 20, 23, 0.16); transition: color 500ms var(--ease); }
+.groups ul li[data-on] { color: var(--t-1); }
+.groups ul li[data-on][data-first] { color: var(--cobalt); }
+
+/* 06 Notch: the tour round the notch, and the menu bar beside it. */
+.notch { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 44px; }
+.tour { overflow: hidden; border-radius: 22px; }
+.menuTitle { margin-top: 26px; margin-bottom: 12px; font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; }
+.menuTitle b { font-weight: 700; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; font-size: 14px; color: var(--t-3); }
+.crumbs span { display: inline-flex; gap: 10px; }
+.crumbs i { font-style: normal; }
+.crumbs span:last-child { color: var(--cobalt); }
+
+/* 07 Screens: the app's own, running sideways. */
+.shots > * { width: min(640px, 80vw); }
+.shot { margin: 0; }
+.shot .frame { aspect-ratio: 16 / 11; }
+.shot .frame img { height: 100%; object-fit: cover; object-position: 0 0; }
+.shot figcaption { display: grid; gap: 4px; margin-top: 14px; }
+.shot figcaption b { font-size: 16px; letter-spacing: -0.015em; }
+.shot figcaption span { font-size: 14px; line-height: 1.45; color: var(--t-2); }
+
+/* The download, on cobalt, its light along the foot: the light rises as the scene comes in, and its blocks brighten in turn. */
+.end { position: relative; margin-top: 80px; padding: 70px 0 112px; overflow: hidden; background: var(--cobalt); color: #fff; text-align: center; }
+.aurora {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: max(1440px, 100%);
+  aspect-ratio: 1;
+  transform: translate(-50%, calc((1 - var(--p, 1)) * 140px));
+  pointer-events: none;
+}
+.aurora img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
+.block {
+  --mask: radial-gradient(var(--mw) 22% at var(--mx) 100%, #000 0, rgba(0, 0, 0, 0.6) 45%, transparent 100%);
+  opacity: 0;
+  filter: saturate(2.4) brightness(1.06) contrast(1.08);
+  mask-image: var(--mask);
+  animation: brighten var(--md) cubic-bezier(0.35, 0.6, 0.3, 1) var(--dl) infinite;
+}
+.block[data-block='1'] { --mx: 8%; --mw: 20%; --md: 4.4s; --dl: -0.7s; }
+.block[data-block='2'] { --mx: 30%; --mw: 22%; --md: 5.4s; --dl: -2.8s; }
+.block[data-block='3'] { --mx: 50%; --mw: 26%; --md: 4.8s; --dl: -3.8s; }
+.block[data-block='4'] { --mx: 70%; --mw: 22%; --md: 6s; --dl: -1.5s; }
+.block[data-block='5'] { --mx: 92%; --mw: 20%; --md: 5.1s; --dl: -4.6s; }
+@keyframes brighten {
+  0% { opacity: 0; }
+  12% { opacity: 0.8; }
+  24% { opacity: 0.6; }
+  32% { opacity: 0.72; }
+  50%, 100% { opacity: 0; }
+}
+.endLine { position: relative; font-size: clamp(38px, 4.4vw, 64px); font-weight: 700; line-height: 1; letter-spacing: -0.045em; }
+.endLine b { font-weight: 700; }
+.endCtas { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 44px; }
+.endGet,
+.endStar {
+  display: inline-flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 24px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.endGet { background: #fff; color: var(--t-1); }
+.endGet:hover { color: var(--cobalt); }
+.endStar { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.endStar:hover { box-shadow: inset 0 0 0 1px #fff; }
+
+.altitude {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 30;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--t-1);
+  font: 500 13px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease);
+}
+.altitude b { font-weight: 500; color: var(--cobalt); }
+.altitude[data-on] { opacity: 1; }
+
+@media (max-width: 900px) {
+  .head, .coord, .notch { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .coordWords { position: static; }
+  .mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .also { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+/* With reduced motion nothing is pinned or runs sideways: the rows wrap, the light holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .stick { position: static; }
+  .track .stick { height: auto; overflow: visible; }
+  .row { flex-wrap: wrap; width: auto; transform: none; }
+  .block { animation: none; }
+  .dot, .fall { display: none; }
+}

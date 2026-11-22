@@ -23,7 +23,7 @@ import { Links, Signature, still, useOnScreen, YEAR } from './parts'
  * narrow as it is, and only while it is seen.
  */
 
-const STATEMENT = ['The most beautiful', 'IDE ever built', 'at your fingertips'] as const
+const STATEMENT = ['The most beautiful', 'ADE ever built', 'at your fingertips'] as const
 
 /** How far ahead of the footer, in screens, the engraving starts loading. */
 const AHEAD = '0px 0px 150% 0px'

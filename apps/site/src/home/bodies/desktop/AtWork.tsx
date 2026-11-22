@@ -42,6 +42,10 @@ import s from './AtWork.module.css'
  * again. On a phone, a lane at a time, the view following it from lane to
  * lane. Still, on the backfill moved on and running, with motion reduced or
  * a moment held (`?t=`).
+ *
+ * Given `at`, the round is not timed but stands at that moment, in ms: the
+ * home page's scroll is its clock, so it plays as far as you scroll, and back
+ * the same way, flights and all.
  */
 
 const none = () => {}
@@ -56,10 +60,12 @@ const LABEL =
 const W = 1440
 const H = 780
 
-export function AtWork() {
+export function AtWork({ at = null }: { at?: number | null } = {}) {
   const box = useRef<HTMLDivElement>(null)
-  const watched = useInView(box, 0.2)
-  const [beat, setBeat] = useState(0)
+  const seen = useInView(box, 0.2)
+  const watched = seen && at === null
+  const [ticks, setBeat] = useState(0)
+  const beat = at === null ? ticks : Math.floor(at / BEAT)
   const phone = useNarrow()
   useEffect(() => {
     if (!watched) return
@@ -69,7 +75,7 @@ export function AtWork() {
   }, [watched])
   return (
     <div ref={box} className={s.wrap}>
-      <Flow beat={beat} watched={watched} phone={phone} />
+      <Flow beat={beat} watched={watched} phone={phone} at={at} />
     </div>
   )
 }
@@ -212,12 +218,13 @@ const TALL = 480
 const SIDE = 8
 
 /** The board following the task; on a `phone`, a lane at a time, the view gliding along with it. */
-function Flow({ beat, watched, phone }: { beat: number; watched: boolean; phone: boolean }) {
+function Flow({ beat, watched, phone, at }: { beat: number; watched: boolean; phone: boolean; at: number | null }) {
   const box = useRef<HTMLDivElement>(null)
   const still = useStill()
   const shown = usePageShown()
   const round = useRound(watched && shown && !still)
-  const frame = still ? STILL : round
+  const ms = at === null ? null : at % ROUND
+  const frame = ms !== null ? frameAt(ms) : still ? STILL : round
   // Where the lanes are, read once laid out, before it is painted.
   const [lanes, setLanes] = useState<Place[]>([])
   useLayoutEffect(() => {
@@ -229,11 +236,20 @@ function Flow({ beat, watched, phone }: { beat: number; watched: boolean; phone:
   }, [])
   // Where the task stood when last drawn: where its next flight sets out from.
   const stood = useRef<{ place: Place; lane: number } | null>(null)
+  // Where it last stood in each lane: scrubbed back, a flight sets out from the lane before, wherever the page came from.
+  const placed = useRef<Record<number, Place>>({})
   useLayoutEffect(() => {
     const stage = box.current?.querySelector<HTMLElement>('[data-picture]')
     const el = stage?.querySelector<HTMLElement>('[data-story=""]')
-    if (stage && el) stood.current = { place: placeIn(stage, el), lane: frame.lane }
+    if (!stage || !el) return
+    const place = placeIn(stage, el)
+    if (ms === null) stood.current = { place, lane: frame.lane }
+    else if (!frame.flying) placed.current[frame.lane] = place
   })
+  // Scrubbed with nothing stood yet in the lane before (the page opened further down): from that lane's top.
+  const before = lanes[Math.max(0, frame.lane - 1)]
+  const near = ms !== null && before ? { left: before.left + 12, top: 120, width: before.width - 24 } : null
+  const since = ms === null ? null : ms - [0, TO_RUNNING, TO_YOURS, TO_SETTLED][frame.lane]!
   const lane = LANES[frame.lane]!
   const story: BoardStory = {
     task: HERO.task,
@@ -263,6 +279,9 @@ function Flow({ beat, watched, phone }: { beat: number; watched: boolean; phone:
             key={frame.lane}
             lane={frame.lane}
             stood={stood}
+            placed={ms === null ? null : placed}
+            near={near}
+            since={since}
             leaving={heroIn(LANES[frame.lane - 1]!, STEPS.length - 1, 3)}
             arriving={heroIn(lane, 0, 0)}
           />
@@ -282,15 +301,34 @@ function Flow({ beat, watched, phone }: { beat: number; watched: boolean; phone:
 function Flight({
   lane,
   stood,
+  placed,
+  near,
+  since,
   leaving,
   arriving,
 }: {
+  /** Scrubbed: where it last stood in each lane, so it can set out from the lane before whichever way the scroll came; and where to start without one. */
+  placed: RefObject<Record<number, Place>> | null
+  near: Place | null
+  /** Scrubbed: how far into the flight, in ms, held there; null, it flies by itself. */
+  since: number | null
   lane: number
   stood: RefObject<{ place: Place; lane: number } | null>
   leaving: ReactNode
   arriving: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const runsNow = useRef<Animation[]>([])
+  useLayoutEffect(() => {
+    if (since !== null) for (const run of runsNow.current) run.currentTime = since
+  })
+  const scrubbed = since !== null
+  const start = useRef(since)
+  const fallback = useRef(near)
+  useLayoutEffect(() => {
+    start.current = since
+    fallback.current = near
+  })
   useLayoutEffect(() => {
     const el = ref.current
     const stage = el?.closest('[data-picture]')
@@ -299,7 +337,7 @@ function Flight({
     const to = placeIn(stage, held)
     Object.assign(el.style, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, visibility: 'visible' })
     // Where it stood, in the lane it leaves, as last drawn: its place there is gone by now.
-    const from = stood.current?.lane === lane - 1 ? stood.current.place : null
+    const from = placed ? (placed.current[lane - 1] ?? fallback.current) : stood.current?.lane === lane - 1 ? stood.current.place : null
     if (!from || typeof el.animate !== 'function') return
     const whole = LIFT + FLY
     // The page's --ease: quick to start, and settling softly.
@@ -340,8 +378,17 @@ function Flight({
         ]
       }),
     ]
-    return () => runs.forEach((one) => one.cancel())
-  }, [lane, stood])
+    if (scrubbed)
+      for (const run of runs) {
+        run.pause()
+        run.currentTime = start.current ?? 0
+      }
+    runsNow.current = runs
+    return () => {
+      runsNow.current = []
+      runs.forEach((one) => one.cancel())
+    }
+  }, [lane, stood, placed, scrubbed])
   return (
     <div ref={ref} className={s.flight} aria-hidden="true">
       <div>
