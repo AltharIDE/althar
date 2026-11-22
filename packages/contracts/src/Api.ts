@@ -1185,6 +1185,17 @@ export type FolderReading = typeof FolderReading.Type
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
 
+/** Each kind of request in words, as an always answer keeps it: "Always allow ___", in the window and on the home's page. */
+export const ruleKindWords = {
+  'default-branch': 'pushes to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushes of every branch, tags or a pattern of branches',
+  'delete-branch': 'deleting branches that aren’t the task’s',
+  deploy: 'deploying and publishing',
+  outside: 'writing outside the task’s worktree',
+  speak: 'posting for you',
+} as const satisfies Record<RuleKind, string>
+
 /**
  * A command the person named: asked about, refused, or let through without
  * asking (ADR-018). By how it starts (`npm publish`, `terraform *`), or, with

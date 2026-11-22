@@ -1,3 +1,5 @@
+import { ruleKindWords } from '@althar/contracts'
+
 /*
  * The page a home serves to confirm, with a security key, a permission
  * answered from a device away from it, or to register that key: in the
@@ -15,7 +17,7 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     color-scheme: light dark;
     --page: #f4f2ec; --sheet: #fcfbf8; --well: #f4f2ec; --line: rgba(20, 20, 28, 0.11);
     --t-1: #141417; --t-2: #45454c; --t-3: #63636b;
-    --signal: #7a3ff0; --signal-hover: #6a2fd6; --on-signal: #ffffff; --focus: #7a3ff0;
+    --fill: #7a3ff0; --fill-hover: #6a2fd6; --on-fill: #ffffff; --focus: #7a3ff0;
     --danger: #c4402f; --ok: #237a3a;
     --lift: 0 1px 2px rgba(60, 50, 30, 0.06), 0 10px 24px -12px rgba(60, 50, 30, 0.14);
     --font: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -25,7 +27,7 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     :root {
       --page: #1c1a17; --sheet: #25231f; --well: rgba(0, 0, 0, 0.2); --line: rgba(255, 240, 215, 0.115);
       --t-1: #efeae1; --t-2: #bcb5a9; --t-3: #aca699;
-      --signal: #8f6cf7; --signal-hover: #a68aff; --on-signal: #ffffff; --focus: #a68aff;
+      --fill: #7350ec; --fill-hover: #7c5cf0; --on-fill: #ffffff; --focus: #a68aff;
       --danger: #f2816f; --ok: #6fc283;
       --lift: 0 0 0 0.5px rgba(255, 240, 215, 0.1), 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -12px rgba(0, 0, 0, 0.5);
     }
@@ -44,8 +46,8 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
   dd { margin: 0; color: var(--t-1); overflow-wrap: anywhere; unicode-bidi: plaintext; }
   code { font: 12.5px var(--mono); }
   .actions { display: flex; align-items: center; gap: 12px; margin: 24px 0 0; }
-  button, .download { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--signal); color: var(--on-signal); font: 500 13px var(--font); text-decoration: none; cursor: pointer; }
-  button:hover:not(:disabled), .download:hover { background: var(--signal-hover); }
+  button, .download { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--fill); color: var(--on-fill); font: 500 13px var(--font); text-decoration: none; cursor: pointer; }
+  button:hover:not(:disabled), .download:hover { background: var(--fill-hover); }
   button:disabled { opacity: 0.55; cursor: default; }
   button:focus-visible, .download:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   #status { margin: 0; font-size: 13px; color: var(--t-2); }
@@ -69,8 +71,9 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     <button id="confirm" type="button" hidden></button>
     <p role="status" id="status">Opening the request…</p>
   </div>
-  <p class="check" id="check" hidden>Install it on the home, and check that its SHA-256 matches:</p>
+  <p class="check" id="check" hidden>Before you install it on the home, check that its SHA-256 matches:</p>
   <pre id="fingerprint" hidden></pre>
+  <p class="check" id="then" hidden>It confirms permissions once it’s installed and the home’s service has restarted.</p>
 </main>
 <script nonce="${nonce}">
   const enrollment = ${enrollment}
@@ -107,11 +110,27 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
     say(enrollment ? 'Althar couldn’t register this key. Start again from Homes in Althar.' : 'Althar couldn’t confirm this. Answer it again in Althar.', 'bad')
     button.hidden = true
   }
-  // What the answer covers, as the permission said it: once, or always (never, for a denial) for this much.
+  // What an always (never, for a denial) keeps, as the home will keep it: this command or host exactly, commands that
+  // start the same way, or a kind of request in words. The subject is the broker's, never the page's own reading.
+  const kinds = ${JSON.stringify(ruleKindWords)}
   const scopes = {
-    exact: 'This command',
-    prefix: 'Commands starting with',
-    kind: 'Requests like this:',
+    exact: { lead: 'Exactly', none: 'Exactly this request' },
+    prefix: { lead: 'Commands starting with', none: 'Commands that start like this one' },
+  }
+  const scopeOf = (scope, remembered) => {
+    const into = document.getElementById('scope')
+    if (scope === 'kind') {
+      const words = (remembered && kinds[remembered]) || remembered || 'Requests of this kind'
+      into.textContent = words.charAt(0).toUpperCase() + words.slice(1)
+      return
+    }
+    if (!remembered) {
+      into.textContent = scopes[scope].none
+      return
+    }
+    const subject = document.createElement('code')
+    subject.textContent = remembered
+    into.append(scopes[scope].lead + ' ', subject)
   }
   post('/view').then((approval) => {
     if (!enrollment) {
@@ -121,15 +140,8 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
       const always = approval.scope === 'exact' || approval.scope === 'prefix' || approval.scope === 'kind'
       show('decision', allow ? (always ? 'Always allow' : 'Allow once') : always ? 'Never allow' : 'Deny')
       if (always) {
-        // A command or its start reads as code; a kind of request, as words.
-        const scope = document.getElementById('scope')
-        scope.textContent = scopes[approval.scope]
-        if (approval.remembered && approval.scope !== 'exact') {
-          const remembered = document.createElement(approval.scope === 'prefix' ? 'code' : 'span')
-          remembered.textContent = approval.remembered
-          scope.append(' ', remembered)
-        }
-        scope.hidden = false
+        scopeOf(approval.scope, approval.remembered)
+        reveal('scope')
         reveal('scopeName')
       }
       if (approval.reason) {
@@ -157,9 +169,11 @@ export const permissionApprovalPage = (nonce: string, enrollment: boolean) => `<
           download.download = 'althar-approval-key.json'
           download.textContent = 'Download the public key'
           button.after(download)
+          // The download first, then what to check before installing it: the home doesn't compare the digest itself.
           reveal('check')
           show('fingerprint', Array.from(new Uint8Array(sha256), (byte) => byte.toString(16).padStart(2, '0')).join(''))
-          say('Registered.', 'good')
+          reveal('then')
+          say('The public key is ready to download.', 'good')
         } else {
           const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(approval.publicKey)
           const proof = await navigator.credentials.get({ publicKey })
