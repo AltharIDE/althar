@@ -299,7 +299,9 @@ function Home({
 }) {
   const live = livenessOf(overview, home)
   const own = here !== null && here.current.kind !== 'local' && here.current.home.homeId === home.homeId
+  const enrollKey = own && home.https !== undefined && live === 'live' ? homes.enrollApprovalKey : undefined
   const [copied, setCopied] = useState(false)
+  const [keySetup, setKeySetup] = useState<{ state: 'opening' | 'opened' | 'failed'; message: string } | null>(null)
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1600)
@@ -345,6 +347,21 @@ function Home({
           <MenuItem icon="plug" onSelect={() => onEdit('connection')}>
             Edit connection
           </MenuItem>
+          {enrollKey !== undefined && (
+            <MenuItem
+              icon="external"
+              disabled={keySetup?.state === 'opening'}
+              onSelect={() => {
+                setKeySetup({ state: 'opening', message: 'Opening security key setup…' })
+                void enrollKey().then(
+                  () => setKeySetup({ state: 'opened', message: 'Security key setup is open in your browser.' }),
+                  (error: unknown) => setKeySetup({ state: 'failed', message: homeProblem(error) }),
+                )
+              }}
+            >
+              Set up a security key
+            </MenuItem>
+          )}
           <MenuItem
             icon="copy"
             onSelect={() => {
@@ -360,6 +377,11 @@ function Home({
           </MenuItem>
         </Menu>
       </div>
+      {keySetup?.state === 'failed' ? (
+        <Problem size="small">{keySetup.message}</Problem>
+      ) : (
+        keySetup !== null && <output>{keySetup.message}</output>
+      )}
       {editing === 'connection' ? (
         <Connection home={home} homes={homes} onDone={() => onEdit(null)} />
       ) : (

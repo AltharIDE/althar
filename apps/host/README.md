@@ -87,7 +87,7 @@ althar-host pair --profile /path/to/profile
 
 In the desktop, open **Homes → Connect a home… → Pairing code**. Paste the code, check the destination, give the home a name and choose **Pair and open**. The home opens in its own window. Its projects stay on the server.
 
-A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. These paired devices get the restricted role: existing projects and tasks, and making a project on the home, from a repository cloned there, one the home finds in `~/code`, `~/projects` and the like, or a new one. Protected approval enrollment is separate work.
+A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. The paired connection opens existing projects and tasks, and makes a project on the home, from a repository cloned there, one the home finds in `~/code`, `~/projects` and the like, or a new one. Set up a security key separately when you want to answer permission requests from that desktop.
 
 ```sh
 althar-host devices --profile /path/to/profile
@@ -98,6 +98,27 @@ althar-host disable-network --profile /path/to/profile
 Use the `next` value from `devices` with `--after` for another page. Revocation ends that device's connections right away. Work the home already accepted may finish. Restart the service after changing or disabling the listener.
 
 Pair again if you change the TLS key or replace a self-signed certificate. Renewals with the same key and trusted chain keep working. Back up the home database and desktop keyring according to your usual recovery plan.
+
+### Answer permissions with a security key
+
+Use an HTTPS home at a DNS name with a certificate your browser trusts. Pair the desktop to that same address. A personal FIDO2 security key with a PIN can confirm each answer in the browser. The home keeps the connection's existing authority and applies the specific decision once it verifies the confirmation.
+
+1. As the server administrator, create a key file under `/etc/althar` in directories owned by root. Keep the file readable by the host service and writable by root. For the first setup, use this shape with the exact home ID from `althar-host status --json` and its HTTPS origin.
+
+   ```json
+   {
+     "version": 1,
+     "homeId": "home_0123456789abcdef0123456789abcdef",
+     "origin": "https://home.example:6769",
+     "credentials": []
+   }
+   ```
+
+2. Run `configure-network` with the existing address and TLS options and `--approval-keys /etc/althar/approvals.json`. Restart the host service.
+3. In the paired desktop window, open **Manage homes**, open the home's menu, then choose **Set up a security key**. Register the key you physically control and download its public key file. Compare the SHA-256 shown on that page with `sha256sum althar-approval-key.json` in your administrator session before installing it. The file contains the home, origin and paired device ID. Check those against your home and its device list.
+4. Install the verified entry in the administrator's `credentials` list and restart the host service. Keep other devices' entries if they still need access. For a lost security key, revoke the paired device and remove its entry. Pair a new device to set up a replacement.
+
+When a permission is waiting in the desktop, choose **Allow** or **Reject** and confirm the exact decision in the browser. The agent continues as soon as the home accepts it.
 
 ## Native worker diagnostic
 
@@ -170,7 +191,7 @@ printf 'Certificate directory %s\n' "$tls"
 
 For a worker on another machine, use a reachable private bind address on the home and a name covered by its certificate. Each worker gets its own client certificate. If both machines can reach a gateway, you can use the [worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay).
 
-Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate on new connections and on the next message of an existing connection. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
+Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate. Add `--project-id "$PROJECT_ID"` to remove the grant for agent execution on that project. When the grant ends, the home refuses new agent runs and checkpoints and asks the enrolled worker to stop its active run. The home keeps the reservation until the worker confirms stop. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
 
 ## Run a project command on a Linux worker
 
@@ -238,10 +259,33 @@ Use a host, worker and Desktop built from the same revision for this flow. It su
      "$worker_data/journal" --agent-config "$worker_data/agents.conf" --watch
    ```
 
-4. In Desktop, open the home and its project. Prepare a task with one repository and an Implement lead that matches the worker’s provider. **Hold** the plan. Use **Run on** to pick the Linux worker, then start the task.
+4. In Desktop, open the home and its project. Prepare a task with one repository and an Implement lead that matches the worker’s provider. **Hold** the plan. Use **Run on** to pick the Linux worker, then start the task. The **Best available worker** option chooses among workers assigned to the project. The home rechecks the lead and repositories at Start. It prefers workers with a current report, then more available memory, disk space and CPU cores.
 5. Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. Try a follow-up and stop a task while the agent is working. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
 
+Althar runs the saved project setup in the worker’s task checkout and keeps the result in the thread. While that checkout is active, use the task’s **Run** menu to run a saved build, test or dev server there. The run has its own output and **Stop** button.
+
+A task can send up to eight repositories to the same worker. Althar runs setup and records Git changes separately for each repository. When a helper joins the lead’s changes, it can work in that same checkout if its provider is registered for the project on the worker. A scratch helper starts in its own copy on the worker. If its lead asked it to keep changes, the home keeps them on the helper's own Git ref so the lead can bring them in. The lead's checkout stays separate. Reviews run on the home.
+
+Codex and Claude leads and helpers can use the skills selected for them in Althar. HTTP MCP servers connect through the home, where their credentials stay. For a selected MCP server that starts as a local command, register an executable on the worker using the same server name. Give it its own local configuration and credentials. For example, add this line to `agents.conf` before starting the worker.
+
+```sh
+printf 'mcp\t%s\t%s\t%s\n' "$PROJECT_ID" projectTools /opt/althar-tools/project-tools >> "$worker_data/agents.conf"
+```
+
+The executable can be a wrapper for a locally installed server. Keep it outside the worker’s workspaces. The thread names selected servers that are unavailable.
+
+Bind a dev server to `localhost`, `127.0.0.1` or `::1` on the worker and have it print its HTTP address. Choose **Worker preview** when the run shows it. The page opens in a private Althar window through the home. The private window supports HTTP pages, form submissions and WebSocket live reload. It closes its connections when the run stops. A desktop connected to an older home can still read pages and assets.
+
+To bring the task to your computer, open its **Parts** menu, choose **Worktree**, and select **Save a local copy**. Althar verifies the download and saves a fresh Git checkout in the folder you choose. The copy keeps the worker’s commits, staged files, and edits that still need staging. If the worker is offline or needs an update, you can choose the home’s current copy. You need Git on your computer.
+
+If the worker is offline, Althar offers to save the home’s copy. Its files may be older than the files on the worker. Each copy carries an `althar-snapshot.json` record so you can see which version you opened.
+
 The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
+
+Publish from the home, where the project's Git credentials and approval
+rules apply. The worker checkout's Git hook directs pushes back to the home.
+The worker's own operator account and filesystem permissions define what
+the provider can reach on that machine.
 
 ## Managed releases and updates
 

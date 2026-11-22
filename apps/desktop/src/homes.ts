@@ -1,5 +1,5 @@
 import type { HttpsHomeTarget } from '@althar/transport-node'
-import type { ClientIdentity } from '@althar/contracts'
+import type { ClientIdentity, PermissionApproval } from '@althar/contracts'
 
 /** Connection settings only. Credentials stay with system OpenSSH; these are never person-authority device keys. */
 export interface SshHomeTarget {
@@ -119,6 +119,8 @@ export interface HomesHost {
   readonly list: () => Promise<ReadonlyArray<RemoteHome>>
   readonly pairingInfo?: (code: string) => Promise<{ origin: string; homeId: string; expiresAt: number }>
   readonly pair?: (code: string, name: string) => Promise<void>
+  readonly answerPermission?: (answer: PermissionApproval) => Promise<void>
+  readonly enrollApprovalKey?: () => Promise<void>
   readonly overview: () => Promise<HomesOverview>
   readonly inspect: (target: SshHomeTarget) => Promise<CheckedHome>
   readonly connect: (checkId: string, name: string) => Promise<void>

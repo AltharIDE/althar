@@ -20,7 +20,13 @@ import { Rpc, RpcGroup, RpcServer } from 'effect/rpc'
 
 import { homeHttpsAgent, httpsJson, httpsOrigin, tlsPublicKeyPin } from '../src/https'
 import { createDeviceKey, decodePairingCode, encodePairingCode, completeDevicePairing, signDeviceMessage } from '../src/pairing'
-import { openHttpsConnection, webSocketPort, webSocketServer } from '../src/webSocket'
+import {
+  openHttpsConnection,
+  prepareApprovalKeyEnrollment,
+  preparePermissionApproval,
+  webSocketPort,
+  webSocketServer,
+} from '../src/webSocket'
 import { apiClient } from '../src/client'
 import { readFrame } from '../src/authentication'
 
@@ -101,6 +107,60 @@ const serveRpc = (server: Server, ready: unknown = { type: 'Authenticated', iden
   })
 
 describe('secure bootstrap and device keys', () => {
+  it.live('opens security-key pages only on the pinned home and reads the home’s decision receipt', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const key = yield* createDeviceKey
+        const code = 'a'.repeat(43)
+        let path = `/approve-permission#${code}`
+        let receipt = 'accepted'
+        let signed = 0
+        const server = yield* fixture((request, response) => {
+          switch (request.url) {
+            case '/v1/connections/challenge':
+              request.resume()
+              json(response, { protocol: 1, homeId, deviceId, apiVersion: API_VERSION, nonce: code, expiresAt: 50_000 })
+              break
+            case '/v1/approval-keys':
+              request.resume()
+              assert.match(request.headers.authorization ?? '', /^Althar-Device /)
+              signed++
+              json(response, { path: `/enroll-approval-key#${code}` })
+              break
+            case '/v1/permission-approvals':
+              assert.match(request.headers.authorization ?? '', /^Althar-Device /)
+              signed++
+              body(request, (value) => {
+                assert.deepStrictEqual(value, action)
+                json(response, { path })
+              })
+              break
+            case '/v1/permission-approvals/result':
+              body(request, (value) => {
+                assert.deepStrictEqual(value, { code })
+                json(response, { state: receipt })
+              })
+              break
+            default:
+              response.writeHead(404).end()
+          }
+        })
+        const target = { ...trust, origin: server.origin, homeId, deviceId }
+        const sign = (message: string) => signDeviceMessage(key.privateKey, message)
+        const action = { commandId: `cmd_${'1'.repeat(32)}`, attentionId: 'ask', decision: 'allow' as const }
+        assert.strictEqual(yield* prepareApprovalKeyEnrollment(target, sign), `${server.origin}/enroll-approval-key#${code}`)
+        const approval = yield* preparePermissionApproval(target, sign, action)
+        assert.strictEqual(approval.url, `${server.origin}${path}`)
+        yield* approval.wait
+        receipt = 'refused'
+        assert.strictEqual((yield* Effect.flip(approval.wait)).reason, 'ApprovalUnavailable')
+        path = `https://other.example/approve-permission#${code}`
+        assert.strictEqual((yield* Effect.flip(preparePermissionApproval(target, sign, action))).reason, 'ApprovalUnavailable')
+        assert.strictEqual(signed, 3)
+      }),
+    ),
+  )
+
   it.live('round-trips an operator code and proves possession of the generated key', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -22,6 +22,22 @@ import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSn
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
+import {
+  WorkerPreviewRequest,
+  WorkerPreviewResponse,
+  WorkerPreviewRun,
+  WorkerPreviewSocketData,
+  WorkerPreviewSocketId,
+} from './workerPreview'
+import {
+  WorkerFile,
+  WorkerFileRequest,
+  WorkerSnapshot,
+  WorkerSnapshotChunk,
+  WorkerSnapshotChunkRequest,
+  WorkerSnapshotId,
+  WorkerSnapshotRequest,
+} from './workerSnapshot'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -1226,6 +1242,16 @@ export type CommandRule = typeof CommandRule.Type
 /** How far an "always" answer to a permission reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
 export type AlwaysScope = typeof AlwaysScope.Type
+
+/** The decision presented in a security-key ceremony for a restricted HTTPS client. */
+export const PermissionApproval = Schema.Struct({
+  commandId: CommandId,
+  attentionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  decision: Schema.Literals(['allow', 'reject']),
+  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  always: Schema.optionalKey(AlwaysScope),
+})
+export type PermissionApproval = typeof PermissionApproval.Type
 
 /** What let a request through without asking: a kind the project always allows, or one of its command rules. */
 export const AllowedBy = Schema.Union([
@@ -2478,8 +2504,24 @@ export const ArrivalItem = Schema.Struct({
   }),
 })
 
+export const WorkerCapacity = Schema.Struct({
+  platform: Schema.Literals(['linux', 'macos', 'windows']),
+  architecture: Schema.Literals(['x64', 'arm64']),
+  cpuCores: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
+  freeMemoryMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+  freeDiskMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+})
+
+export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+
 /** A connected worker the home has granted access to this project. */
-export const ProjectWorker = Schema.Struct({ workerId: Schema.String, providers: Schema.Array(Schema.String), busy: Schema.Boolean })
+export const ProjectWorker = Schema.Struct({
+  workerId: Schema.String,
+  providers: Schema.Array(Schema.String),
+  busy: Schema.Boolean,
+  multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
+  capacity: Schema.optionalKey(WorkerCapacity),
+})
 export type ProjectWorker = typeof ProjectWorker.Type
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
@@ -3710,6 +3752,7 @@ export const Launch = Schema.Struct({
   runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
   where: Schema.String,
+  workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
   /** The branch or pull request it runs a copy of, at a glance (feature/x, PR #12 · feature/x); none for the default branch or a task's. */
   branch: Schema.optional(Schema.NullOr(Schema.String)),
 })
@@ -4367,6 +4410,8 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** The worker assigned to this task's accepted plan. */
+    workerId: Schema.optional(Schema.NullOr(Schema.String)),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -5099,6 +5144,14 @@ const socketCalls = new Set<string>([
   'SetModel',
   'SetEffort',
   'GetRepositoryScripts',
+  'ReadLaunchPreview',
+  'OpenLaunchPreviewSocket',
+  'WriteLaunchPreviewSocket',
+  'CloseLaunchPreviewSocket',
+  'PrepareWorkerSnapshot',
+  'ReadWorkerSnapshotChunk',
+  'ReleaseWorkerSnapshot',
+  'ReadWorkerFile',
   // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
   // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
   'FindHomeFolders',
@@ -5505,7 +5558,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
-      workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
+      workerId: Schema.optional(WorkerSelection),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5529,11 +5582,7 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command(
-    'StartPlan',
-    { planId: Schema.String, workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))) },
-    Schema.Void,
-  ),
+  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
@@ -6550,7 +6599,27 @@ export const AcpApi = RpcGroup.make(
   command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
+export const WorkerPreviewApi = RpcGroup.make(
+  call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse),
+  call('OpenLaunchPreviewSocket', WorkerPreviewRun.fields, WorkerPreviewSocketId),
+  Rpc.make('ReadLaunchPreviewSocket', {
+    payload: { socket: WorkerPreviewSocketId },
+    success: WorkerPreviewSocketData,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
+  call('WriteLaunchPreviewSocket', { socket: WorkerPreviewSocketId, data: WorkerPreviewSocketData }, Schema.Void),
+  call('CloseLaunchPreviewSocket', { socket: WorkerPreviewSocketId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const WorkerSnapshotApi = RpcGroup.make(
+  call('ReadWorkerFile', WorkerFileRequest.fields, WorkerFile),
+  call('PrepareWorkerSnapshot', WorkerSnapshotRequest.fields, WorkerSnapshot),
+  call('ReadWorkerSnapshotChunk', WorkerSnapshotChunkRequest.fields, WorkerSnapshotChunk),
+  call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
 export type Api = typeof Api
 
 /** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
@@ -6570,6 +6639,12 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         ConnectionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ConnectionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        WorkerPreviewApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerPreviewApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
+        WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
       ),
     ),
   )

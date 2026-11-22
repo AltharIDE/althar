@@ -1,5 +1,8 @@
 import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
+import { taskWorker } from './workerExecution'
+import { WorkerSnapshots } from './WorkerSnapshots'
+import { workerPreviewSockets } from './workerPreviewSockets'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -35,6 +38,9 @@ import {
   type SentImage,
   type LineComment,
   workerProblem,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerRepositoryLimit,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
@@ -298,6 +304,9 @@ export const handlers = apiLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const workerSnapshots = yield* WorkerSnapshots
+    const previews = workerPreviewSockets(yield* Effect.scope)
+    yield* Effect.addFinalizer(() => previews.close)
     const terminals = yield* Terminals
     const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
@@ -1913,10 +1922,25 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              let repositoryLimit: number | undefined
               if (workerId !== undefined) {
-                const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
-                const message = aside ? 'This task stays on its home.' : workerProblem(worker, steps)
+                const available = config.workers?.list(projectId) ?? []
+                const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
+                const message = aside
+                  ? 'This task stays on its home.'
+                  : workerId === 'auto' && worker === undefined
+                    ? automaticWorkerUnavailable
+                    : workerProblem(worker, steps)
                 if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
+                repositoryLimit =
+                  workerId === 'auto'
+                    ? Math.max(
+                        1,
+                        ...available
+                          .filter((one) => workerProblem(one, steps) === undefined)
+                          .map((one) => workerRepositoryLimit(one, steps)),
+                      )
+                    : workerRepositoryLimit(worker, steps)
               }
 
               const created = yield* projects.createTask({
@@ -1927,7 +1951,7 @@ export const handlers = apiLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                ...(workerId === undefined ? {} : { requireSingleRepository: true }),
+                ...(repositoryLimit === undefined ? {} : { workerRepositoryLimit: repositoryLimit }),
                 ...(taskId === undefined ? {} : { taskId }),
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
@@ -2599,7 +2623,7 @@ export const handlers = apiLayer(
         api(
           Effect.gen(function* () {
             const open = config.editors?.open
-            if (open === undefined) return false
+            if (open === undefined || (yield* taskWorker(taskId)) !== null) return false
             yield* openingFolder(taskId)
             // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
             const worktrees = yield* sql<{ path: string }>`
@@ -2620,7 +2644,10 @@ export const handlers = apiLayer(
             const open = config.editors?.open
             if (open === undefined) return false
             const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
-            if (thread?.taskId != null) yield* openingFolder(thread.taskId)
+            if (thread?.taskId != null) {
+              if ((yield* taskWorker(thread.taskId)) !== null) return false
+              yield* openingFolder(thread.taskId)
+            }
             const place = yield* queries.codeRoots(threadId)
             const found = codeRootOf(place, path)
             if (found === null) return false
@@ -2775,6 +2802,32 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
+      ReadLaunchPreview: (input) => api(launches.preview(input)),
+      OpenLaunchPreviewSocket: (input) => api(previews.open(launches.previewSocket(input))),
+      ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
+      WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
+      CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
+        api(
+          Effect.gen(function* () {
+            const [site] = yield* sql<{ path: string }>`SELECT path FROM workspaces
+            WHERE task_id = ${taskId} AND project_id = ${projectId} AND device_id = ${instance.deviceId}
+              AND access = 'write' AND state = 'ready'
+              AND (${workspaceId ?? null} IS NULL OR id = ${workspaceId ?? null})
+            ORDER BY created_at, rowid LIMIT 1`
+            const workerId = yield* taskWorker(taskId)
+            const read = config.workers?.readFile
+            if (site === undefined || workerId === null || read === undefined)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This worker file is unavailable.' })
+            const file = yield* read({ workerId, projectId, worktree: site.path, path: relativePath }).pipe(
+              Effect.mapError((error) => new ApiError({ reason: 'NotFound', message: error.message })),
+            )
+            return { sha256: file.sha256, size: file.bytes.byteLength, bodyBase64: Buffer.from(file.bytes).toString('base64') }
+          }),
+        ),
+      PrepareWorkerSnapshot: (input) => api(workerSnapshots.prepare(identity, input)),
+      ReadWorkerSnapshotChunk: (input) => workerSnapshots.read(identity, input),
+      ReleaseWorkerSnapshot: ({ id }) => workerSnapshots.release(identity, id),
       OpenTerminal: ({ commandId, ...input }) =>
         once(
           commandId,

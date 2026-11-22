@@ -157,7 +157,7 @@ const waitsLine = (waits: string): string =>
   (JSON.parse(waits) as Array<{ kind: string; target: string }>).map((w) => `${w.kind.replaceAll('_', ' ')} ${w.target}`).join(', ') ||
   'the next step'
 
-/** Open records are included on first start, handover and task cards, independent of any session. */
+/** Open records are included on first start, recovery, after compaction and on task cards, independent of any session. */
 export const errandLines = (projectId: string, taskId?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

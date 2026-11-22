@@ -33,7 +33,8 @@ export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeSt
       host.startup?.(stage, Math.round(performance.now() - at))
     }
   }
-  const client = await timed('client-created', () => connect(port, home?.identity))
+  const answerPermission = home?.current.kind === 'https' ? host.homes?.answerPermission : undefined
+  const client = await timed('client-created', () => connect(port, home?.identity, answerPermission))
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.

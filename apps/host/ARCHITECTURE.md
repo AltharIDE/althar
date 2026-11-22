@@ -27,6 +27,14 @@ A separate mutual TLS stream carries the workspace, agent session and execution 
 
 The home sends a Git bundle of an isolated task worktree. Before a turn finishes or an Althar tool acts, the home checks its current Git tree and receives the worker’s new commits and working files. The tool bridge reaches the session’s loopback MCP endpoint using its existing role token. A checkout that needs recovery stays on the worker.
 
+The standalone service and the Desktop utility process use the same worker
+listener, enrollment ledger and execution adapter in the runtime. Each
+listener belongs to the active home identity and the profile that owns it.
+Desktop loads the transport when its profile has a worker configuration.
+The application can keep serving its local projects if an optional worker
+listener fails to start. The local CLI checks the running home's identity
+and project list before writing an enrollment grant.
+
 ## Storage and secrets
 
 `configuration.ts` stores version 1 configuration and refuses automatic worktree relocation or replacement of missing storage. `vault.ts` stores version 1 metadata, a key fingerprint, a random vault id and AES-256-GCM envelopes. Each secret uses a fresh 96-bit nonce; additional authenticated data binds format version, vault and secret name. Secret plaintext is limited to 1 MiB. Invalid/tampered ciphertext is unreadable, not silently absent. Initialization can create a random 32-byte key only before vault metadata exists. A missing/wrong key, desktop ciphertext without host metadata, unsafe ownership or permission modes fail closed. Changes to persisted formats need explicit versioned migration and recovery.

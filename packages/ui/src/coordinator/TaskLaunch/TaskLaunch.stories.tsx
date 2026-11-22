@@ -175,20 +175,29 @@ export const HeldWithWorker: Story = {
               value={worker}
               options={[
                 { value: 'home', label: 'This home' },
+                { value: 'auto', label: 'Best available worker' },
                 { value: 'worker', label: 'Linux worker aaaaaa' },
               ]}
               onChange={choose}
             />
-            {worker === 'worker' && (
+            {worker !== 'home' && (
               <>
                 {' '}
-                <span role="status">Lead on the worker. Setup and review on this home.</span>
+                <span role="status">Setup and lead run on the worker. Review runs on this home.</span>
               </>
             )}
           </>
         }
       />
     )
+  },
+}
+
+export const HeldWithAutomaticPlacement: Story = {
+  ...HeldWithWorker,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Run on' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Best available worker' }))
   },
 }
 

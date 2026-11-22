@@ -12,6 +12,7 @@ import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
 import { singleTypes } from './toolSchemas'
+import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
@@ -101,6 +102,10 @@ export class ToolServer extends Context.Service<
       access: ToolAccess,
       prepare?: Effect.Effect<void, ToolRefused>,
     ): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
+    mountWorkerServer(
+      server: Extract<McpServer, { type: 'http' }>,
+      workerPort: number,
+    ): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> } | null>
     /**
      * Adds tools to a role, or to several, replacing any of the same name. Each service that owns tools adds them once it is
      * built. Leads and the coordinator share one tool set (ADR-097): a tool is defined once and served to both, and reads
@@ -118,6 +123,7 @@ export class ToolServer extends Context.Service<
     Effect.gen(function* () {
       const errands = yield* Errands
       const grants = new Map<string, { readonly access: ToolAccess; readonly prepare?: Effect.Effect<void, ToolRefused> }>()
+      const mounts = workerMcpMounts()
       const roles = new Map<ToolRole, ReadonlyArray<Tool>>([
         ['coordinator', errandTools(errands)],
         ['lead', errandTools(errands)],
@@ -127,6 +133,7 @@ export class ToolServer extends Context.Service<
 
       const respond = async (req: IncomingMessage, res: ServerResponse) => {
         const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]
+        if (req.url === WORKER_MCP_PATH) return mounts.serve(token, req, res)
         const grant = token === undefined ? undefined : grants.get(token)
         if (grant === undefined) {
           res.writeHead(401).end()
@@ -233,6 +240,11 @@ export class ToolServer extends Context.Service<
 
       return ToolServer.of({
         port,
+        mountWorkerServer: (server, workerPort) =>
+          Effect.sync(() => {
+            const mounted = mounts.grant(server, workerPort)
+            return mounted === null ? null : { server: mounted.server, revoke: Effect.sync(mounted.revoke) }
+          }),
         grant: (access, prepare) =>
           Effect.sync(() => {
             const token = randomBytes(24).toString('hex')
