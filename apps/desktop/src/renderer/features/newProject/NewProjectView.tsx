@@ -11,7 +11,7 @@ import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectD
 import type { ConnectionsModel } from '../connections/useConnections'
 import { words as elsewhereWords } from '../elsewhere/tiles'
 import { useElsewhere } from '../elsewhere/useElsewhere'
-import { UPDATE_COMMAND, useHomeName } from '../homes/useHomes'
+import { useHomeName, useHomeUpdate } from '../homes/useHomes'
 import { factsOf, useFound } from '../../shared/found'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
@@ -102,6 +102,7 @@ export function NewProjectView({
   const home = useHomeName()
   // A home from before windows made projects there is asked to update: nothing on this page would work on it.
   const older = home.remote && !canCall(client, 'FindHomeFolders')
+  const update = useHomeUpdate()
   const found = useFound(!older)
   const [copied, setCopied] = useState(false)
   // When each found was last worked on is said from when the page opened.
@@ -125,7 +126,7 @@ export function NewProjectView({
                 icon={copied ? 'check' : 'copy'}
                 onClick={() => {
                   setCopied(true)
-                  void navigator.clipboard.writeText(UPDATE_COMMAND).catch(() => setCopied(false))
+                  void navigator.clipboard.writeText(update.command).catch(() => setCopied(false))
                 }}
               >
                 {copied ? homeWelcomeText.copied : homeWelcomeText.copyUpdate}
@@ -134,7 +135,8 @@ export function NewProjectView({
           >
             {homeWelcomeText.older(home.name)}
           </Problem>
-          <code className={s.olderCommand}>{UPDATE_COMMAND}</code>
+          <code className={s.olderCommand}>{update.command}</code>
+          {update.installed !== 'known' && <p className={s.olderUnsure}>{homeWelcomeText.updateUnsure(home.name, update.installed)}</p>}
         </main>
       </div>
     )

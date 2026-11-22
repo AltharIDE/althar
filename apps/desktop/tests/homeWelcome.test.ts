@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentStatus, Machine, Status } from '@althar/contracts'
 
+import { sshArguments } from '@althar/transport-node'
+
+import type { RemoteHome } from '../src/homes'
+import { updateOf, USUAL_LAUNCHER } from '../src/renderer/features/homes/useHomes'
 import { needsOf, pastedRepository } from '../src/renderer/features/start/useHomeWelcome'
 import { agents, connectionList, githubConnection } from './fixtures'
 
@@ -69,5 +73,38 @@ describe('a repository’s address pasted on the welcome', () => {
     expect(pastedRepository('todo: fix/this')).toBeNull()
     expect(pastedRepository('https://github.com/acme')).toBeNull()
     expect(pastedRepository('meeting notes')).toBeNull()
+  })
+})
+
+describe('an older home’s update command', () => {
+  const homeId = `home_${'1'.repeat(32)}`
+  const over = (ssh: Extract<RemoteHome, { ssh: unknown }>['ssh']) => ({
+    kind: 'ssh' as const,
+    home: { id: 'h1', name: 'runner-1', homeId, ssh },
+  })
+  /** What the connection runs on the home, as sshArguments has it. */
+  const runs = (ssh: Extract<RemoteHome, { ssh: unknown }>['ssh']) => sshArguments(ssh, homeId).at(-1) ?? ''
+
+  it('runs the launcher the connection runs, where Althar installs one: the very installation the window talks to', () => {
+    const update = updateOf(over({ target: 'althar@runner-1' }))
+    expect(update).toEqual({ command: `sh ${USUAL_LAUNCHER} update --apply --wait`, installed: 'known' })
+    expect(runs({ target: 'althar@runner-1' })).toContain(USUAL_LAUNCHER)
+  })
+
+  it('runs a launcher and profile saved for the home, as the connection does, quoted for the shell', () => {
+    const ssh = { target: 'althar@runner-1', launcher: "/opt/althar's/launcher", profile: '/srv/althar host' }
+    const update = updateOf(over(ssh))
+    expect(update).toEqual({
+      command: `sh '/opt/althar'\\''s/launcher' update --apply --wait --profile '/srv/althar host'`,
+      installed: 'custom',
+    })
+    // The same words for the launcher and the profile as the connection's.
+    expect(runs(ssh)).toContain("'\\''/opt/althar'\\''\\'\\'''\\''s/launcher'\\''")
+  })
+
+  it('can’t tell how a paired home was installed, nor one not read yet: where Althar installs one, said as unsure', () => {
+    const paired = { kind: 'https' as const, home: { id: 'h2', name: 'runner-2', homeId, https: { origin: 'https://runner-2.example' } } }
+    expect(updateOf(paired as never)).toEqual({ command: `sh ${USUAL_LAUNCHER} update --apply --wait`, installed: 'unknown' })
+    expect(updateOf(undefined).installed).toBe('unknown')
   })
 })

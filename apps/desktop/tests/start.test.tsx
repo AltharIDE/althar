@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
-import { useServices } from '../src/renderer/data/services'
+import { type Host, useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
 import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
@@ -21,7 +21,6 @@ import { agents, changed, fakeClient, fakeHost, project, remoteConnection, strea
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
 import { draftsOf } from '../src/renderer/features/newProject/draft'
-import { UPDATE_COMMAND } from '../src/renderer/features/homes/useHomes'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -975,19 +974,28 @@ it('welcomes an empty remote home with what it found there, and goes into New pr
   expect(draftsOf(client).get()?.way).toBe('new')
 })
 
-it('asks a home from before windows made projects there to update, with its command, in place of the ways in', async () => {
+it('asks a home from before windows made projects there to update, by the launcher and profile its connection runs, in place of the ways in', async () => {
   window.localStorage.clear()
   const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
-  const host = fakeHost()
+  // Installed somewhere of its own: its launcher and profile saved for it, as the connection runs them.
+  const runner = {
+    id: 'h1',
+    name: 'runner-1',
+    homeId: `home_${'1'.repeat(32)}`,
+    ssh: { target: 'althar@runner-1', launcher: '/opt/althar/launcher', profile: '/srv/althar' },
+  }
+  const homes = { state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }), onState: () => () => {} }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
   const copied = vi.fn(async () => {})
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
   withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
   // No tour: the home can't say what it is.
-  expect(await screen.findByRole('heading', { name: 'Welcome to this home' })).not.toBeNull()
-  expect(screen.getByText(/this home runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
+  expect(await screen.findByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
+  expect(screen.getByText(/runner-1 runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
   expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
+  expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
-  expect(copied).toHaveBeenCalledWith(UPDATE_COMMAND)
+  expect(copied).toHaveBeenCalledWith(`sh '/opt/althar/launcher' update --apply --wait --profile '/srv/althar'`)
   expect(client.findHomeFolders).not.toHaveBeenCalled()
   expect(client.getMachine).not.toHaveBeenCalled()
 })

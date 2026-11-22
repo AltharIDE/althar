@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -8,7 +8,7 @@ import { MessageChannel } from 'node:worker_threads'
 import { makeFakeService } from '@althar/connectors/testing'
 import { Api, clientProtocol, emitterPort, type MessageSender } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, services } from '../src/Api'
@@ -77,6 +77,65 @@ const homeAt = (home: string, connectors = fakeConnectors({})) =>
 /** The home's runtime, and a window on another computer (socket authority) talking to it. */
 const onHome = (home: string) => Effect.flatMap(homeAt(home), (context) => clientOf(context, { kind: 'socket' }))
 
+/** Sets environment variables for the scope, as they were after it. */
+const withEnv = (vars: Readonly<Record<string, string>>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const was = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]))
+      Object.assign(process.env, vars)
+      return was
+    }),
+    (was) =>
+      Effect.sync(() => {
+        for (const [key, value] of Object.entries(was))
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+      }),
+  )
+
+/**
+ * Holds every git commit the home makes until `then`, a shell line, has run,
+ * as another operation would act while one waits on git: by a git of the
+ * test's own first on the PATH, as the runtime turns git's hooks off.
+ */
+const afterEachCommit = (then: string) => {
+  const real = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
+  const bin = temp('althar-git-')
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\n'${real}' "$@"\nsaid=$?\ncase " $* " in *" commit "*) ${then} ;; esac\nexit $said\n`)
+  chmodSync(join(bin, 'git'), 0o755)
+  return withEnv({ PATH: `${bin}:${process.env.PATH ?? ''}` })
+}
+
+/** Waits until `ready`, a few seconds at most. */
+const until = (ready: () => boolean) =>
+  Effect.gen(function* () {
+    for (let tries = 0; tries < 400 && !ready(); tries++) yield* Effect.sleep(Duration.millis(25))
+  })
+
+/**
+ * A home signed in to GitHub by the person there, with you/tidepool on it,
+ * and a window on another computer talking to it: git reaches GitHub's
+ * repository at a bare one of the test's, by its address on the host, as the
+ * home's git would. The window never holds the token.
+ */
+const signedInHome = (home: string) =>
+  Effect.gen(function* () {
+    const remotes = temp('althar-host-')
+    const bare = join(remotes, 'tidepool.git')
+    execFileSync('git', ['clone', '-q', '--bare', '--', repositoryAt(join(temp('althar-seed-'), 'tidepool')), bare])
+    const config = join(remotes, 'gitconfig')
+    writeFileSync(config, `[url "${bare.replaceAll('\\', '/')}"]\n\tinsteadOf = ${HOST}/you/tidepool.git\n`)
+    yield* withEnv({ GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' })
+    const github = makeFakeService({ pushUrl: (path) => `${HOST}/${path.join('/')}.git` })
+    github.addRepository(['you', 'tidepool'], 'main', { description: 'Tide tables', private: true })
+    const context = yield* homeAt(home, fakeConnectors({ github }))
+    const there = yield* clientOf(context, { kind: 'window' })
+    yield* there.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+    const window = yield* clientOf(context, { kind: 'socket' })
+    const [connection] = (yield* window.ListConnections()).connections
+    return { window, connectionId: connection!.id, connection }
+  })
+
 describe('making a project on a home from a window on another computer', () => {
   it.live('finds the repositories where its person keeps code, and opens one as a project by the grant the home made', () =>
     Effect.scoped(
@@ -133,34 +192,9 @@ describe('making a project on a home from a window on another computer', () => {
   it.live('clones a repository from a code host the home is signed in to, as the window’s Create does, and opens it there', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        // git reaches GitHub's repository at a bare one of the test's, by its address on the host, as the home's git would.
-        const remotes = temp('althar-host-')
-        const bare = join(remotes, 'tidepool.git')
-        execFileSync('git', ['clone', '-q', '--bare', '--', repositoryAt(join(temp('althar-seed-'), 'tidepool')), bare])
-        const config = join(remotes, 'gitconfig')
-        writeFileSync(config, `[url "${bare.replaceAll('\\', '/')}"]\n\tinsteadOf = ${HOST}/you/tidepool.git\n`)
-        const was = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_NOSYSTEM }
-        process.env.GIT_CONFIG_GLOBAL = config
-        process.env.GIT_CONFIG_NOSYSTEM = '1'
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            if (was.global === undefined) delete process.env.GIT_CONFIG_GLOBAL
-            else process.env.GIT_CONFIG_GLOBAL = was.global
-            if (was.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM
-            else process.env.GIT_CONFIG_NOSYSTEM = was.system
-          }),
-        )
-        const github = makeFakeService({ pushUrl: (path) => `${HOST}/${path.join('/')}.git` })
-        github.addRepository(['you', 'tidepool'], 'main', { description: 'Tide tables', private: true })
         const home = temp('althar-home-')
-        const context = yield* homeAt(home, fakeConnectors({ github }))
-        // Signed in to GitHub on the home, by the person there: the window on another computer never holds the token.
-        const there = yield* clientOf(context, { kind: 'window' })
-        yield* there.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
-
-        const window = yield* clientOf(context, { kind: 'socket' })
+        const { window, connection } = yield* signedInHome(home)
         const found = yield* window.FindHomeFolders({})
-        const [connection] = (yield* window.ListConnections()).connections
         assert.strictEqual(connection?.state, 'ready')
         const listed = yield* window.ListHostRepositories({ connectionId: connection!.id })
         assert.deepInclude(listed[0], { path: ['you', 'tidepool'] })
@@ -188,6 +222,66 @@ describe('making a project on a home from a window on another computer', () => {
           execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: cloned.path, encoding: 'utf8' }).trim(),
           `${HOST}/you/tidepool.git`,
         )
+      }),
+    ),
+  )
+
+  it.live('never makes or clones through a link put where new code goes: the folder it points at stays as it was', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const home = temp('althar-home-')
+        const { window, connectionId } = yield* signedInHome(home)
+        const found = yield* window.FindHomeFolders({})
+        const place = firstPlace(home, process.platform)
+        mkdirSync(place, { recursive: true })
+        // Links where a new repository and a clone would go, to an empty folder outside the place.
+        const outside = temp('althar-outside-')
+        symlinkSync(outside, join(place, 'tide-tables'))
+        symlinkSync(outside, join(place, 'tidepool'))
+        const placed = yield* Effect.flip(window.PlaceRepository({ grant: found.place.grant, name: 'Tide Tables' }))
+        assert.match(placed.message, /tide-tables/)
+        const made = yield* Effect.flip(window.MakeRepository({ grant: found.place.grant, name: 'Tide Tables' }))
+        assert.match(made.message, /tide-tables/)
+        yield* Effect.flip(
+          window.CloneRepository({ commandId: commandId(), grant: found.place.grant, from: { connectionId, path: ['you', 'tidepool'] } }),
+        )
+        assert.deepStrictEqual(readdirSync(outside), [])
+        // Nothing of either left in the place: the links as they were, and no hidden folder.
+        assert.deepStrictEqual(readdirSync(place).sort(), ['tide-tables', 'tidepool'])
+      }),
+    ),
+  )
+
+  it.live('starts empty and clones one name at once: the clone that lands first keeps it whole, and Start empty takes only its own', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const home = temp('althar-home-')
+        const { window, connectionId } = yield* signedInHome(home)
+        const found = yield* window.FindHomeFolders({})
+        const there = join(firstPlace(home, process.platform), 'tidepool')
+        const held = join(temp('althar-held-'), 'held')
+        // Start empty, held at its first commit until the clone has landed where it goes.
+        yield* afterEachCommit(`touch '${held}'; i=0; while [ ! -e '${there}/.git' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done`)
+        const making = yield* Effect.forkScoped(Effect.flip(window.MakeRepository({ grant: found.place.grant, name: 'Tidepool' })))
+        yield* until(() => existsSync(held))
+        assert.isTrue(existsSync(held))
+        // Built in a folder of its own: where it goes is still free for the clone.
+        assert.isFalse(existsSync(there))
+        const cloned = yield* window.CloneRepository({
+          commandId: commandId(),
+          grant: found.place.grant,
+          from: { connectionId, path: ['you', 'tidepool'] },
+        })
+        assert.strictEqual(cloned.path, there)
+        const refused = yield* Fiber.join(making)
+        assert.match(refused.message, /tidepool/)
+        // The clone, whole: its history and origin, nothing of Start empty's, and no hidden folder left beside it.
+        assert.strictEqual(execFileSync('git', ['log', '--format=%s'], { cwd: there, encoding: 'utf8' }).trim(), 'First')
+        assert.strictEqual(
+          execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: there, encoding: 'utf8' }).trim(),
+          `${HOST}/you/tidepool.git`,
+        )
+        assert.deepStrictEqual(readdirSync(firstPlace(home, process.platform)), ['tidepool'])
       }),
     ),
   )

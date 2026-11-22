@@ -25,7 +25,7 @@ import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
 import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
-import { UPDATE_COMMAND } from '../src/renderer/features/homes/useHomes'
+import { USUAL_LAUNCHER } from '../src/renderer/features/homes/useHomes'
 
 /*
  * A new project, in a tab of its own: named on its left, set up on its right.
@@ -888,7 +888,9 @@ describe('a new project on a home on another computer', () => {
   it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {
     const at = onHome({}, null)
     expect(await screen.findByText(/this home runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
-    expect(screen.getByText(UPDATE_COMMAND)).not.toBeNull()
+    // Not read how the home was installed: where Althar installs one, and said so.
+    expect(screen.getByText(`sh ${USUAL_LAUNCHER} update --apply --wait`)).not.toBeNull()
+    expect(screen.getByText(/That’s for a home Althar installed/)).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy the update command' })).not.toBeNull()
     expect(at.client.findHomeFolders).not.toHaveBeenCalled()
   })

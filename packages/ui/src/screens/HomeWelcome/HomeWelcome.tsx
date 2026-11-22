@@ -108,6 +108,8 @@ export interface HomeWelcomeText {
   fresh: { title: string; line: (name: string) => string }
   older: (name: string) => string
   updateLabel: (name: string) => string
+  /** Under the update command, where the window can't be sure it's how the home was installed. */
+  updateUnsure: (name: string, installed: 'custom' | 'unknown') => string
   copyUpdate: string
 }
 
@@ -158,6 +160,10 @@ export const homeWelcomeText: HomeWelcomeText = {
   older: (name) =>
     `${name} runs an older Althar, which can’t make projects from this window. Update it there, then open this window again.`,
   updateLabel: (name) => `Updating ${name}`,
+  updateUnsure: (name, installed) =>
+    installed === 'custom'
+      ? `That’s the launcher this window connects with. If it runs ${name} from a source checkout, pull and rebuild there instead.`
+      : `That’s for a home Althar installed. If ${name} was installed another way, update it the way it was installed.`,
   copyUpdate: 'Copy the update command',
 }
 
@@ -178,9 +184,11 @@ export interface HomeWelcomeProps {
   found: readonly string[] | 'failed' | null
   /**
    * The home is older than making projects from a window: its command for
-   * updating, run there, in place of the ways in, and no tour.
+   * updating, run there, in place of the ways in, and no tour; and how sure
+   * the window is that it's how the home was installed, said under it where
+   * it isn't (`known` where it's sure, as by default).
    */
-  update?: { readonly command: string }
+  update?: { readonly command: string; readonly installed?: 'known' | 'custom' | 'unknown' }
   /** A way in pressed, from the door pressed. */
   onDoor: (door: HomeDoor, from: HTMLElement) => void
   /** Something pasted anywhere but a field: true where it was a repository's address, taken in as a clone. */
@@ -758,16 +766,21 @@ function Arrival({
       {update === undefined ? (
         <Doors name={name} repositories={repositories} found={found} onDoor={onDoor} t={t} />
       ) : (
-        <section className={s.update} aria-label={t.updateLabel(name)}>
-          <code className={s.updateCommand}>{update.command}</code>
-          <Button
-            size="small"
-            icon={copied === 'update' ? 'check' : 'copy'}
-            onClick={() => onCopy('update', update.command)}
-            aria-label={t.copyUpdate}
-          >
-            {copied === 'update' ? t.copied : t.copy}
-          </Button>
+        <section className={s.updating} aria-label={t.updateLabel(name)}>
+          <div className={s.update}>
+            <code className={s.updateCommand}>{update.command}</code>
+            <Button
+              size="small"
+              icon={copied === 'update' ? 'check' : 'copy'}
+              onClick={() => onCopy('update', update.command)}
+              aria-label={t.copyUpdate}
+            >
+              {copied === 'update' ? t.copied : t.copy}
+            </Button>
+          </div>
+          {update.installed !== undefined && update.installed !== 'known' && (
+            <p className={s.updateUnsure}>{t.updateUnsure(name, update.installed)}</p>
+          )}
         </section>
       )}
       {needs !== null && needs.length > 0 && (

@@ -15,6 +15,15 @@
   height: 100%;
   padding: 32px;
 }
+.olderUnsure {
+  max-width: min(560px, 100%);
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--t-3);
+  text-wrap: pretty;
+}
 .olderCommand {
   max-width: min(720px, 100%);
   overflow-x: auto;

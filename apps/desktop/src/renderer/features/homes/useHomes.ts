@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
+import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome, WindowHome } from '../../../homes'
 
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
@@ -42,8 +42,40 @@ const useFollowed = <A>(read: (() => Promise<A>) | undefined, follow: ((listener
 
 export const useHomeState = (homes: HomesHost | undefined): HomeState | null => useFollowed(homes?.state, homes?.onState)
 
-/** How a home installed as the desktop sets one up updates itself, run there (apps/host/README.md, Managed releases and updates). */
-export const UPDATE_COMMAND = 'sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait'
+/** The launcher a home's SSH connection runs where none is saved for it (transport-node's sshArguments): where Althar installs one. */
+export const USUAL_LAUNCHER = '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher"'
+
+const quoted = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+
+/**
+ * How the window's home updates, run there (apps/host/README.md, Managed
+ * releases and updates), and how sure the window is of it. Over SSH, by the
+ * launcher and profile its connection runs, so it's the very installation
+ * the window talks to: `known` where that's where Althar installs one,
+ * `custom` where it's one saved for the home, which may be a source
+ * checkout's. Paired, or before the window knows, the window can't see how
+ * it was installed: `unknown`, by where Althar installs one.
+ */
+export interface HomeUpdate {
+  readonly command: string
+  readonly installed: 'known' | 'custom' | 'unknown'
+}
+
+export const updateOf = (current: WindowHome | undefined): HomeUpdate => {
+  const ssh = current === undefined || current.kind === 'local' ? undefined : current.home.ssh
+  const launcher = ssh?.launcher === undefined ? USUAL_LAUNCHER : quoted(ssh.launcher)
+  const profile = ssh?.profile === undefined ? '' : ` --profile ${quoted(ssh.profile)}`
+  return {
+    command: `sh ${launcher} update --apply --wait${profile}`,
+    installed: ssh === undefined ? 'unknown' : ssh.launcher === undefined ? 'known' : 'custom',
+  }
+}
+
+/** How the home the window is on updates, as its connection says. */
+export const useHomeUpdate = (): HomeUpdate => {
+  const { host } = useServices()
+  return updateOf(useHomeState(host.homes)?.current)
+}
 
 /**
  * The home the window is on, as its words name it: another computer's by its

@@ -96,7 +96,7 @@ export const Bare: Story = {
 /** Where it couldn't look on the home's disk: the folder door stays, saying so. */
 export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
 
-/** A home from before windows made projects there: its update command in place of the ways in, and no tour. */
+/** A home from before windows made projects there, over SSH: the update command its connection's launcher takes, in place of the ways in, and no tour. */
 export const Older: Story = {
   args: {
     toured: false,
@@ -104,8 +104,13 @@ export const Older: Story = {
     git: undefined,
     repositories: [],
     found: null,
-    update: { command: 'sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait' },
+    update: { command: 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait', installed: 'known' },
   },
+}
+
+/** An older home paired over HTTPS: the window can't see how it was installed, so the usual command, and a line saying so. */
+export const OlderPaired: Story = {
+  args: { ...Older.args, update: { command: Older.args!.update!.command, installed: 'unknown' } },
 }
 
 /** A long name, in the app's narrowest window. */

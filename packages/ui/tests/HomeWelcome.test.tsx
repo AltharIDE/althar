@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Brand } from '../src/foundations/brands/brands'
@@ -153,6 +153,17 @@ describe('a home’s welcome, every time after', () => {
   it('keeps the folder door where it couldn’t look, saying so rather than that there was nothing', () => {
     welcome({ toured: true, found: 'failed' })
     expect(screen.getByRole('button', { name: 'A folder on runner-1', description: 'Couldn’t look on runner-1 just now' })).not.toBeNull()
+  })
+
+  it('says under the update command where it can’t be sure that’s how the home was installed', () => {
+    welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'unknown' } })
+    expect(screen.getByText(/That’s for a home Althar installed. If runner-1 was installed another way/)).not.toBeNull()
+    cleanup()
+    welcome({ toured: true, update: { command: "sh '/opt/althar/launcher' update --apply --wait", installed: 'custom' } })
+    expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
+    cleanup()
+    welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'known' } })
+    expect(screen.queryByText(/That’s/)).toBeNull()
   })
 
   it('asks an older home to update, with its command to copy, in place of the ways in and the tour', () => {

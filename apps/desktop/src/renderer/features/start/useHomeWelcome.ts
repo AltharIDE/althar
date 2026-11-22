@@ -15,7 +15,7 @@ import { productBrand } from '../../shared/products'
 import { remoteOf } from '../../shared/remotes'
 import { hostsCode, serviceOfProduct } from '../connections/ways'
 import { type Draft, draftsOf } from '../newProject/draft'
-import { UPDATE_COMMAND, useHomeState } from '../homes/useHomes'
+import { updateOf, useHomeState } from '../homes/useHomes'
 
 /*
  * A home with no projects, on another computer: what its welcome reads from
@@ -125,7 +125,7 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
     needs: needsOf(status, machine, list),
     repositories: (repositories ?? []).slice(0, 5).map((one) => ({ id: one.id, ink: kitInk(inkFor(one.id, [])) })),
     found: found.isError ? 'failed' : (found.data?.repositories.map((one) => one.where) ?? null),
-    ...(makes ? {} : { update: { command: UPDATE_COMMAND } }),
+    ...(makes ? {} : { update: updateOf(here?.current) }),
     onDoor: (door) => enter((now) => ({ ...now, way: way[door] })),
     onPaste: (text) => {
       const ref = pastedRepository(text)
