@@ -3,10 +3,13 @@ import { type ReactNode, useEffect } from 'react'
 import { BackCrumb, Button, Heading, LinkButton, Logo, TaskHeader, TaskStatus, TitleBar } from '@althar/ui'
 
 import { go } from './go'
+import { Horizon } from './looks/coming/Horizon'
+import { Shape } from './looks/coming/Shape'
+import { Workshop } from './looks/coming/Workshop'
 import { Launch } from './looks/Launch'
 import { Live } from './looks/Live'
 import { Log } from './looks/Log'
-import { NOW, ROADMAP, STAGE_TITLE } from './notes'
+import { NOW } from './notes'
 import { lab, useLab, type View } from './state'
 import s from './whatsNew.module.css'
 
@@ -14,9 +17,10 @@ import s from './whatsNew.module.css'
  * What's new, where each direction puts it, in the look the bar picks
  * (looks/): A's and B's tab, C's page in the home's place, D's page of
  * Althar's own, a tab like a project's with its bar and its views What's
- * new and Coming next (the roadmap, in lanes as the board has them). And
- * the small things that say there's an update: C's line on the home, B's
- * in the window's bar.
+ * new and Coming next (the roadmap, in the look the bar's 4–6 pick,
+ * looks/coming/). Elsewhere Coming next opens in What's new's place, with
+ * the way back to it. And the small things that say there's an update: C's
+ * line on the home, B's in the window's bar.
  */
 
 /** The page in the look the bar picks, with the way back where it opens in the home's place. */
@@ -25,6 +29,30 @@ export function Page({ back }: { back?: ReactNode }) {
   if (look === 'live') return <Live back={back} />
   if (look === 'log') return <Log back={back} />
   return <Launch back={back} />
+}
+
+/** Coming next, the roadmap, in the look the bar picks, with the way back where it has one. */
+export function ComingPage({ back }: { back?: ReactNode }) {
+  const { coming } = useLab()
+  if (coming === 'workshop') return <Workshop back={back} />
+  if (coming === 'shape') return <Shape back={back} />
+  return <Horizon back={back} />
+}
+
+/** The way from Coming next back to What's new, where nothing else switches them (A, B, C). */
+function BackToNew() {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') lab.set({ view: 'new' })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  return (
+    <div className={s.back}>
+      <BackCrumb to="What’s new" onBack={() => lab.set({ view: 'new' })} kbd="Esc" title="Coming next" />
+    </div>
+  )
 }
 
 /** D: Althar's own page, a tab like a project's: its bar, and its two views. */
@@ -57,31 +85,7 @@ export function AltharPage() {
           </span>
         </Heading>
       </TitleBar>
-      {view === 'new' ? (
-        <div className={s.pageIn}>
-          <Page />
-        </div>
-      ) : (
-        <div className={s.lanes}>
-          {(['now', 'next', 'later'] as const).map((stage) => (
-            <section key={stage} className={s.lane} aria-labelledby={`stage-${stage}`}>
-              <header className={s.laneHead}>
-                <Heading level={2} id={`stage-${stage}`} className={s.laneTitle}>
-                  {STAGE_TITLE[stage]}
-                </Heading>
-              </header>
-              <ul className={s.laneCards}>
-                {ROADMAP.filter((one) => one.stage === stage).map((one) => (
-                  <li key={one.title} className={s.card}>
-                    <span className={s.cardTitle}>{one.title}</span>
-                    <span className={s.cardDetail}>{one.detail}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      )}
+      <div className={s.pageIn}>{view === 'new' ? <Page /> : <ComingPage />}</div>
     </div>
   )
 }
@@ -94,18 +98,27 @@ export function WhatsNewScreen() {
     if (lab.get().unseen) lab.set({ unseen: false })
   }, [])
   if (d === 'd') return <AltharPage />
-  return <Page />
+  return <Either />
+}
+
+/** What's new or Coming next, in What's new's place, Coming next with its way back. */
+function Either({ back }: { back?: ReactNode }) {
+  const { view } = useLab()
+  if (view === 'coming') return <ComingPage back={<BackToNew />} />
+  return <Page back={back} />
 }
 
 /** C: the page in the home's place, with the way back to it. */
 export function HomeNotes() {
+  const { view } = useLab()
   useEffect(() => {
+    if (view === 'coming') return
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') lab.set({ homeNotes: false })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [view])
   const back = (
     <div className={s.back}>
       <BackCrumb to="Home" onBack={() => lab.set({ homeNotes: false })} kbd="Esc" title="What’s new" />
@@ -113,7 +126,7 @@ export function HomeNotes() {
   )
   return (
     <div className={s.inHome}>
-      <Page back={back} />
+      <Either back={back} />
     </div>
   )
 }

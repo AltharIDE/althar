@@ -21,7 +21,7 @@ import { PENDING } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { ALTHAR, makeClient, TABS } from './data'
 import { go, setRouter, WHATS_NEW } from './go'
-import { arrival, DIRECTIONS, type Direction, lab, LOOKS, useLab } from './state'
+import { arrival, type Coming, COMINGS, DIRECTIONS, type Direction, lab, type Look, LOOKS, useLab } from './state'
 import { WhatsNewScreen } from './WhatsNew'
 import s from './lab.module.css'
 
@@ -32,8 +32,11 @@ import s from './lab.module.css'
  * too), and each opens as the window would on its first launch after the
  * update; R does that again. 1, 2 and 3 switch how the page looks, in
  * every direction: Althar's light, the real thing, or the site's flight
- * log, and open it. N narrows the window to the app's narrowest; F
- * says the person updated from 0.8.0, so two releases are new to them.
+ * log, and open it. 4, 5 and 6 open Coming next, the roadmap, in each of
+ * its looks: on the horizon of the light, as Althar's own board at work,
+ * or for the person to shape. N narrows the window to the app's
+ * narrowest; F says the person updated from 0.8.0, so two releases are
+ * new to them.
  */
 
 // The tabs this window keeps, the same at every load.
@@ -75,13 +78,19 @@ const restart = (d: Direction) => {
 }
 
 /** A look, seen: the page opens on What's new where it isn't. */
-const see = (look: (typeof LOOKS)[number]['key']) => {
+const see = (look: Look) => {
   lab.set({ look, view: 'new' })
   go.whatsNew()
 }
 
+/** Coming next in a look, seen: What's new opens on its other view, in whichever direction. */
+const seeComing = (coming: Coming) => {
+  lab.set({ coming, view: 'coming' })
+  go.whatsNew()
+}
+
 function Bar() {
-  const { d, narrow, skipped, look } = useLab()
+  const { d, narrow, skipped, look, coming, view } = useLab()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -92,6 +101,8 @@ function Bar() {
       if (direction !== undefined) return restart(direction.key)
       const chosen = LOOKS.find((one) => one.kbd === key)
       if (chosen !== undefined) return see(chosen.key)
+      const next = COMINGS.find((one) => one.kbd === key)
+      if (next !== undefined) return seeComing(next.key)
       if (key === 'r') return restart(lab.get().d)
       if (key === 'n') return lab.set({ narrow: !lab.get().narrow })
       if (key === 'f') return lab.set({ skipped: !lab.get().skipped })
@@ -108,7 +119,13 @@ function Bar() {
       ))}
       <span className={s.round}>Looks</span>
       {LOOKS.map((one) => (
-        <button key={one.key} type="button" aria-pressed={look === one.key} onClick={() => see(one.key)}>
+        <button key={one.key} type="button" aria-pressed={view === 'new' && look === one.key} onClick={() => see(one.key)}>
+          <kbd>{one.kbd}</kbd> {one.label}
+        </button>
+      ))}
+      <span className={s.round}>Coming next</span>
+      {COMINGS.map((one) => (
+        <button key={one.key} type="button" aria-pressed={view === 'coming' && coming === one.key} onClick={() => seeComing(one.key)}>
           <kbd>{one.kbd}</kbd> {one.label}
         </button>
       ))}

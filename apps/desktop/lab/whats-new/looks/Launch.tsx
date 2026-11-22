@@ -1,35 +1,23 @@
 import type { ReactNode } from 'react'
 
-import { Brand, BrandMark, Button, HalftoneMark, Heading, Icon, type IconName, Light, LiveDot } from '@althar/ui'
+import { Brand, BrandMark, Button, HalftoneMark, Heading, Icon, Light, LinkButton } from '@althar/ui'
 
 import { LINKS } from '../../../../site/src/content/facts'
 import { Releases, WayIn, Words } from '../parts'
 import { dated, FELT, FLAGSHIP, FLAGSHIP_WHY, fromVersion, type Highlight, HIGHLIGHTS, NOW } from '../notes'
-import { useLab } from '../state'
+import { lab, useLab } from '../state'
 import l from './launch.module.css'
+import { Where } from './Where'
 
 /*
  * Look 1: Althar's light. The release opens as the window first did, on
  * the light the launch and the home at rest stand on (the kit's Light) and
  * the mark coming up in halftone, the flagship large over it. Then where
- * the work runs now, the three places in a row with the work going along
- * them; the rest of what's new as tiles, each with a small picture in the
+ * the work runs now, as one picture of the machines with the work going
+ * between them (Where.tsx); the rest of what's new as tiles, each with a small picture in the
  * app's own marks and type; what feels better; where to follow what's
  * next, on the light again; and every change, a fold away.
  */
-
-/** The three places the work runs now, as the flagship has them. */
-const PLACES: readonly { icon: IconName; name: string; code: boolean; role: string; holds: readonly string[]; live?: boolean }[] = [
-  {
-    icon: 'computer',
-    name: 'This computer',
-    code: false,
-    role: 'The window',
-    holds: ['Where you talk to tasks', 'Close it; the work goes on'],
-  },
-  { icon: 'home', name: 'build-01', code: true, role: 'Your home', holds: ['Projects and their tasks', 'Each agent’s asks and tools'] },
-  { icon: 'terminal', name: 'runner-1', code: true, role: 'A worker', holds: ['A task’s lead', 'Its setup and Run'], live: true },
-]
 
 /** X's and LinkedIn's marks, drawn as the kit draws a brand's: in the ink around them (Simple Icons). */
 function SocialMark({ of }: { of: 'x' | 'linkedin' }) {
@@ -46,7 +34,7 @@ function SocialMark({ of }: { of: 'x' | 'linkedin' }) {
   )
 }
 
-/** Where to follow what's next. X's and LinkedIn's addresses stand in: the repository doesn't keep the real ones. */
+/** Where to follow what's next. */
 const FOLLOW: readonly { key: string; mark: ReactNode; what: string; where: string; href: string }[] = [
   {
     key: 'github',
@@ -55,13 +43,13 @@ const FOLLOW: readonly { key: string; mark: ReactNode; what: string; where: stri
     where: 'AltharIDE/althar',
     href: LINKS.repo,
   },
-  { key: 'x', mark: <SocialMark of="x" />, what: 'Follow on X', where: '@altharai', href: 'https://x.com/altharai' },
+  { key: 'x', mark: <SocialMark of="x" />, what: 'Follow on X', where: '@AltharAiUS', href: 'https://x.com/AltharAiUS' },
   {
     key: 'linkedin',
     mark: <SocialMark of="linkedin" />,
     what: 'Follow on LinkedIn',
-    where: 'Althar',
-    href: 'https://www.linkedin.com/company/althar',
+    where: 'althar-ai',
+    href: 'https://www.linkedin.com/company/althar-ai/',
   },
 ]
 
@@ -203,32 +191,7 @@ export function Launch({ back }: { back?: ReactNode }) {
         <Heading level={2} id="where" className={l.kicker}>
           Where the work runs now
         </Heading>
-        <ol className={l.places}>
-          {PLACES.map((place, i) => (
-            <li key={place.name} className={l.placeCell}>
-              {i > 0 && (
-                <span className={l.link} aria-hidden="true">
-                  <i />
-                </span>
-              )}
-              <div className={l.place}>
-                <span className={l.placeIcon}>
-                  <Icon name={place.icon} size={18} />
-                </span>
-                <span className={l.placeRole}>{place.role}</span>
-                {place.code ? <code className={l.placeCode}>{place.name}</code> : <span className={l.placeName}>{place.name}</span>}
-                <ul className={l.holds}>
-                  {place.holds.map((what) => (
-                    <li key={what}>
-                      {place.live === true && what === place.holds[0] ? <LiveDot pulse /> : <Icon name="check" size={12} />}
-                      {what}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </li>
-          ))}
-        </ol>
+        <Where />
       </section>
 
       <section className={l.band} aria-labelledby="also">
@@ -279,6 +242,9 @@ export function Launch({ back }: { back?: ReactNode }) {
               </li>
             ))}
           </ul>
+          <LinkButton className={l.coming} onClick={() => lab.set({ view: 'coming' })}>
+            See what’s coming next
+          </LinkButton>
         </div>
       </section>
 

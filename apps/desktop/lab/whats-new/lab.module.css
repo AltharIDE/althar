@@ -38,8 +38,9 @@
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
+  gap: 4px 2px;
   padding: 6px 10px;
   border-top: 1px solid var(--line-2);
   background: var(--n-1);

@@ -690,14 +690,14 @@ const SEALED = REVIEWED.rest
 const SCANS: readonly number[] = [0, 3, 6]
 
 /** A picture's loop: when each beat starts, in ms; how long the loop is; and the beat it rests on, its most telling. */
-interface Timeline {
+export interface Timeline {
   readonly beats: readonly number[]
   readonly loop: number
   readonly rest: number
 }
 
 /** The beat it is on: it plays only while on screen, in a shown tab, with motion allowed; otherwise it rests on `rest`. */
-function useBeat(ref: { readonly current: HTMLElement | null }, { beats, loop, rest }: Timeline): number {
+export function useBeat(ref: { readonly current: HTMLElement | null }, { beats, loop, rest }: Timeline): number {
   const [beat, setBeat] = useState(rest)
   useEffect(() => {
     const el = ref.current
