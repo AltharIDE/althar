@@ -38,6 +38,7 @@ import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
+import { phonesIn } from './phones'
 import { profileInUse } from './profileInUse'
 import { pagesWith } from './pages'
 import { screenshotsWith, type Taken } from './screenshots'
@@ -348,6 +349,8 @@ const program = Effect.gen(function* () {
       : yield* workerHome
           .listen(Context.get(context, Instance).homeId)
           .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
+  // Phones reach This Mac's home once the person lets them in (Settings › Computers), and again after a restart.
+  yield* phonesIn(profile, context as never).pipe(Effect.catch((error) => Effect.logWarning('Phones could not be let in', String(error))))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
   // The ports the runtime listens on, which no canvas may reach (ADR-104).

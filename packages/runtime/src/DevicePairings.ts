@@ -42,8 +42,8 @@ export interface PhoneReach {
   readonly tlsCertificate: string
 }
 
-/** Turns This Mac's listener for phones on or off, where the home can (the desktop's own): where it answers then, or null. */
-export type PhoneSwitch = (on: boolean) => Effect.Effect<PhoneReach | null, ApiError>
+/** Turns This Mac's listener for phones on or off, where the home can (the desktop's own). The listener says where it answers (reachable). */
+export type PhoneSwitch = (on: boolean) => Effect.Effect<void, ApiError>
 
 const unreachable = () =>
   new ApiError({
@@ -171,7 +171,7 @@ export class DevicePairings extends Context.Service<
               reason: 'Forbidden',
               message: 'This home’s HTTPS access is set on its host: run althar-host configure-network there.',
             })
-          reach = yield* change(wanted)
+          yield* change(wanted)
           on = wanted
           if (!wanted) invitations.clear()
           return yield* access()

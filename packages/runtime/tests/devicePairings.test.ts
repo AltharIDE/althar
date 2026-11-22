@@ -150,7 +150,7 @@ describe('pairing codes the home makes for a window', () => {
     Effect.gen(function* () {
       const pairings = yield* DevicePairings
       assert.strictEqual((yield* Effect.flip(pairings.setAccess(true))).reason, 'Forbidden')
-      yield* pairings.switchable((on) => Effect.as(pairings.reachable(on ? reach : null), on ? reach : null), false)
+      yield* pairings.switchable((on) => pairings.reachable(on ? reach : null), false)
       assert.deepStrictEqual(yield* pairings.access(), { origin: null, switchable: true, on: false })
       assert.deepStrictEqual(yield* pairings.setAccess(true), { origin: reach.origin, switchable: true, on: true })
       const made = yield* pairings.create()
