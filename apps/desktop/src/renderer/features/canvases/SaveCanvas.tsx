@@ -3,10 +3,11 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import type { ArtifactsHome, ArtifactsHow, CanvasDetail, CanvasSaved, CanvasSummary } from '@althar/contracts'
-import { Button, Popover, Room, SaveToRepo } from '@althar/ui'
+import { Button, Popover, Room, SaveToRepo, Skeleton } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import s from './SaveCanvas.module.css'
 
 /*
  * Save to repo, in an artifact's head (ADR-104): the button says where it is
@@ -57,9 +58,10 @@ export function SaveCanvas({ summary, version }: { summary: CanvasSummary; versi
   const [tree, setTree] = useState<string | null>(null)
   const saved = summary.saved ?? null
   const projectId = summary.projectId
-  // Read as it opens, and held after: a second open shows at once.
-  const place = useQuery({ ...reads(client).artifactsPlace(projectId), enabled: open })
-  const repositories = useQuery({ ...reads(client).repositories(projectId), enabled: open })
+  // Read as the canvas shows, so Save to repo opens on its place at once; held after.
+  const place = useQuery(reads(client).artifactsPlace(projectId))
+  const repositories = useQuery(reads(client).repositories(projectId))
+  const ready = place.data !== undefined && repositories.data !== undefined
   const home: (ArtifactsHome & { readonly why?: string }) | null = place.data?.home ?? place.data?.guess ?? null
   const shownRepository = tree ?? saved?.repositoryId ?? home?.repositoryId ?? repositories.data?.[0]?.id ?? null
   const folders = useQuery({
@@ -101,7 +103,8 @@ export function SaveCanvas({ summary, version }: { summary: CanvasSummary; versi
     )
   return (
     <Popover label={text.label} trigger={trigger} open={open} onOpenChange={setOpen} align="end" padded={false}>
-      {open && (
+      {open && !ready && <Skeleton width="70%" className={s.waiting} />}
+      {open && ready && (
         <SaveToRepo
           title={summary.latest.title}
           name={summary.name}
