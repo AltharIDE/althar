@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort } from '@althar/contracts'
+import { connect } from '@althar/provider-adapters'
+import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, it } from '@effect/vitest'
 import { removeTreeSync } from '@althar/testing'
 import { Context, Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
@@ -140,8 +142,16 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
   let entered!: () => void
   let release!: () => void
   let sessionToClose: string | undefined
+  let closeReached = false
   const closing = new Promise<void>((resolve) => (entered = resolve))
   const closed = new Promise<void>((resolve) => (release = resolve))
+  const beforeClose = async (sessionId: string, isCoordinator: boolean) => {
+    if (isCoordinator && sessionId === sessionToClose) {
+      closeReached = true
+      entered()
+      await closed
+    }
+  }
   return onTestClock(
     Effect.gen(function* () {
       const projects = yield* Projects
@@ -163,6 +173,25 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
         externalSessionId: string
       }>`SELECT external_session_id FROM provider_sessions WHERE id = ${first.sessionId}`
       sessionToClose = provider!.externalSessionId
+      // A model probe on another connection can have the coordinator's provider-local ID.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const probe = yield* connect({
+            transport: {
+              _tag: 'InProcess',
+              agent: fakeAgent({
+                beforeClose: async (...args) => {
+                  void beforeClose(...args)
+                },
+              }),
+            },
+            onPermission: () => Effect.succeed({ decision: 'reject' }),
+          })
+          const session = yield* probe.newSession({ cwd: tmpdir(), mode: 'ask' })
+          assert.strictEqual(session.sessionId, sessionToClose)
+        }),
+      )
+      assert.isFalse(closeReached)
       const advance = yield* Effect.forkChild(TestClock.adjust(Duration.seconds(25)))
       yield* Effect.promise(() => closing)
       const news = 'Arrived during close'
@@ -187,20 +216,7 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
       assert.strictEqual(next.accountId, first.accountId)
     }).pipe(
       Effect.ensuring(Effect.sync(() => release())),
-      Effect.provide(
-        runtime(
-          ':memory:',
-          {
-            beforeClose: async (sessionId) => {
-              if (sessionId === sessionToClose) {
-                entered()
-                await closed
-              }
-            },
-          },
-          { idle: { coordinator: Duration.seconds(10) } },
-        ),
-      ),
+      Effect.provide(runtime(':memory:', { beforeClose }, { idle: { coordinator: Duration.seconds(10) } })),
     ),
   )
 })
@@ -368,8 +384,8 @@ it.effect('recovers input after a restart during an idle coordinator’s close',
           runtime(
             ':memory:',
             {
-              beforeClose: async (sessionId) => {
-                if (sessionId === sessionToClose) {
+              beforeClose: async (sessionId, isCoordinator) => {
+                if (isCoordinator && sessionId === sessionToClose) {
                   entered()
                   await closed
                 }
