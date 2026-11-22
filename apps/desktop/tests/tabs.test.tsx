@@ -301,14 +301,14 @@ describe('the window’s tabs', () => {
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     await waitFor(() => expect(where()).toBe('/new'))
     expect(draftsOf(client).get()).not.toBeNull()
-    expect(names()).toEqual(['Home', 'New project'])
+    expect(names()).toEqual(['Home', 'Althar', 'New project'])
   })
 
   it('open New project where another window’s Manage homes asks for it', async () => {
     let asked: () => void = () => {}
     const homes = { onProject: () => () => {}, onNewProject: (listener: () => void) => ((asked = listener), () => {}) }
     const { client } = windowAt('/projects/p1', [project], fakeHost({ homes: homes as unknown as Host['homes'] }))
-    await waitFor(() => expect(names()).toEqual(['Home', 'meridian, work running']))
+    await waitFor(() => expect(names()).toEqual(['Home', 'Althar', 'meridian, work running']))
     act(() => asked())
     await waitFor(() => expect(where()).toBe('/new'))
     expect(draftsOf(client).get()).not.toBeNull()
