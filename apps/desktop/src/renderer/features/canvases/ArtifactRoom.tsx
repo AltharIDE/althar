@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ArtifactChat, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
 import { ArtifactHead, type ArtifactHeadArtifact, Button, Problem } from '@althar/ui'
@@ -132,10 +132,13 @@ export function ArtifactRoom({
     return made
   }, [chat, canvasId, summary, lead, projectId, client, cache])
 
-  /** Words sent before the chat is ready: they go to this artifact's own chat, with its pointed parts, as it is ready. */
+  /**
+   * Words sent before the chat is ready: they go to this artifact's own chat, with the parts pointed at as Send was pressed,
+   * as it is ready. Those parts are its from then: one pointed at while it waits stays in the draft, for the next message.
+   */
   const sendSoon = (words: string) => {
     if (canvasId === null) return
-    const to = { canvasId, words, draft }
+    const to = { canvasId, words, draft, batch: takeComments(draft) }
     setFailed(null)
     setQueued({ canvasId, words })
     setDraftText(draft, '')
@@ -145,11 +148,12 @@ export function ArtifactRoom({
     }
     void start().then((ready) => {
       if (ready === null) {
-        // Its words go back where they were written, for the person to send again.
+        // Its words and parts go back where they were written, for the person to send again.
+        to.batch.finish(false)
         setDraftText(to.draft, (now) => (now.trim() === '' ? to.words : `${to.words}\n\n${now}`))
         return settled(null)
       }
-      return sendFirst(client.send, ready.threadId, to.draft, to.words).then(
+      return sendFirst(client.send, ready.threadId, to.draft, to.words, to.batch).then(
         () => settled(null),
         (error: unknown) => settled(artifactRoomText.sendFailed(messageOf(error))),
       )
@@ -273,10 +277,14 @@ function FirstWords({
   onAgain: () => void
 }) {
   const comments = useComments(draft)
-  // Pointing at a part says the person means to talk: the chat starts.
+  // Pointing at a part says the person means to talk: the chat starts. Parts given back, as a first message that couldn't
+  // go returns them, were pointed at already: they don't start it again over why it couldn't.
+  const seen = useRef(new Set<string>())
   useEffect(() => {
-    if (comments.length > 0) onStart()
-  }, [comments.length, onStart])
+    const pointed = comments.some((one) => !seen.current.has(one.id))
+    for (const one of comments) seen.current.add(one.id)
+    if (pointed) onStart()
+  }, [comments, onStart])
   return (
     <div className={s.first} onFocusCapture={onStart}>
       <div className={s.empty} />
@@ -303,7 +311,10 @@ function FirstWords({
   )
 }
 
-/** Sends what was written before the chat was ready, with the parts pointed at, to its thread once it is. */
+/**
+ * Sends what was written before the chat was ready, with the parts taken with it as Send was pressed (`batch`), to its
+ * thread once it is: kept where it went, given back to the draft, words and parts, where it didn't.
+ */
 export const sendFirst = async (
   send: (input: {
     threadId: string
@@ -314,8 +325,8 @@ export const sendFirst = async (
   threadId: string,
   draft: string,
   words: string,
+  batch: ReturnType<typeof takeComments>,
 ) => {
-  const batch = takeComments(draft)
   try {
     await send({
       threadId,

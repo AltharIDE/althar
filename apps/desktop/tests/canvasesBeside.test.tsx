@@ -24,7 +24,7 @@ import { arrived, useCanvasArrivals } from '../src/renderer/features/canvases/ar
 import { ArtifactsView, rowOf } from '../src/renderer/features/canvases/ArtifactsView'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
-import { commentsOf, forgetComments } from '../src/renderer/shared/comments'
+import { commentsOf, forgetComments, gather } from '../src/renderer/shared/comments'
 import { coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
 import { useSettingsOf, servicesFor, withServices } from './render'
 
@@ -424,6 +424,68 @@ describe('the project’s Artifacts view', () => {
     expect(await screen.findByRole('list', { name: 'The project’s artifacts' })).toBeTruthy()
     await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
     await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thr_new', body: 'Bigger photos' })))
+  })
+
+  /** A comment on the whole of its latest version, kept in the artifact's draft as pointing at it does. */
+  const pointAt = (id: string, note: string) =>
+    act(() =>
+      gather(ARTIFACT_DRAFT, {
+        id,
+        note,
+        on: {
+          kind: 'canvas',
+          canvasId: CANVAS,
+          name: 'sign-in-flow',
+          title: 'Sign-in flow, take 3',
+          version: 3,
+          anchor: { kind: 'whole' },
+        },
+        crop: null,
+      }),
+    )
+  const notes = () => commentsOf(ARTIFACT_DRAFT).map((one) => one.note)
+
+  it('sends a first message with the parts pointed at as it was sent, and keeps one pointed at while it waits for the next', async () => {
+    let ready: (started: { id: string; threadId: string }) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((resolve) => (ready = resolve as never)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    const field = await screen.findByPlaceholderText('Ask about it, or say what to change')
+    pointAt('loud', 'Too loud')
+    await userEvent.type(field, 'Make it calmer{Enter}')
+    // Taken with the words as they went: what is pointed at while they wait is for the next message.
+    expect(notes()).toEqual([])
+    pointAt('later', 'For later')
+    await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
+    await waitFor(() => expect(client.send).toHaveBeenCalledTimes(1))
+    expect(client.send).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: 'thr_new', canvasComments: [expect.objectContaining({ body: 'Too loud' })] }),
+    )
+    expect(notes()).toEqual(['For later'])
+  })
+
+  it('gives a first message’s words and parts back to the draft where its chat couldn’t start, beside one pointed at since', async () => {
+    let refuse: (why: unknown) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((_, reject) => (refuse = reject)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    const field = await screen.findByPlaceholderText('Ask about it, or say what to change')
+    pointAt('loud', 'Too loud')
+    await userEvent.type(field, 'Make it calmer{Enter}')
+    pointAt('later', 'For later')
+    await act(async () => refuse(new ApiError({ reason: 'Unavailable', message: 'The runtime is busy.' })))
+    expect(await screen.findByText(/Couldn’t start its chat/)).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    expect(notes()).toEqual(['Too loud', 'For later'])
+    expect((screen.getByPlaceholderText('Ask about it, or say what to change') as HTMLTextAreaElement).value).toBe('Make it calmer')
   })
 
   it('show as cards, each with its facts and where it is saved, those still being drawn first, narrowed by Filter', async () => {
