@@ -1219,7 +1219,7 @@ const playRole = async (
       if (text.includes('[lead:computer]') && available.has('computer')) {
         const ask = (args: Record<string, unknown>) => call('computer', args)
         const visual = text.includes('[computer:visual-fixture]')
-        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.', desktop: visual })
+        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.' })
         let windows: ReadonlyArray<{ readonly id: string; readonly title: string }>
         try {
           windows = (JSON.parse(approved) as { readonly windows: typeof windows }).windows

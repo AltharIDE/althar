@@ -7,7 +7,7 @@ import { _electron as electron, type ElectronApplication, expect, test } from '@
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
 
-test('a task requests two desktop apps, transfers a note and keeps a screenshot', async () => {
+test('a task asks once to use the computer, transfers a note between two apps and keeps a screenshot', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-computer-'))
   const repo = repository(home)
   const file = join(home, 'handoff.txt')
@@ -39,11 +39,8 @@ test('a task requests two desktop apps, transfers a note and keeps a screenshot'
     )
 
     const computer = page.getByRole('region', { name: 'Computer use' })
-    await expect(computer.getByText('Waiting for you to approve computer use.')).toBeVisible()
+    await expect(computer.getByRole('button', { name: 'Allow for this turn' })).toBeVisible()
     await computer.screenshot({ path: 'test-results/computer-use-approval.png' })
-    await computer.getByRole('checkbox', { name: /Computer Writer fixture/ }).check()
-    await computer.getByRole('checkbox', { name: /Computer Reader fixture/ }).check()
-    if (native === 'portable') await computer.getByRole('checkbox', { name: /Allow foreground input/ }).check()
     await computer.getByRole('button', { name: 'Allow for this turn' }).click()
 
     await expect(shown(page, /Writer and Reader both show Reviewed report|Opened the handoff in Reader/)).toBeVisible()

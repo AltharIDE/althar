@@ -19,74 +19,91 @@ const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDispla
     canShareDisplay,
     available: () => true,
   })
-  const ask = async (owner = OWNER, desktop = false) => {
-    const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader', desktop }, signal())
-    await vi.waitFor(() => expect(states.at(-1)?.request).toBeDefined())
-    const request = states.at(-1)!.request!
+  const ask = async (owner = OWNER) => {
+    const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader' }, signal())
+    await vi.waitFor(() => expect(states.findLast((one) => one.taskId === owner.taskId)?.request).toBeDefined())
+    const request = states.findLast((one) => one.taskId === owner.taskId)!.request!
     return { approval, request }
   }
-  return { sessions, states, ask }
+  /** Asked and allowed: the windows it may use, by their apps. */
+  const allowed = async (owner = OWNER) => {
+    const { approval, request } = await ask(owner)
+    expect(sessions.allow(owner.taskId, { requestId: request.id, allow: true })).toBe(true)
+    const done = await approval
+    if (!('value' in done)) throw new Error(done.error)
+    const granted = JSON.parse(done.value.text) as { readonly windows: ReadonlyArray<{ readonly id: string; readonly app: string }> }
+    return Object.fromEntries(granted.windows.map((one) => [one.app, one.id]))
+  }
+  return { sessions, states, ask, allowed }
 }
 
 describe('desktop access for a task', () => {
-  it('keeps foreground window approval available when the display itself cannot be shared', async () => {
-    const { sessions, ask } = setup(testComputerWorker, () => false)
-    const { request, approval } = await ask(OWNER, true)
-    const answer = { requestId: request.id, windows: [request.windows[0]!.id], foreground: true }
-    expect(request.primaryDisplay).toBe(false)
-    expect(sessions.allow(TASK, { ...answer, desktop: true })).toBe(false)
-    expect(sessions.allow(TASK, { ...answer, desktop: false })).toBe(true)
-    expect(await approval).toMatchObject({ value: { text: expect.stringContaining('"desktop":null,"foreground":true') } })
-    sessions.stop(TASK)
-  })
-
-  it('restricts the grant to a live request and the windows the person selected', async () => {
+  it('lets one answer take in every window, foreground input and the display, for that turn only', async () => {
     const { sessions, ask } = setup()
     const { approval, request } = await ask()
-    const [writer, reader] = request.windows
-    expect(sessions.allow(TASK, { requestId: request.id, windows: [writer!.id], desktop: true, foreground: false })).toBe(false)
-    expect(sessions.allow(TASK, { requestId: 'stale', windows: [reader!.id], desktop: false, foreground: false })).toBe(false)
-    expect(sessions.allow(TASK, { requestId: request.id, windows: [writer!.id], desktop: false, foreground: false })).toBe(true)
-    expect(await approval).toMatchObject({ value: { text: expect.stringContaining('Writer') } })
-    expect(await sessions.call(OWNER, { op: 'observe', target: reader!.id }, signal())).toMatchObject({
-      error: expect.stringContaining('approved'),
-    })
+    expect(request.primaryDisplay).toBe(true)
+    expect(sessions.allow(TASK, { requestId: 'stale', allow: true })).toBe(false)
+    expect(sessions.allow(TASK, { requestId: request.id, allow: true })).toBe(true)
+    const done = await approval
+    expect(done).toMatchObject({ value: { text: expect.stringContaining('"desktop":"desktop","foreground":true') } })
+    const { windows } = JSON.parse('value' in done ? done.value.text : '{}') as { windows: Array<{ id: string; app: string }> }
+    expect(windows.map((one) => one.app)).toEqual(['Writer', 'Reader'])
+    for (const one of windows) expect(await sessions.call(OWNER, { op: 'observe', target: one.id }, signal())).toHaveProperty('value')
+    expect(await sessions.call(OWNER, { op: 'observe', target: 'desktop' }, signal())).toHaveProperty('value')
+    expect(await sessions.call({ ...OWNER, turnId: 'next' }, { op: 'observe', target: windows[0]!.id }, signal())).toHaveProperty('error')
+  })
+
+  it('keeps foreground input where the display itself cannot be shared', async () => {
+    const { sessions, ask } = setup(testComputerWorker, () => false)
+    const { request, approval } = await ask()
+    expect(request.primaryDisplay).toBe(false)
+    sessions.allow(TASK, { requestId: request.id, allow: true })
+    expect(await approval).toMatchObject({ value: { text: expect.stringContaining('"desktop":null,"foreground":true') } })
     expect(await sessions.call(OWNER, { op: 'observe', target: 'desktop' }, signal())).toMatchObject({
       error: expect.stringContaining('approved'),
     })
-    expect(await sessions.call(OWNER, { op: 'observe', target: writer!.id }, signal())).toHaveProperty('value')
-    expect(await sessions.call({ ...OWNER, turnId: 'next' }, { op: 'observe', target: writer!.id }, signal())).toHaveProperty('error')
+    sessions.stop(TASK)
   })
 
-  it('can extend one task to another app and blocks an overlapping grant to another task', async () => {
-    const { ask, sessions } = setup()
-    const first = await ask()
-    sessions.allow(TASK, { requestId: first.request.id, windows: [first.request.windows[0]!.id], desktop: false, foreground: false })
-    await first.approval
-    const second = await ask()
-    expect(second.request.windows.map((one) => one.app)).toEqual(['Reader'])
-    sessions.allow(TASK, { requestId: second.request.id, windows: [second.request.windows[0]!.id], desktop: false, foreground: false })
-    const approved = await second.approval
-    expect(approved).toMatchObject({ value: { text: expect.stringContaining('Writer') } })
-    expect(approved).toMatchObject({ value: { text: expect.stringContaining('Reader') } })
+  it('ends the session when the person declines', async () => {
+    const { sessions, states, ask } = setup()
+    const { approval, request } = await ask()
+    expect(sessions.allow(TASK, { requestId: request.id, allow: false })).toBe(true)
+    expect(await approval).toEqual({ error: 'The person declined computer access.' })
+    expect(states.at(-1)).toMatchObject({ phase: 'stopped', action: 'Computer access declined.' })
+  })
+
+  it('asks once a turn, keeping the ids it gave', async () => {
+    const { sessions, states, allowed } = setup()
+    const first = await allowed()
+    const asked = states.filter((one) => one.request !== undefined).length
+    const again = await sessions.call(OWNER, { op: 'request', reason: 'Find Reader again' }, signal())
+    expect(states.filter((one) => one.request !== undefined)).toHaveLength(asked)
+    expect(again).toMatchObject({ value: { text: expect.stringContaining(first.Reader!) } })
+  })
+
+  it('leaves an app another task is using to it until that turn ends', async () => {
+    const { sessions, allowed } = setup()
+    const mine = await allowed()
+    expect(await sessions.call(OWNER, { op: 'observe', target: mine.Writer! }, signal())).toHaveProperty('value')
     const other = { ...OWNER, taskId: `task_${'b'.repeat(32)}` }
-    const third = await ask(other)
-    expect(
-      sessions.allow(other.taskId, {
-        requestId: third.request.id,
-        windows: [third.request.windows[0]!.id],
-        desktop: false,
-        foreground: false,
-      }),
-    ).toBe(false)
+    const theirs = await allowed(other)
+    expect(await sessions.call(other, { op: 'observe', target: theirs.Writer! }, signal())).toEqual({
+      error: 'Another task is using Writer. Wait for its turn to end.',
+    })
+    expect(await sessions.call(other, { op: 'observe', target: theirs.Reader! }, signal())).toHaveProperty('value')
+    sessions.ended(OWNER)
+    // Once its helper has stopped.
+    await vi.waitFor(async () =>
+      expect(await sessions.call(other, { op: 'observe', target: theirs.Writer! }, signal())).toHaveProperty('value'),
+    )
     sessions.stopAll('Done.')
-    expect(await third.approval).toEqual({ error: 'Done.' })
   })
 
   it('stops a pending native call, then refuses input after taking over and stopping', async () => {
     const stopped = vi.fn(() => Promise.resolve())
     let finish: (() => void) | undefined
-    const { sessions, ask } = setup(() => {
+    const { sessions, allowed } = setup(() => {
       const fallback = testComputerWorker()
       return {
         run: (call) =>
@@ -98,10 +115,7 @@ describe('desktop access for a task', () => {
         stop: stopped,
       }
     })
-    const { approval, request } = await ask()
-    const target = request.windows[0]!.id
-    sessions.allow(TASK, { requestId: request.id, windows: [target], desktop: false, foreground: false })
-    await approval
+    const target = (await allowed()).Writer!
     const press = { op: 'click' as const, target, observation: 'obs', at: { element: 'e1' } }
     const action = sessions.call(OWNER, press, signal())
     expect(sessions.pause(TASK)).toBe(true)

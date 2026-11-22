@@ -12,7 +12,7 @@ const snapshot = { target, observation: uuid, foreground: Schema.optional(Schema
 
 const call = Schema.Union([
   Schema.Struct({ op: Schema.Literal('status') }),
-  Schema.Struct({ op: Schema.Literal('request'), reason: words(360), desktop: Schema.optional(Schema.Boolean) }),
+  Schema.Struct({ op: Schema.Literal('request'), reason: words(360) }),
   Schema.Struct({ op: Schema.Literal('launch'), app: uuid }),
   Schema.Struct({ op: Schema.Literal('observe'), target, screenshot: Schema.optional(Schema.Boolean) }),
   Schema.Struct({
@@ -74,23 +74,17 @@ export interface ComputerState {
   readonly desktop: boolean
   readonly foreground: boolean
   readonly action: string
+  /** One ask, whether the task may use this computer for its turn: why, and whether its grant would take in the primary display. */
   readonly request?: {
     readonly id: string
-    readonly desktop: boolean
     readonly primaryDisplay: boolean
     readonly reason: string
-    readonly windows: ReadonlyArray<ComputerWindow>
-    readonly apps: ReadonlyArray<{ readonly id: string; readonly app: string }>
   }
   readonly preview?: { readonly target: string; readonly picture: ComputerPicture }
 }
 
-const decision = Schema.Struct({
-  requestId: uuid,
-  windows: Schema.Array(uuid).check(Schema.isMaxLength(40)),
-  desktop: Schema.Boolean,
-  foreground: Schema.Boolean,
-})
+/** The person's answer to that ask: yes lets the task use any app, foreground input and the display it may share, for its turn. */
+const decision = Schema.Struct({ requestId: uuid, allow: Schema.Boolean })
 export type ComputerDecision = typeof decision.Type
 export const computerDecisionOf = (value: unknown): ComputerDecision | null =>
   Option.getOrNull(Schema.decodeUnknownOption(decision, { onExcessProperty: 'error' })(value))

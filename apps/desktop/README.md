@@ -101,19 +101,21 @@ anyway**. Where the browser holds the download back too, keep it (Edge: …
 ### Computer use
 
 A task can ask to use native apps on the computer running this desktop app.
-When the approval opens in the task's conversation, select the apps or
-windows it should use. Add another window when a task requests it. The
-approval lasts for the current task turn. The task can show the window it
-observed, and keep screenshots in its conversation and step evidence.
+It asks once a turn, in the task's conversation, saying why. **Allow for
+this turn** lets it use any app or window, type and click in the
+foreground, and see the primary display, until the turn ends; a later
+request in the same turn finds what opened since without asking again.
+An app one task uses stays with it until its turn ends, so two tasks never
+drive the same app. The task can show the window it observed, and keep
+screenshots in its conversation and step evidence.
 
 Use **Take over** to pause computer input and **Resume** to return it to
 the task. **Stop** ends that turn's computer session. The desktop shortcut
 is Command-Shift-Escape on a Mac and Ctrl-Shift-Escape elsewhere, where
-the desktop lets the app register it. Foreground input and sharing the
-primary display are separate choices. Sharing the display can expose
-other open apps to the task's model.
-On Linux, primary display sharing requires a single connected display.
-Window approval works across connected displays.
+the desktop lets the app register it. Seeing the display can expose other
+open apps to the task's model.
+On Linux, seeing the primary display requires a single connected display;
+apps and windows work across connected displays.
 
 Use a signed-in graphical session. On macOS the system may require
 Accessibility and Screen Recording access. On Linux, accessibility and

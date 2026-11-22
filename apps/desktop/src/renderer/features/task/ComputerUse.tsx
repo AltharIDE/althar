@@ -1,93 +1,73 @@
 import { useEffect, useState } from 'react'
 
-import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
-import { Button } from '@althar/ui'
+import type { ComputerState } from '@althar/runtime/computerBridge'
+import {
+  chord,
+  type ComputerAnswer,
+  type ComputerAsk,
+  type ComputerLatest,
+  ComputerPhase,
+  ComputerUse as ComputerCard,
+  computerUseText,
+  keys,
+  unreachable,
+} from '@althar/ui'
 
 import { useServices, type Host } from '../../data/services'
-import s from './ComputerUse.module.css'
+
+/*
+ * A task's use of this computer, as main says it stands, under the task's
+ * thread: its one ask, answered in place; then what it does, its last picture,
+ * and Take over, Resume and Stop. An answer or a press shows at once, and
+ * goes back, with a line, where the session refuses it.
+ */
 
 type ComputerHost = NonNullable<Host['computer']>
-type Answer = NonNullable<ComputerState['request']>
 
-function ComputerRequest({ request, answer }: { readonly request: Answer; readonly answer: (decision: ComputerDecision) => void }) {
-  const [selected, setSelected] = useState<ReadonlyArray<string>>([])
-  const [foreground, setForeground] = useState(false)
-  const [desktop, setDesktop] = useState(false)
-  const toggle = (id: string, checked: boolean) => setSelected((old) => (checked ? [...old, id] : old.filter((one) => one !== id)))
-  return (
-    <>
-      <p className={s.reason}>{request.reason}</p>
-      {(request.windows.length > 0 || request.apps.length > 0) && (
-        <fieldset className={s.choices}>
-          <legend>Apps and windows</legend>
-          {request.windows.map((one) => (
-            <label key={one.id}>
-              <input
-                type="checkbox"
-                checked={selected.includes(one.id)}
-                onChange={(event) => toggle(one.id, event.currentTarget.checked)}
-              />
-              <span>
-                <strong>{one.app}</strong> {one.title}
-              </span>
-            </label>
-          ))}
-          {request.apps.map((one) => (
-            <label key={one.id}>
-              <input
-                type="checkbox"
-                checked={selected.includes(one.id)}
-                onChange={(event) => toggle(one.id, event.currentTarget.checked)}
-              />
-              <span>Open {one.app}</span>
-            </label>
-          ))}
-        </fieldset>
-      )}
-      {request.desktop && (
-        <fieldset className={s.choices}>
-          <legend>Desktop access</legend>
-          <label>
-            <input type="checkbox" checked={foreground} onChange={(event) => setForeground(event.currentTarget.checked)} />
-            <span>Allow foreground input in the selected windows</span>
-          </label>
-          {request.primaryDisplay ? (
-            <label>
-              <input type="checkbox" checked={desktop} onChange={(event) => setDesktop(event.currentTarget.checked)} />
-              <span>Share and control the primary display. Other open apps may be visible to the task.</span>
-            </label>
-          ) : (
-            <p className={s.reason}>Primary display sharing on Linux requires one connected display.</p>
-          )}
-        </fieldset>
-      )}
-      {request.windows.length === 0 && request.apps.length === 0 && !request.desktop && (
-        <p className={s.reason}>Open the app you want to share and ask the task to try again.</p>
-      )}
-      <div className={s.actions}>
-        <Button
-          size="small"
-          variant="quiet"
-          onClick={() => answer({ requestId: request.id, windows: [], desktop: false, foreground: false })}
-        >
-          Decline
-        </Button>
-        <Button
-          size="small"
-          variant="signal"
-          disabled={selected.length === 0 && !desktop && !foreground}
-          onClick={() => answer({ requestId: request.id, windows: selected, desktop, foreground })}
-        >
-          Allow for this turn
-        </Button>
-      </div>
-    </>
-  )
+const phaseOf = (phase: ComputerState['phase']): ComputerPhase => {
+  switch (phase) {
+    case 'asking':
+      return ComputerPhase.Asking
+    case 'active':
+      return ComputerPhase.Active
+    case 'paused':
+      return ComputerPhase.Paused
+    case 'stopped':
+      return ComputerPhase.Stopped
+    default:
+      return unreachable(phase)
+  }
 }
 
-function ComputerControls({ taskId, computer }: { readonly taskId: string; readonly computer: ComputerHost }) {
+const askOf = (request: NonNullable<ComputerState['request']>): ComputerAsk => ({
+  id: request.id,
+  reason: request.reason,
+  display: request.primaryDisplay,
+})
+
+/** Its last picture, of a window by its app, or of the display. */
+const latestOf = (state: ComputerState): ComputerLatest | undefined => {
+  const preview = state.preview
+  if (preview === undefined) return undefined
+  const of =
+    preview.target === 'desktop'
+      ? computerUseText.primaryDisplay
+      : (state.windows.find((one) => one.id === preview.target)?.app ?? state.title)
+  return { of, image: { name: of, src: `data:${preview.picture.mimeType};base64,${preview.picture.data}` } }
+}
+
+function ComputerControls({
+  taskId,
+  computer,
+  platform,
+}: {
+  readonly taskId: string
+  readonly computer: ComputerHost
+  readonly platform: Host['platform']
+}) {
   const [state, setState] = useState<ComputerState | null>(null)
   const [pending, setPending] = useState<string | null>(null)
+  const [answered, setAnswered] = useState<ComputerAnswer | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let here = true
@@ -97,6 +77,7 @@ function ComputerControls({ taskId, computer }: { readonly taskId: string; reado
       received = true
       setState(next)
       setPending(null)
+      setAnswered(null)
     })
     void computer.states().then(
       (states) => {
@@ -110,82 +91,64 @@ function ComputerControls({ taskId, computer }: { readonly taskId: string; reado
     }
   }, [computer, taskId])
 
-  const send = (words: string, command: () => Promise<boolean>, rollback?: () => void) => {
-    setPending(words)
+  const send = (command: () => Promise<boolean>, rollback: () => void) => {
     setError(null)
     void command().then(
-      (answered) => {
-        if (answered) return
-        rollback?.()
-        setPending(null)
+      (taken) => {
+        if (taken) return
+        rollback()
         setError('The computer session changed. Check its current state and try again.')
       },
       () => {
-        rollback?.()
-        setPending(null)
+        rollback()
         setError('Althar could not reach the computer session.')
       },
     )
   }
   if (state === null) return null
+  // The ask folds to what was answered at once; the session's next state takes its place.
+  const answer = (given: ComputerAnswer) => {
+    setAnswered(given)
+    send(
+      () => computer.allow(taskId, { requestId: given.ask, allow: given.allow }),
+      () => setAnswered(null),
+    )
+  }
   const control = (action: 'pause' | 'resume' | 'stop') => {
     const phase = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'stopped'
     const { preview: _preview, ...previous } = state
     const optimistic: ComputerState = { ...previous, phase }
     setState(optimistic)
+    setPending(action === 'pause' ? 'Taking over…' : action === 'resume' ? 'Resuming…' : 'Stopping…')
     send(
-      action === 'pause' ? 'Taking over…' : action === 'resume' ? 'Resuming…' : 'Stopping…',
       () => computer.control(taskId, action),
-      () => setState((current) => (current === optimistic ? state : current)),
+      () => {
+        setPending(null)
+        setState((current) => (current === optimistic ? state : current))
+      },
     )
   }
-  const request = state.request
+  const latest = latestOf(state)
   return (
-    <section className={s.card} aria-label="Computer use">
-      <header className={s.header}>
-        <strong>Computer use</strong>
-        <output>{pending ?? state.action}</output>
-      </header>
-      {error !== null && (
-        <p role="alert" className={s.reason}>
-          {error}
-        </p>
-      )}
-      {request !== undefined && pending === null && (
-        <ComputerRequest
-          key={request.id}
-          request={request}
-          answer={(decision) => send('Answering computer access…', () => computer.allow(taskId, decision))}
-        />
-      )}
-      {state.preview !== undefined && pending === null && (
-        <img
-          className={s.preview}
-          alt="Latest view from the task’s computer"
-          src={`data:${state.preview.picture.mimeType};base64,${state.preview.picture.data}`}
-        />
-      )}
-      {state.phase !== 'stopped' && request === undefined && (
-        <div className={s.actions}>
-          {state.phase === 'paused' ? (
-            <Button size="small" disabled={pending !== null} onClick={() => control('resume')}>
-              Resume
-            </Button>
-          ) : (
-            <Button size="small" disabled={pending !== null} onClick={() => control('pause')}>
-              Take over
-            </Button>
-          )}
-          <Button size="small" variant="danger" onClick={() => control('stop')}>
-            Stop
-          </Button>
-        </div>
-      )}
-    </section>
+    <ComputerCard
+      phase={phaseOf(state.phase)}
+      activity={state.action}
+      {...(state.request === undefined || pending !== null ? {} : { ask: askOf(state.request) })}
+      {...(answered === null ? {} : { answered })}
+      {...(latest === undefined ? {} : { latest })}
+      {...(pending === null ? {} : { pending })}
+      {...(error === null ? {} : { error })}
+      // Main stops every session on these keys, from anywhere, where the system lets it have them.
+      {...(platform === 'darwin' ? { stopKeys: chord(keys.shift, keys.mod, 'Esc') } : {})}
+      onAnswer={answer}
+      onTakeOver={() => control('pause')}
+      onResume={() => control('resume')}
+      onStop={() => control('stop')}
+    />
   )
 }
 
 export function ComputerUse({ taskId }: { readonly taskId: string }) {
-  const { computer } = useServices().host
-  return computer === undefined ? null : <ComputerControls key={taskId} taskId={taskId} computer={computer} />
+  const { computer, platform } = useServices().host
+  return computer === undefined ? null : <ComputerControls key={taskId} taskId={taskId} computer={computer} platform={platform} />
 }

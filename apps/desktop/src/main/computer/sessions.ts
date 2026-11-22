@@ -17,12 +17,16 @@ const IDLE = 5 * 60_000
 const MAX_SESSIONS = 12
 const sameTurn = (one: ComputerOwner, other: ComputerOwner) => one.sessionId === other.sessionId && one.turnId === other.turnId
 
+interface Found {
+  readonly windows: ReadonlyArray<NativeWindow>
+  readonly apps: ReadonlyArray<NativeApp>
+}
+
+/** One ask, whether the task may use this computer for its turn, and what was open when it asked. */
 interface Pending {
   readonly id: string
-  readonly desktop: boolean
   readonly reason: string
-  readonly windows: ReadonlyMap<string, NativeWindow>
-  readonly apps: ReadonlyMap<string, NativeApp>
+  readonly found: Found
   readonly timer: ReturnType<typeof setTimeout>
   readonly settle: (done: ComputerDone) => void
 }
@@ -32,8 +36,12 @@ interface Session {
   readonly worker: ComputerWorker
   readonly windows: Map<string, NativeWindow>
   readonly apps: Map<string, NativeApp>
+  /** The apps it has used, by process: another task's turn leaves them to it until its own ends. */
+  readonly held: Set<number>
   pending?: Pending | undefined
   timer?: ReturnType<typeof setTimeout> | undefined
+  /** The person let it use this computer for its turn: a later request only finds what opened since. */
+  allowed: boolean
   preview?: ComputerState['preview']
   frame?: NativeFrame | undefined
   desktop: boolean
@@ -82,18 +90,27 @@ export const computerSessions = (options: {
     ...(session.preview === undefined ? {} : { preview: session.preview }),
     ...(session.pending === undefined
       ? {}
-      : {
-          request: {
-            id: session.pending.id,
-            desktop: session.pending.desktop,
-            primaryDisplay: session.pending.desktop && options.canShareDisplay(),
-            reason: session.pending.reason,
-            windows: publicWindows(session.pending.windows),
-            apps: publicApps(session.pending.apps),
-          },
-        }),
+      : { request: { id: session.pending.id, primaryDisplay: options.canShareDisplay(), reason: session.pending.reason } }),
   })
   const changed = (session: Session) => options.changed(stateOf(session))
+  const heldElsewhere = (session: Session, pid: number) => [...sessions.values()].some((other) => other !== session && other.held.has(pid))
+  // What is open now, each window and app keeping the id the task already has for it, and what closed since gone.
+  const take = (session: Session, found: Found) => {
+    const windows = [...session.windows]
+    const apps = [...session.apps]
+    const idOf = <T>(kept: ReadonlyArray<readonly [string, T]>, same: (one: T) => boolean) =>
+      kept.find(([, one]) => same(one))?.[0] ?? randomUUID()
+    const nextWindows = found.windows.map(
+      (one) => [idOf(windows, (kept) => kept.pid === one.pid && kept.handle === one.handle), one] as const,
+    )
+    const nextApps = found.apps.map((one) => [idOf(apps, (kept) => kept.path === one.path), one] as const)
+    session.windows.clear()
+    session.apps.clear()
+    for (const [id, one] of nextWindows) session.windows.set(id, one)
+    for (const [id, one] of nextApps) session.apps.set(id, one)
+    session.desktop = options.canShareDisplay()
+    session.foreground = true
+  }
   const settle = (session: Session, outcome: ComputerDone) => {
     const waiting = session.pending
     if (waiting === undefined) return
@@ -114,6 +131,7 @@ export const computerSessions = (options: {
     session.frame = undefined
     session.windows.clear()
     session.apps.clear()
+    session.held.clear()
     session.desktop = false
     session.foreground = false
     session.action = reason
@@ -173,16 +191,17 @@ export const computerSessions = (options: {
     const inventory = await session.worker.run({ op: 'inventory' })
     if (!still()) return error('Computer use stopped before the request could be shown.')
     if (inventory.kind !== 'inventory') return error('The native helper did not return an app list.')
-    const windows = new Map(
-      inventory.value.windows
-        .filter((one) => ![...session.windows.values()].some((kept) => kept.pid === one.pid && kept.handle === one.handle))
-        .map((one) => [randomUUID(), one]),
-    )
-    const apps = new Map(inventory.value.apps.map((one) => [randomUUID(), one]))
+    // Asked once a turn: allowed, it only finds what opened since.
+    if (session.allowed) {
+      take(session, inventory.value)
+      session.action = 'Waiting for the task’s next action.'
+      changed(session)
+      return summary(session)
+    }
     const access = await new Promise<ComputerDone>((resolve) => {
       const id = randomUUID()
       const timer = setTimeout(() => stop(session.owner.taskId, 'Computer access was not approved in time.'), ASK_FOR)
-      session.pending = { id, desktop: call.desktop === true, reason: call.reason, windows, apps, timer, settle: resolve }
+      session.pending = { id, reason: call.reason, found: inventory.value, timer, settle: resolve }
       session.action = 'Waiting for you to approve computer use.'
       changed(session)
     })
@@ -194,35 +213,15 @@ export const computerSessions = (options: {
     const session = sessions.get(taskId)
     const waiting = session?.pending
     if (session === undefined || waiting === undefined || waiting.id !== decision.requestId) return false
-    if ((decision.desktop || decision.foreground) && !waiting.desktop) return false
-    if (decision.desktop && !options.canShareDisplay()) return false
-    const selected = [...new Set(decision.windows)]
-    if (selected.some((id) => !waiting.windows.has(id) && !waiting.apps.has(id))) return false
-    if (session.windows.size + session.apps.size + selected.length > 40) return false
-    for (const id of selected) {
-      const window = waiting.windows.get(id)
-      if (
-        window !== undefined &&
-        [...sessions.values()].some((other) => other !== session && [...other.windows.values()].some((one) => one.pid === window.pid))
-      )
-        return false
-    }
-    for (const id of selected) {
-      const window = waiting.windows.get(id)
-      const app = waiting.apps.get(id)
-      if (window !== undefined) session.windows.set(id, window)
-      if (app !== undefined) session.apps.set(id, app)
-    }
-    session.desktop ||= decision.desktop
-    session.foreground ||= decision.foreground || decision.desktop
-    if (selected.length === 0 && !decision.desktop && !decision.foreground) {
+    if (!decision.allow) {
       settle(session, error('The person declined computer access.'))
-      if (session.windows.size === 0 && session.apps.size === 0 && !session.desktop) return stop(taskId, 'Computer access declined.')
-      session.action = 'Additional computer access declined.'
-    } else {
-      settle(session, summary(session))
-      session.action = 'Computer access approved.'
+      return stop(taskId, 'Computer access declined.')
     }
+    // Yes takes in the whole computer for the turn: every app and window, foreground input, and the display where it may be shared.
+    session.allowed = true
+    take(session, waiting.found)
+    settle(session, summary(session))
+    session.action = 'Computer access approved.'
     changed(session)
     return true
   }
@@ -248,6 +247,8 @@ export const computerSessions = (options: {
         worker: options.worker(),
         windows: new Map(),
         apps: new Map(),
+        held: new Set(),
+        allowed: false,
         action: '',
         desktop: false,
         foreground: false,
@@ -279,9 +280,8 @@ export const computerSessions = (options: {
         const launched = await active.worker.run({ op: 'launch', app: approved })
         if (!still() || launched.kind !== 'launched') return error('App launch was interrupted. Check the desktop.')
         for (const window of launched.windows) {
-          if ([...sessions.values()].some((other) => other !== active && [...other.windows.values()].some((one) => one.pid === window.pid)))
-            continue
-          if (active.windows.size >= 40) break
+          if (heldElsewhere(active, window.pid)) continue
+          active.held.add(window.pid)
           active.windows.set(randomUUID(), window)
         }
         active.action = `Opened ${approved.name}.`
@@ -291,6 +291,10 @@ export const computerSessions = (options: {
       const target = command.target === 'desktop' ? (active.desktop ? 'desktop' : undefined) : active.windows.get(command.target)
       if (target === undefined) return error('That window or display has not been approved.')
       if (target === 'desktop' && !options.canShareDisplay()) return error('The display layout no longer permits primary-display control.')
+      if (target !== 'desktop') {
+        if (heldElsewhere(active, target.pid)) return error(`Another task is using ${target.app}. Wait for its turn to end.`)
+        active.held.add(target.pid)
+      }
       const name = target === 'desktop' ? 'the primary display' : target.app
       if (command.op === 'observe' || command.op === 'evidence') {
         const observed = await active.worker.run({

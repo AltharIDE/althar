@@ -1818,7 +1818,6 @@ export function TaskView({
                   >
                     <Thread label={text.thread} busy={busy}>
                       {opening}
-                      <ComputerUse taskId={snapshot.task.id} />
                       <ThreadShellProvider value={host.shell}>
                         <ThreadWaysContext.Provider value={ways}>
                           <TaskThread
@@ -1939,6 +1938,8 @@ export function TaskView({
                             )}
                           />
                         </ThreadWaysContext.Provider>
+                        {/* What the turn at work uses on this computer, under it, where the person is reading; its picture opens as the thread's do. */}
+                        <ComputerUse taskId={snapshot.task.id} />
                       </ThreadShellProvider>
                       {closing}
                     </Thread>
