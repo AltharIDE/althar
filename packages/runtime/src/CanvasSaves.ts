@@ -45,7 +45,13 @@ const Published = Schema.Struct({
 })
 const decodePublished = Schema.decodeUnknownEffect(Schema.fromJsonString(Published))
 const decodeChange = Schema.decodeUnknownOption(ChangeRequest)
-const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ title: Schema.String })))
+const decodeAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(ChangeRequest))
+const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ mark: Schema.String })))
+/**
+ * The line a pull request Althar asks to open for a save carries in its description, hidden where the host draws it: a
+ * fresh one each time it asks, kept in that asking's receipt, so the one that asking opened is told from any other.
+ */
+const markOf = (mark: string) => `<!-- althar:artifact-save ${mark} -->`
 const suggestions = ['design/', 'designs/', 'docs/design/']
 const FOLDER_LIMIT = 5000
 
@@ -230,26 +236,24 @@ const make = Effect.gen(function* () {
   const openKey = (canvas: CanvasRow, row: SaveRow, commit: string) => `open_change:canvas:${canvas.id}:${row.repositoryId}:${commit}`
 
   /**
-   * Whether an open pull request no save recorded is the one Althar asked to open from `commit` and never heard back about:
-   * the asking's answer was lost (or the app stopped while asking), and the pull request is the account's, with the title
-   * asked. Where the host said no, or nothing was asked, or it is anyone else's, it isn't.
+   * Whether an open pull request no save recorded is the one Althar's latest asking to open from `commit` opened: where the
+   * host answered, the one it answered with; where its answer was lost (or the app stopped while asking), so the host may
+   * have opened it, one carrying that asking's mark. Where the host said no, nothing was asked, or it is any other, even
+   * by the same account with the same title, it isn't.
    */
-  const openedLost = (
-    canvas: CanvasRow,
-    row: SaveRow,
-    commit: string,
-    open: ChangeRequest,
-    host: { readonly account: Effect.Effect<{ readonly login: string }, unknown> },
-  ) =>
+  const openedFor = (canvas: CanvasRow, row: SaveRow, commit: string, open: ChangeRequest) =>
     Effect.gen(function* () {
-      const [asked] = yield* sql<{ request: string }>`SELECT request FROM mutation_receipts
+      const [asked] = yield* sql<{ state: string; request: string; response: string | null }>`
+        SELECT state, request, response FROM mutation_receipts
         WHERE project_id = ${canvas.projectId} AND idempotency_key = ${openKey(canvas, row, commit)}
-          AND state IN ('uncertain', 'intended') ORDER BY created_at DESC, rowid DESC LIMIT 1`
-      if (asked === undefined) return false
-      const title = Option.getOrUndefined(decodeAsked(asked.request))?.title
-      if (title !== open.title || open.author === null) return false
-      const account = yield* Effect.option(host.account)
-      return Option.isSome(account) && account.value.login.toLowerCase() === open.author.login.toLowerCase()
+        ORDER BY created_at DESC, rowid DESC LIMIT 1`
+      if (asked === undefined || asked.state === 'failed') return false
+      // The host's own answer, kept before the save could record it (the app stopping in between): only one it opened for
+      // this asking is ever kept, checked by its mark as it came back.
+      if (asked.state === 'confirmed')
+        return asked.response !== null && Option.getOrUndefined(decodeAnswer(asked.response))?.number === open.number
+      const mark = Option.getOrUndefined(decodeAsked(asked.request))?.mark
+      return mark !== undefined && open.body.includes(markOf(mark))
     })
 
   const write = (canvas: CanvasRow, row: SaveRow, checkout: string, version: Version) =>
@@ -278,6 +282,9 @@ const make = Effect.gen(function* () {
       // Its own branch, by its id as well as its name: another project's artifact of the same name never shares it.
       const branch = row.how === 'main' ? remote.branch : `althar/artifacts/${canvas.name}-${canvas.id.replace(/^cnv_/, '').slice(0, 12)}`
       const baseRef = `refs/remotes/origin/${remote.branch}`
+      const notOurs = refuse(
+        `${row.repository} has a pull request open from ${branch} that Althar didn’t open for this artifact. Close it or rename its branch, then try again.`,
+      )
       const fault = (step: string) => Effect.mapError((error: unknown) => refuse(problemIn(row.repository, branch, step, error)))
       const base = yield* fetchedInto(checkout, remote.fetch, remote.branch, baseRef).pipe(fault('fetch'))
       const open =
@@ -289,18 +296,14 @@ const make = Effect.gen(function* () {
           : yield* fetchedInto(checkout, remote.target, branch, `refs/althar/artifacts/${canvas.id}`).pipe(fault('fetch'))
       const knownBranch = head !== null && previous?.how === 'pr' && previous.commit === head
       // An open pull request is this artifact's only where it is the one its last save recorded, or, before one was
-      // recorded, where its last save's own asking to open it lost its answer, so the host may have opened it, and it is
-      // that one: from that save's commit, by the account Althar asked with, with the title it asked for. Anything else
-      // is someone else's, never continued, even from the commit Althar pushed.
+      // recorded, the one its last save's own asking opened from that save's commit (`openedFor`). Anything else is
+      // someone else's, never continued, even from the commit Althar pushed.
       const ours =
         open === null ||
         (previous?.pullRequest != null
           ? previous.pullRequest.number === open.number
-          : knownBranch && head !== null && pr !== null && (yield* openedLost(canvas, row, head, open, pr.host)))
-      if (!ours)
-        return yield* refuse(
-          `${row.repository} has a pull request open from ${branch} that Althar didn’t open for this artifact. Close it or rename its branch, then try again.`,
-        )
+          : knownBranch && head !== null && (yield* openedFor(canvas, row, head, open)))
+      if (!ours) return yield* notOurs
       // After a push that didn't open its pull request, continue from that push. Once a
       // pull request closes, start from the default branch again, even after a squash.
       const continueFrom = open !== null || (knownBranch && previous?.pullRequest === null)
@@ -338,19 +341,29 @@ const make = Effect.gen(function* () {
       const firstPull = prior === null || (knownBranch && prior.how === 'pr' && prior.pullRequest === null)
       const title = firstPull ? `Add ${version.title}` : `Update ${version.title} to v${row.nextVersion}`
       const request = { title, source: branch, target: remote.branch, draft: false }
+      const mark = randomUUID()
       const opened = yield* outward({
         projectId: canvas.projectId,
         subject: { type: 'canvas', id: canvas.id },
         target: `${pr.host.product}:${pr.repository.path.join('/')}`,
         operation: 'open_change',
         key: openKey(canvas, row, commit),
-        request,
+        request: { ...request, mark },
         retryable: true,
         stands: stillWanted(canvas, row),
-        perform: pr.host.openChange(pr.repository, {
-          ...request,
-          body: `This saves v${row.nextVersion} of ${version.title} from Althar.`,
-        }),
+        // A host adopts one already open from the branch rather than open another: one someone opened as Althar asked
+        // isn't this artifact's, and isn't kept as the answer.
+        perform: pr.host
+          .openChange(pr.repository, {
+            ...request,
+            body: `This saves v${row.nextVersion} of ${version.title} from Althar.\n\n${markOf(mark)}`,
+          })
+          .pipe(
+            Effect.filterOrFail(
+              (answer) => answer.body.includes(markOf(mark)),
+              () => notOurs,
+            ),
+          ),
         encode: (answer) => answer,
         decode: (answer) => Option.getOrUndefined(decodeChange(answer)),
       }).pipe(Effect.provideContext(context), fault('open a pull request'))

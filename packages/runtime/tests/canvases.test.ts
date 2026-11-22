@@ -833,7 +833,80 @@ describe('saving a canvas to its repository', () => {
     ),
   )
 
-  it.live('after a push whose pull request didn’t open, takes for its own only the one the host opened for it', () =>
+  it.live('after a push whose pull request didn’t open, takes for its own only the one its latest asking opened', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        // Someone opening one from its branch just as Althar asks, which the host then adopts as the answer.
+        let asked: (() => void) | null = null
+        const github = makeFakeService({
+          pushUrl: () => bare,
+          waitsFor: (method) => (method === 'openChange' && asked !== null ? Effect.sync(asked) : Effect.void),
+        })
+        const repository = github.addRepository(['meridian', 'api'])
+        const setup = yield* connectedWith(github)
+        const { personId } = Context.get(setup.context, Instance)
+        yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
+        const { canvasId, save, settled } = yield* publishedAt(setup, working)
+        const branch = branchOf(canvasId)
+        // Someone opens a pull request from its branch, by hand, with the title Althar asks for and the same account.
+        const byHand = () =>
+          github.addPullRequest({ path: ['meridian', 'api'], title: 'Add Sign in', author: 'you', source: branch, target: 'main' })
+        const tryAgain = Effect.suspend(() => Effect.andThen(save('design/sign-in/', 'pr'), settled()))
+        const refusedWith = (problem: string | null | undefined) => assert.include(problem ?? '', 'didn’t open for this artifact')
+
+        // One opened as Althar asks, which the host hands back as already open, isn't taken as the answer.
+        asked = () => {
+          asked = null
+          byHand()
+        }
+        const raced = (yield* tryAgain).summary.saved
+        assert.include(raced, { state: 'failed', pullRequest: null })
+        refusedWith(raced?.problem)
+        github.close(github.changes[0]?.number ?? assert.fail('No pull request'))
+
+        // The host said no: one opened after isn't this artifact's.
+        github.failNext('openChange', 'rejected')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        const afterNo = byHand()
+        refusedWith((yield* tryAgain).summary.saved?.problem)
+        github.close(afterNo.number)
+
+        // Its asking failed before the host opened anything, its answer lost: one opened by hand after still isn't.
+        github.failNext('openChange', 'unreachable')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        const afterLost = byHand()
+        refusedWith((yield* tryAgain).summary.saved?.problem)
+        github.close(afterLost.number)
+
+        // The host opened it and the answer was lost; then a later asking was refused: the latest asking is what counts.
+        github.loseAnswer('openChange')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        const opened = github.changes.at(-1) ?? assert.fail('No pull request')
+        assert.include(opened, { source: branch, state: 'open' })
+        github.close(opened.number)
+        github.failNext('openChange', 'rejected')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        yield* github.reopenChange(repository, opened)
+        refusedWith((yield* tryAgain).summary.saved?.problem)
+        github.close(opened.number)
+
+        // The host opened it and the answer was lost: that one is its own, and it carries on in it.
+        const before = github.changes.length
+        github.loseAnswer('openChange')
+        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
+        assert.lengthOf(github.changes, before + 1)
+        const lost = github.changes.at(-1) ?? assert.fail('No pull request')
+        const adopted = (yield* tryAgain).summary.saved
+        assert.include(adopted, { state: 'saved', version: 1 })
+        assert.deepStrictEqual(adopted?.pullRequest, { number: lost.number, url: lost.url })
+        assert.strictEqual(adopted?.commit, yield* git(bare, 'rev-parse', branch))
+        assert.lengthOf(github.changes, before + 1)
+      }),
+    ),
+  )
+
+  it.live('takes the pull request the host opened back from its answer, where the app stopped before the save kept it', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { working, bare } = hosted()
@@ -843,34 +916,22 @@ describe('saving a canvas to its repository', () => {
         const { personId } = Context.get(setup.context, Instance)
         yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
         const { canvasId, save, settled } = yield* publishedAt(setup, working)
-        const branch = branchOf(canvasId)
-        // Someone opens a pull request from its branch, between its push and its trying again: by its title, as anyone may.
-        const opensOne = (author: string) =>
-          github.addPullRequest({ path: ['meridian', 'api'], title: 'Add Sign in', author, source: branch, target: 'main' })
-        const tryAgain = Effect.suspend(() => Effect.andThen(save('design/sign-in/', 'pr'), settled()))
+        yield* save('design/sign-in/', 'pr')
+        const saved = (yield* settled()).summary.saved
+        const pull = saved?.pullRequest ?? assert.fail('No pull request')
+        const [receipt] = yield* setup.sql<{ state: string }>`SELECT state FROM mutation_receipts WHERE operation = 'open_change'`
+        assert.strictEqual(receipt?.state, 'confirmed')
 
-        // The host said no: one opened after, even by the same account, is the person's own doing, not this artifact's.
-        github.failNext('openChange', 'rejected')
-        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
-        const byHand = opensOne('you')
-        const refused = (yield* tryAgain).summary.saved
-        assert.include(refused, { state: 'failed', pullRequest: null })
-        assert.include(refused?.problem ?? '', 'didn’t open for this artifact')
-        github.close(byHand.number)
-
-        // Its answer lost, the host may have opened it: still, one by anyone else isn't.
-        github.failNext('openChange', 'unreachable')
-        assert.include((yield* tryAgain).summary.saved, { state: 'failed', pullRequest: null })
-        const anas = opensOne('ana')
-        assert.include((yield* tryAgain).summary.saved?.problem ?? '', 'didn’t open for this artifact')
-        github.close(anas.number)
-
-        // The one by the account it asked with, with the title it asked for, is the one the host opened: it carries on in it.
-        const lost = opensOne('you')
-        const adopted = (yield* tryAgain).summary.saved
-        assert.include(adopted, { state: 'saved', version: 1 })
-        assert.deepStrictEqual(adopted?.pullRequest, { number: lost.number, url: lost.url })
-        assert.strictEqual(adopted?.commit, yield* git(bare, 'rev-parse', branch))
+        // As the app stopping between the host's answer being kept and the save keeping it leaves it: the pull request
+        // open and its answer confirmed, the save still going with its push kept and no pull request.
+        yield* setup.sql`UPDATE canvas_saves SET published = json_set(published, '$.pullRequest', NULL), state = 'saving'
+          WHERE canvas_id = ${canvasId}`
+        yield* save('design/sign-in/', 'pr')
+        const recovered = (yield* settled()).summary.saved
+        assert.include(recovered, { state: 'saved', version: 1, problem: null })
+        assert.strictEqual(recovered?.commit, saved?.commit)
+        assert.deepStrictEqual(recovered?.pullRequest, pull)
+        assert.lengthOf(github.changes, 1)
       }),
     ),
   )
