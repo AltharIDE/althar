@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { posix, relative } from 'node:path'
+import { join, posix, relative, sep } from 'node:path'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
@@ -586,7 +586,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               toolPort: toolServer.port,
             })
             homeWorktree = thread.worktree
-            agentCwd = posix.join(remote.path, relative(thread.worktree, agentCwd))
+            agentCwd = posix.join(remote.path, ...relative(thread.worktree, agentCwd).split(sep))
           }
           const activeWorker = remote
           const localRoot = homeWorktree
@@ -602,7 +602,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                       ...request,
                       paths: request.paths.map((path) =>
                         path === activeWorker.path || path.startsWith(activeWorker.path + '/')
-                          ? localRoot + path.slice(activeWorker.path.length)
+                          ? join(localRoot, ...path.slice(activeWorker.path.length).split('/').filter(Boolean))
                           : path,
                       ),
                     },
