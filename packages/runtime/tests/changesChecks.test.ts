@@ -208,6 +208,38 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('leaves a failure of a check its host doesn’t require alone: no fix asked, and ready to accept (#1117)', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [passing, { name: 'Workers Builds: althar-site', state: 'failed' }],
+      rulesOf: () => ({ requiredChecks: ['test'], needs: [] }),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.checks?.outcome === 'failed')
+      assert.isNull(ready?.step)
+      assert.lengthOf(fixesOn(bare), 0)
+      assert.notInclude((yield* notices(ready?.threadId ?? '')).join('\n'), 'again')
+      // The thread hears them as passed, the optional failure named apart; the observation the coordinator's news reads, too.
+      const [heard] = (yield* arrivals(ready?.threadId ?? '')).filter((one) => one.kind === 'checks')
+      assert.deepInclude(heard, { failed: 0, failing: [], optional: ['Workers Builds: althar-site'] })
+      const sql = yield* SqlClient.SqlClient
+      const outcomes = yield* sql<{ outcome: string }>`
+        SELECT json_extract(payload, '$.outcome') AS outcome FROM observations WHERE kind = 'checks'`
+      assert.deepStrictEqual(
+        outcomes.map((one) => one.outcome),
+        ['passed'],
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('starts its lead again for a failure when its session has ended', () => {
     const { working, bare } = hosted()
     let first: 'running' | 'failed' = 'running'
@@ -669,6 +701,61 @@ describe('what failed, in full', () => {
         ready?.change?.checks?.list.map((check) => check.state),
         ['passed', 'cancelled'],
       )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live.each([
+    { required: ['test'], reruns: 0 },
+    { required: ['test', 'lint'], reruns: 1 },
+  ])('runs a cancelled check again only where its host requires it: $required, $reruns', ({ required, reruns }) => {
+    const { working, bare } = hosted()
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [passing, { name: 'lint', state: 'cancelled' }],
+      rulesOf: () => ({ requiredChecks: required, needs: [] }),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && github.reruns.length === reruns)
+      yield* Effect.sleep('500 millis')
+      assert.lengthOf(github.reruns, reruns)
+      const said = (yield* notices(ready?.threadId ?? '')).join('\n')
+      if (reruns === 0) assert.notInclude(said, 'cancelled check')
+      else assert.include(said, 'Running a cancelled check on PR #1 again.')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('hears a required check that fails on a head where only an optional one had failed before it reported', () => {
+    const { working, bare } = hosted()
+    const optional = { name: 'preview', state: 'failed' as const }
+    const first: Array<string> = []
+    let reads = 0
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: (_, sha) => {
+        if (first.length === 0) first.push(sha)
+        if (sha !== first[0]) return [passing, optional]
+        // The optional build fails first; the required test reports, failed, a few reads later, on the same head.
+        reads += 1
+        return reads <= 2 ? [optional] : [failing, optional]
+      },
+      rulesOf: () => ({ requiredChecks: ['test'], needs: [] }),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      // The required failure is run again once, then its lead fixes it; the optional one is never run again.
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && fixesOn(bare).length === 1)
+      assert.isAtLeast(reads, 3)
+      assert.isFalse(github.reruns.some((one) => JSON.stringify(one).includes('preview')))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

@@ -5,7 +5,17 @@ import { tmpdir } from 'node:os'
 import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { type MessageSender, Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import {
+  type MessageSender,
+  Api,
+  ApiError,
+  GOAL_LENGTH,
+  GOAL_ROUNDS,
+  clientProtocol,
+  emitterPort,
+  type ThreadSnapshot,
+  type WatchEvent,
+} from '@althar/contracts'
 import {
   type AgentDefinition,
   AgentExited,
@@ -232,6 +242,227 @@ describe('the API', () => {
       }),
     ),
   )
+  it.live('continues a persisted goal on a different provider and accepts evidence from its current turn', () =>
+    Effect.gen(function* () {
+      const first = holds()
+      const second = holds()
+      const { client, grant, store, context } = yield* connected({
+        agents: fakeAgents({}, [], { codex: { holds: first }, 'claude-code': { holds: second } }),
+      })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Verify the API' })
+      const active = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ id: string; sessionId: string; agent: string; prompt: string; revision: number }>`
+        SELECT d.id, d.provider_session_id AS session_id, s.agent_id AS agent, d.prompt, d.goal_revision AS revision
+        FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+        WHERE d.thread_id = ${task.threadId} AND d.goal_round = 1 AND d.state = 'delivered'`,
+        ),
+      )
+      const head = client.GetThread({ threadId: task.threadId, limit: 0 })
+      const started = yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Verify the API [lead:slowly]' },
+        lead: { agentId: 'codex' },
+      })
+      assert.strictEqual(started?.status, 'active')
+      const [before] = yield* until(active, (rows) => rows[0]?.agent === 'codex')
+      const handing = yield* Effect.forkChild(
+        client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'claude-code' }),
+      )
+      first.open('[lead:slowly]')
+      yield* Fiber.join(handing)
+      const [after] = yield* until(active, (rows) => rows[0]?.agent === 'claude-code')
+      assert.strictEqual(after?.revision, before?.revision)
+      assert.include(after?.prompt ?? '', 'Verify the API')
+      const report = { status: 'complete', detail: 'API test suite passed.' }
+      const access = { role: 'lead' as const, projectId: project.id, taskId: task.id, threadId: task.threadId }
+      assert.include(
+        yield* callTool({ ...access, sessionId: before?.sessionId ?? '' }, 'report_goal', { ...report, turn: before?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'no longer holds',
+      )
+      assert.include(
+        yield* callTool({ ...access, sessionId: after?.sessionId ?? '' }, 'report_goal', { ...report, turn: after?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'evidence recorded',
+      )
+      second.open('[lead:slowly]')
+      assert.strictEqual((yield* head).task.goal?.detail, report.detail)
+      assert.strictEqual((yield* head).task.goal?.status, 'complete')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('bounds automatic rounds, routes typed controls through Althar and preserves revision across clear', () =>
+    Effect.gen(function* () {
+      const { client, grant, store } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Bounded goal' })
+      const send = (body: string) => client.Send({ commandId: commandId(), threadId: task.threadId, body, disposition: 'after_current' })
+      const goal = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ status: string; rounds: number; revision: number }>`
+        SELECT status, rounds, generation AS revision FROM thread_goals WHERE thread_id = ${task.threadId}`,
+        ),
+      )
+      yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Keep checking the result' },
+        lead: { agentId: 'codex' },
+      })
+      const [limited] = yield* until(goal, ([row]) => row?.status === 'limited')
+      assert.strictEqual(limited?.rounds, GOAL_ROUNDS)
+      yield* send('/goal clear')
+      assert.isNull((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.goal)
+      yield* send('/goal Verify the next result')
+      const [newer] = yield* goal
+      assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
+      yield* send('/goal pause')
+      assert.strictEqual((yield* goal)[0]?.status, 'paused')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('validates typed goal commands before keeping attachments or starting a lead', () =>
+    Effect.gen(function* () {
+      const { client, grant } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Goal controls' })
+      const command = { threadId: task.threadId, disposition: 'after_current' as const }
+      const attached = yield* Effect.flip(
+        client.Send({
+          ...command,
+          commandId: commandId(),
+          body: '/goal Verify the build',
+          images: [{ data: 'not an image', name: 'notes.png' }],
+        }),
+      )
+      assert.strictEqual(attached.message, 'Send attachments in a message alongside the goal.')
+      const oversized = yield* Effect.flip(
+        client.Send({ ...command, commandId: commandId(), body: `/goal ${'a'.repeat(GOAL_LENGTH + 1)}` }),
+      )
+      assert.strictEqual(oversized.reason, 'Invalid')
+      const empty = yield* Effect.flip(
+        client.SetThreadGoal({
+          commandId: commandId(),
+          threadId: task.threadId,
+          control: { action: 'set', objective: '  ' },
+        }),
+      )
+      assert.strictEqual(empty.reason, 'Invalid')
+      const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+      const wrongThread = yield* Effect.flip(
+        client.SetThreadGoal({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          control: { action: 'set', objective: 'Verify the build' },
+        }),
+      )
+      assert.strictEqual(wrongThread.message, 'Goals belong to task conversations.')
+      yield* client.Send({ ...command, commandId: commandId(), body: '/goal' })
+      const thread = yield* client.GetThread({ threadId: task.threadId })
+      assert.isNull(thread.task.goal)
+      assert.isNull(thread.session)
+      assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Set an objective with /goal.'))
+      yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
+      const abandoned = yield* Effect.flip(client.Send({ ...command, commandId: commandId(), body: '/goal Verify the build' }))
+      assert.strictEqual(abandoned.message, 'Start a goal on an open task.')
+    }).pipe(Effect.scoped),
+  )
+
+  for (const stop of ['pause', 'clear', 'interrupt', 'stop lead', 'stop task'] as const) {
+    it.live(`ends a live automatic goal turn on ${stop}`, () => {
+      const gate = holds()
+      const marker = '[answers-after:5s]'
+      let promptAsked: () => void = () => undefined
+      const asked = new Promise<void>((resolve) => (promptAsked = resolve))
+      return Effect.gen(function* () {
+        const { client, grant, store } = yield* connected({ agents: fakeAgents({ holds: gate, promptAsked }) })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Stop verification' })
+        const { threadId } = task
+        const turns = store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) => sql<{ state: string }>`
+            SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND goal_round = 1 ORDER BY rowid`,
+          ),
+        )
+        yield* client.SetThreadGoal({
+          commandId: commandId(),
+          threadId,
+          control: { action: 'set', objective: `Verify production ${marker}` },
+          lead: { agentId: 'codex' },
+        })
+        yield* until(turns, ([turn]) => turn?.state === 'delivered')
+        yield* Effect.promise(() => asked)
+
+        if (stop === 'pause' || stop === 'clear')
+          yield* client.SetThreadGoal({ commandId: commandId(), threadId, control: { action: stop } })
+        else if (stop === 'interrupt') yield* client.Interrupt({ commandId: commandId(), threadId })
+        else if (stop === 'stop lead') yield* client.StopSession({ commandId: commandId(), threadId })
+        else yield* client.StopTask({ commandId: commandId(), taskId: task.id })
+
+        const finished = yield* until(turns, ([turn]) => turn?.state === 'interrupted')
+        assert.deepStrictEqual(finished, [{ state: 'interrupted' }])
+        const snapshot = yield* client.GetThread({ threadId, limit: 0 })
+        if (stop === 'clear') assert.isNull(snapshot.task.goal)
+        else assert.include(snapshot.task.goal, { status: 'paused', rounds: 1 })
+      }).pipe(Effect.ensuring(Effect.sync(() => gate.open(marker))), Effect.scoped)
+    })
+  }
+
+  for (const sender of [{ kind: 'socket' }, { kind: 'paired_device', deviceId: 'phone' }] as const) {
+    it.live(`enforces goal control permissions for a ${sender.kind === 'socket' ? 'socket' : 'paired device'}`, () => {
+      const gate = holds()
+      return Effect.gen(function* () {
+        const { client, context } = yield* connected({ sender, agents: fakeAgents({ holds: gate }) })
+        const { threadId } = yield* Effect.gen(function* () {
+          const projects = yield* Projects
+          const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+          return yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title: 'Check the release',
+            draft: true,
+            plain: true,
+          })
+        }).pipe(Effect.provideContext(context))
+        const objective = 'Verify production [lead:slowly]'
+        const set = client.SetThreadGoal({
+          commandId: commandId(),
+          threadId,
+          control: { action: 'set', objective },
+          lead: { agentId: 'codex', model: 'small', effort: 'low' },
+        })
+        const send = (body: string) => client.Send({ commandId: commandId(), threadId, body, disposition: 'after_current' })
+        if (sender.kind === 'socket') {
+          assert.strictEqual((yield* Effect.flip(set)).reason, 'Forbidden')
+          assert.strictEqual((yield* Effect.flip(send(`/goal ${objective}`))).reason, 'Forbidden')
+          assert.isNull((yield* client.GetThread({ threadId, limit: 0 })).task.goal)
+          return
+        }
+
+        const accepted = yield* set
+        assert.include(accepted, { status: 'active', objective })
+        assert.deepStrictEqual(yield* set, accepted)
+        const active = yield* client.SetThreadGoal({ commandId: commandId(), threadId, control: { action: 'resume' } })
+        assert.strictEqual(active?.revision, accepted?.revision)
+        yield* send('/goal')
+        const thread = yield* until(client.GetThread({ threadId }), (snapshot) => snapshot.session?.turnRunning === true)
+        assert.include(thread.session, { agentId: 'codex', model: 'small', effort: 'low' })
+        assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Goal · active'))
+        yield* send('/goal pause')
+        assert.strictEqual((yield* client.GetThread({ threadId, limit: 0 })).task.goal?.status, 'paused')
+      }).pipe(Effect.ensuring(Effect.sync(() => gate.open('[lead:slowly]'))), Effect.scoped)
+    })
+  }
+
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()
@@ -559,6 +790,76 @@ describe('the API', () => {
             ['opencode', true],
           ],
         )
+      }),
+    ),
+  )
+
+  it.live('shares a cold agent status and version check across simultaneous windows', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let checks = 0
+        let versions = 0
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) => {
+            const check = definition.signIn.status
+            if (check === undefined) throw new Error('The test agent needs a status command')
+            return {
+              ...definition,
+              signIn: {
+                ...definition.signIn,
+                status: (node) => {
+                  checks++
+                  return check(node)
+                },
+              },
+              version: (node) => {
+                versions++
+                return { command: node, args: ['--version'] }
+              },
+            }
+          }),
+        })
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind: 'window' },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
+        const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+        const otherWindow = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+        const [first, second] = yield* Effect.all([client.Status({}), otherWindow.Status({})], { concurrency: 2 })
+        assert.deepStrictEqual(first, second)
+        assert.strictEqual(checks, 1)
+        assert.strictEqual(versions, 1)
+        yield* client.Status({ recheck: true })
+        assert.strictEqual(checks, 2)
+        assert.strictEqual(versions, 1)
+      }),
+    ),
+  )
+
+  it.live('retries a failed agent version probe and reuses the version once found', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let probes = 0
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({
+            ...definition,
+            version: (node) => ({
+              command: node,
+              args: ['-e', ++probes === 1 ? 'process.exit(1)' : 'console.log("1.2.3")'],
+            }),
+          })),
+        })
+        const version = client.Status({}).pipe(Effect.map(({ agents }) => agents.find(({ id }) => id === 'codex')?.version))
+        assert.strictEqual(yield* version, null)
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(probes, 2)
       }),
     ),
   )

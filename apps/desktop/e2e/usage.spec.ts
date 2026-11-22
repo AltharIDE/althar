@@ -60,6 +60,8 @@ test('sends usage data while its switch is on, named events only, and nothing on
   try {
     // Althar opened, sent at once: on by default, and the first screen doesn't ask.
     await expect.poll(names).toContain('app_opened')
+    await expect.poll(names).toContain('app_window_opened')
+    expect(fake.events.find((event) => event.event === 'app_opened')?.properties).toMatchObject({ launch: 'foreground', install: 'new' })
     await expect(page.getByRole('switch', { name: 'Usage data' })).toHaveCount(0)
 
     // The first project, of the repository found, and a task started on it.
@@ -69,9 +71,18 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .getByRole('checkbox', { name: /meridian/ })
       .click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect.poll(names).toContain('onboarding_project_attempt')
+    expect(names()).not.toContain('onboarding_completed')
     await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done']))
+    await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done', 'onboarding_completed']))
+    expect(fake.events.find((event) => event.event === 'onboarding_project_attempt')?.properties).toMatchObject({
+      source: 'folder',
+      outcome: 'created',
+    })
+    expect(fake.events.filter((event) => event.event === 'onboarding_step_seen').map((event) => event.properties.step)).toEqual(
+      expect.arrayContaining(['agents', 'project', 'code']),
+    )
     await startTask(page, 'Add a retry to the checkout call')
     await expect.poll(names).toContain('task_started')
 
@@ -95,6 +106,8 @@ test('sends usage data while its switch is on, named events only, and nothing on
     const usage = page.getByRole('main').getByRole('switch', { name: 'Usage data' })
     await usage.click()
     await expect(usage).toHaveAttribute('aria-checked', 'false')
+    const saved = () => page.evaluate(async () => ((await window.althar.preferences()) as { usageData: boolean }).usageData)
+    await expect.poll(saved).toBe(false)
     await page.screenshot({ path: 'test-results/settings-usage-data.png', animations: 'disabled' })
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     const before = fake.requests.length
@@ -104,6 +117,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .click()
     const off = fake.events.length
     await startTask(page, 'Name the limits better')
+    await expect(page.getByRole('article', { name: 'Name the limits better' }).getByText('Ready', { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /Open task/ })).toHaveCount(2)
     expect(fake.requests.slice(before)).toEqual([])
 
@@ -112,6 +126,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
     await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
     await usage.click()
     await expect(usage).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(saved).toBe(true)
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     await page
       .getByRole('navigation', { name: 'Projects' })
@@ -119,8 +134,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .click()
     await startTask(page, 'Log the refunds')
     const started = () => fake.events.slice(off).filter((event) => event.event === 'task_started')
-    await expect.poll(() => started().length).toBeGreaterThan(0)
-    expect(started()).toHaveLength(1)
+    await expect.poll(started).toHaveLength(1)
   } finally {
     await electronApp.close()
     await fake.close()

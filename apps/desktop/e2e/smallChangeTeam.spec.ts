@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, still } from './support'
+import { launch, openFirstProject, say, shown, startTask, still } from './support'
 
 /*
  * A small change starts at once, and its card still lets the person pick its team: Change the team… is on its card in the
@@ -25,6 +25,7 @@ test('changes the team of a small change from its card', async () => {
     await say(page, 'Fix a typo in the run menu. [coordinator:plan] [coordinator:plan-small] [lead:wait]')
 
     // In the coordinator's thread, with no need to open the task first.
+    await expect(shown(page, 'Implementing', { exact: true }).first()).toBeVisible()
     const change = page.getByRole('button', { name: 'Change the team…' })
     await expect(change).toBeVisible()
     const coordinatorCard = change.locator('xpath=ancestor::article[1]')
@@ -89,7 +90,10 @@ test('holds a small change that waits for a free agent while its team is changed
     await expect(page.getByText(/^Waiting · 1 agent busy$/)).toBeVisible()
 
     // Its row in Up next: its team menu opens the same dialog, which holds it while the team is changed.
-    const row = page.locator('article').filter({ hasText: 'Next in line' })
+    const row = page
+      .getByRole('region', { name: 'Up next', exact: true })
+      .getByRole('listitem')
+      .filter({ hasText: 'Fix a typo in the run' })
     await row.hover()
     await row.getByRole('button', { name: 'The team' }).click()
     await page.getByRole('menuitem', { name: 'Change the team…' }).click()

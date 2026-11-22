@@ -82,15 +82,20 @@ export const unixTrees: ProcessTrees = {
     }),
   startedAt: (pid) =>
     Effect.callback<string | undefined>((resume) => {
-      execFile(
-        'ps',
-        ['-o', 'lstart=', '-p', String(pid)],
-        { timeout: 2_000, env: { LC_ALL: 'C', PATH: process.env.PATH ?? '' } },
-        (error, stdout) => {
-          const started = error === null ? new Date(stdout.trim()) : undefined
-          resume(Effect.succeed(started !== undefined && !Number.isNaN(started.getTime()) ? started.toISOString() : undefined))
-        },
-      )
+      try {
+        execFile(
+          'ps',
+          ['-o', 'lstart=', '-p', String(pid)],
+          { timeout: 2_000, env: { LC_ALL: 'C', PATH: process.env.PATH ?? '' } },
+          (error, stdout) => {
+            const started = error === null ? new Date(stdout.trim()) : undefined
+            resume(Effect.succeed(started !== undefined && !Number.isNaN(started.getTime()) ? started.toISOString() : undefined))
+          },
+        )
+      } catch {
+        // A sandbox can refuse the spawn synchronously.
+        resume(Effect.succeed(undefined))
+      }
     }),
 }
 

@@ -16,8 +16,8 @@ import type { Host, Services } from './services'
  * on shows, and opens. Every other open tab's place is read once it has
  * opened, so going to any of them is instant without the launch waiting on
  * the slowest; one clicked before its read is done joins that read. Each
- * agent is asked again, once a launch, and its models read, without waiting
- * for either; each model's room is read again whenever they are.
+ * agent is asked again, once a launch, without holding up the window. Models
+ * are read ahead for a home with projects, and otherwise on demand.
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeState) => {
@@ -32,7 +32,8 @@ export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeSt
       host.startup?.(stage, Math.round(performance.now() - at))
     }
   }
-  const client = await timed('client-created', () => connect(port, home?.identity))
+  const answerPermission = home?.current.kind === 'https' ? host.homes?.answerPermission : undefined
+  const client = await timed('client-created', () => connect(port, home?.identity, answerPermission))
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.
@@ -65,14 +66,15 @@ export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeSt
           ? router.preloadRoute({ to: '/threads/$threadId', params: { threadId: place.threadId } })
           : router.preloadRoute({ to: '/projects/$projectId', params: { projectId } })
       })
+  const hasProjects = (listed?.projects.length ?? 0) > 0
   let started = false
   const afterOpen = () => {
     if (started) return
     started = true
     // Join a mounted screen's status read instead of starting a second set of cold CLIs.
     void cache.fetchQuery(read.status()).catch(() => undefined)
-    readModelsAhead(client)
+    if (hasProjects) readModelsAhead(client)
     void Promise.allSettled(readAhead())
   }
-  return { services, router, afterOpen, hasProjects: (listed?.projects.length ?? 0) > 0 }
+  return { services, router, afterOpen, hasProjects }
 }

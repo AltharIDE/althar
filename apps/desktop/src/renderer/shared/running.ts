@@ -1,4 +1,4 @@
-import type { BackgroundCommand, Launch } from '@althar/contracts'
+import { type BackgroundCommand, type Launch, workerPreviewTarget } from '@althar/contracts'
 import type { RunCardProps, RunningProcess } from '@althar/ui'
 
 import type { RunContent } from './thread'
@@ -11,7 +11,8 @@ import { ago, running } from './time'
  */
 
 /** Where one answers, as the pill says it: the address without its scheme or a bare trailing slash. */
-export const addressOf = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+export const addressOf = (url: string) =>
+  workerPreviewTarget(url) === null ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : 'Worker preview'
 
 /** What runs, each with how long it has run, or when it ended by itself and how; with `where`, where each runs. */
 export const runningOf = (

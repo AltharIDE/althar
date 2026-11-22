@@ -85,6 +85,39 @@ const sqlOf = <A extends object>(query: (sql: SqlClient.SqlClient) => Effect.Eff
   Effect.flatMap(SqlClient.SqlClient, query)
 
 describe('an aside opened with +', () => {
+  it.live('starts from the composer in a project of two repositories with both available', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const other = repository()
+        const grant = yield* store(Effect.flatMap(Folders, (folders) => folders.allow(other)))
+        yield* client.AddRepositories({ commandId: commandId(), projectId: project.id, grant })
+
+        // The composer supplies no repository choice, including when it sends the first words with the aside.
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'A quick question',
+          description: 'How do these fit together?',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        const workspaces = yield* store(
+          sqlOf((sql) => sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${aside.id} ORDER BY path`),
+        )
+        assert.lengthOf(workspaces, 2)
+        yield* until(client.GetThread({ threadId: aside.threadId }), (thread) => thread.items.some((item) => item.kind === 'agent_message'))
+        const [turn] = yield* store(
+          sqlOf((sql) => sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${aside.threadId}`),
+        )
+        for (const workspace of workspaces) {
+          assert.isTrue(existsSync(join(workspace.path, 'README.md')))
+          assert.include(turn?.prompt ?? '', workspace.path)
+        }
+      }),
+    ),
+  )
+
   it.live('starts and answers outside a full task queue, takes no place, and counts again once made a task', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -297,7 +330,7 @@ describe('an aside opened with +', () => {
   )
 
   it.live(
-    'carries on lightly in a fresh session, lost or full, and made a task, its lead is told a lead’s whole brief once, with its sandbox',
+    'carries on lightly after a lost session or in-place compaction, then reads the full lead brief and sandbox once it becomes a task',
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -359,12 +392,15 @@ describe('an aside opened with +', () => {
           assert.notInclude(lost, 'gather evidence')
           assert.isTrue(lost.endsWith('And the backoff? [lead:lost-once]'))
 
-          // Words to it while it is an aside still are only the words; its context full, the next goes to a fresh session.
+          // A full aside compacts in place and reads the next words with current project records.
           const again = yield* said('Look again. [context:25/1000000]')
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
-          const fresh = yield* said('And now? [context:1/1000000]')
-          assert.match(fresh, /^You are carrying on an aside of this project's coordinator.+to keep your context small\./)
-          assert.notInclude(fresh, WORK)
+          const afterCompact = yield* said('And now? [context:1/1000000]')
+          assert.include(afterCompact, 'Current Althar records after compaction.')
+          assert.include(afterCompact, "You are an aside of this project's coordinator")
+          assert.notInclude(afterCompact, "When you have done the task, call Althar's finish_step tool")
+          assert.notInclude(afterCompact, 'The thread so far')
+          assert.notInclude(afterCompact, WORK)
 
           // Made a task, its next turn is told a lead's whole brief and its sandbox, but not the thread, which it has; once.
           yield* client.ShelveTask({ commandId: commandId(), taskId, shelf: null })
@@ -398,7 +434,7 @@ describe('an aside opened with +', () => {
             next.endsWith('And the tests?'),
             `The delivered prompt began:\n${next.slice(0, 160)}\nand ended:\n${next.slice(-800)}`,
           )
-          assert.notInclude(next, WORK)
+          assert.notInclude(afterCompact, WORK)
           assert.notInclude(next, SANDBOX)
           assert.notInclude(next, 'gather evidence')
           assert.notInclude(next, 'You are taking over a task')

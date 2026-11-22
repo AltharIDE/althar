@@ -15,6 +15,8 @@ import {
   type ShipUnderWay,
   type ThreadItem,
   type ThreadSnapshot,
+  type GoalControl,
+  nextGoal,
   type UndoTurnResult,
 } from '@althar/contracts'
 
@@ -174,6 +176,7 @@ export interface TaskModel {
    */
   readonly send: (body: string, start?: Choice, images?: Outgoing) => Promise<boolean>
   readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
+  readonly setGoal: (control: GoalControl, start?: Choice, restore?: () => void) => Promise<void>
   /**
    * Takes back a message still waiting its turn: out of the queue at once, false for one still on its way. Where the lead
    * already had it, it comes back as it was, the line says why, and `refused` is called, to put back what it was taken for.
@@ -380,6 +383,13 @@ export const useTask = (threadId: string): TaskModel => {
   const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
+  const { refetch } = thread
+  const lastShown = useRef<string | null>(null)
+  // A kept screen stops hearing items while hidden. Its latest page catches up when it shows again.
+  useEffect(() => {
+    if (lastShown.current === threadId) void refetch({ cancelRefetch: false })
+    lastShown.current = threadId
+  }, [refetch, threadId])
   // What the presses under way show of it, each held over the thread as read until a read after its answer is shown.
   const [shows, setShows] = useState<ReadonlyMap<number, Showing>>(new Map())
   // The messages taken back from the queue, out of it at once, until a read of each says so.
@@ -914,6 +924,32 @@ export const useTask = (threadId: string): TaskModel => {
         },
         images,
       ),
+    setGoal: (control, start, restore) =>
+      act(
+        async () => {
+          try {
+            const lead = start === undefined ? undefined : startOf(threadId, start)
+            await client.setThreadGoal({
+              threadId,
+              control,
+              ...(lead === undefined
+                ? {}
+                : {
+                    lead: {
+                      agentId: lead.agentId,
+                      ...(lead.model === undefined ? {} : { model: lead.model }),
+                      ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                    },
+                  }),
+            })
+          } catch (failure) {
+            restore?.()
+            throw failure
+          }
+        },
+        presses.act,
+        { setting: 'goal', show: (task) => ({ ...task, goal: nextGoal(task.goal ?? null, control) }) },
+      ),
     sendNow: (body, images) =>
       shown(
         body,
@@ -971,7 +1007,11 @@ export const useTask = (threadId: string): TaskModel => {
         if (!sent && taken) unsent?.()
       })
     },
-    interrupt: () => act(() => client.interrupt(threadId)),
+    interrupt: () =>
+      act(() => client.interrupt(threadId), presses.act, {
+        setting: 'goal',
+        show: (task) => ({ ...task, goal: nextGoal(task.goal ?? null, { action: 'pause' }) }),
+      }),
     compact: () => act(() => client.compact(threadId)),
     tryAgain: () => act(() => client.tryAgain(threadId)),
     choose: async (choice) => {
@@ -1005,7 +1045,11 @@ export const useTask = (threadId: string): TaskModel => {
     },
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
-    stop: () => onTask((taskId) => client.stopTask(taskId)),
+    stop: () =>
+      onTask((taskId) => client.stopTask(taskId), presses.act, {
+        setting: 'goal',
+        show: (task) => ({ ...task, goal: nextGoal(task.goal ?? null, { action: 'pause' }) }),
+      }),
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),

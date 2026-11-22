@@ -150,6 +150,9 @@ export const text = {
   },
   /** The checks that failed: by name while there are two at most, else how many. */
   failing: (names: ReadonlyArray<string>) => (names.length > 2 ? `${names.length} failed` : `Failed: ${names.join(', ')}`),
+  /** Checks its host doesn't require that failed (#1117): nothing held back by them. */
+  optional: (names: ReadonlyArray<string>) =>
+    names.length > 2 ? `${names.length} optional checks failed` : `Optional, failed: ${names.join(', ')}`,
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
   /** A review or triage bot's words (code-hosts § Review and triage bots): passed to the lead as findings where the project trusts it, else not, with a way to. */
@@ -541,7 +544,10 @@ function ArrivalView({
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
-  const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
+  const optional =
+    arrival.kind === 'checks' && arrival.optional !== undefined && arrival.optional.length > 0 ? text.optional(arrival.optional) : null
+  const failing = arrival.kind === 'checks' && arrival.failing.length > 0 ? text.failing(arrival.failing) : null
+  const body = arrival.kind === 'checks' ? [failing, optional].filter((one) => one !== null).join('. ') || null : arrival.text
   const from = arrival.from ?? ''
   const foot = arrival.outsider ? (
     <>

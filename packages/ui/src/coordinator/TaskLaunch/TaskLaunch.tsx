@@ -546,7 +546,9 @@ export interface TaskLaunchProps {
   /** Makes a branch its list doesn't have, from the default branch, for it to work toward; without it, only one listed. */
   onCreateBranch?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
-  onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
+  onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void | Promise<boolean>
+  /** An explicit launch choice needs to change before the task can start. */
+  startDisabled?: boolean
   /**
    * Still being drafted: it shows as the coordinator writes it, with no
    * choices yet and Hold its only action. Its end, without `end`, isn't
@@ -605,6 +607,7 @@ export function TaskLaunch({
   onTowardChange,
   onCreateBranch,
   onStart,
+  startDisabled = false,
   drafting,
   onPlan,
   onDiscard,
@@ -626,9 +629,16 @@ export function TaskLaunch({
     onScreen.current = true
   }, [])
   const start = () => {
-    if (started || drafting !== undefined) return
+    if (started || drafting !== undefined || startDisabled) return
     setStarted(true)
-    onStart(steps, end)
+    const attempt = onStart(steps, end)
+    if (attempt !== undefined)
+      void attempt.then(
+        (accepted) => {
+          if (!accepted) setStarted(false)
+        },
+        () => setStarted(false),
+      )
   }
   const startWhenDue = useEffectEvent(start)
   // Waiting for other tasks, it runs no clock of its own: it starts once they merge.
@@ -652,8 +662,8 @@ export function TaskLaunch({
   const [announced, setAnnounced] = useState(false)
   if (seen && !announced) setAnnounced(true)
   const when = (() => {
+    if (due || started) return t.starting
     if (held) return t.held
-    if (due) return t.starting
     if (seen || startsAt !== undefined) return t.startsIn(left)
     return t.startsAfterSeen(left)
   })()
@@ -807,7 +817,7 @@ export function TaskLaunch({
                     )}
                     <MenuSeparator />
                     {waitsFor.length === 1 || blocker.onStopWaiting === undefined ? (
-                      <MenuItem icon="play" onSelect={start}>
+                      <MenuItem icon="play" onSelect={start} disabled={startDisabled || started}>
                         {t.startWithout}
                       </MenuItem>
                     ) : (
@@ -984,7 +994,9 @@ export function TaskLaunch({
               })()}
             </span>
             {held ? (
-              <Button onClick={start}>{t.start}</Button>
+              <Button onClick={start} disabled={startDisabled || started}>
+                {t.start}
+              </Button>
             ) : (
               <Button variant="quiet" onClick={() => setHeld(true)}>
                 {t.hold}
@@ -1022,7 +1034,9 @@ export function TaskLaunch({
                 {t.hold}
               </Button>
             )}
-            <Button onClick={start}>{held ? t.start : t.startNow}</Button>
+            <Button onClick={start} disabled={startDisabled || started}>
+              {held ? t.start : t.startNow}
+            </Button>
             {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
           </div>
         )}

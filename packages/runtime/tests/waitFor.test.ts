@@ -20,6 +20,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { controlGoal, readGoal } from '../src/threadGoals'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, hosted, HOST, notices, onTestClock, repository, runtime, turns, until, withWork } from './support'
 
@@ -100,6 +101,36 @@ const ready = (projectId: ProjectId, taskId: string) =>
   })
 
 describe('a lead waiting for an external condition', () => {
+  it.effect('keeps an active goal waiting without spending a round while a step watches an external condition', () => {
+    const gate = holds()
+    return onTestClock(
+      Effect.gen(function* () {
+        const task = yield* planned(repository())
+        const now = yield* Clock.currentTimeMillis
+        assert.include(
+          yield* callTool(task.access, 'wait_for', {
+            reason: 'Check the deployment before verifying it',
+            conditions: [{ kind: 'time', at: new Date(now + 30_000).toISOString() }],
+          }),
+          'Althar is watching',
+        )
+        const { goal } = yield* controlGoal(task.threadId, { action: 'set', objective: 'Confirm the deployment is healthy' })
+        assert.include(goal, { status: 'active', waiting: true, rounds: 0 })
+        yield* (yield* Sessions).kickGoal(task.threadId, goal?.revision ?? 0)
+        gate.open('[lead:slowly]')
+        yield* idle(task.threadId)
+        yield* TestClock.adjust(Duration.seconds(10))
+        assert.lengthOf(yield* turns(task.threadId), 1)
+        assert.include(yield* readGoal(task.threadId), { status: 'active', waiting: true, rounds: 0 })
+        yield* controlGoal(task.threadId, { action: 'pause' })
+        yield* TestClock.adjust(Duration.seconds(30))
+        yield* ready(task.projectId, task.taskId)
+        assert.lengthOf(yield* turns(task.threadId), 2)
+        assert.include(yield* readGoal(task.threadId), { status: 'paused', waiting: false, rounds: 0 })
+      }).pipe(Effect.provide(withQueries(':memory:', { holds: gate }))),
+    )
+  })
+
   it.effect('yields its agent place, stays Running without reminders, and resumes once at the requested time', () => {
     const gate = holds()
     return onTestClock(

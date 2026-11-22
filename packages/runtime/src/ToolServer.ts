@@ -11,6 +11,8 @@ import { Context, Effect, Exit, Layer } from 'effect'
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
+import { singleTypes } from './toolSchemas'
+import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
@@ -96,7 +98,14 @@ export class ToolServer extends Context.Service<
     /** The port it listens on, on this computer only: what no canvas may reach (ADR-104). */
     readonly port: number
     /** The server a session is given, and how to take it back. */
-    grant(access: ToolAccess): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
+    grant(
+      access: ToolAccess,
+      prepare?: Effect.Effect<void, ToolRefused>,
+    ): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
+    mountWorkerServer(
+      server: Extract<McpServer, { type: 'http' }>,
+      workerPort: number,
+    ): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> } | null>
     /**
      * Adds tools to a role, or to several, replacing any of the same name. Each service that owns tools adds them once it is
      * built. Leads and the coordinator share one tool set (ADR-097): a tool is defined once and served to both, and reads
@@ -113,7 +122,8 @@ export class ToolServer extends Context.Service<
     ToolServer,
     Effect.gen(function* () {
       const errands = yield* Errands
-      const grants = new Map<string, ToolAccess>()
+      const grants = new Map<string, { readonly access: ToolAccess; readonly prepare?: Effect.Effect<void, ToolRefused> }>()
+      const mounts = workerMcpMounts()
       const roles = new Map<ToolRole, ReadonlyArray<Tool>>([
         ['coordinator', errandTools(errands)],
         ['lead', errandTools(errands)],
@@ -123,11 +133,13 @@ export class ToolServer extends Context.Service<
 
       const respond = async (req: IncomingMessage, res: ServerResponse) => {
         const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]
-        const access = token === undefined ? undefined : grants.get(token)
-        if (access === undefined) {
+        if (req.url === WORKER_MCP_PATH) return mounts.serve(token, req, res)
+        const grant = token === undefined ? undefined : grants.get(token)
+        if (grant === undefined) {
           res.writeHead(401).end()
           return
         }
+        const { access, prepare } = grant
         const tools = roles.get(access.role) ?? []
         const server = new Server({ name: 'althar', version: '1.0.0' }, { capabilities: { tools: {} } })
         // Why this session may not call a tool, by its role's guards; null where it may.
@@ -149,7 +161,7 @@ export class ToolServer extends Context.Service<
             tools: allowed.map((tool) => ({
               name: tool.name,
               description: tool.description,
-              inputSchema: tool.input as { type: 'object' },
+              inputSchema: singleTypes(tool.input) as { type: 'object' },
             })),
           }
         })
@@ -169,6 +181,7 @@ export class ToolServer extends Context.Service<
             ).catch(() => undefined)
           const exit = await Effect.runPromiseExit(
             Effect.gen(function* () {
+              if (prepare !== undefined) yield* prepare
               const current: ToolAccess = { ...access, ...(yield* errands.turn(access)) }
               return tool.kind === 'asked-for'
                 ? yield* errands.execute(tool.name, current, yield* tool.action(input, current))
@@ -227,10 +240,15 @@ export class ToolServer extends Context.Service<
 
       return ToolServer.of({
         port,
-        grant: (access) =>
+        mountWorkerServer: (server, workerPort) =>
+          Effect.sync(() => {
+            const mounted = mounts.grant(server, workerPort)
+            return mounted === null ? null : { server: mounted.server, revoke: Effect.sync(mounted.revoke) }
+          }),
+        grant: (access, prepare) =>
           Effect.sync(() => {
             const token = randomBytes(24).toString('hex')
-            grants.set(token, access)
+            grants.set(token, { access, ...(prepare === undefined ? {} : { prepare }) })
             return {
               server: { type: 'http', name: 'althar', url, headers: { Authorization: `Bearer ${token}` } },
               revoke: Effect.sync(() => void grants.delete(token)),

@@ -68,6 +68,29 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     await page.keyboard.type('echo "typed in Althar" > from-the-terminal.txt\n', { delay: 10 })
     await expect.poll(() => existsSync(join(repo, 'from-the-terminal.txt'))).toBe(true)
     expect(readFileSync(join(repo, 'from-the-terminal.txt'), 'utf8')).toBe('typed in Althar\n')
+    if (process.platform !== 'win32') {
+      const path = join(repo, 'meeting\\notes.txt')
+      writeFileSync(path, 'Read from the dropped file\n')
+      const input = await page.evaluateHandle(() => {
+        const element = document.createElement('input')
+        element.type = 'file'
+        element.hidden = true
+        document.body.append(element)
+        return element
+      })
+      await input.setInputFiles(path)
+      const dataTransfer = await page.evaluateHandle((element) => {
+        const transfer = new DataTransfer()
+        for (const file of element.files ?? []) transfer.items.add(file)
+        element.remove()
+        return transfer
+      }, input)
+      await page.keyboard.type('cat ')
+      await drawer(page).locator('.althar-terminal').dispatchEvent('drop', { dataTransfer })
+      await page.keyboard.type('> copied-terminal-file.txt\n')
+      const copied = join(repo, 'copied-terminal-file.txt')
+      await expect.poll(() => (existsSync(copied) ? readFileSync(copied, 'utf8') : null)).toBe('Read from the dropped file\n')
+    }
     await page.keyboard.type('printf "\\033[32mgreen\\033[0m and \\033[1mbold\\033[0m\\n"; ls\n', { delay: 5 })
     await expect(
       drawer(page)

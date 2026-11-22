@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Server, ServerCredentials, status, type MethodDefinition, type ServerDuplexStream } from '@grpc/grpc-js'
+import { runAgentMethod, type AgentWorkerPool } from './agentRuns.ts'
+import { agentToolsMethod, connectAgentTools } from './agentTools.ts'
+import { agentPreviewMethod } from './agentPreviews.ts'
 import {
   DiagnosticOutcome,
   DiagnosticLeaseSchema,
@@ -37,6 +40,7 @@ interface HomeWorkerTransport {
   readonly privateKeyPem: Buffer
   /** Look up a currently enrolled worker by SHA-256 of its verified certificate in DER format. */
   readonly workerForCertificate: (fingerprint: string) => string | undefined
+  readonly agentWorkers?: AgentWorkerPool
   readonly diagnostics?: {
     readonly cancellationRequested?: (workerId: string, attemptId: string, fence: string) => boolean
     readonly next: (workerId: string, supportsProjectCommands?: boolean) => Omit<DiagnosticOffer, '$typeName'> | undefined
@@ -76,7 +80,7 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
   const server = new Server({
     'grpc.max_receive_message_length': MAX_HELLO_BYTES,
     'grpc.max_send_message_length': MAX_HELLO_BYTES,
-    'grpc.max_concurrent_streams': 8,
+    'grpc.max_concurrent_streams': 12,
   })
   const connected = new Set<string>()
   server.addService(
@@ -272,6 +276,33 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
       },
     },
   )
+  const { agentWorkers } = home
+  if (agentWorkers !== undefined) {
+    server.addService(
+      { runAgent: runAgentMethod, agentTools: agentToolsMethod, agentPreview: agentPreviewMethod },
+      {
+        runAgent(call: ServerDuplexStream<Buffer, Buffer>) {
+          const peer = call.getAuthContext().sslPeerCertificate
+          if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
+          const fingerprint = workerCertificateFingerprint(peer.raw)
+          if (!home.workerForCertificate(fingerprint)) return fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
+          agentWorkers.connect(call, home.homeId, () => home.workerForCertificate(fingerprint))
+        },
+        agentTools(call: ServerDuplexStream<Buffer, Buffer>) {
+          const peer = call.getAuthContext().sslPeerCertificate
+          if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
+          const fingerprint = workerCertificateFingerprint(peer.raw)
+          connectAgentTools(call, agentWorkers, () => home.workerForCertificate(fingerprint))
+        },
+        agentPreview(call: ServerDuplexStream<Buffer, Buffer>) {
+          const peer = call.getAuthContext().sslPeerCertificate
+          if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
+          const fingerprint = workerCertificateFingerprint(peer.raw)
+          agentWorkers.connectPreview(call, () => home.workerForCertificate(fingerprint))
+        },
+      },
+    )
+  }
   try {
     const port = await new Promise<number>((resolve, reject) => {
       server.bindAsync(address, credentials, (error, bound) => {

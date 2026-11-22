@@ -6,7 +6,7 @@ import { join, parse } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { privateDirectory, readPrivate, removePrivate, writePrivate } from '../src/privateFiles'
-import { temporary } from './support'
+import { workerTestDirectory as temporary } from './workerTestFiles'
 
 vi.mock(import('node:fs/promises'), async (importOriginal) => {
   const actual = await importOriginal()
@@ -22,7 +22,7 @@ describe('private durable host files', () => {
     expect((await readPrivate(file, 10))?.toString()).toBe('first')
     expect(await writePrivate(file, 'second', true)).toBe(true)
     expect(readFileSync(file, 'utf8')).toBe('second')
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
     expect(readdirSync(root)).toEqual(['private'])
     await removePrivate(file, 10)
     await removePrivate(file, 10)
@@ -38,7 +38,7 @@ describe('private durable host files', () => {
     await expect(privateDirectory(parse(root).root, true)).rejects.toMatchObject({ code: 'UnsafePermissions' })
     mkdirSync(directory, { mode: 0o755 })
     await privateDirectory(directory, true)
-    expect(statSync(directory).mode & 0o777).toBe(0o700)
+    if (process.platform !== 'win32') expect(statSync(directory).mode & 0o777).toBe(0o700)
     const file = join(root, 'file')
     writeFileSync(file, '')
     await expect(privateDirectory(file)).rejects.toMatchObject({ code: 'UnsafePermissions' })

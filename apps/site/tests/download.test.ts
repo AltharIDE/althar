@@ -102,6 +102,7 @@ const UA = {
   android: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
   windows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   linux: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  chromeOs: 'Mozilla/5.0 (X11; CrOS x86_64 16093.62.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
   odd: 'curl/8.4.0',
 }
 
@@ -109,13 +110,20 @@ interface Browser {
   ua: string
   /** Chromium says its chip through userAgentData; the others have none. */
   arch?: 'arm' | 'x86'
+  bitness?: '32' | '64'
   touches?: number
   search?: string
 }
 
 /** A browser's window and navigator, as the lookup reads them. */
-function browse({ ua, arch, touches = 0, search = '' }: Browser) {
-  const userAgentData = arch && { getHighEntropyValues: () => Promise.resolve({ architecture: arch, bitness: '64' }) }
+function browse({ ua, arch, bitness = '64', touches = 0, search = '' }: Browser) {
+  const userAgentData = arch && {
+    getHighEntropyValues: (hints: string[]) =>
+      Promise.resolve({
+        architecture: hints.includes('architecture') ? arch : undefined,
+        bitness: hints.includes('bitness') ? bitness : undefined,
+      }),
+  }
   vi.stubGlobal('navigator', { userAgent: ua, maxTouchPoints: touches, userAgentData })
   vi.stubGlobal('window', { location: { search } })
 }
@@ -226,6 +234,22 @@ describe('findDownload', () => {
     expect(await (await lookup())()).toBeNull()
     api({ assets: WITH_WINDOWS })
     expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-0.2.0-x64-setup.exe'), other: null })
+  })
+
+  it('sends a Chromebook to the releases page without asking the API', async () => {
+    browse({ ua: UA.chromeOs, arch: 'x86' })
+    const fetch = api({ assets: SHIPPED })
+    expect(await (await lookup())()).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Linux', UA.linux.replace('x86_64', 'i686')],
+    ['Windows', UA.windows.replace('; Win64; x64', '')],
+  ])('sends 32-bit %s to the releases page', async (_, ua) => {
+    browse({ ua, arch: 'x86', bitness: '32' })
+    api({ assets: WITH_WINDOWS })
+    expect(await (await lookup())()).toBeNull()
   })
 
   it('sends a phone or a desktop-mode iPad to the releases page without asking the API', async () => {

@@ -57,6 +57,9 @@ export interface Reading {
 
 /** The variable that says whose work a process is. */
 export const WORK = 'ALTHAR_WORK'
+/** The exact run or agent session that started a process. */
+export const RUN = 'ALTHAR_RUN'
+export const WORKER = 'ALTHAR_WORKER'
 
 /** Althar itself, as a piece of work: the app, its windows and the runtime. */
 export const ALTHAR = 'althar'
@@ -438,12 +441,12 @@ export const readMachine = (platform: NodeJS.Platform = process.platform, lean =
 const BATCH = 500
 
 /**
- * Whose work each of `pids` carries in its environment (`ALTHAR_WORK`), by
+ * Whose work each of `pids` carries in its environment, by
  * pid, for those that carry one: from /proc on Linux, from the reader on a
  * Mac where it is built, from `ps` otherwise.
  */
 export const marksOf =
-  (platform: NodeJS.Platform = process.platform) =>
+  (platform: NodeJS.Platform = process.platform, name = WORK) =>
   (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap<number, string>> =>
     Effect.gen(function* () {
       if (pids.length === 0) return new Map()
@@ -453,7 +456,7 @@ export const marksOf =
           await Promise.all(
             pids.map(async (pid) => {
               const text = await readFile(`/proc/${pid}/environ`, 'latin1').catch(() => null)
-              const value = text === null ? null : valueInEnviron(text, WORK)
+              const value = text === null ? null : valueInEnviron(text, name)
               if (value !== null) values.set(pid, value)
             }),
           )
@@ -465,11 +468,11 @@ export const marksOf =
       for (let from = 0; from < pids.length; from += BATCH) {
         const batch = pids.slice(from, from + BATCH).map(String)
         if (reader !== null) {
-          const text = yield* Effect.promise(() => runReader(reader, [WORK, ...batch]))
+          const text = yield* Effect.promise(() => runReader(reader, [name, ...batch]))
           for (const [pid, value] of valuesOfReader(text ?? '')) values.set(pid, value)
         } else {
           const text = yield* output('ps', ['-wwE', '-o', 'pid=,command=', '-p', batch.join(',')], true)
-          for (const [pid, value] of valuesOfPs(text ?? '', WORK)) values.set(pid, value)
+          for (const [pid, value] of valuesOfPs(text ?? '', name)) values.set(pid, value)
         }
       }
       return values

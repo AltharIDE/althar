@@ -160,6 +160,36 @@ describe('what is kept between reports', () => {
     expect((await run(post(formOf()), { linear, cache, fetch })).response.status).toBe(201)
     expect(operationsOf(linear)).toEqual(['ReportTeam', 'ReportLabel', 'ReportTeam', 'ReportLabel', 'ReportIssueCreate'])
   })
+
+  it('shares one setup for concurrent reports that need a new label', async () => {
+    const linear = makeFakeLinear()
+    const cache: SetupCache = new Map()
+    const bothAllowed = Promise.withResolvers<void>()
+    let reports = 0
+    const env = envOf({
+      REPORTS_PER_INSTALL: {
+        limit: async () => {
+          reports += 1
+          if (reports === 2) bothAllowed.resolve()
+          await bothAllowed.promise
+          return { success: true }
+        },
+      },
+    })
+    const results = await Promise.all([run(post(formOf()), { linear, cache, env }), run(post(formOf()), { linear, cache, env })])
+    expect(results.map(({ response }) => response.status)).toEqual([201, 201])
+    expect(operationsOf(linear)).toEqual(['ReportTeam', 'ReportLabel', 'ReportLabelCreate', 'ReportIssueCreate', 'ReportIssueCreate'])
+  })
+
+  it('retries a failed setup on the next report', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const linear = makeFakeLinear({ label: 'team' })
+    const cache: SetupCache = new Map()
+    const unavailable: Fetch = async () => new Response(null, { status: 503 })
+
+    expect((await run(post(formOf()), { linear, cache, fetch: unavailable })).response.status).toBe(502)
+    expect((await run(post(formOf()), { linear, cache })).response.status).toBe(201)
+  })
 })
 
 /** A fetch that answers `operation` (or the storage's PUT) with `answer`, and passes the rest to the fake. */

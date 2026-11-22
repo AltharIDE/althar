@@ -19,6 +19,22 @@ flowchart LR
 
 One profile is one persistent home owned by one person. A server can run separate profiles/units; no server-wide organization or tenant model is implied. Home, actor and device identities come from the shared runtime. Projects, approvals, commands, receipts and reconciliation remain there. This app imports only public package APIs and does not implement a second scheduler, API or permission model. Clients disconnect independently of the host scope. Shutdown closes runtime resources before zeroing the in-memory vault key. Restart reconciles interrupted work through the existing runtime; it does not replay external effects as if they had never happened.
 
+## Agent execution on workers
+
+The home keeps task and approval authority. An operator grants an enrolled worker access to a project, and the worker advertises the providers its own operator has configured. A held plan can select an eligible Linux worker for its lead. The selected worker lives in the plan’s durable parameters. The worker uses its own provider account.
+
+A separate mutual TLS stream carries the workspace, agent session and execution lease. The home reserves the worker and workspace in its private ledger before sending a start. The worker records the systemd control group before letting the provider run. After a disconnect, the same worker journal must confirm that group has stopped before the home releases the reservation.
+
+The home sends a Git bundle of an isolated task worktree. Before a turn finishes or an Althar tool acts, the home checks its current Git tree and receives the worker’s new commits and working files. The tool bridge reaches the session’s loopback MCP endpoint using its existing role token. A checkout that needs recovery stays on the worker.
+
+The standalone service and the Desktop utility process use the same worker
+listener, enrollment ledger and execution adapter in the runtime. Each
+listener belongs to the active home identity and the profile that owns it.
+Desktop loads the transport when its profile has a worker configuration.
+The application can keep serving its local projects if an optional worker
+listener fails to start. The local CLI checks the running home's identity
+and project list before writing an enrollment grant.
+
 ## Storage and secrets
 
 `configuration.ts` stores version 1 configuration and refuses automatic worktree relocation or replacement of missing storage. `vault.ts` stores version 1 metadata, a key fingerprint, a random vault id and AES-256-GCM envelopes. Each secret uses a fresh 96-bit nonce; additional authenticated data binds format version, vault and secret name. Secret plaintext is limited to 1 MiB. Invalid/tampered ciphertext is unreadable, not silently absent. Initialization can create a random 32-byte key only before vault metadata exists. A missing/wrong key, desktop ciphertext without host metadata, unsafe ownership or permission modes fail closed. Changes to persisted formats need explicit versioned migration and recovery.

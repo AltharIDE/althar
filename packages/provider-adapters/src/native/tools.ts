@@ -280,7 +280,7 @@ const stdio = async (
     throw error
   })
   const writer = child.stdin.getWriter()
-  let stopped = false
+  let closing: Promise<void> | undefined
   const transport: Transport = {
     onclose: undefined,
     onerror: undefined,
@@ -305,7 +305,7 @@ const stdio = async (
             }
           }
         } catch (error) {
-          if (!stopped) transport.onerror?.(error instanceof Error ? error : new Error('MCP transport failed.'))
+          if (closing === undefined) transport.onerror?.(error instanceof Error ? error : new Error('MCP transport failed.'))
         } finally {
           reader.releaseLock()
           await transport.close()
@@ -317,11 +317,8 @@ const stdio = async (
     send: async (message) => {
       await writer.write(new TextEncoder().encode(`${JSON.stringify(message)}\n`))
     },
-    close: async () => {
-      if (stopped) return
-      stopped = true
-      await Effect.runPromise(Scope.close(scope, Exit.void))
-    },
+    // The session abort, explicit close and EOF can all meet here. Each waits for the same process shutdown.
+    close: () => (closing ??= Effect.runPromise(Scope.close(scope, Exit.void))),
   }
   return transport
 }

@@ -42,7 +42,7 @@ const overview: HomesOverview = {
     local: { live: true, list: [{ id: 'prj_althar', name: 'althar', ink: 'clay', working: 0, yours: 0 }] },
     [home.homeId]: { live: true, list: [{ id: 'prj_ledger', name: 'ledger', ink: 'moss', working: 2, yours: 1 }] },
   },
-  opened: { [home.id]: Date.now() - 40 * 60_000 },
+  opened: {},
 }
 const fixture = () => {
   const listeners = new Set<(state: HomeState) => void>()
@@ -308,6 +308,19 @@ const manage = (at: ReturnType<typeof fixture>, given: HomesOverview = overview,
   return { close, view }
 }
 
+it('opens security key setup from the current paired home and says where it opened', async () => {
+  const at = fixture()
+  const enrollApprovalKey = vi.fn(async () => {})
+  const here: HomeState = { ...remote, current: { kind: 'https', home: paired } }
+  const homes = { ...at.homes, enrollApprovalKey }
+  const result = manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
+  await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key' }))
+  expect(enrollApprovalKey).toHaveBeenCalledOnce()
+  expect(await screen.findByText('Security key setup is open in your browser.')).not.toBeNull()
+  expect(result.close).not.toHaveBeenCalled()
+})
+
 it('shows each home by its projects, live while its window is connected, and opens one there', async () => {
   const at = fixture()
   const { close } = manage(at)
@@ -338,6 +351,7 @@ it('shows a resting home’s projects quietly, as last read, with when it was la
   const at = fixture()
   manage(at, {
     ...overview,
+    opened: { [home.id]: Date.now() - 40 * 60_000 },
     windows: { local: 'local' },
     projects: {
       ...overview.projects,

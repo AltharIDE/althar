@@ -85,10 +85,11 @@ export const microphoneToUse = (chosen: Microphone | null, there: ReadonlyArray<
 }
 
 /** The microphones there are, again as one comes or goes; `refresh` reads them again, as once the system names them. */
-export const useMicrophones = (): { readonly microphones: ReadonlyArray<Microphone>; readonly refresh: () => void } => {
+export const useMicrophones = (enabled = true): { readonly microphones: ReadonlyArray<Microphone>; readonly refresh: () => void } => {
   const [microphones, setMicrophones] = useState<ReadonlyArray<Microphone>>([])
   const [reads, setReads] = useState(0)
   useEffect(() => {
+    if (!enabled) return
     const devices = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices
     if (devices?.enumerateDevices === undefined) return
     let live = true
@@ -109,6 +110,6 @@ export const useMicrophones = (): { readonly microphones: ReadonlyArray<Micropho
       live = false
       devices.removeEventListener?.('devicechange', read)
     }
-  }, [reads])
+  }, [enabled, reads])
   return { microphones, refresh: () => setReads((n) => n + 1) }
 }

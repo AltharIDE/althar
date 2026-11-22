@@ -320,6 +320,10 @@ function First({
 
   // Where its code comes from: a folder, as this computer has them, or a clone, or a new repository, as a new project's page has them.
   const services = useServices()
+  const { host } = services
+  useEffect(() => {
+    if (firstRun || made !== null) host.welcomeUsage?.('step', step)
+  }, [firstRun, host, made, step])
   const store = draftsOf(services.client)
   const draft = useSyncExternalStore(store.subscribe, store.get)
   // The welcome's own draft, for a clone or a new repository: it goes with the welcome, so no New project tab is left behind.
@@ -344,6 +348,7 @@ function First({
     void (
       folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
     ).then(async (one) => {
+      if (firstRun) host.welcomeUsage?.('project', way, one === null ? 'not_created' : 'created')
       if (one === null) return
       // Never long: a look that takes more than a moment leaves the step out rather than hold the welcome up.
       await Promise.race([elsewhere.load(one.id), new Promise((done) => setTimeout(done, LOOK_MOST))])
@@ -356,6 +361,7 @@ function First({
     if (made === null) return
     welcome.end()
     onProject(made.id)
+    host.welcomeUsage?.('completed')
   }
 
   // ⌘N chooses a folder, ⌘↵ makes the project, on its step, as the screen says; Ctrl off a Mac. Keys typed into an account's
@@ -378,7 +384,6 @@ function First({
   })
 
   const { preferences, set } = usePreferences()
-  const { host } = useServices()
   const list = connections.list
   const hostConnected =
     list?.connections.some((connection) => {

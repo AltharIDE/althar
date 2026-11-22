@@ -97,6 +97,12 @@ import { statements as broughtIn } from './0092_brought_in'
 import { statements as runnableTask } from './0093_runnable_task'
 import { statements as presetTunings } from './0094_preset_tunings'
 import { statements as sessionsByAgent } from './0095_sessions_by_agent'
+import { statements as homeEvents } from './0096_home_events'
+import { statements as finderIndex } from './0097_finder_index'
+import { statements as threadGoals } from './0098_thread_goals'
+import { statements as threadItemDates } from './0099_thread_item_dates'
+import { statements as setupsByThread } from './0100_setups_by_thread'
+import { statements as boundedHomeSearch } from './0101_bounded_home_search'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -211,6 +217,12 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0093_runnable_task', statements: runnableTask },
   { key: '0094_preset_tunings', statements: presetTunings },
   { key: '0095_sessions_by_agent', statements: sessionsByAgent },
+  { key: '0096_home_events', statements: homeEvents },
+  { key: '0097_finder_index', statements: finderIndex },
+  { key: '0098_thread_goals', statements: threadGoals },
+  { key: '0099_thread_item_dates', statements: threadItemDates },
+  { key: '0100_setups_by_thread', statements: setupsByThread },
+  { key: '0101_bounded_home_search', statements: boundedHomeSearch },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

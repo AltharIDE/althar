@@ -314,7 +314,8 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
   const listenWhenHere = useRef(false)
   const chosen = useChosenMicrophone()
-  const { microphones, refresh: refreshMicrophones } = useMicrophones()
+  const [inputMenuOpen, setInputMenuOpen] = useState(false)
+  const { microphones, refresh: refreshMicrophones } = useMicrophones(inputMenuOpen || chosen !== null || phase === 'listening')
   const input = microphoneToUse(chosen, microphones)
 
   const refresh = async () => {
@@ -689,6 +690,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       inputs: microphones,
       input: microphones.some((m) => m.id === input) ? input : null,
       onChooseInput: chooseInput,
+      onInputMenuOpenChange: setInputMenuOpen,
       onStart: () => void press(),
       onStop: stop,
     },

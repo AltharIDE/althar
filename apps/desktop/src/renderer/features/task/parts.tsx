@@ -1,11 +1,19 @@
 import { useState } from 'react'
 
-import type { BoardTask, ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import {
+  type BoardTask,
+  type CheckFailures,
+  type ChangeSummary,
+  checkFailuresOf,
+  type ThreadItem,
+  type ThreadSnapshot,
+} from '@althar/contracts'
 import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
 import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
+import { addressOf } from '../../shared/running'
 import s from './parts.module.css'
 import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
@@ -21,6 +29,8 @@ import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 export const partsText = {
   worktree: 'Worktree',
+  copyWorker: 'Save a local copy',
+  copyingWorker: 'Saving local copy…',
   local: 'Local',
   /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
   toLocal: 'Move to Local',
@@ -50,15 +60,18 @@ export const partsText = {
   checks: 'Checks',
   title: 'Title',
   into: 'Into',
-  checksSaid: (checks: NonNullable<ChangeSummary['checks']>) =>
-    checks.outcome === 'none'
+  /** Only the checks its host requires fail it; an optional one's failure is said after, quietly (#1117). */
+  checksSaid: (checks: NonNullable<ChangeSummary['checks']>, counted: CheckFailures) => {
+    const optional = counted.optional.length === 0 ? '' : `, ${counted.optional.length} optional failed`
+    return checks.outcome === 'none'
       ? 'None'
-      : checks.failed > 0
-        ? `${checks.passed} pass, ${checks.failed} ${checks.failed === 1 ? 'fails' : 'fail'}`
+      : counted.failed > 0
+        ? `${checks.passed} pass, ${counted.failed} ${counted.failed === 1 ? 'fails' : 'fail'}${optional}`
         : checks.running > 0
-          ? `${checks.running} running`
-          : `${checks.passed} pass`,
-  stands: (change: ChangeSummary, standing: MergeStanding | null = null) =>
+          ? `${checks.running} running${optional}`
+          : `${checks.passed} pass${optional}`
+  },
+  stands: (change: ChangeSummary, standing: MergeStanding | null = null, counted: CheckFailures = checkFailuresOf(change)) =>
     change.state === 'merged' || standing === 'merged'
       ? 'Merged'
       : change.state === 'closed'
@@ -67,7 +80,7 @@ export const partsText = {
           ? 'Merging'
           : standing === 'queued' || change.queued === true
             ? 'In the merge queue'
-            : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
+            : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : counted.outcome === 'failed' ? ` · ${counted.failed} ${counted.failed === 1 ? 'check fails' : 'checks fail'}` : counted.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
   merge: 'Merge',
   /** One of several changes, in its own row: where it stands without a pull request yet. */
   noPullRequest: 'No pull request yet',
@@ -129,6 +142,7 @@ export interface PartsActions {
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
+  readonly copyWorker?: { readonly pending: boolean; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
@@ -241,6 +255,16 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 icon: 'external' as const,
               },
             ]),
+        ...(act.copyWorker === undefined
+          ? []
+          : [
+              {
+                label: act.copyWorker.pending ? t.copyingWorker : t.copyWorker,
+                onClick: act.copyWorker.open,
+                disabled: act.copyWorker.pending,
+                variant: 'quiet' as const,
+              },
+            ]),
         ...(act.removeFolder === undefined
           ? []
           : [
@@ -294,17 +318,20 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     })
   }
   for (const change of task.changes) {
-    const failing = change.state === 'open' && change.checks?.outcome === 'failed'
+    // Only the checks its host requires: an optional one's failure neither fails the row nor holds Merge back (#1117).
+    const counted = checkFailuresOf(change)
+    const failing = change.state === 'open' && counted.outcome === 'failed'
     const merge = act.mergeStanding?.(change.url) ?? null
     const ready =
       merge === null &&
       act.mergeAwaits?.(change.url) !== true &&
       change.state === 'open' &&
       !change.draft &&
-      change.checks?.outcome === 'passed' &&
+      counted.outcome === 'passed' &&
       change.queued !== true
     const line = lines.find((one) => one.url === change.url)
-    const standing = change.change?.waitsFor === undefined || merge !== null ? t.stands(change, merge) : t.waitsFor(change.change.waitsFor)
+    const standing =
+      change.change?.waitsFor === undefined || merge !== null ? t.stands(change, merge, counted) : t.waitsFor(change.change.waitsFor)
     parts.push({
       id: `pr:${change.url}`,
       icon: 'pr',
@@ -324,7 +351,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       facts: [
         [t.title, change.title],
         ...(line === undefined ? [] : lineFacts(line)),
-        ...(change.checks === null ? [] : [[t.checks, t.checksSaid(change.checks)] as const]),
+        ...(change.checks === null ? [] : [[t.checks, t.checksSaid(change.checks, counted)] as const]),
         ...(change.target === undefined ? [] : [[t.into, <code key="i">{change.target}</code>] as const]),
       ],
       ...(failing && change.checks !== null
@@ -333,7 +360,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
               <PartLines
                 log
                 lines={change.checks.list
-                  .filter((check) => check.state === 'failed')
+                  .filter((check) => check.state === 'failed' && !counted.optional.includes(check.name))
                   .map((check) => [`✗ ${check.name}${check.summary === null ? '' : `\n  ${check.summary}`}`, ''] as const)}
               />
             ),
@@ -356,7 +383,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           : []),
         ...(line === undefined ? [] : shipOf(line)),
         ...(failing && change.checks !== null
-          ? [{ label: t.fixIt, onClick: () => act.askLead(t.fixAsk(change.checks?.failing ?? [], change.short)) }]
+          ? [{ label: t.fixIt, onClick: () => act.askLead(t.fixAsk(counted.failing, change.short)) }]
           : []),
         { label: t.onHost(host), onClick: () => act.openUrl(change.url), variant: 'quiet' as const, icon: 'external' as const },
       ],
@@ -409,10 +436,10 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     parts.push({
       id: `run:${launch.id}`,
       icon: address === null ? 'play' : 'globe',
-      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : address.replace(/^https?:\/\//, '').replace(/\/$/, '')),
+      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : addressOf(address)),
       detail: t.running,
       tone: 'live',
-      facts: address === null ? [] : [[t.answersAt, <code key="a">{address}</code>]],
+      facts: address === null ? [] : [[t.answersAt, <code key="a">{launch.workerId === undefined ? address : addressOf(address)}</code>]],
       actions: [
         ...(address === null ? [] : [{ label: t.open, onClick: () => act.openUrl(address), icon: 'external' as const }]),
         { label: t.stop, onClick: () => act.stopLaunch(launch.id), variant: 'quiet' as const, end: true },

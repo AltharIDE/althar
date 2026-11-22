@@ -79,8 +79,10 @@ test('a step whose lead is signed out asks at once, with Sign in again first', a
     await startTask(page, 'Fix the heading', '[lead:signed-out]')
     // Its card asks at once, Open task becoming Answer: pressed once it has, rather than whichever it is when looked at.
     await page.getByRole('button', { name: /^Answer/ }).click()
-    await toConversation(page)
     const thread = page.getByRole('region', { name: 'Thread' })
+    const face = page.getByRole('radiogroup', { name: 'Face' })
+    await expect(thread.or(face).filter({ visible: true }).first()).toBeVisible()
+    if (!(await thread.isVisible())) await toConversation(page)
     const call = thread.getByRole('button', { name: 'Sign in again' })
     await expect(call).toBeVisible()
     // Signed out, its lead can't be told anything.

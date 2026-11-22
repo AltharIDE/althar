@@ -123,6 +123,58 @@ describe('a task’s parts where it has little or several kinds of work', () => 
     if (checks?.outcome === 'none') expect(part?.facts).toContainEqual(['Checks', 'None'])
   })
 
+  describe('where only a check its host doesn’t require failed (#1117)', () => {
+    const site = checks({
+      outcome: 'failed',
+      passed: 2,
+      failed: 1,
+      total: 3,
+      failing: ['Workers Builds: althar-site'],
+      list: [
+        { name: 'check', state: 'passed', summary: null },
+        { name: 'test', state: 'passed', summary: null },
+        { name: 'Workers Builds: althar-site', state: 'failed', summary: 'Build failed' },
+      ],
+    })
+    const needs = (required: ReadonlyArray<string>) => [{ kind: 'checks', state: 'met', have: 2, need: 2, required }] as const
+    const rowOf = (pr: ReturnType<typeof change>, act = actions()) =>
+      partsOf(thread({ worktree: null, changes: [pr] }), act).find((one) => one.id.startsWith('pr:'))
+
+    it('reads as passing, offers Merge, and says the optional failure quietly, with no Fix it', () => {
+      const act = actions()
+      const part = rowOf(change({ draft: false, checks: site, needs: needs(['check', 'test']) }), act)
+      expect(part?.detail).toBe('Open · checks pass')
+      expect(part?.tone).toBe('you')
+      expect(part?.facts).toContainEqual(['Checks', '2 pass, 1 optional failed'])
+      expect(part?.actions?.map((one) => one.label)).not.toContain(partsText.fixIt)
+      expect(part?.actions?.some((one) => one.label.startsWith('Merge'))).toBe(true)
+      expect(part?.body).toBeUndefined()
+    })
+
+    it('still fails on a required check, asking the lead to fix only that one', () => {
+      const act = actions()
+      const both = checks({
+        ...site,
+        failed: 2,
+        failing: ['test', 'Workers Builds: althar-site'],
+        list: [
+          { name: 'check', state: 'passed', summary: null },
+          { name: 'test', state: 'failed', summary: null },
+          { name: 'Workers Builds: althar-site', state: 'failed', summary: null },
+        ],
+      })
+      const part = rowOf(change({ draft: false, checks: both, needs: needs(['check', 'test']) }), act)
+      expect(part?.detail).toBe('Open · 1 check fails')
+      expect(part?.tone).toBe('bad')
+      part?.actions?.find((one) => one.label === partsText.fixIt)?.onClick?.()
+      expect(act.askLead).toHaveBeenCalledWith(partsText.fixAsk(['test'], 'PR'))
+    })
+
+    it('counts every check where its host names none', () => {
+      expect(rowOf(change({ draft: false, checks: site }))?.detail).toBe('Open · 1 check fails')
+    })
+  })
+
   it('offers a Local checkout’s move back, and lets a waiting move be called off', () => {
     const move = vi.fn(),
       dropMove = vi.fn(),

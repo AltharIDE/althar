@@ -1,7 +1,7 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { availableParallelism, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 
 import { budget } from '@althar/testing/budget'
 import { type ElementHandle, expect, type Page, test } from '@playwright/test'
@@ -16,20 +16,29 @@ import { launch, openFirstProject } from './support'
  * modelsBrowser.test.tsx's to show, with a runtime that answers only when told.
  */
 
-/**
- * Keeps every core busy, as the person's tasks' builds and tests do, until stopped: each started once it resolves. Where
- * one can't start, those that did are stopped before it says so, as the caller never has them to stop.
- */
-const busy = async (): Promise<ReadonlyArray<ChildProcess>> => {
-  const load = Array.from({ length: availableParallelism() }, () => spawn('yes', [], { stdio: 'ignore' }))
-  try {
-    await Promise.all(load.map((one) => new Promise((started, failed) => one.once('spawn', started).once('error', failed))))
-  } catch (error) {
-    load.forEach((one) => one.kill())
-    throw error
-  }
-  return load
-}
+// Threads die with the Playwright worker, including when a test times out and Playwright kills the worker.
+const loaded = test.extend<{ cpuLoad: () => Promise<number> }>({
+  cpuLoad: async ({ browserName: _browserName }, provideLoad) => {
+    const workers: Array<Worker> = []
+    try {
+      await provideLoad(async () => {
+        await Promise.all(
+          Array.from({ length: availableParallelism() }, () => {
+            const worker = new Worker(
+              'const { parentPort } = require("node:worker_threads"); parentPort.postMessage("ready"); for (;;) {}',
+              { eval: true },
+            )
+            workers.push(worker)
+            return new Promise<void>((ready, failed) => worker.once('message', () => ready()).once('error', failed))
+          }),
+        )
+        return workers.length
+      })
+    } finally {
+      await Promise.all(workers.map((worker) => worker.terminate()))
+    }
+  },
+})
 
 /** Opens the full model picker from a preset's lead, in Settings › Tasks › Presets. */
 const openBrowser = async (page: Page) => {
@@ -80,12 +89,11 @@ const took = async (page: Page) => {
   })
 }
 
-test('the full model picker shows a default effort and a model switched off at once, with every core busy', async () => {
+loaded('the full model picker shows a default effort and a model switched off at once, with every core busy', async ({ cpuLoad }) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   mkdirSync(join(home, 'profile'), { recursive: true })
   writeFileSync(join(home, 'profile', 'desktop.json'), JSON.stringify({ appearance: 'light' }))
   const { electronApp, page } = await launch(home, {}, { scheme: 'system' })
-  let load: ReadonlyArray<ChildProcess> = []
   try {
     await page.setViewportSize({ width: 1180, height: 900 })
     await openFirstProject(electronApp, page, repository(home))
@@ -97,7 +105,7 @@ test('the full model picker shows a default effort and a model switched off at o
     const effort = browser.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })
     const was = (await effort.textContent()) ?? ''
 
-    load = await busy()
+    const cores = await cpuLoad()
 
     await arm(await effort.elementHandle().then((one) => one!), 'text', '[role="option"]')
     await effort.click()
@@ -116,7 +124,7 @@ test('the full model picker shows a default effort and a model switched off at o
 
     // One frame is at most about 16 ms at 60 Hz.
     process.stdout.write(
-      `Under load (${load.length} cores busy): default effort shown ${effortMs} ms after the press, switched off ${offMs} ms after\n`,
+      `Under load (${cores} cores busy): default effort shown ${effortMs} ms after the press, switched off ${offMs} ms after\n`,
     )
     expect(effortMs).toBeLessThan(100)
     expect(offMs).toBeLessThan(100)
@@ -134,7 +142,6 @@ test('the full model picker shows a default effort and a model switched off at o
       })
     }).toPass({ timeout: budget.medium })
   } finally {
-    load.forEach((one) => one.kill())
     await electronApp.close()
   }
 })
