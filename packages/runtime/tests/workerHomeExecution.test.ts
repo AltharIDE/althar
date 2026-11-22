@@ -8,8 +8,8 @@ import type { AgentWorkerPool, WorkerAgentProcess } from '@althar/worker-protoco
 import { assert, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { workerExecution } from '../src/agentExecution'
-import { temporary } from './support'
+import { workerExecution } from '../src/workerHome/execution'
+import { workerTestDirectory as temporary } from './workerTestFiles'
 
 const request = (worktree: string) => ({
   workerId: 'wrk_' + '1'.repeat(32),

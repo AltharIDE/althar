@@ -14,6 +14,24 @@ import { attachmentFailure, runAttachment } from './attachment'
 import { ATTACH_USAGE, parseAttachmentOptions } from './attachmentOptions'
 import { terminalWrite } from './terminalWrite'
 
+if (process.argv[2] === 'workers') {
+  const { runWorkers, WORKER_USAGE } = await import('./workers')
+  try {
+    const command = runWorkers(process.argv.slice(3), {
+      profile: defaultProfile(process.env, process.platform),
+      worktrees: defaultWorktrees(process.env),
+    })
+    const output = await Effect.runPromise(command)
+    process.stdout.write(output + '\n')
+  } catch (error) {
+    process.stderr.write(`${attachmentFailure(error)}\n\n${WORKER_USAGE}\n`)
+    process.exitCode = 1
+  }
+  await new Promise<void>((resolve) => process.stdout.write('', () => resolve()))
+  await new Promise<void>((resolve) => process.stderr.write('', () => resolve()))
+  process.exit(process.exitCode ?? 0)
+}
+
 if (process.argv[2] === 'attach' || process.argv[2] === 'inspect') {
   const stop = new AbortController()
   const disconnect = () => stop.abort()

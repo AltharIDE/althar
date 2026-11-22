@@ -1,11 +1,8 @@
+import type { ProjectWorker } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type { Effect, Scope } from 'effect'
 
-export interface ProjectWorker {
-  readonly workerId: string
-  readonly providers: ReadonlyArray<string>
-  readonly busy: boolean
-}
+export type { ProjectWorker } from '@althar/contracts'
 
 export interface WorkerExecution {
   readonly transport: Extract<Transport, { _tag: 'Remote' }>

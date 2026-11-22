@@ -14,6 +14,7 @@ import {
   databaseIn,
   Failures,
   Folders,
+  Instance,
   MachineLoad,
   listenLocalApi,
   Secrets,
@@ -42,6 +43,7 @@ import { pagesWith } from './pages'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
+import { workersForProfile } from './workers'
 
 /*
  * The runtime, in Electron's utility process (ADR-003). It opens the profile,
@@ -302,6 +304,8 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
+  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot })
+  const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
   const context = yield* startup(
     'services',
     Layer.build(
@@ -309,6 +313,7 @@ const program = Effect.gen(function* () {
         fake === undefined
           ? {
               ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
+              ...workerOptions,
               clientIds,
               ...(copilotClientId ? { copilotClientId } : {}),
               ...(githubApp === undefined ? {} : { githubApp }),
@@ -318,7 +323,7 @@ const program = Effect.gen(function* () {
               modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
               ...fakeHost,
             }
-          : { ...options, ...fake },
+          : { ...options, ...fake, ...workerOptions },
       ),
     ).pipe(
       Effect.catchTags({
@@ -337,10 +342,19 @@ const program = Effect.gen(function* () {
     threads: number
   }>`SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM threads) AS threads`
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
+  const workerPort =
+    workerHome === undefined
+      ? undefined
+      : yield* workerHome
+          .listen(Context.get(context, Instance).homeId)
+          .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
   // The ports the runtime listens on, which no canvas may reach (ADR-104).
-  parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
+  parent.postMessage({
+    type: 'listening',
+    ports: [Context.get(context, ToolServer).port, ...(workerPort === undefined ? [] : [workerPort])],
+  })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // The log says when the runtime's thread ran late, and which window's calls took long (lag.ts), packaged or not.
   if (lagLogged()) yield* watchLag()

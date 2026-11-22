@@ -631,7 +631,7 @@ export function ProjectView({
     agents: model.agents,
     agentName,
     workers: model.workers,
-    onStart: (planId, workerId) => void model.startPlan(planId, workerId),
+    onStart: (planId, workerId) => model.startPlan(planId, workerId),
     onHold: (planId) => void model.holdPlan(planId),
     onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
     onReopen: (taskId) => void model.reopenTask(taskId),
@@ -1268,7 +1268,9 @@ export function ProjectView({
                           {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                           team={{
                             projectId,
-                            start: (planId) => model.startPlan(planId),
+                            start: async (planId) => {
+                              await model.startPlan(planId)
+                            },
                             hold: (planId) => model.holdPlan(planId),
                             change: setTeamFor,
                           }}

@@ -1,17 +1,18 @@
-import { chmod, mkdir, symlink } from 'node:fs/promises'
+import { chmod, link, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { AgentRunOutcome, DiagnosticOutcome, type AgentRunExit, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
 import { describe, expect, it } from 'vitest'
 
-import { openWorkerStore } from '../src/workerStore'
-import { temporary } from './support'
+import { openWorkerStore as open } from '../src/workerHome/store'
+import { workerTestDirectory as temporary } from './workerTestFiles'
 
 const homeId = `home_${'1'.repeat(32)}`
 const otherHome = `home_${'2'.repeat(32)}`
 const fingerprint = 'a'.repeat(64)
 const otherFingerprint = 'b'.repeat(64)
+const openWorkerStore = (profile: string, home: string, now = () => 10_000) => open(profile, home, now)
 const result = (attemptId: string, fence: string, outcome: DiagnosticOutcome = DiagnosticOutcome.SUCCEEDED): DiagnosticResult => ({
   $typeName: 'althar.worker.v1.DiagnosticResult',
   attemptId,
@@ -267,11 +268,15 @@ describe('the private worker ledger', () => {
     await expect(openWorkerStore(profile, 'invalid')).rejects.toThrow('initialized home')
     const first = await openWorkerStore(profile, homeId)
     first.close()
-    await chmod(join(profile, 'workers', 'ledger.sqlite'), 0o644)
-    await expect(openWorkerStore(profile, homeId)).rejects.toThrow('private file')
+    const ledger = join(profile, 'workers', 'ledger.sqlite')
+    if (process.platform !== 'win32') {
+      await chmod(ledger, 0o644)
+      await expect(openWorkerStore(profile, homeId)).rejects.toThrow('private file')
+      await chmod(ledger, 0o600)
+    }
     const other = temporary()
     await mkdir(join(other, 'workers'), { mode: 0o700 })
-    await symlink(join(profile, 'workers', 'ledger.sqlite'), join(other, 'workers', 'ledger.sqlite'))
+    await link(ledger, join(other, 'workers', 'ledger.sqlite'))
     await expect(openWorkerStore(other, homeId)).rejects.toThrow('private file')
   })
 })

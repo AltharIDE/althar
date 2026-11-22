@@ -3,6 +3,7 @@ import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -82,7 +83,7 @@ import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
 import { beforeFirstStep, checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
-import { towardChoicesOf } from './towards'
+import { planTowardChoices } from './towards'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
@@ -432,20 +433,6 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
-/**
- * What a plan card offers to work toward (ADR-093). Only a proposed plan,
- * which a hold stops, can have a branch made for it: one accepted and waiting
- * for a free agent could start while the host makes it, toward the old one,
- * so it is pointed only at a branch the remote has, which changes at once.
- */
-const choicesOf = (taskId: string, proposed: boolean) =>
-  Effect.map(towardChoicesOf(taskId), (choices) => {
-    if (choices === null) return {}
-    if (proposed) return choices
-    const { repositoryId: _made, ...rest } = choices
-    return rest
-  })
-
 /** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
 const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
@@ -3052,6 +3039,9 @@ export class Queries extends Context.Service<
                 : {
                     id: task.planId,
                     steps: teamSteps,
+                    ...(task.planState === 'proposed' && config.workers !== undefined
+                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
@@ -3089,7 +3079,7 @@ export class Queries extends Context.Service<
                           ...(task.planState === 'proposed' || (yield* planWaits(taskId))
                             ? {
                                 localTaken: yield* Effect.andThen(noteUnsure('who works Local'), localTakenFor(taskId)),
-                                ...(yield* choicesOf(taskId, task.planState === 'proposed')),
+                                ...(yield* planTowardChoices(taskId, task.planState === 'proposed')),
                               }
                             : { toward: task.toward }),
                         }),

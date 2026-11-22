@@ -40,7 +40,10 @@ class Gate:
     def workflow(self, pr, head, name, needs_smoke=False):
         newest = None
         skipped = None
-        for run in self.pages(f'actions/workflows/{name}.yml/runs?head_sha={head}&event=pull_request', 'workflow_runs'):
+        runs = self.pages(f'actions/workflows/{name}.yml/runs?head_sha={head}&event=pull_request', 'workflow_runs')
+        # A push and a ready-for-review event can have the same creation time.
+        # In that case GitHub can return the cancelled predecessor first.
+        for run in sorted(runs, key=lambda run: (run['created_at'], run['id']), reverse=True):
             newest = newest or run
             jobs = list(self.pages(f'actions/runs/{run["id"]}/jobs', 'jobs'))
             self.log(pr, run, name)
