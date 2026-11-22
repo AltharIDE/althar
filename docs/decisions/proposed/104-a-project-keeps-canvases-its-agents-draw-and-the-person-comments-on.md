@@ -743,8 +743,10 @@ who never open Althar.
 - **The project keeps one place for artifacts:** a folder in one of its
   repositories, how they go in (a pull request of their own, or straight to
   the default branch), and whether each new version is committed. It is a
-  setting under Code and issues. The first save makes it: Althar's pick
-  is the first repository's design folder, with why.
+  setting under Code and issues, which the coordinator and leads change
+  too, with change_settings (`project/code.artifacts`), as any setting
+  (ADR-097). The first save makes it: Althar's pick is the first
+  repository's design folder, with why.
 - **Save to repo, in the canvas's head, opens on that place** with the
   canvas's own folder named in place, and Save. Somewhere else opens the
   repository's folders as a tree, read at the default branch's head, and

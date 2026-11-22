@@ -1,4 +1,4 @@
-import type { ElectronApplication, Locator, Page } from '@playwright/test'
+import { type ElectronApplication, expect, type Locator, type Page } from '@playwright/test'
 
 import { still } from './support'
 
@@ -41,10 +41,41 @@ export const inCanvas = <T>(electronApp: ElectronApplication, code: string) =>
   }, code) as Promise<T>
 
 /**
+ * Waits until the canvas's page and each board in it have loaded, with their pictures and fonts, nothing in them is
+ * moving but what never ends, and a frame has been drawn since. A frame not yet given its own page still holds the
+ * blank one it starts with, already complete; one from another origin can't be seen into, and isn't waited for.
+ */
+const canvasStill = (electronApp: ElectronApplication) =>
+  expect
+    .poll(() =>
+      inCanvas<boolean>(
+        electronApp,
+        `(async () => {
+          const docs = [document]
+          for (const frame of document.querySelectorAll('iframe')) {
+            const doc = frame.contentDocument
+            if (doc === null) continue
+            if (doc.URL === 'about:blank' || doc.readyState !== 'complete') return false
+            docs.push(doc)
+          }
+          for (const doc of docs) {
+            if (doc.fonts.status !== 'loaded' || [...doc.images].some((one) => !one.complete)) return false
+            const moving = doc.getAnimations().some((one) => one.playState === 'running' && one.effect?.getComputedTiming().endTime !== Infinity)
+            if (moving) return false
+          }
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+          return true
+        })()`,
+      ),
+    )
+    .toBe(true)
+
+/**
  * A picture of a part of the window as the person sees it: the canvas is a view of its own over the window, which the
- * window's own screenshot leaves out, so its picture is laid where it is first.
+ * window's own screenshot leaves out, so its picture is laid where it is first, once it is still.
  */
 export const shoot = async (page: Page, electronApp: ElectronApplication, of: Locator | Page, path: string) => {
+  if ((await canvasView(electronApp)) !== null) await canvasStill(electronApp)
   const view = await canvasView(electronApp, true)
   if (view !== null)
     await page.evaluate((drawn) => {

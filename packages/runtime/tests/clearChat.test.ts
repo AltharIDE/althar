@@ -26,6 +26,9 @@ import { callTool, items, repository, runtime, until } from './support'
 
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
+/** The whole record, however long: the fake agent's first answer echoes the coordinator's brief, which grows. */
+const WHOLE = Number.POSITIVE_INFINITY
+
 const opened = Effect.gen(function* () {
   const projects = yield* Projects
   const coordinator = yield* Coordinator
@@ -158,9 +161,13 @@ describe('clearing the coordinator’s view', () => {
       assert.strictEqual(Option.getOrUndefined(before)?.sessionId, Option.getOrUndefined(yield* sessions.running(threadId))?.sessionId)
 
       // Everything before the mark is still there to read: the record, the tool and the brief of a handover.
-      const record = yield* transcript(threadId, 30_000)
+      const record = yield* transcript(threadId, WHOLE)
       assert.include(record.text, '[person] First question')
-      assert.include(yield* callTool(access, 'read_thread', {}), '[person] First question')
+      // The tool reads its latest page first, and back from where it says, as an agent does.
+      const latest = yield* callTool(access, 'read_thread', {})
+      const back = /read_thread with before (\d+)/.exec(latest)?.[1]
+      const reached = back === undefined ? latest : `${yield* callTool(access, 'read_thread', { before: Number(back) })}\n${latest}`
+      assert.include(reached, '[person] First question')
       const handover = yield* handoverRecord({ projectId, threadId, modelOf: () => 'a model', working: () => false })
       assert.include(handover.sections.join('\n'), '[person] Second question')
     }).pipe(Effect.provide(withQueries())),
@@ -286,7 +293,7 @@ describe('forgetting the coordinator’s conversation', () => {
       // Nothing of what was said can be reached: not the thread, the tool, nor the record a brief reads.
       const kinds = (yield* items(threadId)).map((item) => item.kind)
       assert.deepStrictEqual(kinds.toSorted(), ['notice', 'task', 'task_ask'])
-      const record = yield* transcript(threadId, 30_000)
+      const record = yield* transcript(threadId, WHOLE)
       assert.notInclude(record.text, 'Zebra')
       assert.notInclude(yield* callTool(access, 'read_thread', {}), 'Zebra')
       assert.notInclude(

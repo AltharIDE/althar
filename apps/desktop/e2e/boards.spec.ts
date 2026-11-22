@@ -133,16 +133,12 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect
       .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('iframe')?.contentDocument?.querySelector('nav') != null`))
       .toBe(true)
-    // A board's frame is drawn a moment after its page loads: the picture waits for it.
-    await page.waitForTimeout(1_500)
     await shoot(page, electronApp, panel, 'test-results/boards-one.png')
 
     // Every page at once, a row each, from the pages menu, which opens over the boards.
     await pressControl(electronApp, '^Every board$')
     await pressControl(electronApp, '^Pages: ')
     await expect.poll(() => controlAt(electronApp, 'Every page')).not.toBeNull()
-    // The menu fades in, and the boards laid out again paint a moment after they load: the picture waits for both.
-    await page.waitForTimeout(1_200)
     await shoot(page, electronApp, panel, 'test-results/boards-pages-menu.png')
     await pressControl(electronApp, '^Every page')
     await expect.poll(() => frames(electronApp)).toBe(6)
@@ -188,7 +184,6 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
     await expect.poll(() => frames(electronApp)).toBe(4)
     await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
-    await page.waitForTimeout(1_000)
     await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
 
     // Save to repo, in the artifact's row, opens on the project's place for artifacts, the canvas's folder named in place; the
@@ -218,7 +213,7 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     }, into)
     await page.getByRole('button', { name: 'Download' }).click()
     await page.getByRole('menuitem', { name: /PNG, a board each/ }).click()
-    await expect.poll(() => pngsIn(into).length, { timeout: 60_000 }).toBe(7)
+    await expect.poll(() => pngsIn(into).length).toBe(7)
     const pngs = pngsIn(into)
     expect(pngs.map((one) => one.split('/').slice(-2).join('/'))).toEqual([
       'Directions/A present first.png',
@@ -238,7 +233,7 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.getByRole('button', { name: 'Download' }).click()
     await page.getByRole('menuitem', { name: /PDF, a page a board/ }).click()
     const pdf = join(into, 'gift-a-class.pdf')
-    await expect.poll(() => existsSync(pdf), { timeout: 60_000 }).toBe(true)
+    await expect.poll(() => existsSync(pdf)).toBe(true)
     expect(pagesOf(readFileSync(pdf))).toBe(7)
 
     // Back to every artifact: it is a card, with a picture of it as it was drawn.
@@ -266,7 +261,6 @@ test('a canvas of boards in dark, and in a narrow window', async () => {
     await expect.poll(() => controlsSay(electronApp)).toContain('1 of 7')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
     await expect.poll(() => frames(electronApp)).toBe(1)
-    await page.waitForTimeout(1_500)
     await shoot(page, electronApp, panel, 'test-results/boards-dark-one.png')
   } finally {
     await electronApp.close()

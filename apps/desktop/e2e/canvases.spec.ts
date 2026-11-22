@@ -281,7 +281,6 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(chat.getByText('Make the button calmer.')).toBeVisible()
     await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toHaveCount(0)
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
-    await page.waitForTimeout(1_500)
     await shoot(page, electronApp, page, 'test-results/canvas-artifact-chat.png')
 
     // Escape goes back to every artifact.

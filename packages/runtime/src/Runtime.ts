@@ -217,6 +217,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const signing = startupLayer('account-signins', AccountSignIns.layer).pipe(Layer.provideMerge(work))
   // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
   const automating = startupLayer('automations', Automations.layer).pipe(Layer.provideMerge(signing))
+  // Where a project's artifacts go in git and those saved there, which the canvases and the settings both change (ADR-104, ADR-097).
+  const saving = CanvasSaves.layer.pipe(Layer.provideMerge(automating))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
   // Leads whose work meets another running task's hear of it once (Overlaps.ts).
   // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
@@ -232,7 +234,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         PageTools.layer,
         ComputerTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
-        Canvases.layer.pipe(Layer.provideMerge(CanvasSaves.layer)),
+        Canvases.layer,
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
         Elsewhere.layer,
         MachineLoad.layer,
@@ -243,7 +245,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         finderIndex,
         // The skills an older Althar shipped come out of the person's store on the first start after it stopped.
         startupLayer('skills', shippedSkillsLayer),
-      ).pipe(Layer.provideMerge(automating)),
+      ).pipe(Layer.provideMerge(saving)),
     ),
     Layer.tap((services) => {
       const sessions = Context.get(services, Sessions)

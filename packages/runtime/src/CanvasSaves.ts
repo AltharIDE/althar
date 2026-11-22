@@ -162,13 +162,20 @@ const make = Effect.gen(function* () {
       return (yield* treeOf(repo)).folders
     })
 
+  /** The project's place for artifacts, where its setting names one in a repository it still has. */
+  const home = (projectId: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<Omit<ArtifactsHome, 'follow'> & { follow: number }>`
+        SELECT h.repository_id, b.display_name AS repository, h.folder, h.how, h.follow FROM artifacts_homes h
+        JOIN repository_bindings b ON b.id = h.repository_id AND b.detached_at IS NULL WHERE h.project_id = ${projectId}`
+      return row === undefined ? null : ({ ...row, follow: row.follow !== 0 } satisfies ArtifactsHome)
+    })
+
   const place = (projectId: string) =>
     Effect.gen(function* () {
       yield* projectOf(projectId)
-      const [home] = yield* sql<Omit<ArtifactsHome, 'follow'> & { follow: number }>`
-        SELECT h.repository_id, b.display_name AS repository, h.folder, h.how, h.follow FROM artifacts_homes h
-        JOIN repository_bindings b ON b.id = h.repository_id AND b.detached_at IS NULL WHERE h.project_id = ${projectId}`
-      if (home !== undefined) return { home: { ...home, follow: home.follow !== 0 }, guess: null } satisfies ArtifactsPlace
+      const kept = yield* home(projectId)
+      if (kept !== null) return { home: kept, guess: null } satisfies ArtifactsPlace
       const [repo] = yield* repos(projectId, null)
       if (repo === undefined) return { home: null, guess: null } satisfies ArtifactsPlace
       const existing = yield* treeOf(repo).pipe(
@@ -493,7 +500,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not resume canvas saves', cause))),
   )
 
-  return { saved, place, folders, setHome, save, stop, published }
+  return { saved, home, place, folders, setHome, save, stop, published }
 })
 
 export class CanvasSaves extends Context.Service<CanvasSaves, Effect.Success<typeof make>>()('@althar/runtime/CanvasSaves') {

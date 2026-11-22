@@ -11,6 +11,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { install } from '../../skills/tests/support'
+import { CanvasSaves } from '../src/CanvasSaves'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf } from '../src/plansAndReviews'
@@ -528,6 +529,39 @@ describe('each section of the settings, as agents change it', () => {
       yield* settings.undo((yield* lineIds(coordinator.threadId)).at(-1) ?? '')
       assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.role, 'frontend')
       assert.strictEqual((yield* lines(coordinator.threadId)).at(-1)?.state, 'undone')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('project/code sets where the project’s artifacts go, by its repository’s name, changing only what it names', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      const name = (yield* (yield* Projects).repositories(projectId))[0]?.name ?? ''
+      const saves = yield* CanvasSaves
+      const change = (artifacts: unknown) => callTool(coordinator, 'change_settings', { section: 'project/code', change: { artifacts } })
+      assert.isNull(yield* saves.home(projectId))
+      assert.match(yield* change({ how: 'main' }), /no place for artifacts yet: name the repository they go in/)
+      assert.match(yield* change({ repository: 'elsewhere' }), /^The project has no repository called elsewhere/)
+      // The first names its repository; the rest is as the first save would make it.
+      assert.match(yield* change({ repository: name, folder: 'docs/design/' }), /^Changed Code and issues: Artifacts/)
+      assert.deepStrictEqual(yield* saves.home(projectId), {
+        repositoryId: (yield* (yield* Projects).repositories(projectId))[0]?.id,
+        repository: name,
+        folder: 'docs/design/',
+        how: 'pr',
+        follow: true,
+      })
+      // A later one names only what it changes, and reads back as Settings shows it.
+      yield* change({ how: 'main', follow: false })
+      assert.deepInclude(yield* saves.home(projectId), { folder: 'docs/design/', how: 'main', follow: false })
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/code' }), 'docs/design/')
+      // Undo puts back what that one named; undoing the first takes the place away again.
+      const settings = yield* SettingsTools
+      const [first, second] = yield* lineIds(coordinator.threadId)
+      yield* settings.undo(second ?? '')
+      assert.deepInclude(yield* saves.home(projectId), { folder: 'docs/design/', how: 'pr', follow: true })
+      yield* settings.undo(first ?? '')
+      assert.isNull(yield* saves.home(projectId))
     }).pipe(Effect.provide(withQueries())),
   )
 
