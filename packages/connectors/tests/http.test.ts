@@ -49,6 +49,9 @@ it('turns HTML in host JSON and GraphQL errors into plain words and keeps the up
     messageOf(JSON.stringify({ error: 'Reference &lt;branch&gt; not found &amp; unavailable' }), 'Error'),
     'Reference <branch> not found & unavailable',
   )
+  for (const markup of ['<details>here</details>', '&lt;details&gt;here&lt;/details&gt;', '&lt;script&gt;ignored&lt;/script&gt;here'])
+    assert.strictEqual(messageOf(JSON.stringify({ message: `Denied ${markup}` }), 'Error'), 'Denied here')
+  assert.strictEqual(messageOf(JSON.stringify({ message: 'Reference <branch> not found' }), 'Error'), 'Reference <branch> not found')
   assert.strictEqual(messageOf(JSON.stringify({ message: 'a < b and c > d' }), 'Error'), 'a < b and c > d')
   assert.strictEqual(graphqlFailure('github', { message: '<b>Denied</b>' }, 200).message, 'Denied')
   for (const tag of ['script', 'style'])

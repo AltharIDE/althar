@@ -1,3 +1,4 @@
+import { plainError } from '@althar/connectors'
 import { BEFORE_SUFFIX, viewOfKey, type ScreenshotNow, type ScreenshotsOnChange } from '@althar/contracts'
 import { Schema } from 'effect'
 
@@ -23,6 +24,7 @@ export const EARLIER_KEPT = 24
 /** A screenshot the comment shows: its view, what it is called, its picture by digest, where the host serves it, and the commit it was of. */
 export const PostedShot = Schema.Struct({
   key: Schema.String,
+  name: Schema.optional(Schema.String),
   caption: Schema.String,
   digest: Schema.String,
   url: Schema.String,
@@ -111,19 +113,23 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
   const posting = postingOf(now, leftOut)
   const changed = kept === undefined || kept.commentId === null ? posting.length : changedBetween(posting, kept.shown)
   const shown = kept?.shown ?? []
+  const attempted = shown.filter((shot) => goes(posting, shot))
+  const missing = attempted.filter((shot) => shot.url === '')
+  const notUp = missing.map((shot) => shot.key)
+  // Older releases saved per-image notes twice, as rows and as a joined banner.
+  // Rebuild that banner from the rows still applicable to the current pictures.
+  const saved = kept?.failed
+  const oldNotes = shown
+    .filter((shot) => shot.url === '')
+    .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+    .join(' ')
   const failed =
-    kept?.failed ??
-    notUpWords(
-      shown.filter((shot) => shot.url === '' && goes(posting, shot)).map((shot) => ({ name: shot.caption, why: shot.why ?? shot.note })),
-      posting.length,
-    )
-  // Where the last try failed: each view going up whose picture the pull request doesn't show as it is now.
-  const notUp =
-    failed === null
-      ? []
-      : posting
-          .filter((shot) => !shown.some((was) => was.key === shot.key && was.digest === shot.digest && was.url !== ''))
-          .map((shot) => shot.key)
+    saved && saved !== oldNotes
+      ? plainError(saved, 600)
+      : notUpWords(
+          missing.map((shot) => ({ name: shot.name ?? shot.caption, why: shot.why ?? shot.note })),
+          attempted.length,
+        )
   return {
     standing: kept === undefined || kept.commentId === null ? 'unposted' : changed === 0 ? 'posted' : 'changed',
     changed,
@@ -151,7 +157,7 @@ export const notUpWords = (
   if (missing.length === 0) return null
   const names = missing.map((shot) => shot.name)
   const named = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
-  const whys = [...new Set(missing.map((shot) => shot.why ?? ''))].filter((why) => why !== '')
+  const whys = [...new Set(missing.map((shot) => plainError(shot.why ?? '')))].filter((why) => why !== '')
   const head =
     missing.length === of
       ? `${of === 1 ? `${named} didn’t go up` : `None of the ${of} screenshots went up`}`
@@ -200,8 +206,8 @@ const SHOWN_WIDTH = 720
 
 const pictureOf = (shot: PostedShot, width = SHOWN_WIDTH) =>
   shot.url === ''
-    ? plain(shot.note ?? 'Left out: this picture could not be uploaded.')
-    : `${shot.note ? `${plain(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
+    ? plain(plainError(shot.note ?? 'Left out: this picture could not be uploaded.'))
+    : `${shot.note ? `${plain(plainError(shot.note))}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
 
 /** How wide each picture of a Before | After table shows, so the two fit side by side. */
 const PAIRED_WIDTH = 356

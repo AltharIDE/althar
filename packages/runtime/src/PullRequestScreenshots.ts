@@ -59,9 +59,13 @@ export class PullRequestScreenshots extends Context.Service<
      * Puts the task's screenshots, as its Outputs show them now, in the
      * comment on its pull request at `url`, or writes that comment anew;
      * `leftOut` the views the person left out, kept from then on. Without
-     * it, those left out before stay out.
+     * it, those left out before stay out. Returns the reason any pictures were omitted, or null once all went up.
      */
-    post(input: { readonly taskId: string; readonly url: string; readonly leftOut?: ReadonlyArray<string> }): Effect.Effect<void, unknown>
+    post(input: {
+      readonly taskId: string
+      readonly url: string
+      readonly leftOut?: ReadonlyArray<string>
+    }): Effect.Effect<string | null, unknown>
     /**
      * Posts what changed on each open pull request of a project's tasks, or
      * of one task, where its rules post screenshots on their own: as the
@@ -291,6 +295,7 @@ export class PullRequestScreenshots extends Context.Service<
             const head = on.change.headSha
             const shown = posting.map((shot): PostedShot => ({
               key: shot.key,
+              name: shot.name,
               caption: shot.caption,
               digest: shot.digest,
               url: uploads[shot.digest] ?? '',
@@ -323,7 +328,8 @@ export class PullRequestScreenshots extends Context.Service<
             // A comment someone deleted isn't posted again only to say there is nothing to show.
             if (!updating && posting.length === 0) {
               yield* keep(on.linkId, on.projectId, { commentId: null, commentUrl: null, shown: [], earlier: [], leftOut, failed: null })
-              return yield* touchTask(input.taskId)
+              yield* touchTask(input.taskId)
+              return null
             }
             const comment = updating ? written.value : yield* on.host.reply(on.repository, on.change.number, { body, threadId: null })
             // An edit tells nobody: reviewers who reviewed since it was last written are told it changed, in a line.
@@ -341,12 +347,13 @@ export class PullRequestScreenshots extends Context.Service<
               leftOut,
               uploads,
               postedAt: new Date(comment.at).toISOString(),
-              failed: notUpWords(
-                posting.filter((shot) => uploads[shot.digest] === undefined).map((shot) => ({ name: shot.name, why: whys[shot.digest] })),
-                posting.length,
-              ),
+              failed: null,
             })
             yield* touchTask(input.taskId)
+            return notUpWords(
+              posting.filter((shot) => uploads[shot.digest] === undefined).map((shot) => ({ name: shot.name, why: whys[shot.digest] })),
+              posting.length,
+            )
           }).pipe(
             Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.fail(Cause.squash(cause)))),
             // A try that failed is said on the card, until one goes up: not that there was nothing to post, which is said as it is asked.
@@ -386,7 +393,13 @@ export class PullRequestScreenshots extends Context.Service<
             // Nothing to post, as every view is left out or none is kept, is 'unposted' with none changed; a posted comment it empties is 'changed'.
             if (standing.standing === 'posted' || (standing.standing === 'unposted' && standing.changed === 0)) continue
             // One that failed waits a while before it is tried again by itself.
-            if (!force && kept?.failed != null && Date.parse(kept.updatedAt) + Duration.toMillis(RETRY_AFTER) > clock) continue
+            if (
+              !force &&
+              kept !== undefined &&
+              standing.failed !== null &&
+              Date.parse(kept.updatedAt) + Duration.toMillis(RETRY_AFTER) > clock
+            )
+              continue
             yield* post({ taskId, url: one.change.url }).pipe(contained('Screenshots.sync', () => undefined))
           }
         })

@@ -38,11 +38,11 @@ export function ScreenshotsOnPullRequest({
 }) {
   const [open, setOpen] = useState(false)
   const [posting, setPosting] = useState(false)
-  const [failed, setFailed] = useState<string | null>(null)
+  const [failed, setFailed] = useState<{ message: string; snapshot: ChangeSummary['screenshots'] } | null>(null)
   const { screenshots } = change
   if (screenshots === undefined) return null
   // What went wrong pressing it, else why the last try failed, as the runtime kept it.
-  const error = failed ?? screenshots.failed
+  const error = failed?.snapshot === screenshots ? failed.message : screenshots.failed
   return (
     <PostScreenshots
       standing={screenshots.synced ? 'synced' : screenshots.standing}
@@ -66,7 +66,7 @@ export function ScreenshotsOnPullRequest({
         setFailed(null)
         void onPost(change.url, leftOut).then((said) => {
           setPosting(false)
-          setFailed(said)
+          setFailed(said === null ? null : { message: said, snapshot: screenshots })
           // Up: the sheet closes, and the line says it is.
           if (said === null) setOpen(false)
         })

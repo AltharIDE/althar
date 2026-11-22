@@ -1157,10 +1157,7 @@ export const useTask = (threadId: string): TaskModel => {
     postScreenshots: (url, leftOut) =>
       snapshot === null
         ? Promise.resolve(null)
-        : client.postScreenshots({ taskId: snapshot.task.id, url, leftOut }).then(
-            () => null,
-            (failure: unknown) => messageOf(failure),
-          ),
+        : client.postScreenshots({ taskId: snapshot.task.id, url, leftOut }).catch((failure: unknown) => messageOf(failure)),
     markAllReady: (urls) =>
       act(async () => {
         if (snapshot === null) return

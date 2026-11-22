@@ -723,7 +723,7 @@ export interface Client {
     readonly taskId: string
     readonly url: string
     readonly leftOut: ReadonlyArray<string>
-  }) => Promise<void>
+  }) => Promise<string | null>
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */

@@ -1,11 +1,12 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChangeSummary, Evidence, ScreenshotsOnChange, ThreadSnapshot } from '@althar/contracts'
 
 import { Outputs } from '../src/renderer/features/task/Outputs'
-import { change, fakeClient, items, snapshot } from './fixtures'
+import { useTask } from '../src/renderer/features/task/useTask'
+import { change, changed, fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -49,28 +50,27 @@ const task = (pr: Partial<ChangeSummary>): ThreadSnapshot =>
     },
   })
 
-const show = (snap: ThreadSnapshot, onPostScreenshots?: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>) => {
-  withServices(
-    <Outputs
-      snapshot={snap}
-      pending={false}
-      error={null}
-      onAccept={vi.fn()}
-      onMergeHere={vi.fn()}
-      onOpenChange={vi.fn()}
-      onPush={vi.fn()}
-      onMarkReady={vi.fn()}
-      onMarkAllReady={vi.fn()}
-      onOpenFile={vi.fn()}
-      onPushBranch={vi.fn()}
-      onConnect={vi.fn()}
-      onReplace={vi.fn()}
-      onBringIn={vi.fn()}
-      {...(onPostScreenshots === undefined ? {} : { onPostScreenshots })}
-    />,
-    fakeClient().client,
-  )
-}
+const outputs = (snap: ThreadSnapshot, onPostScreenshots?: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>) => (
+  <Outputs
+    snapshot={snap}
+    pending={false}
+    error={null}
+    onAccept={vi.fn()}
+    onMergeHere={vi.fn()}
+    onOpenChange={vi.fn()}
+    onPush={vi.fn()}
+    onMarkReady={vi.fn()}
+    onMarkAllReady={vi.fn()}
+    onOpenFile={vi.fn()}
+    onPushBranch={vi.fn()}
+    onConnect={vi.fn()}
+    onReplace={vi.fn()}
+    onBringIn={vi.fn()}
+    {...(onPostScreenshots === undefined ? {} : { onPostScreenshots })}
+  />
+)
+
+const show = (...args: Parameters<typeof outputs>) => withServices(outputs(...args), fakeClient().client)
 
 describe('a task’s screenshots on its pull request, from its Outputs', () => {
   it('posts what Outputs shows, leaving out what the person unticks, and closes once they’re up', async () => {
@@ -98,12 +98,24 @@ describe('a task’s screenshots on its pull request, from its Outputs', () => {
 
   it('marks the pictures that didn’t go up, and says which and why, where some went and some didn’t', async () => {
     const failed = '1 of 2 screenshots didn’t go up: A2.png. GitHub said: File type not allowed'
-    show(
-      task({ screenshots: standing({ standing: 'changed', changed: 1, commentUrl: `${URL}#issuecomment-9`, failed, notUp: ['A2'] }) }),
-      vi.fn(),
-    )
-    await userEvent.click(screen.getByRole('button', { name: /^Update PR #1/ }))
+    let current = task({ screenshots: standing() })
+    const fake = fakeClient({
+      getThread: vi.fn(async () => current),
+      postScreenshots: vi.fn(async () => failed),
+    })
+    function TaskOutputs() {
+      const model = useTask('th1')
+      return model.snapshot && outputs(model.snapshot, model.postScreenshots)
+    }
+    withServices(<TaskOutputs />, fake.client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Post to PR #1/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Post 2 to PR #1' }))
     expect(await screen.findByText(failed)).toBeTruthy()
+    current = task({
+      screenshots: standing({ standing: 'changed', changed: 1, commentUrl: `${URL}#issuecomment-9`, failed, notUp: ['A2'] }),
+    })
+    act(() => fake.emit(changed('task', 't1')))
+    await screen.findByRole('checkbox', { name: /Didn’t go up/ })
     // Still ticked to go, to try again: only the one that didn't go up says so.
     expect(screen.getByRole('checkbox', { name: 'Include A2 · The error line · Didn’t go up' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('checkbox', { name: 'Include A1 · The retry button' }).getAttribute('aria-checked')).toBe('true')

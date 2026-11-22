@@ -189,18 +189,21 @@ const wordsOf = (said: unknown): string => {
 /** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
 const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
-/** HTML's own elements, as a host's message may carry them escaped: `&lt;span class='btn-link'&gt;`. */
-const ESCAPED_ELEMENT =
-  /<\/?(?:a|abbr|b|br|code|div|em|font|h[1-6]|hr|i|img|kbd|li|ol|p|pre|small|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul)(?:\s[^<>]*|\s*\/?)>/gi
+// Only HTML element names: a host may also use angle brackets for a literal placeholder such as <branch>.
+const HTML_ELEMENTS = new Set(
+  (
+    'a abbr acronym address area article aside audio b base basefont bdi bdo big blockquote body br button canvas caption center cite code ' +
+    'col colgroup data datalist dd del details dfn dialog dir div dl dt em embed fieldset figcaption figure font footer form frame frameset ' +
+    'h1 h2 h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label legend li link main map mark marquee menu meta meter ' +
+    'nav noframes noscript object ol optgroup option output p param picture pre progress q rp rt ruby s samp script search section select ' +
+    'selectedcontent slot small source span strike strong style sub summary sup table tbody td template textarea tfoot th thead time title ' +
+    'tr track tt u ul var video wbr'
+  ).split(' '),
+)
 
-/**
- * Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text; what
- * decodes to one of HTML's own elements goes too, while a placeholder such as `<branch>` stays the host's words.
- */
-export const plainError = (value: string): string =>
+/** A host's message as plain text, including a message saved by an earlier version. */
+export const plainError = (value: string, maxLength = MESSAGE_KEPT): string =>
   value
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
-    .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^<>]*|\s*\/?)>/gi, ' ')
     .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code: string) => {
       const n = code[0]?.toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code)
       return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ''
@@ -209,10 +212,11 @@ export const plainError = (value: string): string =>
       /&(lt|gt|amp|quot|apos|nbsp);/gi,
       (_, name: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' })[name.toLowerCase()] ?? '',
     )
-    .replace(ESCAPED_ELEMENT, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
+    .replace(/<\/?([a-z][a-z0-9-]*)(?:\s[^<>]*|\s*\/?)>/gi, (tag, name: string) => (HTML_ELEMENTS.has(name.toLowerCase()) ? ' ' : tag))
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, MESSAGE_KEPT)
+    .slice(0, maxLength)
 
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
 const rawMessageOf = (body: string, fallback: string): string => {

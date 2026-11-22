@@ -6218,9 +6218,13 @@ const WorkApi = RpcGroup.make(
    * Puts the task's screenshots, as its Outputs show them now, in one comment
    * on its pull request at `url`, or writes that comment anew (ADR-077):
    * without the views `leftOut` names, which stay out of it from then on,
-   * whoever posts. Fails, saying why, where its host takes no pictures.
+   * whoever posts. Returns the reason any pictures were omitted, or null once all went up. Fails where the host takes no pictures.
    */
-  command('PostScreenshots', { taskId: Schema.String, url: Schema.String, leftOut: Schema.Array(Schema.String) }, Schema.Void),
+  command(
+    'PostScreenshots',
+    { taskId: Schema.String, url: Schema.String, leftOut: Schema.Array(Schema.String) },
+    Schema.NullOr(Schema.String),
+  ),
   /**
    * Adds an account to an agent: the folder a grant names, as another tool
    * made it, or, without one, a folder Althar makes, to sign in to.

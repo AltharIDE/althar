@@ -2582,21 +2582,38 @@ describe('GitHub’s pictures', () => {
     }),
   )
 
-  it.effect('says the bytes didn’t arrive, where GitHub calls a picture well under its limit too big', () =>
+  it.effect('explains GitHub’s size validation once for any picture below its stated limit', () =>
     Effect.gen(function* () {
       const { host, sent } = github([['POST', UPLOADS, tooBig]])
-      const shot = { ...picture, name: 'lead-01.png', bytes: new Uint8Array(150_000).fill(7) }
-      const error = yield* Effect.flip(host.uploadPicture!(repository, shot))
-      // What was sent was the picture, whole.
-      assert.strictEqual(sent[0]?.bytes?.byteLength, 150_000)
-      assert.strictEqual(error.reason, 'rejected')
-      assert.strictEqual(error.status, 422)
-      // No smaller copy would help: no limit to fit it under.
-      assert.isUndefined(error.uploadLimit)
-      assert.strictEqual(
-        error.message,
-        "GitHub refused lead-01.png as too big, though it is 150 KB, under its 10 MB limit: the picture's bytes didn't reach it. Try again.",
-      )
+      for (const [name, length] of [
+        ['lead-01.png', 150_000],
+        ['lead-02.png', 174_841],
+      ] as const) {
+        const shot = { ...picture, name, bytes: new Uint8Array(length).fill(7) }
+        const error = yield* Effect.flip(host.uploadPicture!(repository, shot))
+        assert.strictEqual(sent.at(-1)?.bytes?.byteLength, length)
+        assert.strictEqual(error.reason, 'rejected')
+        assert.strictEqual(error.status, 422)
+        assert.strictEqual(error.uploadLimit, 10_000_000)
+        assert.strictEqual(error.message, 'The picture is below the stated size limit. Its bytes may not have reached GitHub. Try again.')
+      }
+    }),
+  )
+
+  it.effect('preserves other size messages and their classification even when the picture is smaller', () =>
+    Effect.gen(function* () {
+      for (const [status, reason] of [
+        [413, 'rejected'],
+        [403, 'forbidden'],
+        [503, 'unreachable'],
+      ] as const) {
+        const message = 'Maximum attachment size is 10 MB'
+        const { host } = github([['POST', UPLOADS, { status, json: { message } }]])
+        const error = yield* Effect.flip(host.uploadPicture!(repository, { ...picture, bytes: new Uint8Array(150_000) }))
+        assert.strictEqual(error.reason, reason)
+        assert.strictEqual(error.message, message)
+        assert.strictEqual(error.uploadLimit, 10_000_000)
+      }
     }),
   )
 

@@ -138,8 +138,6 @@ describe('where the screenshots stand', () => {
       leftOut: [],
       commentUrl: 'https://github.test/meridian/api/pull/1#issuecomment-91',
       failed: 'GitHub refused.',
-      // The try failed: the view taken again isn't on the pull request as it is now.
-      notUp: ['A1'],
     })
   })
 
@@ -156,6 +154,25 @@ describe('where the screenshots stand', () => {
     assert.isNull(notUpWords([], 4))
     // Nothing failed: nothing is marked, however much changed.
     assert.isUndefined(standingOf([now('A1', 'z')], kept({ shown: [posted('A1', 'a')] }), false).notUp)
+  })
+
+  it('keeps a failed upload with the attempted view and digest when Outputs change', () => {
+    const shown = [posted('A', 'a'), { ...posted('B', 'b'), url: '', name: 'b.png', why: 'Access denied.' }]
+    const added = standingOf([now('A', 'a'), now('B', 'b'), now('C', 'c')], kept({ shown }), false)
+    assert.deepStrictEqual(added.notUp, ['B'])
+    assert.strictEqual(added.failed, '1 of 2 screenshots didn’t go up: b.png. Access denied.')
+    const replaced = standingOf([now('A', 'a'), now('B', 'new')], kept({ shown }), false)
+    assert.isUndefined(replaced.notUp)
+    assert.isNull(replaced.failed)
+  })
+
+  it('shows the saved GitHub failure and earlier upload notes in plain text', () => {
+    const error =
+      "Validation Failed: size Yowza that's a big file. <span class='drag-and-drop-error-info'> <span class='btn-link'>Try again</span> with a file size less than 10MB.</span>"
+    const plain = "Validation Failed: size Yowza that's a big file. Try again with a file size less than 10MB."
+    assert.strictEqual(standingOf([], kept({ failed: error }), true).failed, plain)
+    const earlier = [{ ...posted('A', 'a'), url: '', note: error }]
+    assert.include(commentBody({ shown: [], earlier, head: null }), plain)
   })
 
   it('leave out only views Outputs still shows', () => {

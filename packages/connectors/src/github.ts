@@ -571,10 +571,6 @@ export const tail = (log: string): string => {
 /** What every call to GitHub's API carries: its media type, and the version of the API it is written against. */
 const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
 
-/** A file's size in a person's words, as GitHub counts it: 150 KB, 10 MB. */
-const sizeOf = (bytes: number) =>
-  bytes >= 1_000_000 ? `${Math.round(bytes / 100_000) / 10} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`
-
 /** What GitHub says of a picture it took for a repository's conversations: where it is served from. */
 const AssetAnswer = Schema.Struct({ url: Schema.String })
 
@@ -2063,13 +2059,17 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         const query = new URLSearchParams({ name: picture.name, content_type: picture.mediaType, repository_id: repository.id })
         const asset = yield* http.upload(AssetAnswer, `${uploads}?${query.toString()}`, picture.bytes, 'application/octet-stream').pipe(
           Effect.mapError((error) =>
-            // Too big, of one well under its limit: what arrived wasn't the picture, so a smaller one wouldn't help.
-            error.uploadLimit !== undefined && picture.bytes.byteLength < error.uploadLimit
+            // GitHub also returns this validation for an empty body. The response alone can't tell us what arrived.
+            error.status === 422 &&
+            error.uploadLimit !== undefined &&
+            picture.bytes.byteLength < error.uploadLimit &&
+            error.message.startsWith("Validation Failed: size Yowza that's a big file.")
               ? new ConnectorFailed({
-                  product,
-                  reason: 'rejected',
-                  ...(error.status === undefined ? {} : { status: error.status }),
-                  message: `GitHub refused ${picture.name} as too big, though it is ${sizeOf(picture.bytes.byteLength)}, under its ${sizeOf(error.uploadLimit)} limit: the picture's bytes didn't reach it. Try again.`,
+                  product: error.product,
+                  reason: error.reason,
+                  status: error.status,
+                  uploadLimit: error.uploadLimit,
+                  message: 'The picture is below the stated size limit. Its bytes may not have reached GitHub. Try again.',
                 })
               : error,
           ),

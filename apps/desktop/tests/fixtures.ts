@@ -1416,7 +1416,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
-    postScreenshots: vi.fn(async () => {}),
+    postScreenshots: vi.fn(async () => null),
     trustBot: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     skipReview: vi.fn(async () => {}),
