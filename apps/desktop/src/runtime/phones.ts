@@ -64,6 +64,21 @@ const readJson = (path: string) =>
     }
   })
 
+/** Whether phones are let in, as kept across restarts. */
+export const savedSetting = (profile: string) =>
+  readJson(join(profile, SETTING)).pipe(
+    Effect.map((setting) => typeof setting === 'object' && setting !== null && 'on' in setting && setting.on === true),
+  )
+
+/** Keeps whether phones are let in; fails where it couldn't, so nothing claims a setting that won't hold. */
+export const keepSetting = (profile: string, on: boolean) =>
+  Effect.tryPromise({
+    try: async () => {
+      if (!(await writePrivate(join(profile, SETTING), JSON.stringify({ on }), true))) throw new Error('not written')
+    },
+    catch: () => failed('Althar couldn’t save whether phones are let in. Check the profile’s folder and try again.'),
+  })
+
 /** The kept key and certificate, made the first time; the certificate is made again for a new name, the key kept. */
 export const tlsFor = (profile: string, name: string) =>
   Effect.gen(function* () {
@@ -95,8 +110,6 @@ export const phonesIn = (profile: string, context: Context.Context<never>) =>
       open = undefined
       return was === undefined ? Effect.void : Scope.close(was, Exit.void)
     })
-    const keep = (on: boolean) =>
-      Effect.promise(() => writePrivate(join(profile, SETTING), JSON.stringify({ on }), true).catch(() => false))
     const start = Effect.gen(function* () {
       if (open !== undefined) return
       const name = yield* hostHere
@@ -121,13 +134,18 @@ export const phonesIn = (profile: string, context: Context.Context<never>) =>
       open = scope
     })
     const change = (on: boolean) =>
-      Effect.gen(function* () {
-        if (on) yield* start
-        else yield* close
-        yield* keep(on)
-      })
-    const setting = yield* readJson(join(profile, SETTING))
-    const wasOn = typeof setting === 'object' && setting !== null && 'on' in setting && setting.on === true
+      on
+        ? start.pipe(
+            Effect.andThen(keepSetting(profile, true)),
+            Effect.tapError(() => close),
+          )
+        : close.pipe(
+            Effect.andThen(keepSetting(profile, false)),
+            Effect.mapError(() =>
+              failed('Phones are shut out now, but Althar couldn’t save that, so they’d be let in again when it restarts. Try again.'),
+            ),
+          )
+    const wasOn = yield* savedSetting(profile)
     yield* pairings.switchable(change, wasOn)
     if (wasOn) yield* start.pipe(Effect.catch((error) => Effect.logWarning('Phones could not be let in', error.message)))
     yield* Effect.addFinalizer(() => close)

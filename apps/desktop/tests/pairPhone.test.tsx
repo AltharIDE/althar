@@ -137,6 +137,40 @@ describe('pairing a phone from the homes menu', () => {
     expect(await screen.findByText('Pixel 9')).toBeTruthy()
   })
 
+  it('keeps a removed device hidden when the list can’t be read again after', async () => {
+    let reads = 0
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => made()),
+      pairedDevices: vi.fn(async () => {
+        reads += 1
+        if (reads > 1) throw new ApiError({ reason: 'Unavailable', message: 'The home didn’t answer.' })
+        return { clients: [pixel], next: null }
+      }),
+      removePairedDevice: vi.fn(async () => {}),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    await screen.findByText('Pixel 9')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Remove Pixel 9?' })).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(reads).toBeGreaterThan(1))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText('Pixel 9')).toBeNull()
+  })
+
+  it('offers Stop letting phones in where phones are kept let in but the listener didn’t open', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: null, switchable: true, on: true })),
+      setPhoneAccess: vi.fn(async () => {
+        throw new ApiError({ reason: 'PhonesCantReach', message: 'Althar couldn’t save that. Try again.' })
+      }),
+    })
+    withServices(<PhonesDialog home="This Mac" onClose={() => undefined} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop letting phones in' }))
+    expect(client.setPhoneAccess).toHaveBeenCalledWith(false)
+    expect(await screen.findByText('Althar couldn’t save that. Try again.')).toBeTruthy()
+  })
+
   it('asks the home once more when its count reaches 0, and hears a phone that paired in the last second', async () => {
     let asked = 0
     const { client } = fakeClient({

@@ -86,9 +86,13 @@ export function usePairedPhones() {
       setProblem(problemOf(error))
     },
     onSuccess: async (_done, id) => {
-      // A read begun before the press is cancelled for a fresh one; until it lands, the device stays off the list.
-      await queries.invalidateQueries({ queryKey: DEVICES }).catch(() => undefined)
-      settled(id)
+      // A read begun before the press is cancelled for a fresh one. The device shows again only once a fresh list
+      // has landed; where that read fails, the list in hand still has it, so it stays hidden: the home took it off.
+      const fresh = await queries
+        .refetchQueries({ queryKey: DEVICES }, { throwOnError: true })
+        .then(() => true)
+        .catch(() => false)
+      if (fresh) settled(id)
     },
   })
   const paired = (deviceId: string) => {
@@ -199,6 +203,7 @@ export function usePairing(onPaired: (deviceId: string) => void) {
   const host = access.data?.origin == null ? null : new URL(access.data.origin).hostname
   const reach =
     host === null ? null : host.endsWith('.local') ? `Phones on the same Wi-Fi reach it, at ${host}.` : `Phones reach it at ${host}.`
+  // Offered wherever phones are kept let in, the listener open or not (it may have failed to start).
   const on = access.data?.on === true && access.data.switchable
   return {
     state,

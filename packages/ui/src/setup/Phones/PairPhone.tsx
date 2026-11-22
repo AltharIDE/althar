@@ -114,7 +114,9 @@ function Closed({
   state,
   layout,
   onLetIn,
-}: Pick<PairPhoneProps, 'home' | 'layout' | 'onLetIn'> & { state: PairPhoneState & { kind: 'closed' } }) {
+  onShutOut,
+  shutProblem,
+}: Pick<PairPhoneProps, 'home' | 'layout' | 'onLetIn' | 'onShutOut' | 'shutProblem'> & { state: PairPhoneState & { kind: 'closed' } }) {
   return (
     <div className={s.pairing} data-layout={layout}>
       <div className={s.tile} data-empty="">
@@ -134,7 +136,9 @@ function Closed({
               <Button variant="ink" busy={state.letting === true} onClick={onLetIn}>
                 Let phones in
               </Button>
+              {onShutOut !== undefined && <LinkButton onClick={onShutOut}>Stop letting phones in</LinkButton>}
             </span>
+            {shutProblem !== undefined && <span className={s.problem}>{shutProblem}</span>}
           </>
         ) : (
           <>
@@ -167,7 +171,16 @@ export function PairPhone({
   const seed = useMemo(() => (code === null ? null : seedOfCode(code)), [code])
   const frame = (body: React.ReactNode) => <div className={s.frame}>{body}</div>
   if (state.kind === 'closed')
-    return frame(<Closed home={home} state={state} layout={layout} {...(onLetIn === undefined ? {} : { onLetIn })} />)
+    return frame(
+      <Closed
+        home={home}
+        state={state}
+        layout={layout}
+        {...(onLetIn === undefined ? {} : { onLetIn })}
+        {...(onShutOut === undefined ? {} : { onShutOut })}
+        {...(shutProblem === undefined ? {} : { shutProblem })}
+      />,
+    )
   if (state.kind === 'failed')
     return frame(
       <div className={s.pairing} data-layout={layout}>

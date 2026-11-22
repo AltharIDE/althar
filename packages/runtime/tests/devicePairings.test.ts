@@ -146,6 +146,24 @@ describe('pairing codes the home makes for a window', () => {
     }).pipe(Effect.provide(env)),
   )
 
+  it.effect('still says a code paired after it ran out and another code cleared it away', () =>
+    Effect.gen(function* () {
+      const pairings = yield* DevicePairings
+      yield* pairings.reachable(reach)
+      const made = yield* pairings.create()
+      yield* TestClock.adjust('4 minutes')
+      const device = yield* pairings.complete(request(String(bodyOf(made.code).homeId), String(bodyOf(made.code).token)))
+      yield* TestClock.adjust('2 minutes')
+      // Another window's code, made after the first ran out, clears the run-out invitations away.
+      yield* pairings.create()
+      const status = yield* pairings.status(made.tokenHash)
+      assert.strictEqual(status.state === 'paired' ? status.device.deviceId : status.state, device.deviceId)
+      yield* TestClock.adjust('15 minutes')
+      yield* pairings.create()
+      assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'expired' })
+    }).pipe(Effect.provide(env)),
+  )
+
   it.effect('switches phone access only where the home lets a window, and drops codes out as it turns off', () =>
     Effect.gen(function* () {
       const pairings = yield* DevicePairings

@@ -21,6 +21,8 @@ import { Instance } from './Instance'
 
 const LIFETIME = 5 * 60_000
 const MAX_INVITATIONS = 32
+/** How long past a code's five minutes the home still says which device used it. */
+const FOLLOW_UP = 10 * 60_000
 const refused = () =>
   new ApiError({
     reason: 'PairingRefused',
@@ -78,6 +80,8 @@ export class DevicePairings extends Context.Service<
       const identities = yield* ClientIdentities
       const lock = yield* Semaphore.make(1)
       const invitations = new Map<string, Pending>()
+      // Codes a device used, kept past the code's own five minutes so a window still asking hears it paired.
+      const used = new Map<string, { readonly deviceId: string; readonly until: number }>()
       let reach: PhoneReach | null = null
       let change: PhoneSwitch | null = null
       let on = false
@@ -141,6 +145,9 @@ export class DevicePairings extends Context.Service<
           pending.publicKey = input.publicKey
           const device = yield* identities.register({ name: input.name, publicKey: input.publicKey, role: 'socket' })
           pending.deviceId = device.deviceId
+          const at = yield* Clock.currentTimeMillis
+          for (const [key, kept] of used) if (kept.until <= at) used.delete(key)
+          used.set(hash, { deviceId: device.deviceId, until: at + LIFETIME + FOLLOW_UP })
           return device
         }).pipe((effect) => lock.withPermit(effect))
       const create = () =>
@@ -158,8 +165,11 @@ export class DevicePairings extends Context.Service<
         Effect.gen(function* () {
           const hash = yield* Schema.decodeUnknownEffect(PairingTokenHash)(given).pipe(Effect.mapError(refused))
           const pending = invitations.get(hash)
-          if (pending?.deviceId !== undefined) {
-            const device = yield* identities.lookup(pending.deviceId)
+          const kept = used.get(hash)
+          const deviceId =
+            pending?.deviceId ?? (kept !== undefined && kept.until > (yield* Clock.currentTimeMillis) ? kept.deviceId : undefined)
+          if (deviceId !== undefined) {
+            const device = yield* identities.lookup(deviceId)
             if (device !== undefined && device.revokedAt === null) return { state: 'paired' as const, device }
           }
           if (pending === undefined || pending.expiresAt <= (yield* Clock.currentTimeMillis)) return { state: 'expired' as const }
