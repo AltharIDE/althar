@@ -54,3 +54,14 @@ export const qrOf = (text: string): Matrix => {
   const code = qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.LOW)
   return { size: code.size, version: code.version, dark: (x, y) => code.getModule(x, y) }
 }
+
+/*
+ * One QR for any phone: the code as a link to the site's pairing page, the code
+ * after the #, so it never reaches the site. A phone with Althar opens it in
+ * the app (universal link, app link); one without opens the page, which sends
+ * it to its store and back. The code to paste stays as it is.
+ */
+export const PAIR_PAGE = 'https://althar.ai/pair'
+export const linkOf = (code: string) => `${PAIR_PAGE}#${code.replace(/^althar-pairing/, '')}`
+/** The code back from a link's #, as the app and the page read it. */
+export const codeOfHash = (hash: string) => (/^#?\d+\./.test(hash) ? `althar-pairing${hash.replace(/^#/, '')}` : null)

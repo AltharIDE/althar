@@ -13,8 +13,9 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { ALTHAR, makeClient, makeHomes, TABS } from './data'
-import { phones } from './pairing/world'
-import { type Direction, DIRECTIONS, lab, useLab } from './state'
+import { linkOf, pairingCode } from './pairing/code'
+import { HOMES, phones } from './pairing/world'
+import { type Direction, DIRECTIONS, lab, type LabState, useLab } from './state'
 import s from './lab.module.css'
 
 /*
@@ -44,8 +45,20 @@ const goTo = (d: Direction) =>
 
 const PHONES = ['none', 'two', 'many'] as const
 
+/** What the phone's camera opens without Althar on it: the site's pairing page, with the code the window shows now. */
+const openPhonePage = (now: LabState) => {
+  const home = HOMES[now.home]
+  if (phones.get().invitations[now.home]?.state !== 'waiting') phones.issue(now.home)
+  const invitation = phones.get().invitations[now.home]
+  if (invitation === undefined) return
+  window.open(
+    `/phone.html${now.dark ? '?theme=dark' : ''}#${linkOf(pairingCode(home, invitation, now.short)).split('#')[1] ?? ''}`,
+    '_blank',
+  )
+}
+
 function Bar() {
-  const { d, home, phones: count, reach, short, narrow, dark } = useLab()
+  const { d, home, phones: count, reach, short, link, narrow, dark } = useLab()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -62,6 +75,8 @@ function Bar() {
       if (key === 'p') return lab.set({ phones: PHONES[(PHONES.indexOf(now.phones) + 1) % PHONES.length] })
       if (key === 'r') return lab.set({ reach: !now.reach })
       if (key === 'q') return lab.set({ short: !now.short })
+      if (key === 'l') return lab.set({ link: !now.link })
+      if (key === 'o') return openPhonePage(now)
       if (key === 'n') return lab.set({ narrow: !now.narrow })
       if (key === 't') return lab.set({ dark: !now.dark })
       if (key === 's') return phones.pairs(now.home)
@@ -98,7 +113,13 @@ function Bar() {
       <button type="button" aria-pressed={short} onClick={() => lab.set({ short: !short })}>
         <kbd>Q</kbd> Short code
       </button>
+      <button type="button" aria-pressed={link} onClick={() => lab.set({ link: !link })}>
+        <kbd>L</kbd> One QR
+      </button>
       <span className={s.round}>Phone</span>
+      <button type="button" onClick={() => openPhonePage(lab.get())}>
+        <kbd>O</kbd> Phone's page
+      </button>
       <button type="button" onClick={() => phones.pairs(home)}>
         <kbd>S</kbd> Phone pairs
       </button>

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Code, CopyButton, Icon, LinkButton } from '@althar/ui'
 
 import { lab, useLab } from '../state'
-import { pairingCode, qrOf } from './code'
+import { linkOf, pairingCode, qrOf } from './code'
 import { printDots } from './print'
 import { type LabHome, mmss, phones, seedOf, useLeft, usePhones, wordsOfHome } from './world'
 import { PHONE } from './icons'
@@ -119,7 +119,7 @@ export function Pairing(props: PairingProps) {
 }
 
 function Body({ layout, onDone }: PairingProps) {
-  const { reach, short } = useLab()
+  const { reach, short, link } = useLab()
   const { home, invitation } = usePhones()
   const left = useLeft(home.key, invitation)
   // No Althar on the phone yet: the tile shows where to get it, for the phone's own camera, and back.
@@ -151,7 +151,7 @@ function Body({ layout, onDone }: PairingProps) {
       </div>
     )
   const expired = invitation.state === 'expired'
-  if (getting && !expired)
+  if (getting && !expired && !link)
     return (
       <div className={s.pairing} data-layout={layout}>
         <div className={s.qrColumn}>
@@ -188,7 +188,7 @@ function Body({ layout, onDone }: PairingProps) {
     <div className={s.pairing} data-layout={layout}>
       <div className={s.qrColumn}>
         <div className={s.tile} data-expired={expired || undefined}>
-          <Qr text={code} size={qrSize} />
+          <Qr text={link ? linkOf(code) : code} size={qrSize} />
           {expired && (
             <span className={s.again}>
               <Button onClick={() => phones.issue(home.key)}>New code</Button>
@@ -212,7 +212,14 @@ function Body({ layout, onDone }: PairingProps) {
         </span>
       </div>
       <div className={s.side}>
-        <span className={s.lead}>Scan it with Althar on your phone</span>
+        {link ? (
+          <span className={s.leadPair}>
+            <span className={s.lead}>Scan it with your phone's camera</span>
+            <span className={s.note}>It opens Althar, or the App Store or Google Play to get it first.</span>
+          </span>
+        ) : (
+          <span className={s.lead}>Scan it with Althar on your phone</span>
+        )}
         <span className={s.check}>
           <Print home={home} size={52} />
           <span className={s.checkWords}>
@@ -225,7 +232,7 @@ function Body({ layout, onDone }: PairingProps) {
           <Code className={s.commandLine}>{code}</Code>
           <CopyButton value={code} ghost disabled={expired} />
         </span>
-        {!expired && (
+        {!expired && !link && (
           <span className={s.getApp}>
             No Althar on your phone yet? <LinkButton onClick={() => setGetting(true)}>Get it</LinkButton>
           </span>

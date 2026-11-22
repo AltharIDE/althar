@@ -27,6 +27,8 @@ export interface LabState {
   readonly reach: boolean
   /** The code without the home's certificate in it, so its QR is far less dense. */
   readonly short: boolean
+  /** The QR is a link to althar.ai/pair with the code after #, so a phone's own camera opens Althar, or the page that gets it. */
+  readonly link: boolean
   readonly narrow: boolean
   readonly dark: boolean
 }
@@ -39,6 +41,7 @@ let state: LabState = {
   phones: params.get('phones') === 'none' ? 'none' : params.get('phones') === 'many' ? 'many' : 'two',
   reach: params.get('reach') !== '0',
   short: params.get('short') === '1',
+  link: params.get('link') !== '0',
   narrow: params.get('narrow') === '1',
   dark: params.get('theme') === 'dark',
 }
@@ -52,6 +55,7 @@ const write = () => {
   set('phones', state.phones === 'two' ? null : state.phones)
   set('reach', state.reach ? null : '0')
   set('short', state.short ? '1' : null)
+  set('link', state.link ? null : '0')
   set('narrow', state.narrow ? '1' : null)
   set('theme', state.dark ? 'dark' : null)
   window.history.replaceState(window.history.state, '', url)

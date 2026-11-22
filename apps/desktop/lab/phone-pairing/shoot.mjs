@@ -37,8 +37,8 @@ const shots = [
   ['a-14-short-code', 'd=a&short=1', [click('Add a phone')]],
   ['a-15-dark', 'd=a&theme=dark', [click('Add a phone')]],
   ['a-16-dark-computers', 'd=a&theme=dark', []],
-  ['a-18-get-app', 'd=a', [click('Add a phone'), click('Get it')]],
-  ['a-19-get-app-dark', 'd=a&theme=dark', [click('Add a phone'), click('Get it')]],
+  ['a-18-get-app', 'd=a&link=0', [click('Add a phone'), click('Get it')]],
+  ['a-19-get-app-dark', 'd=a&theme=dark&link=0', [click('Add a phone'), click('Get it')]],
   ['a-17-narrow', 'd=a&narrow=1', [click('Add a phone')]],
   // B · part of the home
   ['b-1-computers', 'd=b', []],
@@ -59,17 +59,22 @@ const shots = [
   // D · from the homes menu
   ['d-1-menu', 'd=d', [homes]],
   ['d-2-dialog', 'd=d', [homes, item(/^Pair a phone/)]],
-  ['d-8-get-app', 'd=d', [homes, item(/^Pair a phone/), click('Get it')]],
+  ['d-8-get-app', 'd=d&link=0', [homes, item(/^Pair a phone/), click('Get it')]],
   ['d-3-paired', 'd=d', [homes, item(/^Pair a phone/), key('s')]],
   ['d-4-studio-menu', 'd=d&home=studio', [homes]],
   ['d-5-studio', 'd=d&home=studio', [homes, item(/^Pair a phone/)]],
   ['d-6-empty', 'd=d&phones=none', [homes, item(/^Pair a phone/)]],
+  ['p-1-iphone', 'd=a', [], []],
+  ['p-2-android', 'd=a', [], ['i']],
+  ['p-3-ran-out', 'd=a', [], ['x']],
+  ['p-4-no-code', 'd=a', [], ['e']],
+  ['p-5-dark', 'd=a&theme=dark', [], []],
   ['d-7-dark', 'd=d&theme=dark', [homes, item(/^Pair a phone/)]],
 ]
 
 const only = process.argv.slice(2)
 const browser = await chromium.launch()
-for (const [name, query, steps] of shots) {
+for (const [name, query, steps, phoneKeys] of shots) {
   if (only.length > 0 && !only.some((one) => name.startsWith(one))) continue
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
   await page.goto(`http://localhost:6189/?${String(query)}`)
@@ -79,6 +84,17 @@ for (const [name, query, steps] of shots) {
     await page.waitForTimeout(700)
   }
   await page.waitForTimeout(400)
+  if (phoneKeys !== undefined) {
+    // The page the phone's camera opens: the lab's O opens it with the code the window shows.
+    const [phone] = await Promise.all([page.waitForEvent('popup'), page.keyboard.press('o')])
+    await phone.setViewportSize({ width: 480, height: 860 })
+    await phone.waitForTimeout(1200)
+    for (const one of phoneKeys) await phone.keyboard.press(one)
+    await phone.waitForTimeout(400)
+    await phone.locator('[data-lab-phone]').screenshot({ path: join(out, `${String(name)}.png`) })
+    await page.close()
+    continue
+  }
   await page.locator('[data-lab-window]').screenshot({ path: join(out, `${String(name)}.png`) })
   await page.close()
 }

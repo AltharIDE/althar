@@ -68,3 +68,38 @@ node lab/phone-pairing/sheet.mjs name a-2 c-2
 ```
 
 Delete the lab once a direction is picked to build, before building it.
+
+## One QR for any phone (L, on by default)
+
+The QR is a link, `https://althar.ai/pair#1.<code>`, rather than the bare
+`althar-pairing1.<code>`. The code to paste is unchanged. A phone's own
+camera opens it:
+
+- With Althar installed, the phone opens it in the app (a universal link on
+  iOS, an app link on Android), straight to pairing.
+- Without Althar, the phone opens althar.ai/pair. The page reads the code
+  after the `#` (which never reaches the site) and shows the home's print and
+  words and the time left. It sends the phone to its store, then has an
+  **Open in Althar** button (`althar://pair#…`), so nothing needs scanning
+  again. O in the lab's bar opens that page with the window's code (I: iPhone
+  or Android, X: ran out, E: no code, T: dark).
+
+QR size: 117 squares across with the certificate (113 for the bare code), and
+69 either way without it.
+
+What building it takes:
+
+- **Site (apps/site, Cloudflare Workers):** a static `/pair` page, and
+  `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json`.
+  Route `/.well-known/*` through the Worker (`run_worker_first`), so they are
+  served as `application/json` with no redirect.
+- **Phone (althar-mobile):** the associated domain `applinks:althar.ai` and an
+  Android intent filter (`autoVerify`) for `https://althar.ai/pair`. A route
+  that takes the code from the link's `#` (Expo Router's `+native-intent`
+  where it drops the fragment), for the `althar://` scheme too. The in-app
+  scanner and paste field also accept the link form.
+- **Contracts:** the pairing code parser accepts both forms.
+  `althar-host pair` can print the link too.
+- **Later, Android:** Google Play's install referrer could carry the code
+  through the install, so the app opens on pairing without the page's button.
+  iOS has no equivalent: there, the button is the way.
