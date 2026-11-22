@@ -138,6 +138,7 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await panel.getByRole('button', { name: 'Download' }).click()
     await expect(page.getByRole('menuitem', { name: /PNG, a board each/ })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: /PDF, a page a board/ })).toBeVisible()
+    await expect.poll(() => canvasView(electronApp)).toBeNull()
     await shoot(page, electronApp, page, 'test-results/boards-download.png')
     await page.keyboard.press('Escape')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
