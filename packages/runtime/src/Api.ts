@@ -2789,6 +2789,7 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
+      ReadLaunchPreview: (input) => api(launches.preview(input)),
       OpenTerminal: ({ commandId, ...input }) =>
         once(
           commandId,

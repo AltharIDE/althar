@@ -1,11 +1,14 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
+import { workerPreviewAddress, type WorkerPreviewRequest, type WorkerPreviewResponse } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
-import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
+import { AgentRunOutcome } from '@althar/worker-protocol'
+import type { WorkerManagedProcess } from '@althar/worker-protocol/agent-runs'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -31,6 +34,8 @@ import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { ASIDE_BUILDS, onScratch } from './scratch'
 import { Setups } from './Setups'
 import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { taskWorker } from './workerExecution'
+import { readWorkerPreview, workerPreviewPort } from './workerPreviewHttp'
 
 /*
  * The project run by Althar itself, with no agent (ADR-023): the command that
@@ -64,6 +69,7 @@ export interface ShownLaunch {
   readonly branch: string | null
   /** Which of the project's runnables it runs. */
   readonly runnableId: string | null
+  readonly workerId?: string
   /** Where it runs, in words: the task's title, or the default branch. */
   readonly where: string
   readonly command: string
@@ -117,8 +123,14 @@ interface Launch {
   readonly directory: { readonly dev: number; readonly ino: number }
   readonly startedAt: string
   readonly close: Effect.Effect<void>
-  /** Its process, the leader of its group. */
-  readonly pid: number
+  /** The leader of its local process group, if it runs on this home. */
+  readonly pid: number | null
+  readonly workerId: string | null
+  readonly preview?: {
+    readonly open: NonNullable<WorkerManagedProcess['preview']>
+    readonly requests: Semaphore.Semaphore
+    port: number | null
+  }
   /** Its card, in the thread it was asked for in; null where it was asked for in none. */
   card: string | null
   /** The end of what it printed, both streams. */
@@ -212,6 +224,7 @@ export class Launches extends Context.Service<
      * none outlives Althar.
      */
     output(id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
+    preview(input: WorkerPreviewRequest): Effect.Effect<WorkerPreviewResponse, LaunchRefused>
     /**
      * Stops every run of the project, or only the task's, and clears those
      * that ended: the project is removed, or the task settled, and nothing is
@@ -341,6 +354,7 @@ export class Launches extends Context.Service<
         taskId: launch.taskId,
         branch: launch.branch,
         runnableId: launch.runnableId,
+        ...(launch.workerId === null ? {} : { workerId: launch.workerId }),
         where: launch.where,
         command: launch.command,
         label: launch.name ?? shortCommand(launch.command),
@@ -387,15 +401,15 @@ export class Launches extends Context.Service<
       const within = (binding: Binding, root: string) => (binding.within === null ? root : join(root, binding.within))
 
       /** How a repository runs in a folder: as kept for it, else as what is in the folder says. */
-      const runIn = (binding: Binding, folder: string, root: string): RunCommand | null =>
-        runOf({ command: binding.runCommand, setup: binding.runSetup }, folder, root)
+      const runIn = (binding: Binding, folder: string, root: string, platform = process.platform): RunCommand | null =>
+        runOf({ command: binding.runCommand, setup: binding.runSetup }, folder, root, platform)
 
       /** How a runnable runs from a root: its repository's own way, or its command after its repository's setup; null where its own way can't be told. */
-      const runOfKept = (kept: Kept, binding: Binding, root: string): RunCommand | null => {
+      const runOfKept = (kept: Kept, binding: Binding, root: string, platform = process.platform): RunCommand | null => {
         const folder = within(binding, root)
         return kept.command === null
-          ? runIn(binding, folder, root)
-          : { command: kept.command, setup: binding.runSetup ?? setupIn(folder, root) }
+          ? runIn(binding, folder, root, platform)
+          : { command: kept.command, setup: binding.runSetup ?? setupIn(folder, root, platform) }
       }
 
       /** Who said how a runnable runs: worked out from its repository, or kept by the person, the coordinator or another agent. */
@@ -528,7 +542,12 @@ export class Launches extends Context.Service<
             if (launch.url !== null || launch.ended !== null || !launches.has(launch.id)) return
             const url = servingAt(launch.printed)
             if (url !== null) {
-              launch.url = url
+              if (launch.preview !== undefined) {
+                const port = workerPreviewPort(url)
+                if (port === null) return
+                launch.preview.port = port
+                launch.url = workerPreviewAddress(launch.projectId, launch.id)
+              } else launch.url = url
               yield* toldCard(launch)
               return yield* told(launch.projectId)
             }
@@ -599,7 +618,9 @@ export class Launches extends Context.Service<
                           'An aside doesn’t run the project: nothing is installed in its copy, so it answers fast. Make it a task to run it.',
                       })
                     // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
-                    if (input.taskId !== null) yield* setups.ready(input.taskId)
+                    const workerId = input.taskId === null ? null : yield* taskWorker(input.taskId)
+                    const platform = workerId === null ? process.platform : 'linux'
+                    if (input.taskId !== null && workerId === null) yield* setups.ready(input.taskId)
                     const places = yield* placesOf(input.projectId, input.taskId, input.repository)
                     if (places.length === 0)
                       return yield* new LaunchRefused({
@@ -625,7 +646,7 @@ export class Launches extends Context.Service<
                     let chosen: { readonly kept: Kept; readonly binding: Binding } | undefined
                     for (const one of asked === undefined ? kept : [asked]) {
                       const place = places.find(({ binding }) => binding.id === one.bindingId)
-                      if (place !== undefined && runOfKept(one, place.binding, place.root) !== null) {
+                      if (place !== undefined && runOfKept(one, place.binding, place.root, platform) !== null) {
                         chosen = { kept: one, binding: place.binding }
                         break
                       }
@@ -657,7 +678,7 @@ export class Launches extends Context.Service<
                     const copy = input.taskId === null ? yield* runCopy(input.projectId, binding) : null
                     const at = copy?.path ?? places.find((place) => place.binding.id === binding.id)?.root ?? ''
                     const folder = within(binding, at)
-                    const run = runOfKept(chosen.kept, binding, at)
+                    const run = runOfKept(chosen.kept, binding, at, platform)
                     if (run === null)
                       return yield* new LaunchRefused({
                         why: 'unknown',
@@ -678,6 +699,7 @@ export class Launches extends Context.Service<
                       where: task?.title ?? copy?.branch ?? binding.base ?? 'main',
                       branch: null,
                       copy: null,
+                      ...(workerId === null ? {} : { worker: { id: workerId, worktree: at } }),
                     })
                   }),
                 ),
@@ -715,30 +737,39 @@ export class Launches extends Context.Service<
         readonly branch: { readonly label: string; readonly commit: string; readonly ref: Ref } | null
         /** The run's own copy, removed as it ends or is stopped. */
         readonly copy: string | null
+        readonly worker?: { readonly id: string; readonly worktree: string }
       }) =>
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const { id, run, folder, binding } = input
+            const { id, run, folder, binding, worker } = input
+            const startCommand = config.workers?.startCommand
+            if (worker !== undefined && startCommand === undefined)
+              return yield* new LaunchRefused({ why: 'elsewhere', message: 'Managed runs for this worker task are unavailable.' })
             const directory = yield* Effect.tryPromise(() => stat(folder))
             const copy = input.copy
             const copyDirectory = copy === null || copy === folder ? directory : yield* Effect.tryPromise(() => stat(copy))
             const line = lineOf(run)
             // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
-            const spec = runSpec(line, { [RUN]: id, [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) })
+            const spec = runSpec(
+              line,
+              { [RUN]: id, [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) },
+              worker === undefined ? process.platform : 'linux',
+            )
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
-            yield* sql`INSERT INTO processes ${sql.insert({
-              id,
-              projectId: input.projectId,
-              deviceId: instance.deviceId,
-              runtimeInstanceId: instance.id,
-              purpose: 'run',
-              executable: spec.command,
-              argsRedacted: JSON.stringify(spec.args),
-              controllerGeneration: 1,
-              state: 'launching',
-              launchedAt: yield* timestamp,
-            })}`
+            if (worker === undefined)
+              yield* sql`INSERT INTO processes ${sql.insert({
+                id,
+                projectId: input.projectId,
+                deviceId: instance.deviceId,
+                runtimeInstanceId: instance.id,
+                purpose: 'run',
+                executable: spec.command,
+                argsRedacted: JSON.stringify(spec.args),
+                controllerGeneration: 1,
+                state: 'launching',
+                launchedAt: yield* timestamp,
+              })}`
             const scope = yield* Scope.fork(launchesScope, 'sequential')
             const close = yield* Effect.cached(Scope.close(scope, Exit.void))
             return yield* Effect.gen(function* () {
@@ -754,14 +785,31 @@ export class Launches extends Context.Service<
                 if (printed.to === undefined) printed.early = printedMore(printed.early, text)
                 else printed.to.printed = printedMore(printed.to.printed, text)
               }
-              const owned = yield* spawnOwned(spec, folder, { stderr: print, stopWithOwner: true }).pipe(Scope.provide(scope))
-              yield* change('processes', id, {
-                pid: owned.pid,
-                processGroupId: owned.pid,
-                osStartedAt: owned.osStartedAt ?? null,
-                environmentDigest: owned.environmentDigest,
-                state: 'running',
-              })
+              const decoder = new TextDecoder()
+              const owned =
+                worker === undefined || startCommand === undefined
+                  ? yield* spawnOwned(spec, folder, { stderr: print, stopWithOwner: true }).pipe(Scope.provide(scope))
+                  : null
+              const remote =
+                worker === undefined || startCommand === undefined
+                  ? null
+                  : yield* startCommand({
+                      id,
+                      workerId: worker.id,
+                      projectId: input.projectId,
+                      worktree: worker.worktree,
+                      directory: (binding.within ?? '').split(sep).join('/'),
+                      command: line,
+                      output: (bytes) => print(decoder.decode(bytes, { stream: true })),
+                    }).pipe(Scope.provide(scope))
+              if (owned !== null)
+                yield* change('processes', id, {
+                  pid: owned.pid,
+                  processGroupId: owned.pid,
+                  osStartedAt: owned.osStartedAt ?? null,
+                  environmentDigest: owned.environmentDigest,
+                  state: 'running',
+                })
               const launch: Launch = {
                 id,
                 projectId: input.projectId,
@@ -778,10 +826,14 @@ export class Launches extends Context.Service<
                 directory,
                 startedAt: yield* timestamp,
                 close,
-                pid: owned.pid,
+                pid: owned?.pid ?? null,
+                workerId: worker?.id ?? null,
+                ...(remote?.preview === undefined
+                  ? {}
+                  : { preview: { open: remote.preview, port: null, requests: yield* Semaphore.make(3) } }),
                 card: null,
                 printed: printed.early,
-                stderr: owned.stderrTail,
+                stderr: owned?.stderrTail ?? (() => ''),
                 url: null,
                 ended: null,
                 stopped: false,
@@ -800,40 +852,56 @@ export class Launches extends Context.Service<
                   cardOf(launch),
                 ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
               // What it prints is read as it comes, so it never waits on a full pipe.
-              const output = yield* Effect.forkIn(
-                Effect.promise(async (signal) => {
-                  const reader = owned.stdout.getReader()
-                  const decoder = new TextDecoder()
-                  const cancel = () => void reader.cancel().catch(() => {})
-                  signal.addEventListener('abort', cancel, { once: true })
-                  try {
-                    for (;;) {
-                      const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
-                      if (done || value === undefined) return
-                      print(decoder.decode(value, { stream: true }))
-                    }
-                  } finally {
-                    signal.removeEventListener('abort', cancel)
-                    reader.releaseLock()
-                  }
-                }),
-                launchesScope,
-              )
-              yield* Effect.forkIn(watchServing(launch), scope)
+              const output =
+                owned === null
+                  ? null
+                  : yield* Effect.forkIn(
+                      Effect.promise(async (signal) => {
+                        const reader = owned.stdout.getReader()
+                        const decoder = new TextDecoder()
+                        const cancel = () => void reader.cancel().catch(() => {})
+                        signal.addEventListener('abort', cancel, { once: true })
+                        try {
+                          for (;;) {
+                            const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
+                            if (done || value === undefined) return
+                            print(decoder.decode(value, { stream: true }))
+                          }
+                        } finally {
+                          signal.removeEventListener('abort', cancel)
+                          reader.releaseLock()
+                        }
+                      }),
+                      launchesScope,
+                    )
+              if (remote === null || launch.preview !== undefined) yield* Effect.forkIn(watchServing(launch), scope)
               // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
               yield* Effect.forkIn(
                 provide(
                   Effect.gen(function* () {
-                    const exit = yield* Deferred.await(owned.exited)
+                    const exit =
+                      owned !== null
+                        ? yield* Deferred.await(owned.exited)
+                        : yield* Effect.promise(async () => {
+                            const result = await remote?.exit.catch(() => undefined)
+                            print(decoder.decode())
+                            if (result === undefined || result.outcome === AgentRunOutcome.UNCONFIRMED)
+                              print('\nThe worker disconnected before it confirmed this command had stopped.\n')
+                            return { code: result?.exitCode ?? null, signal: null }
+                          })
                     // Exit can precede the last pipe read. Stop descendants that kept it open, then drain it before
                     // recording the final card. A detached descendant can still hold the pipe, so the drain is bounded.
                     yield* close
-                    yield* Fiber.join(output).pipe(Effect.timeoutOption('1 second'))
-                    yield* Fiber.interrupt(output)
+                    if (output !== null) {
+                      yield* Fiber.join(output).pipe(Effect.timeoutOption('1 second'))
+                      yield* Fiber.interrupt(output)
+                    }
                     const at = yield* timestamp
                     if (!launches.has(id) || launch.stopped) return
                     launch.ended = { at, code: exit.code, signal: exit.signal }
-                    yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
+                    if (worker !== undefined) launch.url = null
+                    if (owned !== null)
+                      yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
                     yield* toldCard(launch)
                     yield* told(input.projectId)
                   }),
@@ -850,7 +918,8 @@ export class Launches extends Context.Service<
                   : Effect.gen(function* () {
                       launches.delete(id)
                       yield* close
-                      yield* Effect.ignore(Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })))
+                      if (worker === undefined)
+                        yield* Effect.ignore(Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })))
                     }),
               ),
             )
@@ -976,8 +1045,9 @@ export class Launches extends Context.Service<
               if (!launches.has(id)) return
               forget(launch)
               const at = yield* timestamp
-              yield* change('processes', id, { state: 'killed', endedAt: at })
+              if (launch.pid !== null) yield* change('processes', id, { state: 'killed', endedAt: at })
               launch.ended = { at, code: null, signal: null }
+              if (launch.workerId !== null) launch.url = null
               yield* toldCard(launch)
             } else forget(launch)
             yield* told(launch.projectId)
@@ -1713,12 +1783,35 @@ export class Launches extends Context.Service<
               ? Effect.fail(new NotFound({ kind: 'run', id }))
               : Effect.succeed({ text: readable(launch.printed), dropped: 0 })
           }),
+        preview: (input) =>
+          Effect.suspend(() => {
+            const launch = launches.get(input.id)
+            const current = launch?.preview
+            const port = current?.port
+            if (launch?.projectId !== input.projectId || launch.ended !== null || launch.stopped || current === undefined || port == null)
+              return Effect.fail(new LaunchRefused({ why: 'elsewhere', message: 'This worker preview is unavailable.' }))
+            return current.requests.withPermits(1)(
+              Effect.tryPromise({
+                try: (signal) => readWorkerPreview(current.open, port, input, signal),
+                catch: () =>
+                  new LaunchRefused({
+                    why: 'elsewhere',
+                    message: 'The worker could not read this preview. Check that the app is listening on localhost.',
+                  }),
+              }),
+            )
+          }),
         stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
         terminalFolder: ({ projectId, taskId, launchId }) =>
           provide(
             Effect.gen(function* () {
               const launch = launchId === undefined ? undefined : (launches.get(launchId) ?? leftBehind.get(launchId))
+              if (launch?.workerId != null)
+                return yield* new LaunchRefused({
+                  why: 'elsewhere',
+                  message: 'This command runs on a worker. Open its output from the Run menu.',
+                })
               if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
               const [place] = yield* placesOf(projectId, taskId, undefined)
               if (place === undefined)
@@ -1739,7 +1832,7 @@ export class Launches extends Context.Service<
         processes: () =>
           Effect.sync(() =>
             [...launches.values()].flatMap((launch) =>
-              launch.ended === null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
+              launch.ended === null && launch.pid !== null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
             ),
           ),
         using: (taskId, since) =>

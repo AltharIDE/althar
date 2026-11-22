@@ -34,6 +34,7 @@ import type { Policies } from './Policies'
 import { processes, treeOf } from './ports'
 import { guardEnv, guardHolds } from './pushGuard'
 import type { Questions } from './Questions'
+import type { Setups } from './Setups'
 import { change, fact, timestamp } from './records'
 import {
   type Brief,
@@ -62,7 +63,7 @@ import { blockGoalAfterDisconnect } from './threadGoals'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
-import type { WorkerExecution } from './workerExecution'
+import { taskWorker, type WorkerExecution } from './workerExecution'
 import { folderGoneWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -98,6 +99,7 @@ export interface SessionConnectionsDependencies {
   >
   readonly sessionsScope: Scope.Closeable
   readonly sessionsSql: SqlClient.SqlClient
+  readonly setups: Setups['Service']
   readonly skillsConfig: RuntimeOptions['skills']
   readonly stopGrace: Duration.Duration
   readonly stopTrees: (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) => Effect.Effect<void>
@@ -128,6 +130,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     sessionFact,
     sessionsScope,
     sessionsSql,
+    setups,
     skillsConfig,
     stopGrace,
     stopTrees,
@@ -300,12 +303,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       // Trusted fully, by the person's word or as the team's, it runs as the team's code does: no longer untrusted or offline.
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
-      const selectedWorker =
-        thread.role !== 'task' || thread.helper !== undefined
-          ? null
-          : ((yield* sql<{ workerId: string | null }>`SELECT json_extract(parameters, '$.workerId') AS worker_id
-              FROM task_plans WHERE state = 'accepted' AND task_id = ${thread.taskId}
-              ORDER BY decided_at DESC, rowid DESC LIMIT 1`)[0]?.workerId ?? null)
+      const selectedWorker = thread.role !== 'task' || thread.helper !== undefined ? null : yield* taskWorker(thread.taskId)
+      const startWithin = selectedWorker === null ? SESSION_START_TIMEOUT : Duration.minutes(15)
       // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
       if (selectedWorker === null) yield* accounts.prepare(account)
       // The session's own scope, from here, so whatever it is given goes with it.
@@ -577,6 +576,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               id: string
             }>`SELECT id FROM workspaces WHERE task_id = ${thread.taskId} AND path = ${thread.worktree}`
             if (workspace === undefined) return yield* refuse('The task’s worker workspace is not ready.')
+            const setup = yield* setups
+              .workerPlan(thread.taskId, workspace.id)
+              .pipe(Effect.mapError(() => refuse('Could not plan setup for the worker’s checkout.')))
             remote = yield* platform.open({
               workerId: selectedWorker,
               projectId: thread.projectId,
@@ -584,7 +586,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               providerId: definition.id,
               worktree: thread.worktree,
               toolPort: toolServer.port,
+              ...(setup?.spec === undefined ? {} : { setup: setup.spec }),
             })
+            if (setup !== undefined) yield* setup.record(remote.setup)
             homeWorktree = thread.worktree
             agentCwd = posix.join(remote.path, ...relative(thread.worktree, agentCwd).split(sep))
           }
@@ -662,10 +666,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           return { connection, agent }
         }).pipe(
           Scope.provide(scope),
-          Effect.timeoutOption(SESSION_START_TIMEOUT),
+          Effect.timeoutOption(startWithin),
           Effect.flatMap((result) => {
             if (Option.isNone(result)) {
-              return Effect.fail(new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }))
+              return Effect.fail(new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: startWithin }))
             }
             return Effect.succeed(result.value)
           }),

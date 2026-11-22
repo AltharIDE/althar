@@ -462,6 +462,7 @@ describe('the API', () => {
           Effect.succeed(
             Api.of({
               ListProjectWorkers: () => Effect.succeed([]),
+              ReadLaunchPreview: () => Effect.die('unused'),
               GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
               SaveAcpConnection: () => Effect.succeed(1),
               CheckAcpConnection: () => Effect.succeed(1),

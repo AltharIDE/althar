@@ -11,14 +11,22 @@ import {
   AgentRunOutcome,
   AgentRunStartSchema,
   AgentRunStopSchema,
+  AgentPreviewOpenSchema,
   AgentSnapshotRequestSchema,
   AgentWorkerFrameSchema,
+  AgentWorkspaceSetupSchema,
   WorkerControlService,
   type AgentHomeFrame,
   type AgentRunExit,
   type AgentWorkerCapability,
+  type AgentWorkspaceSetupResult,
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId, WORKER_PROTOCOL_VERSION } from './handshake.ts'
+import { makeManagedCommands, type WorkerManagedCommand, type WorkerManagedProcess } from './agentManaged.ts'
+import { makePreviewTunnels } from './agentPreviews.ts'
+import { deferred, type Deferred } from './deferred.ts'
+
+export type { WorkerManagedCommand, WorkerManagedProcess } from './agentManaged.ts'
 
 export const MAX_AGENT_CHUNK = 2_048
 export const AGENT_WORKER_LEASE_MS = 8_000
@@ -30,6 +38,8 @@ const CHECKOUT_TIMEOUT_MS = 180_000
 const SNAPSHOT_TIMEOUT_MS = 60_000
 const MAX_PATCH_BYTES = 16 * 1024 * 1024
 const MAX_COMMIT_BUNDLE_BYTES = 64 * 1024 * 1024
+const MAX_SETUP_BYTES = 128 * 1024
+const SETUP_TIMEOUT_MS = 10 * 60_000 + START_TIMEOUT_MS
 export const MAX_WORKER_BUNDLE_BYTES = 128 * 1024 * 1024
 const PROVIDER_ID = /^[a-z][a-z0-9-]{0,47}$/
 
@@ -58,6 +68,12 @@ interface AgentRunOptions {
   readonly signal?: AbortSignal
   readonly checkout?: WorkerCheckout
   readonly toolPort?: number
+  readonly setup?: WorkerSetup
+}
+
+export interface WorkerSetup {
+  readonly directory: string
+  readonly commands: ReadonlyArray<string>
 }
 
 export interface WorkerCheckout {
@@ -87,6 +103,8 @@ export interface WorkerPatch {
 export interface WorkerAgentProcess {
   readonly workspacePath: string
   readonly toolPort?: number
+  readonly setup?: AgentWorkspaceSetupResult
+  readonly startCommand: (input: WorkerManagedCommand) => Promise<WorkerManagedProcess>
   readonly output: PassThrough
   /** Settles only when the worker confirms the outcome or this stream is lost. */
   readonly exit: Promise<AgentRunExit>
@@ -110,22 +128,6 @@ interface Slot {
   readonly busy: () => boolean
 }
 
-interface Deferred<A> {
-  readonly promise: Promise<A>
-  readonly resolve: (value: A) => void
-  readonly reject: (error: Error) => void
-}
-
-const deferred = <A>(): Deferred<A> => {
-  let resolve!: Deferred<A>['resolve']
-  let reject!: Deferred<A>['reject']
-  const promise = new Promise<A>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  return { promise, resolve, reject }
-}
-
 interface SnapshotPart {
   readonly hash: Uint8Array
   readonly bytes: Buffer
@@ -147,6 +149,8 @@ interface Run {
   readonly starting: NodeJS.Timeout
   readonly cleanup: () => void
   readonly toolPort: number | undefined
+  readonly requiresSetup: boolean
+  readonly managed: ReturnType<typeof makeManagedCommands>
   readonly tunnels: Set<() => void>
   stopping?: NodeJS.Timeout
   snapshot?: PendingSnapshot
@@ -182,6 +186,7 @@ const validOutcome = (exit: AgentRunExit): boolean =>
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
 export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
   const slots = new Map<string, Slot>()
+  const previews = makePreviewTunnels()
 
   const connect = (call: ServerDuplexStream<Buffer, Buffer>, homeId: string, enrolledWorker: () => string | undefined): void => {
     let slot: Slot | undefined
@@ -227,6 +232,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         run.cleanup()
         closeTools(run)
         run.ready.reject(error)
+        run.managed.close(error)
         interruptSnapshot(run, error)
         run.output.destroy(error)
         run.exit.reject(error)
@@ -300,10 +306,22 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       delete current.snapshot
       pending.result.resolve({ tree: transfer.tree, head: transfer.head, patch: transfer.patch.bytes, commits: transfer.commits.bytes })
     }
-    const start: Slot['start'] = (placement, { checkout, signal, toolPort }) => {
+    const start: Slot['start'] = (placement, { checkout, signal, toolPort, setup }) => {
       if (closed || run !== undefined || recovering !== undefined)
         return Promise.reject(new Error('The worker is already running an agent.'))
       if (signal?.aborted === true) return Promise.reject(new Error('The agent start was cancelled.'))
+      const plan =
+        setup === undefined
+          ? undefined
+          : toBinary(
+              AgentWorkspaceSetupSchema,
+              create(AgentWorkspaceSetupSchema, {
+                directory: setup.directory,
+                commands: [...setup.commands],
+              }),
+            )
+      if (plan !== undefined && (plan.byteLength === 0 || plan.byteLength > MAX_SETUP_BYTES))
+        return Promise.reject(new Error('The project setup is too large for the worker.'))
       const id = `war_${randomUUID().replaceAll('-', '')}`
       if (slot === undefined || !ledger.begin(slot.workerId, { ...placement, runId: id }))
         return Promise.reject(new Error('A previous run still owns this worker or workspace.'))
@@ -314,7 +332,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       void exit.promise.catch(() => undefined)
       const starting = setTimeout(
         () => fail(status.DEADLINE_EXCEEDED, 'The worker did not start the agent in time.'),
-        checkout === undefined ? START_TIMEOUT_MS : CHECKOUT_TIMEOUT_MS,
+        (checkout === undefined ? START_TIMEOUT_MS : CHECKOUT_TIMEOUT_MS) + (plan === undefined ? 0 : SETUP_TIMEOUT_MS),
       )
       starting.unref()
       const transfer = new AbortController()
@@ -327,6 +345,33 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         signal?.removeEventListener('abort', abort)
         transfer.abort()
       }
+      const capability = slot.capabilities.find((cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId)
+      const workerId = slot.workerId
+      const managed = makeManagedCommands(
+        id,
+        capability?.managedCommands === true,
+        () => run?.id === id && ownsRun(run),
+        sendControl,
+        (message) => fail(status.INVALID_ARGUMENT, message),
+        capability?.managedPreview === true
+          ? {
+              open: (commandId, port, active, signal) =>
+                previews.open(
+                  workerId,
+                  commandId,
+                  active,
+                  (tunnelId) => {
+                    sendControl({
+                      case: 'previewOpen',
+                      value: create(AgentPreviewOpenSchema, { tunnelId, port, managed: { runId: id, commandId } }),
+                    })
+                  },
+                  signal,
+                ),
+              close: (commandId) => previews.close(workerId, commandId),
+            }
+          : undefined,
+      )
       run = {
         id,
         starting,
@@ -335,6 +380,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         exit,
         cleanup,
         toolPort,
+        requiresSetup: plan !== undefined,
+        managed,
         tunnels: new Set(),
         phase: 'starting',
       }
@@ -348,9 +395,19 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           runId: id,
           tools: toolPort !== undefined,
           ...(source === undefined ? {} : { source }),
+          ...(plan === undefined ? {} : { setup: { size: plan.byteLength, sha256: createHash('sha256').update(plan).digest() } }),
         }),
       })
-        .then(() => (checkout === undefined ? undefined : stage(current, checkout, transfer.signal)))
+        .then(async () => {
+          if (plan !== undefined) {
+            for (let offset = 0; offset < plan.byteLength; offset += MAX_AGENT_CHUNK) {
+              if (run !== current || current.phase !== 'starting' || transfer.signal.aborted) return
+              const data = plan.subarray(offset, offset + MAX_AGENT_CHUNK)
+              await send({ case: 'setupChunk', value: create(AgentRunBytesSchema, { runId: current.id, data }) })
+            }
+          }
+          if (checkout !== undefined) await stage(current, checkout, transfer.signal)
+        })
         .catch(() => {
           if (!transfer.signal.aborted) fail(status.UNAVAILABLE, 'Could not send the project workspace to the worker.')
         })
@@ -367,6 +424,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (run === current && current.phase !== 'stopping') {
         current.phase = 'stopping'
         closeTools(current)
+        current.managed.close(new Error('The worker workspace is stopping.'))
         current.cleanup()
         clearTimeout(current.starting)
         current.stopping = setTimeout(
@@ -444,6 +502,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           return
         }
         const current = run
+        if (payload.case === 'managedReady' || payload.case === 'managedOutput' || payload.case === 'managedExit') {
+          if (current === undefined) return fail(status.PERMISSION_DENIED, 'There is no active worker workspace for this command.')
+          if (current.phase !== 'stopping') current.managed.receive(payload)
+          return
+        }
         if (
           current === undefined ||
           (payload.case !== 'ready' &&
@@ -458,9 +521,13 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         if (payload.case === 'ready') {
           if (current.phase === 'stopping' && validPath(payload.value.workspacePath)) return
           const hasPort = payload.value.toolsPort > 0 && payload.value.toolsPort <= 65_535
+          const setup = payload.value.setup
           if (
             current.phase !== 'starting' ||
             !validPath(payload.value.workspacePath) ||
+            (setup !== undefined) !== current.requiresSetup ||
+            (setup !== undefined &&
+              (setup.exitCode > 255 || setup.outputTail.byteLength > MAX_AGENT_CHUNK || (setup.timedOut && setup.exitCode === 0))) ||
             (current.toolPort === undefined ? payload.value.toolsPort !== 0 : !hasPort)
           )
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent readiness.')
@@ -470,6 +537,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           current.ready.resolve({
             workspacePath: payload.value.workspacePath,
             ...(hasPort ? { toolPort: payload.value.toolsPort } : {}),
+            ...(setup === undefined ? {} : { setup }),
+            startCommand: current.managed.start,
             output: current.output,
             exit: current.exit.promise,
             write: (chunk) => write(current, chunk),
@@ -538,6 +607,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         clearTimeout(current.stopping)
         current.cleanup()
         current.ready.reject(new Error('The worker could not start the agent. Check the worker log and provider setup.'))
+        current.managed.close(new Error('The worker workspace ended.'))
         closeTools(current)
         interruptSnapshot(current, new Error('The agent ended before its changes were received.'))
         current.output.end()
@@ -553,6 +623,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
 
   return {
     connect,
+    connectPreview: previews.connect,
     list: (projectId: string): ReadonlyArray<AvailableAgentWorker> =>
       [...slots.values()]
         .filter(({ workerId }) => ledger.permits(workerId, projectId))
@@ -584,6 +655,13 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           !objectId.test(checkout.head))
       )
         throw new Error('The worker needs a valid, bounded Git bundle.')
+      if (
+        options.setup !== undefined &&
+        !slot.capabilities.some(
+          (entry) => entry.projectId === placement.projectId && entry.providerId === placement.providerId && entry.workspaceSetup,
+        )
+      )
+        throw new Error('Update this worker to run the project’s setup in its task checkout.')
       return slot.start(placement, options)
     },
   }

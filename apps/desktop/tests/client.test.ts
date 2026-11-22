@@ -227,6 +227,7 @@ describe('the client', () => {
       Effect.succeed(
         Api.of({
           ListProjectWorkers: () => Effect.succeed([]),
+          ReadLaunchPreview: () => Effect.die('unused'),
           WatchAttention: () => Stream.die('unused'),
           GetConnectionInfo: () => Effect.die('unused'),
           ListClientDevices: () => Effect.die('unused'),

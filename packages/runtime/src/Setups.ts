@@ -20,6 +20,8 @@ import { ASIDE_BUILDS, onScratch } from './scratch'
 import { addItem, updateItem } from './threads'
 import { Questions } from './Questions'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { taskWorker, type WorkerSetupOutcome } from './workerExecution'
+import type { WorkerSetup } from '@althar/worker-protocol/agent-runs'
 
 /*
  * A task's worktree set up by Althar itself, outside any agent's sandbox,
@@ -276,6 +278,11 @@ interface Unset {
   readonly checkout: string | null
 }
 
+interface WorkerSetupPlan {
+  readonly spec?: WorkerSetup
+  readonly record: (result: WorkerSetupOutcome | undefined) => Effect.Effect<void>
+}
+
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeConfig
 
 /** A worktree of the task's, set up already or not, to set up again. */
@@ -303,6 +310,7 @@ export class Setups extends Context.Service<
     ready(taskId: string): Effect.Effect<void>
     /** What the task's lead is told of how its worktrees were set up; null where nothing ran. */
     told(taskId: string): Effect.Effect<string | null>
+    workerPlan(taskId: string, workspaceId: string): Effect.Effect<WorkerSetupPlan | undefined, unknown>
   }
 >()('@althar/runtime/Setups') {
   static readonly layer: Layer.Layer<Setups, never, Store | ToolServer | Questions> = Layer.effect(
@@ -512,6 +520,7 @@ export class Setups extends Context.Service<
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
+            if ((yield* taskWorker(taskId)) !== null) return
             // An aside's copy, on Scratch, is never set up (docs/decisions/tasks.md, "Asides"): it never installs, builds or runs
             // the setup before it answers, nor after. Made a task, by the person or its lead's work, it is set up as any task's.
             const unset = yield* sql<{ id: string }>`
@@ -690,6 +699,8 @@ export class Setups extends Context.Service<
             }
             if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
             if (yield* provide(onScratch(taskId))) return yield* new ToolRefused({ message: ASIDE_BUILDS })
+            if ((yield* provide(taskWorker(taskId))) !== null)
+              return yield* new ToolRefused({ message: 'This task’s setup runs on its worker before the agent starts.' })
             const again = yield* provide(againOf(taskId, named))
             if (again.length === 0)
               return yield* new ToolRefused({
@@ -805,6 +816,46 @@ export class Setups extends Context.Service<
         begin: (taskId) => Effect.asVoid(Effect.forkIn(ready(taskId), setupsScope)),
         ready,
         told,
+        workerPlan: (taskId, workspaceId) =>
+          provide(
+            Effect.gen(function* () {
+              const workspaces = yield* againOf(taskId, undefined)
+              const workspace = workspaces.find((one) => one.id === workspaceId)
+              if (workspace === undefined) return
+              const recorded = recordedOf(workspace.recorded)
+              const folder = workspace.within === null ? workspace.worktree : join(workspace.worktree, workspace.within)
+              const found = workspace.kept ?? installIn(folder, workspace.worktree)
+              const commands = recorded?.commands ?? (found === null ? [] : [found])
+              const missing = recorded?.copy ?? []
+              if (commands.length === 0 && missing.length === 0) return
+              const command = recorded === null ? found : shownOf(recorded)
+              if (command === null) return
+              const startedAt = yield* timestamp
+              return {
+                ...(commands.length === 0 ? {} : { spec: { commands, directory: (workspace.within ?? '').split(sep).join('/') } }),
+                record: (result) =>
+                  provide(
+                    Effect.gen(function* () {
+                      const last = result === undefined || result.output === '' ? null : lastLinesOf(result.output)
+                      const at = yield* timestamp
+                      const info = missing.length === 0 ? {} : { missing }
+                      const setup: SetUp = { at, command, code: result?.code ?? null, timedOut: result?.timedOut ?? false, last, ...info }
+                      yield* kept(workspace, setup)
+                      yield* addItem({ projectId: workspace.projectId, threadId: workspace.threadId }, 'setup', {
+                        repository: workspace.name,
+                        command,
+                        kept: recorded === null && workspace.kept !== null,
+                        startedAt,
+                        ended: { at, code: setup.code, timedOut: setup.timedOut, stopped: false, last, ...info },
+                      } satisfies Shown)
+                    }),
+                  ).pipe(
+                    Effect.asVoid,
+                    Effect.catchCause((cause) => Effect.logWarning('Could not keep the worker setup result', cause)),
+                  ),
+              }
+            }),
+          ),
       })
     }),
   )

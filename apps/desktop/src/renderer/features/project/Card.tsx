@@ -267,7 +267,7 @@ function PlanCard({
   const startProblem = selected === 'home' ? undefined : (planProblem ?? workerProblem(selection, steps))
   const from = fromOf(card)
   const placementNote =
-    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Lead on the worker. Setup and review on this home.')
+    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
   const placement =
     card.phase !== 'held' || (workers.length === 0 && selected === 'home') ? undefined : (
       <>
