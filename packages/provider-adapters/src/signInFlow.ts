@@ -108,7 +108,10 @@ export const signInSaid = {
   unknown: 'Couldn’t sign in.',
 } as const
 
-/** A sign-in's failure in the agent's own words, as the person is told it. */
+/**
+ * A sign-in's failure in the agent's own words, as the person is told it. A connection that timed out is the network's;
+ * any other timeout is the person's sign-in left unfinished.
+ */
 export const signInFailureOf = (agent: string, raw: string): string =>
   /SUBSCRIPTION_REQUIRED/.test(raw)
     ? signInSaid.subscription(agent)
@@ -120,11 +123,11 @@ export const signInFailureOf = (agent: string, raw: string): string =>
           ? signInSaid.busy
           : /stopped (signing in|listening)/i.test(raw)
             ? signInSaid.stopped(agent)
-            : /error sending request|couldn.t (be )?reach|could not (be )?reach|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|network|dns|timed? ?out|connection (error|failed|refused|reset|closed)/i.test(
+            : /error sending request|couldn.t (be )?reach|could not (be )?reach|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|network|dns|(connect|connection|operation|request) timed out|connection (error|failed|refused|reset|closed)/i.test(
                   raw,
                 )
               ? signInSaid.noReply
-              : /in time|expired/i.test(raw)
+              : /in time|expired|timed? ?out/i.test(raw)
                 ? signInSaid.timedOut
                 : signInSaid.unknown
 

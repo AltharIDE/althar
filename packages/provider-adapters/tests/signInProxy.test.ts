@@ -5,7 +5,15 @@ import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { signInFailureOf, signInSaid, type SignInFlowEvent, startSignInFlow } from '../src/signInFlow'
-import { openResolvingProxy, openSignInProxy, proxiedBySettings, raceResolve, type Resolve, type SignInProxy } from '../src/signInProxy'
+import {
+  askNameservers,
+  openResolvingProxy,
+  openSignInProxy,
+  proxiedBySettings,
+  raceResolve,
+  type Resolve,
+  type SignInProxy,
+} from '../src/signInProxy'
 
 /*
  * Codex's sign-in, on a Mac whose system resolver stalls on a name: its login
@@ -50,6 +58,11 @@ describe('a failed sign-in, as the person reads it', () => {
     expect(signInFailureOf('Codex', 'OAuth error: access_denied')).toBe(signInSaid.notApproved)
     expect(signInFailureOf('Codex', 'Codex stopped signing in.')).toBe('Codex stopped before signing in.')
     expect(signInFailureOf('Codex', 'Token exchange failed: token endpoint returned status 401 Unauthorized')).toBe(signInSaid.unknown)
+    // A sign-in the person didn't finish isn't the connection's fault; a connection that timed out is.
+    expect(signInFailureOf('Claude Code', 'login timed out after 300s')).toBe(signInSaid.timedOut)
+    expect(signInFailureOf('Codex', 'Device code login timed out')).toBe(signInSaid.timedOut)
+    expect(signInFailureOf('Codex', 'Token exchange failed: error trying to connect: operation timed out')).toBe(signInSaid.noReply)
+    expect(signInFailureOf('Codex', 'connect ETIMEDOUT 104.18.41.241:443')).toBe(signInSaid.noReply)
     for (const line of Object.values(signInSaid).map((one) => (typeof one === 'string' ? one : one('Codex'))))
       expect(line).not.toMatch(/https?:|\(|\{|\b\d{3,}\b/)
   })
@@ -76,15 +89,62 @@ describe('the way out a Codex sign-in takes on a Mac', () => {
     expect(proxiedBySettings('<dictionary> {\n  HTTPSEnable : 0\n  ProxyAutoConfigEnable : 1\n}')).toBe(true)
   })
 
-  it('takes the first address found: the nameservers’ while the system’s lookup hangs, the system’s where they have none', async () => {
-    expect(await raceResolve(at('104.18.41.241'), never)('auth.openai.com')).toEqual([{ address: '104.18.41.241', family: 4 }])
-    expect(await raceResolve(async () => [], at('172.64.146.15'))('auth.openai.com')).toEqual([{ address: '172.64.146.15', family: 4 }])
-    await expect(
-      raceResolve(
+  it('asks the system only where the nameservers fail or are slow, once a host, and keeps what it found', async () => {
+    let asked = 0
+    const counted =
+      (resolve: Resolve): Resolve =>
+      (host) => {
+        asked += 1
+        return resolve(host)
+      }
+    // The nameservers answer: the system, stalled or not, is never asked.
+    const answered = raceResolve(at('104.18.41.241'), counted(never))
+    expect(await answered('auth.openai.com')).toEqual([{ address: '104.18.41.241', family: 4 }])
+    expect(asked).toBe(0)
+    // They have none: the system at once.
+    expect(await raceResolve(async () => [], counted(at('172.64.146.15')))('auth.openai.com')).toEqual([
+      { address: '172.64.146.15', family: 4 },
+    ])
+    expect(asked).toBe(1)
+    // They don't answer: the system once they've had their moment, and only once for all who ask.
+    asked = 0
+    const slow = raceResolve(never, counted(at('172.64.146.15')), { systemAfter: 20 })
+    const all = await Promise.all([slow('auth.openai.com'), slow('auth.openai.com'), slow('auth.openai.com')])
+    expect(all[2]).toEqual([{ address: '172.64.146.15', family: 4 }])
+    expect(asked).toBe(1)
+    // Found once, kept.
+    expect(await slow('auth.openai.com')).toEqual([{ address: '172.64.146.15', family: 4 }])
+    expect(asked).toBe(1)
+    // Nobody has it: refused, and asked again next time.
+    const nowhere = raceResolve(
+      async () => [],
+      counted(() => Promise.reject(new Error('ENOTFOUND'))),
+    )
+    await expect(nowhere('nowhere.invalid')).rejects.toThrow()
+    await expect(nowhere('nowhere.invalid')).rejects.toThrow()
+    expect(asked).toBe(3)
+  })
+
+  it('takes the nameservers’ IPv4 answer at once, and gives an IPv6 one a moment for IPv4’s', async () => {
+    const wait = <T>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms))
+    const hang = () => new Promise<string[]>(() => {})
+    expect(await askNameservers(async () => ['104.18.41.241'], hang)('auth.openai.com')).toEqual([{ address: '104.18.41.241', family: 4 }])
+    expect(
+      await askNameservers(
+        () => wait(30, ['104.18.41.241']),
+        async () => ['2606:4700::1'],
+      )('auth.openai.com'),
+    ).toEqual([
+      { address: '104.18.41.241', family: 4 },
+      { address: '2606:4700::1', family: 6 },
+    ])
+    expect(await askNameservers(hang, async () => ['2606:4700::1'])('auth.openai.com')).toEqual([{ address: '2606:4700::1', family: 6 }])
+    expect(
+      await askNameservers(
+        () => Promise.reject(new Error('ENODATA')),
         async () => [],
-        () => Promise.reject(new Error('ENOTFOUND')),
       )('nowhere.invalid'),
-    ).rejects.toThrow()
+    ).toEqual([])
   })
 
   it('tunnels to the address it found, and answers a host it can’t find with a refusal', async () => {

@@ -160,6 +160,8 @@ export class AccountSignIns extends Context.Service<
                 return { flowId, state: flow.state }
               }
               const holder: { flow?: Flow } = {}
+              // The runtime's own services, its logger among them, for what the flow's events log: runtime.log, not the console.
+              const context = yield* Effect.context<never>()
               // Codex's login on macOS goes out through a proxy of its own that finds addresses itself: a system resolver
               // that stalls on a name can't fail the token exchange that ends it (provider-adapters' signInProxy).
               const proxy = yield* Effect.promise(() => openSignInProxy(entry.definition).catch(() => null))
@@ -186,7 +188,7 @@ export class AccountSignIns extends Context.Service<
                     case 'failed':
                       flow.state = { state: 'failed', message: event.message }
                       // The person reads the short line; what the agent said goes to the log.
-                      Effect.runFork(
+                      Effect.runForkWith(context)(
                         Effect.logWarning('A sign-in failed').pipe(
                           Effect.annotateLogs({ agent: account.agentId, account: accountId, error: event.detail ?? event.message }),
                         ),

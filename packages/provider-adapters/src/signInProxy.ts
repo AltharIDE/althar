@@ -12,8 +12,8 @@ import type { AgentDefinition } from './registry'
  * Codex's login finishes by sending the browser's code to OpenAI's token endpoint, and gives that ten seconds. On a Mac
  * whose system resolver (mDNSResponder) stops answering a name for minutes on end, as it does in front of a local DNS
  * filter while the filter itself answers at once, that lookup alone outlasts it: "Token exchange failed: error sending
- * request". Through this proxy the name is asked of the nameservers directly, as `dig` asks them, and of the system at
- * the same time, and the first answer is the one used. The agent itself is unchanged: it honours HTTPS_PROXY.
+ * request". Through this proxy the name is asked of the nameservers directly, as `dig` asks them, and of the system only
+ * where they fail or are slow; the first answer is the one used, and kept while the sign-in lasts. The agent itself is unchanged: it honours HTTPS_PROXY.
  *
  * None where the person already goes through a proxy of their own, in the environment or the Mac's network settings:
  * theirs stands.
@@ -32,8 +32,18 @@ export type Resolve = (host: string) => Promise<ReadonlyArray<LookupAddress>>
 
 const PROXY_VARIABLES = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'] as const
 
-/** How long the nameservers are given, each try, before the system's answer is all there is to wait for. */
+/** How long the nameservers are given, each try, before they count as not answering. */
 const ASK_TIMEOUT = 2_500
+
+/**
+ * How long the nameservers have alone before the system is asked too. Its lookup (getaddrinfo) holds one of Node's few
+ * worker threads until it answers, which the stalled resolver this is for makes minutes: it is asked only where the
+ * nameservers fail or are slow, once a host at a time.
+ */
+const SYSTEM_AFTER = 1_000
+
+/** How long an IPv6 answer waits for the IPv4 one beside it, so a Mac with no IPv6 route still has an address to try. */
+const FOUR_GRACE = 150
 
 /** Whether the environment already sends HTTP through a proxy. */
 export const proxiedByEnv = (env: NodeJS.ProcessEnv) => PROXY_VARIABLES.some((name) => (env[name] ?? '').trim() !== '')
@@ -48,26 +58,83 @@ const macProxied = () =>
     execFile('/usr/sbin/scutil', ['--proxy'], { timeout: 5_000 }, (error, stdout) => resolve(error !== null || proxiedBySettings(stdout))),
   )
 
-/** The nameservers asked directly, both families, beside the system's own lookup: the first with an address wins. */
-export const raceResolve = (ask: Resolve, system: Resolve): Resolve => {
-  return (host) =>
-    Promise.any([ask(host), system(host)].map((found) => found.then((all) => (all.length > 0 ? all : Promise.reject(new Error(host))))))
+export interface RaceOptions {
+  /** How long the nameservers have alone before the system is asked too. */
+  readonly systemAfter?: number
 }
 
-const askNameservers = (): Resolve => {
-  const resolver = new Resolver({ timeout: ASK_TIMEOUT, tries: 2 })
+/**
+ * A host's addresses from the nameservers, asked directly, and only where they fail or are slow from the system too: the
+ * first with an address wins. Each host's answer is kept for as long as this lives (a sign-in's proxy), and the system is
+ * never asked for one host twice at once.
+ */
+export const raceResolve = (ask: Resolve, system: Resolve, options: RaceOptions = {}): Resolve => {
+  const systemAfter = options.systemAfter ?? SYSTEM_AFTER
+  const known = new Map<string, Promise<ReadonlyArray<LookupAddress>>>()
+  const asking = new Map<string, Promise<ReadonlyArray<LookupAddress>>>()
+  const askSystemOnce = (host: string) => {
+    const already = asking.get(host)
+    if (already !== undefined) return already
+    const lookup = system(host).finally(() => asking.delete(host))
+    asking.set(host, lookup)
+    return lookup
+  }
+  return (host) => {
+    const kept = known.get(host)
+    if (kept !== undefined) return kept
+    const some = (all: ReadonlyArray<LookupAddress>) => (all.length > 0 ? all : Promise.reject(new Error(host)))
+    const direct = ask(host).then(some)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const fallback = new Promise<void>((resolve) => {
+      // A plain Promise's wait, outside any effect: the proxy answers sockets, not fibers.
+      // oxlint-disable-next-line althar/one-clock
+      timer = setTimeout(resolve, systemAfter)
+      direct.catch(() => resolve())
+    })
+      .then(() => askSystemOnce(host))
+      .then(some)
+    const answer = Promise.any([direct, fallback]).finally(() => clearTimeout(timer))
+    known.set(host, answer)
+    // A host not found is asked again next time.
+    answer.catch(() => known.delete(host))
+    return answer
+  }
+}
+
+/** The nameservers asked directly, both families: the IPv4 answer at once, an IPv6 one once IPv4's has had a moment. */
+export const askNameservers = (four: (host: string) => Promise<string[]>, six: (host: string) => Promise<string[]>): Resolve => {
   const family = (records: Promise<string[]>, version: 4 | 6) =>
     records.then(
       (all) => all.map((address): LookupAddress => ({ address, family: version })),
       () => [],
     )
-  return async (host) => {
-    const [four, six] = await Promise.all([
-      family(new Promise((resolve, reject) => resolver.resolve4(host, (error, all) => (error ? reject(error) : resolve(all)))), 4),
-      family(new Promise((resolve, reject) => resolver.resolve6(host, (error, all) => (error ? reject(error) : resolve(all)))), 6),
-    ])
-    return [...four, ...six]
-  }
+  return (host) =>
+    new Promise((resolve) => {
+      const found: Array<LookupAddress> = []
+      let left = 2
+      let grace: ReturnType<typeof setTimeout> | undefined
+      const done = () => {
+        clearTimeout(grace)
+        resolve([...found].sort((a, b) => a.family - b.family))
+      }
+      const take = (all: ReadonlyArray<LookupAddress>, version: 4 | 6) => {
+        found.push(...all)
+        left -= 1
+        if (left === 0 || (version === 4 && all.length > 0)) return done()
+        // oxlint-disable-next-line althar/one-clock
+        if (all.length > 0) grace = setTimeout(done, FOUR_GRACE)
+      }
+      void family(four(host), 4).then((all) => take(all, 4))
+      void family(six(host), 6).then((all) => take(all, 6))
+    })
+}
+
+const nameservers = (): Resolve => {
+  const resolver = new Resolver({ timeout: ASK_TIMEOUT, tries: 2 })
+  return askNameservers(
+    (host) => new Promise((resolve, reject) => resolver.resolve4(host, (error, all) => (error ? reject(error) : resolve(all)))),
+    (host) => new Promise((resolve, reject) => resolver.resolve6(host, (error, all) => (error ? reject(error) : resolve(all)))),
+  )
 }
 
 const askSystem: Resolve = (host) =>
@@ -182,5 +249,5 @@ export const openSignInProxy = async (agent: AgentDefinition, options: SignInPro
   if ((options.platform ?? process.platform) !== 'darwin') return null
   if (proxiedByEnv(options.env ?? process.env)) return null
   if (await (options.settingsProxied ?? macProxied)()) return null
-  return openResolvingProxy(options.resolve ?? raceResolve(askNameservers(), askSystem)).catch(() => null)
+  return openResolvingProxy(options.resolve ?? raceResolve(nameservers(), askSystem)).catch(() => null)
 }
