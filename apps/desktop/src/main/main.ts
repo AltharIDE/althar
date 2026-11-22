@@ -53,7 +53,7 @@ import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
-import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from './repositories'
+import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from '@althar/runtime/repositories'
 import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
@@ -537,7 +537,7 @@ const homes = startHomeConnections({
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
-  open: (home, projectId) => {
+  open: (home, projectId, fresh) => {
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
@@ -547,12 +547,14 @@ const homes = startHomeConnections({
       existing.show()
       if (!quiet) existing.focus()
       if (projectId !== undefined) existing.webContents.send('althar:homes-project', projectId)
+      if (fresh === true) existing.webContents.send('althar:homes-new-project')
       return
     }
     const opened = openWindow(home)
-    // Its preload holds the project until the page listens, once the window has drawn its first projects.
+    // Its preload holds the project, or New project, until the page listens, once the window has drawn its first projects.
     if (projectId !== undefined)
       opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-project', projectId))
+    if (fresh === true) opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-new-project'))
   },
   log: (message) => logs.error(message),
   usage: recordUsage,

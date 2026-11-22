@@ -167,6 +167,13 @@ ipcRenderer.on('althar:homes-project', (_event, projectId: unknown) => {
   if (projectShown.size === 0) pendingProject = projectId
   for (const listener of projectShown) listener(projectId)
 })
+/* New project, asked from another window's Manage homes: held as a project to show is. */
+let pendingNew = false
+const newShown = new Set<() => void>()
+ipcRenderer.on('althar:homes-new-project', () => {
+  if (newShown.size === 0) pendingNew = true
+  for (const listener of newShown) listener()
+})
 
 contextBridge.exposeInMainWorld('althar', {
   homes: {
@@ -181,6 +188,7 @@ contextBridge.exposeInMainWorld('althar', {
     connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
     save: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-save', checkId, name),
     open: (id: string, projectId?: string) => ipcRenderer.invoke('althar:homes-open', id, projectId),
+    openNew: (id: string) => ipcRenderer.invoke('althar:homes-open', id, undefined, true),
     rename: (id: string, name: string) => ipcRenderer.invoke('althar:homes-rename', id, name),
     change: (id: string, checkId: string) => ipcRenderer.invoke('althar:homes-change', id, checkId),
     forget: (id: string) => ipcRenderer.invoke('althar:homes-forget', id),
@@ -224,6 +232,16 @@ contextBridge.exposeInMainWorld('althar', {
       }
       return () => {
         projectShown.delete(listener)
+      }
+    },
+    onNewProject: (listener: () => void) => {
+      newShown.add(listener)
+      if (pendingNew) {
+        listener()
+        pendingNew = false
+      }
+      return () => {
+        newShown.delete(listener)
       }
     },
   },

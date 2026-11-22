@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from '../src/main/repositories'
+import { findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from '../src/repositoriesFound'
 
 /* The repositories the first screen offers: found where people keep code, newest work first, and handed to the window by id. */
 
