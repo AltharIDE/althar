@@ -742,6 +742,35 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 
 [The T3 and Paradev research](../research/chat-turn-undo.md) informed the worktree boundary, selective file checks and prompt restoration. Althar refuses a conflicting restore as a whole, so the conversation and files cannot silently diverge through a partial undo. There is no redo control in this slice; recovery refs support interrupted operations rather than a second conversation branch.
 
+## Althar's own tab
+
+After an update, what changed shows in the window, not only on the site.
+Althar has a tab of its own beside the home's, kept like a project's, with
+two views: What's new and Coming next (`/althar`, `features/news`).
+
+- **It arrives quietly.** The window opens where it was. Althar's tab has a
+  quiet dot (the kit's "something new there", not the violet of what waits on
+  the person) until it's opened or closed. Nothing opens by itself, and a
+  first launch has no news: what runs is what has been seen. A build whose
+  version has no notes of its own (one between releases) has none either.
+- **Closed, it stays closed until the next update with news** brings it back,
+  with its dot. The version line in the quick settings' foot and in About
+  Althar opens it in the window, and is the way back in between.
+- **What's new reads the site's notes**, bundled as the app is built (the
+  site's `changelog.ts` and its highlights, through `@althar/site`), so the
+  page is there offline and at once, and the notes are written once. It leads
+  with the release's highlight, drawn where the app has a picture for it,
+  then the features the app draws a tile for (by how their line starts; a
+  release with none shows its first named ones), what feels better, where to
+  follow Althar, and every release a fold away, those new to the person said
+  so. The version the person updated from is kept with what they've seen.
+- **Coming next is the roadmap, to shape.** The site's `ROADMAP`, what's being
+  built first and largest, each with a way to say what you'd need from it (a
+  new GitHub issue, its name filled in) and where to say what's missing. No
+  votes yet: a vote needs somewhere to be kept. When there are, they can be
+  reactions on an issue per item, read from GitHub and added with the GitHub
+  sign-in Althar already has, with nothing of Althar's own to run.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
@@ -753,3 +782,4 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 - 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.
 - 14 Nov 2026: markdown files open rendered, with what the task changed marked, and Source a key away ([Code beside the conversation](#code-beside-the-conversation)).
 - 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).
+- 22 Nov 2026: Althar's own tab shows what's new after an update, and what's coming next, from the site's notes and roadmap; the version line opens it in the window ([Althar's own tab](#althars-own-tab)).
