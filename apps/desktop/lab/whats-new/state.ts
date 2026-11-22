@@ -1,0 +1,99 @@
+import { useSyncExternalStore } from 'react'
+
+/*
+ * What the lab's bar picks, and where the update stands in the window: the
+ * direction (A–D), a narrow window, and whether the person came from 0.8.0
+ * (two releases new to them) rather than 0.9.0. Then what the window holds:
+ * whether What's new has a tab, whether its line or dot still shows, and
+ * whether the home has the notes open in place. The bar's choices are kept
+ * in the address, so a reload or a screenshot opens on the same.
+ */
+
+export const DIRECTIONS = [
+  { key: 'a', kbd: 'A', label: 'Opens as a tab' },
+  { key: 'b', kbd: 'B', label: 'Offered in the bar' },
+  { key: 'c', kbd: 'C', label: 'The home says it' },
+  { key: 'd', kbd: 'D', label: 'Althar, like a project' },
+] as const
+export type Direction = (typeof DIRECTIONS)[number]['key']
+
+/** D's two views. */
+export type View = 'new' | 'coming'
+
+/** How What's new reads, in A, B and C: the notes whole, or the highlights first. */
+export const READINGS = [
+  { key: 'notes', kbd: '1', label: 'Notes' },
+  { key: 'highlights', kbd: '2', label: 'Highlights' },
+] as const
+export type Reading = (typeof READINGS)[number]['key']
+
+export interface LabState {
+  readonly d: Direction
+  readonly narrow: boolean
+  /** Updated from 0.8.0, so 0.9.0 is new to the person too. */
+  readonly skipped: boolean
+  /** What's new has a tab (A, B; D's is always there). */
+  readonly tab: boolean
+  /** The update hasn't been looked at: B's line in the bar, what C's home says, D's dot on its tab. */
+  readonly unseen: boolean
+  /** C: the home has the notes open in its place. */
+  readonly homeNotes: boolean
+  /** D: the view its page is on. */
+  readonly view: View
+  /** A, B and C: how the page reads. */
+  readonly reading: Reading
+}
+
+const params = new URLSearchParams(window.location.search)
+const asked = params.get('d')
+const d: Direction = DIRECTIONS.find((one) => one.key === asked)?.key ?? 'a'
+
+/** How each direction stands as the window opens on 0.10.0 for the first time. */
+export const arrival = (direction: Direction): Pick<LabState, 'tab' | 'unseen' | 'homeNotes' | 'view'> => ({
+  tab: direction === 'a' || direction === 'd',
+  unseen: direction !== 'a',
+  homeNotes: false,
+  view: 'new',
+})
+
+/** How each direction reads first: B leads with the highlights, the others with the notes. */
+export const readingOf = (direction: Direction): Reading => (direction === 'b' ? 'highlights' : 'notes')
+
+let state: LabState = {
+  d,
+  narrow: params.get('narrow') === '1',
+  skipped: params.get('from') === '0.8.0',
+  ...arrival(d),
+  reading: READINGS.find((one) => one.key === params.get('read'))?.key ?? readingOf(d),
+  // Opened on What's new's own address, its tab is open and it has been seen.
+  ...(window.location.hash === '#/whats-new' && d !== 'c' ? { tab: true, unseen: false } : {}),
+  ...(params.get('notes') === '1' ? { homeNotes: true, unseen: false } : {}),
+  ...(params.get('view') === 'coming' ? { view: 'coming' as const } : {}),
+}
+const listeners = new Set<() => void>()
+
+export const lab = {
+  get: () => state,
+  set: (change: Partial<LabState>) => {
+    state = { ...state, ...change }
+    const url = new URL(window.location.href)
+    url.searchParams.set('d', state.d)
+    url.searchParams.set('read', state.reading)
+    for (const [key, on, value] of [
+      ['narrow', state.narrow, '1'],
+      ['from', state.skipped, '0.8.0'],
+    ] as const)
+      if (on) url.searchParams.set(key, value)
+      else url.searchParams.delete(key)
+    url.searchParams.delete('notes')
+    url.searchParams.delete('view')
+    window.history.replaceState(window.history.state, '', url)
+    for (const listener of listeners) listener()
+  },
+  subscribe: (listener: () => void) => {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  },
+}
+
+export const useLab = () => useSyncExternalStore(lab.subscribe, lab.get)
