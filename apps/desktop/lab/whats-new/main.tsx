@@ -4,7 +4,7 @@ import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
 import { createHashHistory, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
-import { StrictMode, useEffect } from 'react'
+import { StrictMode, useEffect, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { follow } from '../../src/renderer/data/feed'
@@ -21,22 +21,17 @@ import { PENDING } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { ALTHAR, makeClient, TABS } from './data'
 import { go, setRouter, WHATS_NEW } from './go'
-import { arrival, type Coming, COMINGS, DIRECTIONS, type Direction, lab, type Look, LOOKS, useLab } from './state'
+import { arrival, lab, useLab, type View } from './state'
 import { WhatsNewScreen } from './WhatsNew'
 import s from './lab.module.css'
 
 /*
  * The What's new lab (README.md): the desktop app's window, whole, in the
  * browser, on made-up data, just restarted into Althar 0.10.0, with the
- * page's bar under it. The bar swaps the direction in place (A–D, with keys
- * too), and each opens as the window would on its first launch after the
- * update; R does that again. 1, 2 and 3 switch how the page looks, in
- * every direction: Althar's light, the real thing, or the site's flight
- * log, and open it. 4, 5 and 6 open Coming next, the roadmap, in each of
- * its looks: on the horizon of the light, as Althar's own board at work,
- * or for the person to shape. N narrows the window to the app's
- * narrowest; F says the person updated from 0.8.0, so two releases are
- * new to them.
+ * page's bar under it. The window opens where it was, Althar's tab beside the
+ * home's with its dot; the bar walks through the rest, with keys too: R the
+ * update again, 1 What's new, 2 Coming next, Q the quick settings' version
+ * line (the way back to it), F updated from 0.8.0, N the narrowest window.
  */
 
 // The tabs this window keeps, the same at every load.
@@ -50,7 +45,7 @@ Object.defineProperty(window, 'althar', { value: host, configurable: true })
 const cache = makeQueryClient()
 const services = { client, host, cache, feed: follow(client, cache) }
 
-/** What's new's own place, which the app's routes don't have: under the window's tabs, as the settings' is. */
+/** Althar's own place, which the app's routes don't have: under the window's tabs, as the settings' is. */
 const whatsNewRoute = createRoute({ getParentRoute: () => rootRoute, path: WHATS_NEW, component: WhatsNewScreen })
 const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute, pageRoute, whatsNewRoute])
 const router = createRouter({
@@ -64,46 +59,39 @@ const router = createRouter({
 })
 setRouter(router)
 
-/** Where the window opens, the first time after the update: What's new's tab in A, the home in C, where it was (althar) else. */
-const land = (d: Direction) => {
-  if (d === 'a') return go.whatsNew()
-  if (d === 'c') return go.home()
+/** The update again: the window opens where it was, a project of the person's, and Althar's tab has its dot. */
+const restart = () => {
+  lab.set(arrival)
   go.project(ALTHAR)
 }
 
-/** The update again, in a direction: the window as it opens on 0.10.0 for the first time. */
-const restart = (d: Direction) => {
-  lab.set({ d, ...arrival(d) })
-  land(d)
-}
+/** The quick settings, open, their foot saying the version and the way to What's new. */
+const quick = () => document.querySelector<HTMLButtonElement>('[data-lab-window] button[aria-label="Althar settings"]')?.click()
 
-/** A look, seen: the page opens on What's new where it isn't. */
-const see = (look: Look) => {
-  lab.set({ look, view: 'new' })
-  go.whatsNew()
-}
+const usePath = () =>
+  useSyncExternalStore(
+    (changed) => router.subscribe('onResolved', changed),
+    () => router.state.location.pathname,
+  )
 
-/** Coming next in a look, seen: What's new opens on its other view, in whichever direction. */
-const seeComing = (coming: Coming) => {
-  lab.set({ coming, view: 'coming' })
-  go.whatsNew()
-}
+const VIEWS: readonly { key: View; kbd: string; label: string }[] = [
+  { key: 'new', kbd: '1', label: 'What’s new' },
+  { key: 'coming', kbd: '2', label: 'Coming next' },
+]
 
 function Bar() {
-  const { d, narrow, skipped, look, coming, view } = useLab()
+  const { narrow, skipped, unseen, view } = useLab()
+  const onPage = usePath() === WHATS_NEW
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (event.metaKey || event.ctrlKey || event.altKey) return
       if (target !== null && (target.isContentEditable || target.closest('input, textarea, [contenteditable="true"]') !== null)) return
       const key = event.key.toLowerCase()
-      const direction = DIRECTIONS.find((one) => one.kbd.toLowerCase() === key)
-      if (direction !== undefined) return restart(direction.key)
-      const chosen = LOOKS.find((one) => one.kbd === key)
-      if (chosen !== undefined) return see(chosen.key)
-      const next = COMINGS.find((one) => one.kbd === key)
-      if (next !== undefined) return seeComing(next.key)
-      if (key === 'r') return restart(lab.get().d)
+      const chosen = VIEWS.find((one) => one.kbd === key)
+      if (chosen !== undefined) return go.althar(chosen.key)
+      if (key === 'r') return restart()
+      if (key === 'q') return quick()
       if (key === 'n') return lab.set({ narrow: !lab.get().narrow })
       if (key === 'f') return lab.set({ skipped: !lab.get().skipped })
     }
@@ -111,28 +99,21 @@ function Bar() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   return (
-    <div className={s.bar} role="toolbar" aria-label="Directions">
-      {DIRECTIONS.map((one) => (
-        <button key={one.key} type="button" aria-pressed={d === one.key} onClick={() => restart(one.key)}>
-          <kbd>{one.kbd}</kbd> {one.label}
-        </button>
-      ))}
-      <span className={s.round}>Looks</span>
-      {LOOKS.map((one) => (
-        <button key={one.key} type="button" aria-pressed={view === 'new' && look === one.key} onClick={() => see(one.key)}>
-          <kbd>{one.kbd}</kbd> {one.label}
-        </button>
-      ))}
-      <span className={s.round}>Coming next</span>
-      {COMINGS.map((one) => (
-        <button key={one.key} type="button" aria-pressed={view === 'coming' && coming === one.key} onClick={() => seeComing(one.key)}>
-          <kbd>{one.kbd}</kbd> {one.label}
-        </button>
-      ))}
-      <span className={s.gap} />
-      <button type="button" onClick={() => restart(d)}>
-        <kbd>R</kbd> Update again
+    <div className={s.bar} role="toolbar" aria-label="What’s new">
+      <button type="button" aria-pressed={unseen && !onPage} onClick={restart}>
+        <kbd>R</kbd> Just updated
       </button>
+      <span className={s.round}>Althar’s tab</span>
+      {VIEWS.map((one) => (
+        <button key={one.key} type="button" aria-pressed={onPage && view === one.key} onClick={() => go.althar(one.key)}>
+          <kbd>{one.kbd}</kbd> {one.label}
+        </button>
+      ))}
+      <span className={s.round}>Later</span>
+      <button type="button" onClick={quick}>
+        <kbd>Q</kbd> From the version line
+      </button>
+      <span className={s.gap} />
       <button type="button" aria-pressed={skipped} onClick={() => lab.set({ skipped: !skipped })}>
         <kbd>F</kbd> From 0.8.0
       </button>
@@ -145,9 +126,9 @@ function Bar() {
 
 function Lab() {
   const { narrow } = useLab()
-  // The first time, the window opens as the direction has it after the update; a reload keeps where it was.
+  // The first time, the window opens where it was after the update; a reload keeps where it is.
   useEffect(() => {
-    if (window.location.hash === '' || window.location.hash === '#/') land(lab.get().d)
+    if (window.location.hash === '' || window.location.hash === '#/') go.project(ALTHAR)
   }, [])
   return (
     <div className={s.lab}>

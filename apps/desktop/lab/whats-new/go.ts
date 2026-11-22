@@ -2,12 +2,12 @@ import type { AnyRouter } from '@tanstack/react-router'
 
 import type { Section } from '../../src/renderer/features/settings/sections'
 import { ALTHAR } from './data'
-import { lab } from './state'
+import { lab, type View } from './state'
 
 /*
- * Where the lab's parts send the window: its own What's new page, which the
- * app's routes don't know (main.tsx adds it), and the places a highlight's
- * way in opens. Through the lab's router, set as the page starts.
+ * Where the lab's parts send the window: Althar's own page, which the app's
+ * routes don't know (main.tsx adds it), and the places a highlight's way in
+ * opens. Through the lab's router, set as the page starts.
  */
 
 let router: AnyRouter | null = null
@@ -20,14 +20,9 @@ const to = (path: string) => void router?.history.push(path)
 export const WHATS_NEW = '/whats-new'
 
 export const go = {
-  /** What's new: its tab, or C's home with the notes in place. */
-  whatsNew: () => {
-    const { d } = lab.get()
-    if (d === 'c') {
-      lab.set({ homeNotes: true, unseen: false })
-      return to('/')
-    }
-    lab.set({ tab: true, unseen: false })
+  /** Althar's page, on a view: opening it is looking at the update, so its tab's dot goes. */
+  althar: (view: View = 'new') => {
+    lab.set({ unseen: false, view })
     to(WHATS_NEW)
   },
   home: () => to('/'),

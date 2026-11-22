@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-
 import { Brand, BrandMark, Heading, Icon, LiveDot } from '@althar/ui'
 
 import { LINKS } from '../../../../../site/src/content/facts'
@@ -9,7 +7,7 @@ import { COMING, type Coming, STAGE_WORD } from './roadmap'
 import x from './shape.module.css'
 
 /*
- * Coming next, 6: shape it. Each coming thing as a card with the thing drawn
+ * Coming next: shape it. Each coming thing as a card with the thing drawn
  * working: what's being built first and largest, the mobile app, then
  * what's next and later. On each, a way to say what you'd need from it, which opens
  * an issue on GitHub with its name filled in: no votes yet, since a vote
@@ -34,12 +32,10 @@ function Stage({ one }: { one: Coming }) {
   )
 }
 
-export function Shape({ back }: { back?: ReactNode }) {
+export function Shape() {
   return (
     <div className={x.page}>
-      {back !== undefined && <div className={x.back}>{back}</div>}
       <header className={x.head}>
-        <p className={x.kicker}>Coming next</p>
         <Heading level={1} className={x.title}>
           Shape what’s next
         </Heading>

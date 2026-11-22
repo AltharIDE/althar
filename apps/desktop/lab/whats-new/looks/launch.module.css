@@ -1,4 +1,4 @@
-/* Look 1: Althar's light. On the kit's tokens; cobalt, Althar's own, the one accent. */
+/* What's new, on Althar's light. On the kit's tokens; cobalt, Althar's own, the one accent. */
 
 .page {
   height: 100%;
@@ -26,12 +26,6 @@
   overflow: hidden;
   -webkit-mask-image: linear-gradient(#000 72%, transparent 96%);
   mask-image: linear-gradient(#000 72%, transparent 96%);
-}
-.back {
-  position: absolute;
-  top: 14px;
-  left: 20px;
-  z-index: 2;
 }
 .heroIn {
   position: relative;

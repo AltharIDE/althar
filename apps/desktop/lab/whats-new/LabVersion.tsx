@@ -8,9 +8,9 @@ import s from './lab.module.css'
 
 /*
  * The version line in the quick settings' foot and About Althar's head, as
- * the kit draws them, but What's new opens in the window (its tab, or C's
- * home) rather than the browser: the one way back to it once its tab is
- * closed. Its arrow out goes with it (lab.module.css).
+ * the kit draws them, but What's new opens in the window, on Althar's tab,
+ * rather than the browser: the way back to it once the update has been
+ * looked at. Its arrow out goes with it (lab.module.css).
  */
 
 const inside = (event: MouseEvent) => {
@@ -19,7 +19,7 @@ const inside = (event: MouseEvent) => {
   event.preventDefault()
   // The quick settings close, as they do for every way out of them.
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  go.whatsNew()
+  go.althar()
 }
 
 export function AppVersion(props: AppVersionProps) {

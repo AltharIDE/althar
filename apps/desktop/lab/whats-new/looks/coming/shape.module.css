@@ -1,4 +1,4 @@
-/* Coming next, 6: shape it. On the kit's tokens. */
+/* Coming next: shape it. On the kit's tokens. */
 
 .page {
   position: relative;
@@ -9,12 +9,6 @@
 .page :where(h1, h2, p) {
   margin: 0;
 }
-.back {
-  position: absolute;
-  top: 14px;
-  left: 20px;
-  z-index: 2;
-}
 
 .head {
   display: grid;
@@ -24,12 +18,6 @@
   margin: 0 auto;
   padding: 64px 32px 36px;
   text-align: center;
-}
-.kicker {
-  font: 500 11.5px/1.3 var(--font-label);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--t-3);
 }
 .title {
   font: 640 52px/1.04 var(--font-display);
@@ -252,9 +240,11 @@
   .top .picture {
     min-height: 260px;
   }
-  .top .picture > *,
-  .top .picture[data-picture='phone'] > * {
+  .top .picture > * {
     zoom: 1;
+  }
+  .top .picture[data-picture='phone'] > * {
+    zoom: 1.5;
   }
   .top .body {
     grid-template-columns: minmax(0, 1fr);

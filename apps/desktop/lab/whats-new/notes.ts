@@ -3,11 +3,11 @@ import type { IconName } from '@althar/ui'
 import { type Change, type Kind, type Release, RELEASES, ROADMAP } from './changelog'
 
 /*
- * The release notes as the directions read them: the releases new to the
+ * The release notes as What's new reads them: the releases new to the
  * person (0.10.0, and 0.9.0 too where they came from 0.8.0), 0.10.0's
  * flagship (its first lines, the host and the workers) apart from the rest,
- * and the few highlights B leads with, each with the way into it where the
- * app has one.
+ * and the highlights after it, each with the way into it where the app has
+ * one.
  */
 
 export { ROADMAP, RELEASES }
@@ -74,7 +74,7 @@ export const FELT = [
   { name: 'Long threads, smooth', line: 'Threads open and scroll smoothly, at any length.' },
 ] as const
 
-/** What B leads with after the flagship: the new things a person would go and try, in the release's order. */
+/** What's new after the flagship: the new things a person would go and try, in the release's order. */
 export const HIGHLIGHTS: readonly Highlight[] = [
   { name: 'Computer use', line: first(lineOf('Computer use')), whole: wholeOf('Computer use'), icon: 'viewport' },
   { name: 'Artifacts you talk to', line: first(lineOf('Artifacts you talk to')), whole: wholeOf('Artifacts you talk to'), icon: 'canvas' },
@@ -89,16 +89,3 @@ export const HIGHLIGHTS: readonly Highlight[] = [
   { name: 'Terminals in Althar', line: first(lineOf('Terminals in Althar')), whole: wholeOf('Terminals in Althar'), icon: 'terminal' },
   { name: 'Bring in your work', line: first(lineOf('Bring in work from')), whole: wholeOf('Bring in work from'), icon: 'download' },
 ]
-
-/** The flagship's few lines B shows, each its own line's first sentence. */
-export const FLAGSHIP_BRIEF = [
-  { name: 'A home on your server', line: first(lineOf('Your own host')), way: { label: 'Connect a home', to: 'homes' as const } },
-  { name: 'Workers of your own', line: first(lineOf('Your own workers')), way: { label: 'Add a worker', to: 'workers' as const } },
-  { name: 'Best available worker', line: first(lineOf('Choose a worker')) },
-]
-
-/** How many lines 0.10.0 has beyond what B and C lead with. */
-export const restCount = (release: Release) => release.changes.length
-
-/** The roadmap's stages, in D's lanes. */
-export const STAGE_TITLE = { now: 'Now', next: 'Next', later: 'Later' } as const

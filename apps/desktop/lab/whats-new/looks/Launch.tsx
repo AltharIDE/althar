@@ -11,7 +11,7 @@ import l from './launch.module.css'
 import { Where } from './Where'
 
 /*
- * Look 1: Althar's light. The release opens as the window first did, on
+ * What's new: Althar's light. The release opens as the window first did, on
  * the light the launch and the home at rest stand on (the kit's Light) and
  * the mark coming up in halftone, the flagship large over it. Then where
  * the work runs now, as one picture of the machines with the work going
@@ -164,7 +164,7 @@ function Tile({ one, size }: { one: Highlight; size: 'big' | 'small' | 'wide' })
   )
 }
 
-export function Launch({ back }: { back?: ReactNode }) {
+export function Launch() {
   const { skipped } = useLab()
   const [first, ...rest] = FLAGSHIP.title.split(', ')
   return (
@@ -173,7 +173,6 @@ export function Launch({ back }: { back?: ReactNode }) {
         <div className={l.glow}>
           <Light height={0.8} motion="drift" />
         </div>
-        {back !== undefined && <div className={l.back}>{back}</div>}
         <div className={l.heroIn}>
           <HalftoneMark size={58} />
           <p className={l.eyebrow}>

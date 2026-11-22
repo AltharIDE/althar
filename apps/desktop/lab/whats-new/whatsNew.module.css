@@ -1,58 +1,5 @@
-/* Where What's new sits in each direction, and what says there's an update. The looks have their own (looks/). On the kit's tokens only. */
+/* Althar's page, as a project's: its bar, and its views. The views have their own (looks/). On the kit's tokens only. */
 
-/* B: in the window's bar */
-.updated {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-right: 6px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.updatedWords {
-  color: var(--t-2);
-}
-
-/* C: what the home at rest says of the update */
-.homeUpdate {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  margin-top: 26px;
-  padding-top: 22px;
-  border-top: 1px solid var(--line);
-  text-align: center;
-}
-.homeEyebrow {
-  margin: 0;
-  font: 500 11.5px/1.3 var(--font-label);
-  letter-spacing: 0.02em;
-  color: var(--t-3);
-}
-.homeTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--t-1);
-}
-.homeLine {
-  max-width: 340px;
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--t-2);
-}
-.inHome {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-}
-.back {
-  position: relative;
-  z-index: 1;
-}
-
-/* D: Althar's page, as a project's: its bar, and its views */
 .project {
   display: flex;
   flex-direction: column;

@@ -261,7 +261,7 @@ const boardOf = (projectId: string): BoardSnapshot => {
 const said = (one: Said, agentId: string): ThreadItem =>
   ({ ...(one.who === 'you' ? items.you(one.text) : items.says(one.text, agentId)), createdAt: minutesAgo(one.ago) }) as ThreadItem
 
-/** The coordinator's conversation in althar: the same in every direction. */
+/** The coordinator's conversation in althar: the same in every state of the lab. */
 const COORDINATOR: ReadonlyArray<Said> = [
   { who: 'you', text: 'Is 0.10.1 ready to tag?', ago: 64 },
   {

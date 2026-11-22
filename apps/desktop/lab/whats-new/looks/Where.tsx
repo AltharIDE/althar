@@ -2,7 +2,7 @@ import { type ReactNode, useId, useRef } from 'react'
 
 import { Brand, BrandMark, Icon, LiveDot } from '@althar/ui'
 
-import { type Timeline, useBeat } from './site/LogPictures'
+import { type Timeline, useBeat } from './beat'
 import w from './where.module.css'
 
 /*
