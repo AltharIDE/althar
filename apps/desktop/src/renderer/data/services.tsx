@@ -4,7 +4,6 @@ import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
 import type { WatchEvent } from '@althar/contracts'
-import type { WelcomeStep } from '@althar/ui/screens'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
@@ -186,7 +185,7 @@ export interface StorageHost {
 
 /** The welcome's own milestones passed to main. */
 export type WelcomeMilestone =
-  | [action: 'step', step: WelcomeStep]
+  | [action: 'step', step: import('@althar/ui/screens').WelcomeStep]
   | [action: 'project', source: 'folder' | 'clone' | 'new', outcome: 'created' | 'not_created']
   | [action: 'completed']
 
