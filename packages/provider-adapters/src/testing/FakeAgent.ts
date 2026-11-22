@@ -296,7 +296,7 @@ export interface FakeAgentOptions {
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
   /** Holds a session close while a test sends another input. */
-  readonly beforeClose?: () => Promise<void>
+  readonly beforeClose?: (sessionId: string) => Promise<void>
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
   /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
@@ -1878,7 +1878,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       return { configOptions: configOptions(session) }
     })
     .onRequest(acp.methods.agent.session.close, async ({ params }) => {
-      await options.beforeClose?.()
+      await options.beforeClose?.(params.sessionId)
       const closing = sessions.get(params.sessionId)
       if (closing !== undefined) closing.closed = true
       sessions.delete(params.sessionId)

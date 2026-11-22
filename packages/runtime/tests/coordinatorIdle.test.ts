@@ -139,7 +139,7 @@ it.effect('keeps the second account when the window starts the sleeping coordina
 it.effect('delivers an input accepted while the old coordinator is closing', () => {
   let entered!: () => void
   let release!: () => void
-  let armed = false
+  let sessionToClose: string | undefined
   const closing = new Promise<void>((resolve) => (entered = resolve))
   const closed = new Promise<void>((resolve) => (release = resolve))
   return onTestClock(
@@ -159,7 +159,10 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
       const first = Option.getOrThrow(
         yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.turnEndedAt !== null),
       )
-      armed = true
+      const [provider] = yield* sql<{
+        externalSessionId: string
+      }>`SELECT external_session_id FROM provider_sessions WHERE id = ${first.sessionId}`
+      sessionToClose = provider!.externalSessionId
       const advance = yield* Effect.forkChild(TestClock.adjust(Duration.seconds(25)))
       yield* Effect.promise(() => closing)
       const news = 'Arrived during close'
@@ -188,8 +191,8 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
         runtime(
           ':memory:',
           {
-            beforeClose: async () => {
-              if (armed) {
+            beforeClose: async (sessionId) => {
+              if (sessionId === sessionToClose) {
                 entered()
                 await closed
               }
@@ -318,7 +321,7 @@ it.effect('recovers input queued for a retired coordinator if the runtime restar
 it.effect('recovers input after a restart during an idle coordinator’s close', () => {
   let entered!: () => void
   let release!: () => void
-  let armed = false
+  let sessionToClose: string | undefined
   const closing = new Promise<void>((resolve) => (entered = resolve))
   const closed = new Promise<void>((resolve) => (release = resolve))
   return onTestClock(
@@ -340,7 +343,10 @@ it.effect('recovers input after a restart during an idle coordinator’s close',
         const first = Option.getOrThrow(
           yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.turnEndedAt !== null),
         )
-        armed = true
+        const [provider] = yield* sql<{
+          externalSessionId: string
+        }>`SELECT external_session_id FROM provider_sessions WHERE id = ${first.sessionId}`
+        sessionToClose = provider!.externalSessionId
         const advance = yield* Effect.forkChild(TestClock.adjust(Duration.seconds(25)))
         yield* Effect.promise(() => closing)
         const input = yield* sessions.send({
@@ -362,8 +368,8 @@ it.effect('recovers input after a restart during an idle coordinator’s close',
           runtime(
             ':memory:',
             {
-              beforeClose: async () => {
-                if (armed) {
+              beforeClose: async (sessionId) => {
+                if (sessionId === sessionToClose) {
                   entered()
                   await closed
                 }
