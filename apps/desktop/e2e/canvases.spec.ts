@@ -159,9 +159,28 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(page.getByRole('button', { name: 'Back to meridian' })).toHaveCount(0)
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
+
+    // The person talks to it: going to its composer starts its own chat, and what they say goes there, beside it.
+    const words = chat.getByPlaceholder('Ask about it, or say what to change')
+    await words.click()
+    await words.fill('Make the button calmer.')
+    await words.press('Enter')
+    await expect(chat.getByText('Make the button calmer.')).toBeVisible()
+    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toHaveCount(0)
+    await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    await page.waitForTimeout(1_500)
+    await shoot(page, electronApp, page, 'test-results/canvas-artifact-chat.png')
+
     // Escape goes back to every artifact.
     await page.locator('body').press('Escape')
     await expect(table).toBeVisible()
+
+    // Its chat is never a task: not on the board, nor among the asides.
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Home' }).click()
+    await expect(page.getByText('Redesign sign-in').first()).toBeVisible()
+    // (Its name is still in the coordinator's conversation, on the line of the canvas the lead drew.)
+    await expect(page.getByRole('article', { name: /Sign-in page/ })).toHaveCount(0)
+    await expect(page.getByRole('tab', { name: /Sign-in page/ })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }
