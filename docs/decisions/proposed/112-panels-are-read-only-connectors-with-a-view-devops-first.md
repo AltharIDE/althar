@@ -18,7 +18,10 @@
   [ADR-100, a page beside the conversation](../desktop-app.md#a-web-page-beside-the-conversation),
   [ADR-108, lenses](108-a-role-is-a-lens-not-a-separate-app.md),
   Ops A (the Ops sandbox profile) and Ops B (environments, the plan/apply
-  gate, locks, a run log).
+  gate, locks, a run log). Their scope here is taken from the project's
+  decision on Ops mode, not from issues: no Linear issue for either was
+  found, so what this ADR says of them is an assumption for Balázs to
+  confirm, and their issues are to be linked once filed.
 
 ## Context
 
@@ -57,8 +60,24 @@ still reach agents as they do (ADR-097); panels don't replace them.
   Althar reads the file and runs its credential plugins itself, in the
   runtime, outside every agent's sandbox, as its own git runs.
 - **Verbs `get`, `list` and `watch` only,** on workloads, pods, events,
-  services, ingresses, jobs and nodes. Secrets are never read; a
-  ConfigMap's keys are shown, not its values.
+  services, ingresses, jobs and nodes. Secrets and ConfigMaps are never
+  read.
+- **Fields from an allowlist, never raw objects.** The connector maps
+  each resource to the fields the view needs, and the panel and
+  `cluster_read` return only those:
+  - identity: kind, namespace, name, owner, the `app` and `version`
+    labels, container images;
+  - workloads: desired, ready, updated and available replicas, rollout
+    revision and progress, condition types, statuses and reasons;
+  - pods: phase, readiness, restart counts, the last termination's
+    reason and exit code, node;
+  - events: type, reason, count, the object it is about, and its message;
+  - nodes: readiness and allocatable against requested CPU and memory.
+
+  Environment variables, `envFrom`, commands and arguments, annotations,
+  volumes, other labels and the rest of a spec are never read into
+  Althar, so neither a view nor an agent can show one. A field is added
+  to the list in review, like a tool.
 - **The view:** each environment's workloads, ready against desired, pods
   restarting or failing, recent warnings, and the rollout of what the
   feature's `ops.md` names.
@@ -67,6 +86,10 @@ still reach agents as they do (ADR-097); panels don't replace them.
 
 - **A base URL, and a token or basic auth where it needs one,** sealed as
   code hosts' tokens are. Grafana is linked from the view, not read.
+- **Queries return series and their values only;** an alert returns its
+  name, state, severity, labels and when it started. Annotations, which
+  may carry links and text from anywhere, are left out unless the project
+  names one to show (`summary`).
 - **The view:** the active alerts, and the queries `ops.md` names for the
   feature, as small charts.
 - **An alert is offered as a task:** "Look into it" drafts an Incident

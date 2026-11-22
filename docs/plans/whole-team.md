@@ -67,8 +67,12 @@ specs/<feature>/
 ```
 
 In several repositories the feature lives in its home repository's
-`specs/`, and the pull requests elsewhere name it with a `Feature: <slug>`
-line in their description, or a `feature:<slug>` label.
+`specs/`, and each pull request names its feature and stage with a
+`Feature: <slug> <stage>` line in its description, or a
+`feature:<slug>:<stage>` label; `spec.md` may list a stage's pull requests
+instead. A stage whose merges Althar can't all confirm, as in a
+repository the project doesn't bind, is unverified and hands over nothing
+([ADR-109](../decisions/proposed/109-a-feature-moves-through-stages-kept-in-the-repository.md)).
 
 ## The flow
 
@@ -76,15 +80,17 @@ line in their description, or a `feature:<slug>` label.
 flowchart LR
   S[Spec<br/>product] -->|spec.md merged on main| D[Design<br/>design]
   D -->|design/ merged| B[Build<br/>engineering]
-  B -->|every linked pull request merged| SH[Ship<br/>devops]
-  SH -->|ops.md merged, rollout done| O[Operate<br/>devops]
+  B -->|every pull request in its set merged| SH[Ship<br/>devops]
+  SH -->|ops.md merged| O[Operate<br/>devops]
   O -.incident, feedback.-> S
   D -.question on the spec.-> S
   B -.question on the design.-> D
 ```
 
 - **Every arrow is a merge,** with whatever the host requires for it:
-  reviews, code owners, checks. Althar adds nothing to it.
+  reviews, code owners, checks. Althar adds nothing to it. A rollout's
+  progress is shown on Ship and Operate from the panels, beside the stage,
+  and moves nothing.
 - **"Ready for next" is a soft signal.** A stage owner can mark their part
   ready before it merges; the next role sees it and may start early.
   Nothing waits on it and nothing is locked by it.
@@ -92,8 +98,9 @@ flowchart LR
   one on the pull request or the tracker; the feature stays where it is.
 - **Work runs in parallel.** An engineering spike can start during Design;
   stages mark the main road only.
-- **At each handoff the coordinator** of each person whose role owns the
-  next stage reads the merged artefact and proposes their tasks, held for
+- **At each handoff the coordinator** of each person whose project roles
+  include the next stage's owner, whichever lens they look through then,
+  reads the merged artefact and proposes their tasks, held for
   them: design prototypes after a spec, build tasks after a design, a
   rollout checklist after a merge. They are the same plans and cards as
   today.
@@ -155,8 +162,13 @@ Reading the code moved a few things against the canvas:
   is already planned can wait on this stage's tasks without errands.
 - **Errands are still needed** for what the person asks for later ("when
   the build pull requests merge, draft the rollout"), and those waits
-  never fire today (DEV-267). That makes DEV-267 a prerequisite of
-  handoffs, as the canvas said, but not of reading stages.
+  never fire today (DEV-267). That makes DEV-267 a condition of accepting
+  handoffs (Phase 3), as the canvas said, but not of reading stages
+  (Phase 2).
+- **Nothing reads every repository's main today.** The merge line watches
+  main only for an hour after this Althar's own merge (`redWatch` in
+  `MergeLine.ts`), so handoffs need a feature sweep of their own, with a
+  catch-up on start ([ADR-110](../decisions/proposed/110-a-stage-hands-over-when-its-artefact-merges.md)).
 - **The host's gates are read already.** `githubRules.ts`,
   `gitlabRules.ts` and `bitbucketRules.ts` read branch protection,
   rulesets, required checks, required reviews and merge queues into
@@ -189,18 +201,22 @@ Reading the code moved a few things against the canvas:
 
 ```mermaid
 flowchart LR
-  P0[0 Prerequisites<br/>DEV-267, Ops A] --> P2
+  D267[0 DEV-267] --> P3
+  OPSA[0 Ops A] --> P5
   P1[1 Lenses] --> P2[2 Features and stages]
   P2 --> P3[3 Handoffs]
   P3 --> P4[4 Spec and design as artefacts]
-  P0 --> P5[5 DevOps: panels, Ops B]
-  P1 --> P5
+  P1 --> P5[5 DevOps: panels, Ops B]
   P3 --> P6[6 The team view<br/>with Althar Cloud]
 ```
 
 0. **Prerequisites.** DEV-267, so errands fire on the events they wait on,
-   including those that happened before the errand was kept. Ops A, the
-   Ops sandbox profile, so the devops lens has a profile to default to.
+   including those that happened before the errand was kept: Phase 3 is
+   accepted only once it is fixed. Ops A, the Ops sandbox profile, so the
+   devops lens has a profile to default to. Ops A's and Ops B's scope here
+   is taken from the project's decision on Ops mode; no Linear issue for
+   either was found, so it is an assumption for Balázs to confirm, and
+   their issues are linked once filed.
 1. **Lenses** ([ADR-108](../decisions/proposed/108-a-role-is-a-lens-not-a-separate-app.md)).
    A role per person per project, a switch in the project's header, and
    each lens's landing view, preset order and notification defaults first:
@@ -209,13 +225,18 @@ flowchart LR
    Incident look) are built-ins with a brief, model-free like the rest.
 2. **Features and stages** ([ADR-109](../decisions/proposed/109-a-feature-moves-through-stages-kept-in-the-repository.md)).
    Read `.althar/flow.yaml` and `specs/*/spec.md` from the default branch;
-   a feature card and its timeline, read-only; `Feature:` links across the
-   project's repositories; the optional tracker mirror. Nothing here acts.
+   a feature card and its timeline, read-only; `Feature:` links, with
+   their stage, across the project's repositories; unverified stages; the
+   optional tracker mirror. Nothing here acts, and none of it waits on
+   DEV-267.
 3. **Handoffs** ([ADR-110](../decisions/proposed/110-a-stage-hands-over-when-its-artefact-merges.md),
    [ADR-111](../decisions/proposed/111-gates-live-on-the-code-host-and-the-tracker.md)).
-   The coordinator hears a stage's artefact merge, and proposes the next
-   role's tasks, held. "Ready for next" as a soft signal. The host's gates
+   The feature sweep reads every bound repository's main and the marked
+   pull requests, catching up on start; the coordinator of each next-stage
+   owner proposes their tasks, held. "Ready for next" as a soft signal. The host's gates
    shown on the timeline, CODEOWNERS read for who owns each artefact.
+   Accepted only once DEV-267 is fixed (open question 8 asks whether it
+   should be).
 4. **Spec and design as artefacts.** A spec view beside the conversation
    (a document, as today), a canvas exported into `specs/<feature>/design/`
    on the person's word, Figma links and screenshots there. A Figma
@@ -296,6 +317,13 @@ Two smaller ones came up while reading the code:
    next stage's owner looks: a handoff is someone else's work arriving,
    and the person decides when theirs starts. A lens setting could let
    them count down like any plan. **Open.**
+8. **Should handoffs wait for DEV-267?** As written, yes: Phase 3 is
+   accepted only once DEV-267 is fixed, as the brief and the canvas say.
+   The alternative is to ship the feature sweep's handoffs first, as they
+   need no errand, and add errand follow-ups after. *Recommended: keep the
+   dependency,* since people will ask for "when this merges, do that" as
+   soon as handoffs exist, and an errand that never fires there would be
+   the first thing they meet. **Open.**
 
 ## Out of scope
 

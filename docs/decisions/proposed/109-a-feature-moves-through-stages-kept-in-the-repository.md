@@ -45,6 +45,8 @@ what has merged there.**
   tracker: https://linear.app/althar/project/offline-sync
   ready: design        # optional: a stage owner's "ready for next" (ADR-110)
   skip: []             # stages this feature doesn't need
+  pullRequests:        # optional: a stage's set, repository-qualified
+    build: [althar#412, althar#415, althar-relay#88]
   ---
   ```
 
@@ -67,17 +69,37 @@ what has merged there.**
   feature (`skip`), and a project can add, rename or drop stages.
 - **A stage's state is read, never kept by Althar.** Done when its artefact
   has merged on the default branch, and for a stage with `pullRequests`,
-  when every pull request linked to the feature for it has merged
+  when every pull request in its set has merged
   ([ADR-110](110-a-stage-hands-over-when-its-artefact-merges.md)). The
   current stage is the first not done and not skipped. Where the
   frontmatter's `ready` says more than the merges do, both are shown; Althar
   never picks one.
-- **Several repositories.** A pull request in any of the project's
-  repositories belongs to a feature by a `Feature: <slug>` line in its
-  description, or a `feature:<slug>` label; Althar writes the line in the
-  pull requests its own tasks open for a feature. A repository the
-  frontmatter names but the project hasn't bound is shown as named and
-  unread.
+- **Each pull request belongs to a feature and a stage.** A pull request in
+  any of the project's repositories carries a `Feature: <slug> <stage>`
+  line in its description (`Feature: offline-sync build`), or a
+  `feature:<slug>:<stage>` label. The stage may be left out only where the
+  feature has one stage with pull requests, which it then means; a marker
+  that leaves it out where there are several counts for none and is shown
+  as needing one. Althar writes the line, with the stage, in the pull
+  requests its own tasks open for a feature. So work opened early for a
+  later stage never counts toward an earlier one.
+- **A stage's set of pull requests** is the frontmatter's `pullRequests`
+  list for it, repository-qualified (`althar-relay#88`), where it has one:
+  then only those count, whatever else is marked, and the timeline shows
+  marked ones outside the list. Without a list, the set is every pull
+  request marked for that stage. Completion and reopening use the set
+  alone, everywhere.
+- **Unverified when the evidence isn't there.** A stage is done only when
+  every merge it needs is confirmed on its repository's default branch. A
+  repository the frontmatter names, or a pull request the list names, that
+  this Althar can't read (the project doesn't bind the repository, access
+  was lost, the host can't be reached) makes the stage **unverified**, not
+  done: the timeline says which repository or pull request it couldn't
+  read, and what to do (bind it, reconnect). An unverified stage hands
+  over nothing ([ADR-110](110-a-stage-hands-over-when-its-artefact-merges.md))
+  until every merge is confirmed. Without a list, marked pull requests in a
+  repository Althar can't read can't be found at all, so a feature naming
+  such a repository keeps its pull request stages unverified.
 - **The tracker mirrors, optionally.** A feature's `tracker` link (a Linear
   project or issue, a Jira epic) is moved as its stage moves, with the
   same switch as a task's issue ("Move issues along with their tasks"), and
@@ -127,7 +149,9 @@ what has merged there.**
   (when to read again), `repositoryInstructions.ts` and `conventions.ts`
   (the existing readers of repository files, as a pattern),
   `projectTracker.ts` and `packages/connectors/src/linear.ts`, `jira.ts`
-  (the mirror), `runTools.ts` (the `Feature:` line in descriptions).
+  (the mirror), `runTools.ts` (the `Feature:` line, with its stage, in
+  descriptions), and the code host connectors' pull request search
+  (finding marked pull requests by text and label).
 - `packages/ui/src/board/` and a new `features/feature/` in the desktop
   app: the feature card and its timeline, read-only, from the prototype's
   chosen direction.
