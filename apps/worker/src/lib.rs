@@ -4,6 +4,28 @@ use prost::Message;
 use std::{error::Error, fmt};
 
 #[cfg(target_os = "linux")]
+pub mod agent;
+#[cfg(target_os = "linux")]
+mod agent_capacity;
+#[cfg(target_os = "linux")]
+mod agent_files;
+#[cfg(target_os = "linux")]
+mod agent_managed;
+#[cfg(target_os = "linux")]
+mod agent_preview;
+#[cfg(target_os = "linux")]
+mod agent_reservation;
+#[cfg(target_os = "linux")]
+mod agent_setup;
+#[cfg(target_os = "linux")]
+mod agent_skills;
+#[cfg(target_os = "linux")]
+mod agent_tools;
+#[cfg(target_os = "linux")]
+mod agent_workspace;
+#[cfg(target_os = "linux")]
+mod agent_workspace_set;
+#[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;
 #[cfg(target_os = "linux")]

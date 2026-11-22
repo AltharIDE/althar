@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Pixels } from '../src/coordinator/Issue/Pixels'
 import { useStickToBottom } from '../src/lib/stick'
+import { registerVirtualThread } from '../src/lib/virtual'
 import { Streamed } from '../src/fixtures/stream'
 import { Stream } from '../src/primitives/Stream/Stream'
 
@@ -217,5 +218,32 @@ describe('useStickToBottom', () => {
     vi.stubGlobal('ResizeObserver', undefined)
     render(<Scroller />)
     expect(screen.getByTestId('scroller').scrollTop).toBe(0)
+  })
+
+  it('lets a virtual thread preserve its distance to the bottom when the column grows', () => {
+    const o = observers()
+    render(<Scroller />)
+    const el = screen.getByTestId('scroller')
+    const followResize = vi.fn(() => {
+      el.scrollTop = el.scrollHeight - el.clientHeight - 72
+    })
+    const unregister = registerVirtualThread(el, {
+      stops: () => [],
+      topOf: () => null,
+      bring: () => {},
+      bringItem: () => false,
+      followResize,
+      subscribe: () => () => {},
+    })
+    try {
+      metrics(el, 1000, 400)
+      o.resize()
+      expect(followResize).toHaveBeenCalledOnce()
+      expect(el.scrollTop).toBe(528)
+    } finally {
+      unregister()
+    }
+    o.resize()
+    expect(el.scrollTop).toBe(1000)
   })
 })

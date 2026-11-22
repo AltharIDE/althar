@@ -103,6 +103,7 @@ export type AsideTabsProps = RootProps<
     /** The search over every conversation is open; without it, the heading opens and shuts it on its own. */
     searching?: boolean
     onSearchingChange?: (open: boolean) => void
+    onSearch?: (text: string) => void
     text?: Partial<AsideTabsText>
   }
 >
@@ -121,6 +122,7 @@ export function AsideTabs({
   searchKbd,
   searching,
   onSearchingChange,
+  onSearch,
   text,
   className,
   ...rest
@@ -130,6 +132,7 @@ export function AsideTabs({
   const shown = searching ?? own
   const setShown = (next: boolean) => {
     if (searching === undefined) setOwn(next)
+    if (!next) onSearch?.('')
     onSearchingChange?.(next)
   }
   const open = [...asides, ...older].find((one) => one.id === current) ?? null
@@ -184,6 +187,7 @@ export function AsideTabs({
             older={older}
             current={current}
             t={t}
+            {...(onSearch === undefined ? {} : { onSearch })}
             {...(coordinatorWords === undefined ? {} : { coordinatorWords })}
             {...(searchKbd === undefined ? {} : { kbd: searchKbd })}
             {...(onClearOlder === undefined ? {} : { onClearOlder })}
@@ -376,6 +380,7 @@ function Search({
   kbd,
   onClearOlder,
   onChoose,
+  onSearch,
 }: {
   mark: ReactNode
   asides: readonly Aside[]
@@ -386,6 +391,7 @@ function Search({
   kbd?: string
   onClearOlder?: (ids: readonly string[]) => void
   onChoose: (id: string | null) => void
+  onSearch?: (text: string) => void
 }) {
   const [query, setQuery] = useState('')
   // The row the keys are on, by the conversation it is of: a list that changes under it (a conversation at work moves up, one is
@@ -441,6 +447,7 @@ function Search({
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)
+            onSearch?.(event.target.value)
             pointed.current = null
             setActive(null)
           }}

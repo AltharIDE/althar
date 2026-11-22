@@ -281,11 +281,17 @@ describe('a task’s lead out of usage outside a step', () => {
         ],
         { concurrency: 'unbounded' },
       )
-      assert.deepStrictEqual(yield* queued(task.threadId), [{ agentId: 'codex', model: 'large' }])
+      // The idle stand-in can adopt its model before the test sees the queued choice.
+      const chosen = Effect.gen(function* () {
+        const [next] = yield* queued(task.threadId)
+        return next ?? (yield* leads(task.threadId)).at(-1)
+      })
+      const isChosen = (one: { agentId: string; model?: string | null } | undefined) => one?.agentId === 'codex' && one.model === 'large'
+      yield* until(chosen, isChosen)
       assert.isTrue(Option.isNone(yield* standInOf(standIn?.id ?? '')))
       // And once chosen, nothing gives it back.
       assert.isFalse(yield* sessions.giveBack({ threadId: task.threadId, sessionId: standIn?.id ?? '' }))
-      assert.deepStrictEqual(yield* queued(task.threadId), [{ agentId: 'codex', model: 'large' }])
+      assert.isTrue(isChosen(yield* chosen))
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
   })
 })

@@ -66,6 +66,8 @@ export class SignIns extends Context.Service<
     of(agentId: string, recheck?: boolean): Effect.Effect<SignInStatus>
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
+    /** The last check without starting a CLI, even if it is old; absent after the connection is forgotten. */
+    cached(account: Account): Effect.Effect<SignInCheck | undefined>
     /** Drop the cached readings and let new checks proceed independently of the old connection. */
     forget(agentId: string): Effect.Effect<void>
     /**
@@ -214,6 +216,11 @@ export class SignIns extends Context.Service<
               : anyOf(all.map((check) => check.status)),
           ),
         account,
+        cached: (of) =>
+          Effect.sync(() => {
+            const state = checking.get(of.agentId)
+            return state !== undefined && agents.list.includes(state.entry) ? state.known.get(of.id)?.check : undefined
+          }),
         forget: (agentId) => Effect.sync(() => void checking.delete(agentId)),
         providers,
         signedIn: Stream.fromPubSub(arrived),

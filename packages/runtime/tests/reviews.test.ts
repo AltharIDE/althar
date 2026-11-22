@@ -750,6 +750,10 @@ describe('reviewing someone else’s pull request', () => {
       const queries = yield* Queries
       const instance = yield* Instance
       const card = () => Effect.orDie(queries.card(taskId))
+      const stopped = Effect.gen(function* () {
+        yield* until((yield* LeftBehind).stopping, (tasks) => !tasks.has(taskId))
+        yield* until(sessions.running(threadId), Option.isNone)
+      })
       // The busy flag clears before the turn's bookkeeping commits. Finish that turn before posting or reopening the review.
       const turnOver = Effect.gen(function* () {
         yield* until(turns(threadId), (all) => all.length > 0 && all.every((turn) => turn.state === 'completed'))
@@ -778,15 +782,9 @@ describe('reviewing someone else’s pull request', () => {
         Effect.gen(function* () {
           const draft = (yield* cardsIn(threadId)).at(-1)
           assert.strictEqual((yield* reviews.post(draft?.draftId ?? '', instance.personId)).state, 'posted')
-          // Posting settles the task; wait for that fixture's agent cleanup before reopening it.
-          yield* until((yield* LeftBehind).stopping, (tasks) => !tasks.has(taskId))
           assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
           yield* until(card(), (one) => one.phase === 'settled')
-          // Exercise reopening a stopped lead, independent of the background cleanup's timing.
-          yield* until(
-            Effect.map(sessions.running(threadId), (running) => [running]),
-            ([running]) => running !== undefined && Option.isNone(running),
-          )
+          yield* stopped
         })
 
       // Its lead reads the pull request first, once its plan starts, then drafts.
@@ -809,6 +807,7 @@ describe('reviewing someone else’s pull request', () => {
       // Done settles it, as a quick task's does.
       assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId }), taskId }))
       assert.strictEqual((yield* card()).phase, 'settled')
+      yield* stopped
 
       // Written to again, its lead drafts again: the draft waits in Needs you, and posting it settles the task once more.
       yield* write('Approve it after all.')

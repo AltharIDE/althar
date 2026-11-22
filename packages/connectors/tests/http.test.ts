@@ -230,6 +230,39 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('uses the HTTP-date in Retry-After before a quota reset', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        [
+          'GET',
+          'https://api.test/thing',
+          {
+            status: 429,
+            headers: {
+              'retry-after': 'Thu, 01 Oct 2026 09:00:30 GMT',
+              'x-ratelimit-reset': String(Date.parse('2026-10-01T09:01:00Z') / 1000),
+            },
+          },
+        ],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      const blocked = failure(yield* Effect.exit(http.json(Thing, 'GET', 'https://api.test/thing')))
+      assert.strictEqual(blocked?.reason, 'rate_limited')
+      assert.strictEqual(blocked?.retryAt, '2026-10-01T09:00:30.000Z')
+    }),
+  )
+
+  it.effect.each(['retry-after', 'x-ratelimit-reset', 'x-ratelimit-requests-reset'])('handles an out-of-range %s', (header) =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([['GET', 'https://api.test/thing', { status: 429, headers: { [header]: '99999999999999999999' } }]])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      const blocked = failure(yield* Effect.exit(http.json(Thing, 'GET', 'https://api.test/thing')))
+      assert.strictEqual(blocked?.reason, 'rate_limited')
+      assert.strictEqual(blocked?.retryAt, undefined)
+      assert.strictEqual(http.allowance().resetAt, undefined)
+    }),
+  )
+
   it.live('is unreachable when the network fails, or nothing answers in time', () =>
     Effect.gen(function* () {
       const broken = makeHttp({

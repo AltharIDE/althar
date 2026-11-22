@@ -156,6 +156,33 @@ export const AWorktree: Story = {
   },
 }
 
+const workerCopies = (pending: boolean): ReadonlyArray<TaskPartModel> => {
+  const worktree = PARTS[0]
+  if (worktree === undefined) return []
+  return [
+    {
+      ...worktree,
+      actions: [
+        { label: 'See the changes', onClick: fn() },
+        { label: pending ? 'Saving local copy…' : 'Save a local copy', onClick: fn(), disabled: pending, variant: 'quiet' },
+      ],
+    },
+  ]
+}
+
+export const WorkerCopy: Story = {
+  args: { parts: workerCopies(false) },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Parts, 1/ }))
+    await userEvent.click(within(document.body).getByRole('button', { name: 'Worktree' }))
+  },
+}
+
+export const SavingWorkerCopy: Story = {
+  ...WorkerCopy,
+  args: { parts: workerCopies(true) },
+}
+
 /** A failing check, open: its last lines and Ask the lead to fix it. */
 export const AFailingCheck: Story = {
   play: async ({ canvasElement }) => {

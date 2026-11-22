@@ -128,7 +128,7 @@ One runtime thread answers every window and runs every agent's session, so anyth
 
 The app logs, packaged or not and only on this computer, each window of five seconds in which the runtime's event loop or the main process's ran more than 100 ms late, each window call that took longer than 250 ms (`lag.ts`), and each frame of the window's that took 100 ms or more to draw and each press whose next frame came that late, by what it was on, never what it showed (`shared/frames.ts`). `tests/real/responsiveness.test.ts` is a by-hand run that times a task's view, the board, the home and Ship on a store of the person's size, idle and with every core and the disk busy.
 
-The store still runs on the runtime's thread: with the above, its statements took about 1.5 s of a two-minute window under load, and none held the thread past 200 ms. Moving it to a worker of its own is the next step if the lag log shows otherwise.
+The home owns the store's one writer. Board, Home and document search use read-only SQLite connections on workers. Screen reads have their own queue, and search and background refreshes use a separate queue. Search indexes public documents in small transactions as the source records change. Board and Home serve the latest completed cards and refresh worktree details behind the screen. The command's checks for merge and push still read fresh Git state.
 
 ## Recorded facts are complete; behaviour may start simple
 

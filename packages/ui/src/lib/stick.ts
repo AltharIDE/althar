@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
+import { virtualThreadIn } from './virtual'
+
 /**
  * Keeps a scroller at its bottom while what is inside it grows, as a thread
  * does while an answer streams in, unless the reader has scrolled away from
@@ -24,8 +26,10 @@ export function useStickToBottom(ref: RefObject<HTMLElement | null>, slack = 90)
       setAtBottom(pinned.current)
     }
     const follow = () => {
-      if (!pinned.current) return
-      el.scrollTop = el.scrollHeight
+      const thread = virtualThreadIn(el)
+      if (thread !== undefined) thread.followResize()
+      else if (pinned.current) el.scrollTop = el.scrollHeight
+      else return
       last = el.scrollTop
     }
     const ro = new ResizeObserver(follow)

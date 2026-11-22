@@ -405,7 +405,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)), checkpoints TEXT CHECK (json_valid(checkpoints)), undone_at TEXT,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)), checkpoints TEXT CHECK (json_valid(checkpoints)), undone_at TEXT, goal_revision INTEGER, goal_round INTEGER NOT NULL DEFAULT 0 CHECK (goal_round IN (0, 1)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -1743,3 +1743,178 @@ CREATE TABLE preset_tunings (
 CREATE INDEX provider_sessions_by_agent ON provider_sessions (agent_id, started_at);
 
 CREATE INDEX thread_items_home_events ON thread_items (created_at DESC, sequence DESC) WHERE kind = 'step_result' OR (kind = 'notice' AND json_extract(content, '$.about') = 'stall');
+
+CREATE TABLE finder_dirty (source TEXT NOT NULL, source_id TEXT NOT NULL, UNIQUE(source, source_id)) STRICT;
+
+CREATE TABLE finder_progress (source TEXT PRIMARY KEY, after_id TEXT NOT NULL, done INTEGER NOT NULL) STRICT;
+
+CREATE TABLE finder_rows (
+    id INTEGER PRIMARY KEY, source TEXT NOT NULL, source_id TEXT NOT NULL, kind TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, thread_id TEXT, task_id TEXT, item_id TEXT,
+    title TEXT NOT NULL, body TEXT NOT NULL, ref TEXT NOT NULL, url TEXT, changed_at TEXT NOT NULL, state TEXT NOT NULL,
+    UNIQUE(source, source_id)
+  ) STRICT;
+
+CREATE TABLE board_card_views (
+    task_id TEXT PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    view TEXT NOT NULL CHECK (json_valid(view))
+  ) STRICT;
+
+CREATE INDEX finder_rows_project ON finder_rows(project_id, changed_at DESC, id DESC);
+
+CREATE INDEX finder_rows_recent ON finder_rows(kind, changed_at DESC, id DESC);
+
+CREATE VIRTUAL TABLE finder_match USING fts5(title, body, ref, content='finder_rows', content_rowid='id', prefix='2 3 4');
+
+CREATE TABLE 'finder_match_data'(id INTEGER PRIMARY KEY, block BLOB);
+
+CREATE TABLE 'finder_match_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+CREATE TABLE 'finder_match_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+
+CREATE TABLE 'finder_match_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+
+CREATE TRIGGER finder_rows_added AFTER INSERT ON finder_rows BEGIN
+    INSERT INTO finder_match(rowid, title, body, ref) VALUES (new.id, new.title, new.body, new.ref);
+  END;
+
+CREATE TRIGGER finder_rows_removed AFTER DELETE ON finder_rows BEGIN
+    INSERT INTO finder_match(finder_match, rowid, title, body, ref) VALUES ('delete', old.id, old.title, old.body, old.ref);
+  END;
+
+CREATE VIEW finder_task_source AS SELECT k.id AS source_id, k.project_id, t.id AS thread_id, k.id AS task_id, NULL AS item_id,
+      k.title, coalesce(k.request, k.description, '') AS body, k.slug AS ref, NULL AS url, k.created_at AS changed_at, k.state
+    FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task';
+
+CREATE TRIGGER finder_task_insert AFTER INSERT ON tasks BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('task', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_task_update AFTER UPDATE ON tasks BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('task', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_task_delete AFTER DELETE ON tasks BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('task', old.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE VIEW finder_link_source AS SELECT l.id AS source_id, l.project_id, t.id AS thread_id, l.task_id, NULL AS item_id,
+      coalesce(json_extract(l.snapshot, '$.title'), k.title) AS title, coalesce(json_extract(l.snapshot, '$.body'), '') AS body,
+      l.key AS ref, l.url, l.updated_at AS changed_at,
+      CASE WHEN l.kind = 'issue' THEN coalesce(json_extract(l.snapshot, '$.status.name'), '')
+        WHEN json_extract(l.snapshot, '$.state') = 'open' AND json_extract(l.snapshot, '$.draft') THEN 'draft'
+        ELSE coalesce(json_extract(l.snapshot, '$.state'), '') END AS state,
+      CASE l.kind WHEN 'change' THEN 'pull' ELSE 'issue' END AS kind
+    FROM external_links l JOIN tasks k ON k.id = l.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+    WHERE l.kind IN ('change', 'issue');
+
+CREATE TRIGGER finder_link_insert AFTER INSERT ON external_links BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('link', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_link_update AFTER UPDATE ON external_links BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('link', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_link_delete AFTER DELETE ON external_links BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('link', old.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE VIEW finder_note_source AS SELECT n.id AS source_id, n.project_id, t.id AS thread_id, NULL AS task_id, NULL AS item_id,
+      n.body AS title, n.body, '' AS ref, NULL AS url, n.created_at AS changed_at, '' AS state
+    FROM project_notes n LEFT JOIN threads t ON t.project_id = n.project_id AND t.kind = 'coordinator'
+    WHERE n.dropped_at IS NULL;
+
+CREATE TRIGGER finder_note_insert AFTER INSERT ON project_notes BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('note', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_note_update AFTER UPDATE ON project_notes BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('note', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_note_delete AFTER DELETE ON project_notes BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('note', old.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE VIEW finder_conversation_source AS SELECT t.id AS source_id, t.project_id, t.id AS thread_id, NULL AS task_id, NULL AS item_id,
+      p.name || '’s conversation' AS title, '' AS body, '' AS ref, NULL AS url, t.created_at AS changed_at, '' AS state
+    FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.kind = 'coordinator';
+
+CREATE TRIGGER finder_conversation_insert AFTER INSERT ON threads BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('conversation', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_conversation_update AFTER UPDATE ON threads BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('conversation', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_conversation_delete AFTER DELETE ON threads BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('conversation', old.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE VIEW finder_said_source AS SELECT i.id AS source_id, i.project_id, t.id AS thread_id, t.task_id, i.id AS item_id,
+      trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
+        coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
+          FROM json_each(i.content, '$.findings') f), ''), char(10)) AS title,
+      coalesce(json_extract(i.content, '$.built'), '') AS body, coalesce(k.title, 'Conversation') AS ref,
+      NULL AS url, i.created_at AS changed_at, '' AS state
+    FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind IN ('task', 'coordinator')
+      LEFT JOIN tasks k ON k.id = t.task_id LEFT JOIN user_inputs u ON u.id = i.user_input_id
+    WHERE i.undone_at IS NULL AND i.kind IN ('user_message', 'agent_message', 'step_result', 'arrival')
+      AND (i.kind != 'user_message' OR u.state IN ('queued', 'delivered'));
+
+CREATE TRIGGER finder_said_insert AFTER INSERT ON thread_items WHEN new.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('said', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_said_update AFTER UPDATE ON thread_items WHEN new.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') OR old.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('said', new.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_said_delete AFTER DELETE ON thread_items WHEN old.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') BEGIN
+        INSERT INTO finder_dirty(source, source_id) VALUES ('said', old.id) ON CONFLICT(source, source_id) DO NOTHING;
+      END;
+
+CREATE TRIGGER finder_input_state AFTER UPDATE OF state ON user_inputs WHEN new.state != old.state BEGIN
+    INSERT INTO finder_dirty (source, source_id) SELECT 'said', id FROM thread_items WHERE user_input_id = new.id
+      ON CONFLICT(source, source_id) DO NOTHING;
+  END;
+
+CREATE TRIGGER finder_task_thread AFTER INSERT ON threads WHEN new.kind = 'task' BEGIN
+    INSERT INTO finder_dirty(source, source_id) VALUES ('task', new.task_id) ON CONFLICT(source, source_id) DO NOTHING;
+  END;
+
+CREATE TRIGGER finder_project_name AFTER UPDATE OF name ON projects WHEN new.name != old.name BEGIN
+    INSERT INTO finder_dirty (source, source_id) SELECT 'conversation', id FROM threads WHERE project_id = new.id AND kind = 'coordinator'
+      ON CONFLICT(source, source_id) DO NOTHING;
+  END;
+
+CREATE TRIGGER finder_task_title AFTER UPDATE OF title ON tasks WHEN new.title != old.title BEGIN
+    INSERT INTO finder_dirty (source, source_id) SELECT 'link', id FROM external_links WHERE task_id = new.id
+      ON CONFLICT(source, source_id) DO NOTHING;
+  END;
+
+CREATE TABLE thread_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'complete', 'limited', 'cleared')),
+    rounds INTEGER NOT NULL CHECK (rounds >= 0),
+    round_limit INTEGER NOT NULL CHECK (round_limit > 0),
+    launch_agent TEXT,
+    launch_model TEXT,
+    launch_effort TEXT,
+    progress TEXT,
+    detail TEXT
+  ) STRICT;
+
+CREATE INDEX active_thread_goals ON thread_goals (thread_id) WHERE status = 'active';
+
+CREATE INDEX thread_items_by_thread_date ON thread_items (thread_id, created_at DESC);
+
+CREATE INDEX thread_items_setups_by_thread ON thread_items (thread_id, sequence DESC) WHERE kind = 'setup';
+
+CREATE INDEX tasks_settled_by_project ON tasks (project_id, settled_at DESC, id DESC) WHERE state IN ('done', 'abandoned');
+
+CREATE INDEX thread_items_search_passages ON thread_items (id DESC) WHERE kind IN ('user_message', 'agent_message', 'step_result', 'arrival');

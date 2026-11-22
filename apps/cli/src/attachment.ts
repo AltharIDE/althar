@@ -5,7 +5,7 @@ import { ApiError, type FeedPosition } from '@althar/contracts'
 import { apiClient, inspectSshHost, openLocalConnection, openSshConnection, transportError } from '@althar/transport-node'
 import { Effect, Stream } from 'effect'
 
-import { type AttachmentOptions, ATTACH_USAGE } from './attachmentOptions'
+import { type AttachmentOptions, type AttachmentTarget, ATTACH_USAGE } from './attachmentOptions'
 import { attachmentPrinter, terminalText } from './attachmentPrinter'
 import { attachmentLines } from './attachmentInput'
 import { parseLine } from './input'
@@ -147,6 +147,14 @@ export const attachedSession = (
     yield* Effect.raceFirst(input, watch)
   })
 
+export const attachedClient = (target: AttachmentTarget) =>
+  Effect.gen(function* () {
+    if (target.kind === 'local') return yield* apiClient(yield* openLocalConnection(target.profile, target.homeId))
+    if (target.homeId === undefined)
+      return yield* transportError('HomeMismatch', 'Verify the remote home ID before opening its connection.')
+    return yield* apiClient(yield* openSshConnection({ ...target.ssh, homeId: target.homeId }))
+  })
+
 export const runAttachment = (options: AttachmentOptions, io: AttachmentIO) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -160,11 +168,7 @@ export const runAttachment = (options: AttachmentOptions, io: AttachmentIO) =>
         )
         return
       }
-      const connection =
-        target.kind === 'local'
-          ? yield* openLocalConnection(target.profile, target.homeId)
-          : yield* openSshConnection({ ...target.ssh, homeId: target.homeId! })
-      const { api, info } = yield* apiClient(connection)
+      const { api, info } = yield* attachedClient(target)
       if (options.command === 'inspect') {
         const projects = yield* api.ListProjects()
         yield* io.write(

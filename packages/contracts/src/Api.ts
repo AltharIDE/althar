@@ -1,4 +1,5 @@
 import { PairingInvitation, PairingTokenHash } from './pairing'
+import { GoalControl, ThreadGoal } from './goals'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -21,6 +22,22 @@ import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSn
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
+import {
+  WorkerPreviewRequest,
+  WorkerPreviewResponse,
+  WorkerPreviewRun,
+  WorkerPreviewSocketData,
+  WorkerPreviewSocketId,
+} from './workerPreview'
+import {
+  WorkerFile,
+  WorkerFileRequest,
+  WorkerSnapshot,
+  WorkerSnapshotChunk,
+  WorkerSnapshotChunkRequest,
+  WorkerSnapshotId,
+  WorkerSnapshotRequest,
+} from './workerSnapshot'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -1183,6 +1200,16 @@ export type CommandRule = typeof CommandRule.Type
 /** How far an "always" answer to a permission reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
 export type AlwaysScope = typeof AlwaysScope.Type
+
+/** The decision presented in a security-key ceremony for a restricted HTTPS client. */
+export const PermissionApproval = Schema.Struct({
+  commandId: CommandId,
+  attentionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  decision: Schema.Literals(['allow', 'reject']),
+  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  always: Schema.optionalKey(AlwaysScope),
+})
+export type PermissionApproval = typeof PermissionApproval.Type
 
 /** What let a request through without asking: a kind the project always allows, or one of its command rules. */
 export const AllowedBy = Schema.Union([
@@ -2420,6 +2447,8 @@ export const ArrivalItem = Schema.Struct({
     passed: Schema.NullOr(Schema.Number),
     failed: Schema.NullOr(Schema.Number),
     failing: Schema.Array(Schema.String),
+    /** Checks its host doesn't require that failed or were cancelled (#1117): not counted in `failed`, said quietly. Absent where none. */
+    optional: Schema.optional(Schema.Array(Schema.String)),
     /** Failed checks' logs: the end of each, or why Althar couldn't read it, with the check's page. None from before it read them here. */
     logs: Schema.Array(CheckLogShown),
     url: Schema.NullOr(Schema.String),
@@ -2433,6 +2462,26 @@ export const ArrivalItem = Schema.Struct({
   }),
 })
 
+export const WorkerCapacity = Schema.Struct({
+  platform: Schema.Literals(['linux', 'macos', 'windows']),
+  architecture: Schema.Literals(['x64', 'arm64']),
+  cpuCores: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
+  freeMemoryMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+  freeDiskMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+})
+
+export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+
+/** A connected worker the home has granted access to this project. */
+export const ProjectWorker = Schema.Struct({
+  workerId: Schema.String,
+  providers: Schema.Array(Schema.String),
+  busy: Schema.Boolean,
+  multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
+  capacity: Schema.optionalKey(WorkerCapacity),
+})
+export type ProjectWorker = typeof ProjectWorker.Type
+
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
@@ -2443,6 +2492,13 @@ export const PlanStep = Schema.Struct({
   skipped: Schema.Boolean,
 })
 export type PlanStep = typeof PlanStep.Type
+
+export const WorkerPlanRequirements = Schema.Struct({
+  repositoryCount: Schema.Int,
+  homeOnly: Schema.Boolean,
+  readOnly: Schema.Boolean,
+})
+export type WorkerPlanRequirements = typeof WorkerPlanRequirements.Type
 
 /**
  * A command the agent left running in the background, such as a dev server
@@ -2787,6 +2843,8 @@ export const TaskCard = Schema.Struct({
       end: Schema.NullOr(TaskEnd),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
+      /** Facts the home reads before offering a worker for the lead. Absent on earlier homes. */
+      workerRequirements: Schema.optional(WorkerPlanRequirements),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
       /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
@@ -3657,6 +3715,7 @@ export const Launch = Schema.Struct({
   runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
   where: Schema.String,
+  workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
   /** The branch or pull request it runs a copy of, at a glance (feature/x, PR #12 · feature/x); none for the default branch or a task's. */
   branch: Schema.optional(Schema.NullOr(Schema.String)),
 })
@@ -4156,6 +4215,7 @@ export const ThreadSnapshot = Schema.Struct({
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
   task: Schema.Struct({
     id: Schema.String,
+    goal: Schema.optional(Schema.NullOr(ThreadGoal)),
     title: Schema.String,
     description: Schema.String,
     /** What the person asked for, in their words, which its thread opens with; null for a task made before Althar kept it. */
@@ -4313,6 +4373,8 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** The worker assigned to this task's accepted plan. */
+    workerId: Schema.optional(Schema.NullOr(Schema.String)),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -4789,10 +4851,21 @@ export const FOUND_MOST = 50
 export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
 export type FoundTasks = typeof FoundTasks.Type
 
-/** Local search documents, read in pages independently of what is typed. */
+const DocumentKind = Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note'])
+
+export const FinderQuery = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(500)),
+  projectId: Schema.optional(Schema.String),
+  kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+  /** Find related documents that contain at least one of the search words. */
+  matchAny: Schema.optional(Schema.Boolean),
+})
+export type FinderQuery = typeof FinderQuery.Type
+
+/** Local documents found by search. The original catalog is still paged. */
 export const SearchDocument = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note']),
+  kind: DocumentKind,
   projectId: Schema.String,
   threadId: Schema.NullOr(Schema.String),
   taskId: Schema.NullOr(Schema.String),
@@ -4805,7 +4878,12 @@ export const SearchDocument = Schema.Struct({
   state: Schema.String,
 })
 export type SearchDocument = typeof SearchDocument.Type
-export const SearchDocuments = Schema.Struct({ documents: Schema.Array(SearchDocument), next: Schema.NullOr(Schema.String) })
+export const SearchDocuments = Schema.Struct({
+  documents: Schema.Array(SearchDocument),
+  next: Schema.NullOr(Schema.String),
+  indexed: Schema.optional(Schema.Boolean),
+  indexing: Schema.optional(Schema.Boolean),
+})
 export type SearchDocuments = typeof SearchDocuments.Type
 
 /** A part of the whole, 0 to 1. */
@@ -4988,6 +5066,7 @@ const socketCalls = new Set<string>([
   'GetConnectionInfo',
   'Status',
   'ListProjects',
+  'ListProjectWorkers',
   'GetProject',
   'GetTask',
   'GetThread',
@@ -5015,8 +5094,11 @@ const socketCalls = new Set<string>([
   'GetSearchFiles',
   'Watch',
   'Send',
+  'SetThreadGoal',
   'TakeBack',
   'StartTask',
+  'StartPlan',
+  'HoldPlan',
   'CreateTask',
   'StopTask',
   'ResumeTask',
@@ -5027,6 +5109,14 @@ const socketCalls = new Set<string>([
   'SetModel',
   'SetEffort',
   'GetRepositoryScripts',
+  'ReadLaunchPreview',
+  'OpenLaunchPreviewSocket',
+  'WriteLaunchPreviewSocket',
+  'CloseLaunchPreviewSocket',
+  'PrepareWorkerSnapshot',
+  'ReadWorkerSnapshotChunk',
+  'ReleaseWorkerSnapshot',
+  'ReadWorkerFile',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -5251,6 +5341,7 @@ const ProjectApi = RpcGroup.make(
     },
     Schema.String,
   ),
+  call('ListProjectWorkers', { projectId: Schema.String }, Schema.Array(ProjectWorker)),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
    * Finds tasks by what they were about: their titles, what the person asked,
@@ -5269,7 +5360,7 @@ const ProjectApi = RpcGroup.make(
     },
     FoundTasks,
   ),
-  call('GetSearchDocuments', { after: Schema.optional(Schema.String) }, SearchDocuments),
+  call('GetSearchDocuments', { after: Schema.optional(Schema.String), search: Schema.optional(FinderQuery) }, SearchDocuments),
   call('GetSearchFiles', { threadId: Schema.String }, Schema.Struct({ files: Schema.Array(Schema.String) })),
   command(
     'CreateTask',
@@ -5317,7 +5408,7 @@ const ProjectApi = RpcGroup.make(
    */
   call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
-  call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
+  call('GetBoard', { projectId: Schema.String, cached: Schema.optional(Schema.Boolean) }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
   call(
     'GetOlderSettled',
@@ -5325,7 +5416,7 @@ const ProjectApi = RpcGroup.make(
     Schema.Struct({ tasks: Schema.Array(BoardTask) }),
   ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
-  call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
+  call('GetHome', { since: Schema.optional(Schema.String), cached: Schema.optional(Schema.Boolean) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   /**
@@ -5415,6 +5506,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
+      workerId: Schema.optional(WorkerSelection),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5438,7 +5530,7 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String }, Schema.Void),
+  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
@@ -5893,6 +5985,17 @@ const WorkApi = RpcGroup.make(
       canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },
     Schema.Void,
+  ),
+  command(
+    'SetThreadGoal',
+    {
+      threadId: Schema.String,
+      control: GoalControl,
+      lead: Schema.optional(
+        Schema.Struct({ agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) }),
+      ),
+    },
+    Schema.NullOr(ThreadGoal),
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
@@ -6444,7 +6547,27 @@ export const AcpApi = RpcGroup.make(
   command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
+export const WorkerPreviewApi = RpcGroup.make(
+  call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse),
+  call('OpenLaunchPreviewSocket', WorkerPreviewRun.fields, WorkerPreviewSocketId),
+  Rpc.make('ReadLaunchPreviewSocket', {
+    payload: { socket: WorkerPreviewSocketId },
+    success: WorkerPreviewSocketData,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
+  call('WriteLaunchPreviewSocket', { socket: WorkerPreviewSocketId, data: WorkerPreviewSocketData }, Schema.Void),
+  call('CloseLaunchPreviewSocket', { socket: WorkerPreviewSocketId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const WorkerSnapshotApi = RpcGroup.make(
+  call('ReadWorkerFile', WorkerFileRequest.fields, WorkerFile),
+  call('PrepareWorkerSnapshot', WorkerSnapshotRequest.fields, WorkerSnapshot),
+  call('ReadWorkerSnapshotChunk', WorkerSnapshotChunkRequest.fields, WorkerSnapshotChunk),
+  call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
 export type Api = typeof Api
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
@@ -6459,6 +6582,12 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         ConnectionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ConnectionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        WorkerPreviewApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerPreviewApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
+        WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
       ),
     ),
   )

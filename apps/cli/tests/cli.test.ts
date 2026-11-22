@@ -181,6 +181,24 @@ describe('the printer', () => {
     assert.isUndefined(out.waiting)
   })
 
+  it('tracks unanswered calls when several arrive in the same thread', () => {
+    const out = printer('t')
+    const ask = (attentionId: string) =>
+      out.print({ _tag: 'AttentionNeeded', threadId: 't', attentionId, title: `Check ${attentionId}`, reason: 'This action asks.' })
+    const close = (attentionId: string, outcome: 'answered' | 'withdrawn') =>
+      out.print({ _tag: 'AttentionClosed', threadId: 't', attentionId, outcome })
+
+    ask('first')
+    ask('second')
+    ask('third')
+    close('second', 'withdrawn')
+    assert.strictEqual(out.waiting, 'third')
+    assert.include(close('third', 'answered'), 'Check first')
+    assert.strictEqual(out.waiting, 'first')
+    close('first', 'answered')
+    assert.isUndefined(out.waiting)
+  })
+
   it('starts a line after a streamed message, and says the session started without a model', () => {
     const out = printer('t')
     out.print(agent({ _tag: 'AgentMessage', text: 'Done' }))

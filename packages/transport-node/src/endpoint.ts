@@ -13,6 +13,8 @@ export const LocalApiEndpoint = Schema.Struct({
   apiVersion: Schema.Int,
   address: Schema.String,
   secret: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  /** Direct pairing settings active on this socket's host process, where configured. */
+  networkFingerprint: Schema.optional(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
 })
 export type LocalApiEndpoint = typeof LocalApiEndpoint.Type
 const unsafe = () =>

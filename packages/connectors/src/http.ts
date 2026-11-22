@@ -49,23 +49,34 @@ export interface Allowance {
   readonly resetAt?: string
 }
 
+const numberHeader = (headers: Headers, ...names: ReadonlyArray<string>): number | undefined => {
+  for (const name of names) {
+    const value = headers.get(name)
+    if (value !== null && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value)
+  }
+  return undefined
+}
+
+const isoDate = (milliseconds: number): string | undefined => {
+  const date = new Date(milliseconds)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
+}
+
+const quotaResetAt = (headers: Headers, now: number): string | undefined => {
+  const reset = numberHeader(headers, 'x-ratelimit-reset', 'ratelimit-reset')
+  // A time in seconds since the epoch (GitHub's, GitLab's), or the seconds left (Bitbucket's).
+  return reset === undefined ? undefined : isoDate(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000)
+}
+
 /** The numbers a service's rate-limit headers carry, under either of the names services use. */
 export const allowanceHeaders = (headers: Headers, now: number): Omit<Allowance, 'counted'> => {
-  const number = (...names: ReadonlyArray<string>) => {
-    for (const name of names) {
-      const value = headers.get(name)
-      if (value !== null && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value)
-    }
-    return undefined
-  }
-  const limit = number('x-ratelimit-limit', 'ratelimit-limit')
-  const remaining = number('x-ratelimit-remaining', 'ratelimit-remaining')
-  const reset = number('x-ratelimit-reset', 'ratelimit-reset')
+  const limit = numberHeader(headers, 'x-ratelimit-limit', 'ratelimit-limit')
+  const remaining = numberHeader(headers, 'x-ratelimit-remaining', 'ratelimit-remaining')
+  const resetAt = quotaResetAt(headers, now)
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(remaining === undefined ? {} : { remaining }),
-    // A time in seconds since the epoch (GitHub's, GitLab's), or the seconds left (Bitbucket's).
-    ...(reset === undefined ? {} : { resetAt: new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString() }),
+    ...(resetAt === undefined ? {} : { resetAt }),
   }
 }
 
@@ -231,26 +242,24 @@ export const messageOf = (body: string, fallback: string): string => plainError(
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
-  const afterHeader = headers.get('retry-after')
-  if (afterHeader !== null && afterHeader.trim() !== '') {
-    const after = Number(afterHeader)
-    const at = Number.isFinite(after) ? now + Math.max(0, after) * 1000 : Date.parse(afterHeader)
-    if (Number.isFinite(at) && Math.abs(at) <= 8.64e15) return new Date(at).toISOString()
+  const after = headers.get('retry-after')
+  if (after !== null) {
+    // Retry-After accepts delay-seconds or an HTTP-date, which starts with a weekday.
+    const retryAt = /^\d+$/.test(after)
+      ? isoDate(now + Number(after) * 1000)
+      : /^[a-z]{3}/i.test(after)
+        ? isoDate(Date.parse(after))
+        : undefined
+    if (retryAt !== undefined) return retryAt
   }
-  // GitHub's and GitLab's reset is a time, in seconds since the epoch; Bitbucket's is the seconds left until it.
-  const resetHeader = headers.has('x-ratelimit-reset') ? 'x-ratelimit-reset' : 'ratelimit-reset'
-  const reset = Number(headers.get(resetHeader))
-  if (headers.has(resetHeader) && Number.isFinite(reset)) {
-    const at = reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000
-    if (Math.abs(at) <= 8.64e15) return new Date(at).toISOString()
-  }
-  for (const name of ['x-ratelimit-endpoint-requests-reset', 'x-ratelimit-requests-reset', 'x-ratelimit-complexity-reset']) {
-    const value = headers.get(name)
-    const resetMs = Number(value)
-    if (value !== null && value.trim() !== '' && Number.isFinite(resetMs) && Math.abs(resetMs) <= 8.64e15)
-      return new Date(resetMs).toISOString()
-  }
-  return undefined
+  // Linear's resets are times in milliseconds since the epoch: of the endpoint's own limit, of all requests, or of complexity.
+  const linearReset = numberHeader(
+    headers,
+    'x-ratelimit-endpoint-requests-reset',
+    'x-ratelimit-requests-reset',
+    'x-ratelimit-complexity-reset',
+  )
+  return quotaResetAt(headers, now) ?? (linearReset === undefined ? undefined : isoDate(linearReset))
 }
 
 /** Classifies an answer that isn't a success; `fallback` is what it says where the answer has no words of its own. */

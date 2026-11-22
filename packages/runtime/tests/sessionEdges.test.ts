@@ -74,12 +74,12 @@ describe('a coordinator handed to a fresh session', () => {
       yield* say('hello')
       yield* answered(threadId, 1)
       yield* callTool(access, 'draft_task', { title: 'Tidy the README' })
-      yield* say('Where are we? [context:85]')
+      yield* say('Where are we? [coordinator:lost-once]')
       yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active')
       assert.deepInclude(yield* notices(threadId), {
         source: 'runtime',
         severity: 'info',
-        title: 'Started a fresh session.',
+        title: 'Fake claude-code had lost this conversation. Started it afresh.',
       })
     }).pipe(Effect.provide(runtime())),
   )
@@ -125,10 +125,8 @@ describe('a lead handed to a fresh session', () => {
         Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) =>
           sessions.send({ envelope, threadId: created.threadId, body, disposition: 'after_current' }),
         )
-      // Past its mark: its next turn starts in a fresh session, briefed from the task.
-      yield* say('Look again. [context:25/1000000]')
-      yield* answered(created.threadId, 2)
-      yield* say('And now?')
+      // The adapter lost its session, so the same message is delivered to its replacement.
+      yield* say('And now? [lead:lost-once]')
       const [, , first] = yield* until(
         prompts(created.threadId),
         (all) => all.length === 3 && all[2]?.state === 'completed',
@@ -141,6 +139,39 @@ describe('a lead handed to a fresh session', () => {
       const reports = (yield* items(created.threadId)).filter((item) => item.kind === 'step_result')
       assert.lengthOf(reports, 2)
     }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a lead whose folder moved', () => {
+  it.live('keeps input queued when the replacement fails to start', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      const threadId = created.threadId
+      yield* sessions.start({ threadId, agentId: 'codex' })
+      yield* answered(threadId, 1)
+      yield* Effect.flip(sessions.setModel({ threadId, model: 'large' }))
+      yield* sessions.setModel({ threadId, model: 'large' })
+
+      yield* sessions.moved(threadId)
+      const say = (body: string) =>
+        Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) => sessions.send({ envelope, threadId, body }))
+      yield* say('Read this in the new folder.')
+      yield* until(notices(threadId), (rows) => rows.some((notice) => notice.title === "Fake codex couldn't start."))
+      yield* until(sessionsOn(threadId), (rows) => rows[1]?.state === 'failed')
+      assert.lengthOf(yield* prompts(threadId), 1)
+
+      // A workable model and a new message retry the replacement, including the message that was waiting.
+      yield* sessions.setModel({ threadId, model: 'small' })
+      yield* say('Try now.')
+      yield* answered(threadId, 2)
+      const [old, , replacement] = yield* sessionsOn(threadId)
+      assert.strictEqual(old?.state, 'superseded')
+      assert.strictEqual(replacement?.state, 'active')
+      const [, next] = yield* prompts(threadId)
+      assert.strictEqual(next?.providerSessionId, replacement?.id)
+      assert.match(next?.prompt ?? '', /Read this in the new folder\.\n\nTry now\.$/)
+    }).pipe(Effect.provide(runtime(undefined, { failsOnce: ['large'] }))),
   )
 })
 

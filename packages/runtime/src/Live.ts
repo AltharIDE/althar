@@ -59,6 +59,7 @@ export type LiveEvent =
   | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
   | {
       readonly _tag: 'TurnEnded'
+      readonly compacting?: true
       readonly threadId: string
       readonly turnId: string
       readonly state: string

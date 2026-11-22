@@ -1,17 +1,20 @@
-import { chmod, mkdir, symlink } from 'node:fs/promises'
+import { chmod, link, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { setTimeout as pause } from 'node:timers/promises'
+import { Effect } from 'effect'
 
-import { DiagnosticOutcome, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
+import { AgentRunOutcome, DiagnosticOutcome, type AgentRunExit, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
 import { describe, expect, it } from 'vitest'
 
-import { openWorkerStore } from '../src/workerStore'
-import { temporary } from './support'
+import { openWorkerStore as open, withWorkerStore } from '../src/workerHome/store'
+import { workerTestDirectory as temporary } from './workerTestFiles'
 
 const homeId = `home_${'1'.repeat(32)}`
 const otherHome = `home_${'2'.repeat(32)}`
 const fingerprint = 'a'.repeat(64)
 const otherFingerprint = 'b'.repeat(64)
+const openWorkerStore = (profile: string, home: string, now = () => 10_000) => open(profile, home, now)
 const result = (attemptId: string, fence: string, outcome: DiagnosticOutcome = DiagnosticOutcome.SUCCEEDED): DiagnosticResult => ({
   $typeName: 'althar.worker.v1.DiagnosticResult',
   attemptId,
@@ -21,6 +24,110 @@ const result = (attemptId: string, fence: string, outcome: DiagnosticOutcome = D
 })
 
 describe('the private worker ledger', () => {
+  it('lets operator reads wait for a writer and reports a ledger that remains busy', async () => {
+    const profile = temporary()
+    const first = await openWorkerStore(profile, homeId)
+    let attempt: string
+    try {
+      attempt = first.enqueue(first.enroll(fingerprint))
+    } finally {
+      first.close()
+    }
+    const writer = new DatabaseSync(join(profile, 'workers', 'ledger.sqlite'))
+    const read = () => Effect.runPromise(withWorkerStore(profile, homeId, (store) => store.log(attempt, 0)))
+    try {
+      writer.exec('BEGIN EXCLUSIVE')
+      let returned = false
+      const reading = read().finally(() => {
+        returned = true
+      })
+      await pause(90)
+      expect(returned).toBe(false)
+      writer.exec('COMMIT')
+      await expect(reading).resolves.toMatchObject({ attemptId: attempt, state: 'queued', nextOffset: 0 })
+      writer.exec('BEGIN EXCLUSIVE')
+      await expect(read()).rejects.toThrow('The worker ledger is busy')
+      writer.exec('COMMIT')
+      let reads = 0
+      let released: Promise<void> | undefined
+      try {
+        const recovered = Effect.runPromise(
+          withWorkerStore(profile, homeId, (store) => {
+            if (++reads === 1) {
+              writer.exec('BEGIN EXCLUSIVE')
+              released = pause(75).then(() => writer.exec('COMMIT'))
+            }
+            return store.log(attempt, 0)
+          }),
+        )
+        await expect(recovered).resolves.toMatchObject({ attemptId: attempt, state: 'queued' })
+        expect(reads).toBeGreaterThan(1)
+      } finally {
+        await released
+      }
+      await expect(Effect.runPromise(withWorkerStore(profile, otherHome, () => undefined))).rejects.toThrow('belongs to another home')
+    } finally {
+      writer.close()
+    }
+  })
+
+  it('fences agent placement across store restarts until the original worker confirms its stop', async () => {
+    const profile = temporary()
+    const first = await openWorkerStore(profile, homeId)
+    const run = {
+      runId: `war_${'3'.repeat(32)}`,
+      projectId: `proj_${'4'.repeat(32)}`,
+      workspaceId: `ws_${'5'.repeat(32)}`,
+      providerId: 'codex',
+    }
+    const worker = first.enroll(fingerprint)
+    const other = first.enroll(otherFingerprint)
+    const journal = `wjn_${'6'.repeat(32)}`
+    const otherJournal = `wjn_${'7'.repeat(32)}`
+    try {
+      expect(first.agents.begin(worker, run)).toBe(false)
+      expect(first.agents.bind(worker, journal)).toBe(true)
+      expect(first.agents.bind(other, otherJournal)).toBe(true)
+      expect(first.agents.begin(worker, run)).toBe(false)
+      expect(first.enroll(fingerprint, run.projectId)).toBe(worker)
+      expect(first.enroll(otherFingerprint, run.projectId)).toBe(other)
+      expect(first.agents.permits(worker, run.projectId)).toBe(true)
+      expect(first.agents.begin(worker, run)).toBe(true)
+      expect(first.agents.permitsRun(worker, run.runId)).toBe(true)
+      expect(first.agents.permitsRun(other, run.runId)).toBe(false)
+      expect(() => first.enqueue(worker)).toThrow('no outstanding')
+      first.unassign(worker, run.projectId)
+      expect(first.agents.permits(worker, run.projectId)).toBe(false)
+      expect(first.enroll(fingerprint, run.projectId)).toBe(worker)
+    } finally {
+      first.close()
+    }
+    const reopened = await openWorkerStore(profile, homeId)
+    try {
+      expect(reopened.agents.outstanding(worker)).toEqual(run)
+      expect(reopened.agents.permits(worker, run.projectId)).toBe(true)
+      expect(reopened.agents.permitsRun(worker, run.runId)).toBe(false)
+      expect(reopened.agents.bind(worker, `wjn_${'8'.repeat(32)}`)).toBe(false)
+      expect(reopened.agents.bind(worker, journal)).toBe(true)
+      const replaced = { ...run, runId: `war_${'9'.repeat(32)}` }
+      expect(reopened.agents.begin(other, replaced)).toBe(false)
+      const stopped: AgentRunExit = {
+        $typeName: 'althar.worker.v1.AgentRunExit',
+        workerBusy: false,
+        runId: run.runId,
+        outcome: AgentRunOutcome.STOPPED,
+      }
+      expect(reopened.agents.finish(other, stopped)).toBe(false)
+      expect(reopened.agents.finish(worker, { ...stopped, outcome: AgentRunOutcome.UNCONFIRMED })).toBe(false)
+      expect(reopened.agents.finish(worker, stopped)).toBe(true)
+      expect(reopened.agents.outstanding(worker)).toBeUndefined()
+      expect(reopened.agents.begin(other, replaced)).toBe(true)
+      expect(reopened.agents.permitsRun(other, replaced.runId)).toBe(true)
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('requires a current enrollment and records exactly one grant across concurrent store handles', async () => {
     const profile = temporary()
     let clock = 1000
@@ -223,11 +330,15 @@ describe('the private worker ledger', () => {
     await expect(openWorkerStore(profile, 'invalid')).rejects.toThrow('initialized home')
     const first = await openWorkerStore(profile, homeId)
     first.close()
-    await chmod(join(profile, 'workers', 'ledger.sqlite'), 0o644)
-    await expect(openWorkerStore(profile, homeId)).rejects.toThrow('private file')
+    const ledger = join(profile, 'workers', 'ledger.sqlite')
+    if (process.platform !== 'win32') {
+      await chmod(ledger, 0o644)
+      await expect(openWorkerStore(profile, homeId)).rejects.toThrow('private file')
+      await chmod(ledger, 0o600)
+    }
     const other = temporary()
     await mkdir(join(other, 'workers'), { mode: 0o700 })
-    await symlink(join(profile, 'workers', 'ledger.sqlite'), join(other, 'workers', 'ledger.sqlite'))
+    await link(ledger, join(other, 'workers', 'ledger.sqlite'))
     await expect(openWorkerStore(other, homeId)).rejects.toThrow('private file')
   })
 })

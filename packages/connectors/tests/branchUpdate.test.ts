@@ -156,7 +156,7 @@ const run = (cwd: string, ...args: ReadonlyArray<string>) =>
   }).trim()
 
 /** A bare repository with a `main`, and a `refunds` branch of its own, behind main by one commit. */
-const hosting = () => {
+const hosting = (limitFile = 'limiter.ts') => {
   const root = mkdtempSync(join(tmpdir(), 'althar-update-test-'))
   roots.push(root)
   const bare = join(root, 'origin.git')
@@ -164,7 +164,7 @@ const hosting = () => {
   mkdirSync(work)
   run(root, 'init', '--quiet', '--bare', '--initial-branch=main', bare)
   run(work, 'init', '--quiet', '--initial-branch=main')
-  writeFileSync(join(work, 'limiter.ts'), 'export const limit = 1\n')
+  writeFileSync(join(work, limitFile), 'export const limit = 1\n')
   writeFileSync(join(work, 'README.md'), 'readme\n')
   run(work, 'add', '.')
   run(work, 'commit', '--quiet', '-m', 'first')
@@ -215,13 +215,14 @@ describe('The merge in a copy', () => {
 
   it.effect('names the files that conflict, settles none, and pushes nothing', () =>
     Effect.gen(function* () {
-      const { bare, work, tip } = hosting()
+      const limitFile = ' vérificateur.ts'
+      const { bare, work, tip } = hosting(limitFile)
       run(work, 'switch', '--quiet', 'refunds')
       writeFileSync(join(work, 'README.md'), 'readme, refunds\n')
-      writeFileSync(join(work, 'limiter.ts'), 'export const limit = 2\n')
+      writeFileSync(join(work, limitFile), 'export const limit = 2\n')
       run(work, 'commit', '--quiet', '-am', 'edit the readme')
       run(work, 'switch', '--quiet', 'main')
-      writeFileSync(join(work, 'limiter.ts'), 'export const limit = 3\n')
+      writeFileSync(join(work, limitFile), 'export const limit = 3\n')
       run(work, 'commit', '--quiet', '-am', 'limit three')
       run(work, 'push', '--quiet', bare, 'main', 'refunds')
       const before = tip('refunds')
@@ -230,7 +231,7 @@ describe('The merge in a copy', () => {
         from: { target: target(bare), branch: 'main' },
         push: true,
       })
-      assert.deepStrictEqual(merged, { outcome: 'conflict', files: ['README.md', 'limiter.ts'] })
+      assert.deepStrictEqual(merged, { outcome: 'conflict', files: [limitFile, 'README.md'] })
       assert.strictEqual(tip('refunds'), before)
     }),
   )

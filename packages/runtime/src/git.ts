@@ -926,7 +926,7 @@ export const restoreWorktree = (repository: string, path: string, branch: string
  * separately by the merge.
  */
 export const trackedStatus = (cwd: string, submodules: 'all' | 'dirty' = 'all'): Effect.Effect<string, GitFailed> =>
-  git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`)
+  looking(git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`))
 
 /** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
 export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>

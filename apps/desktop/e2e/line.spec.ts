@@ -128,10 +128,13 @@ test('lists reviews and a task waiting for an agent in Up next, and starts them 
 
     // Presses a row's grip, to drag it from there.
     const grab = async (title: string) => {
+      await expect(next.locator('ol[class*="sorting"]')).toHaveCount(0)
+      await still(page)
       await rows.filter({ hasText: title }).hover()
-      const box = await next.getByRole('button', { name: new RegExp(`^Move ${title}.* in the line$`) }).boundingBox()
+      const handle = next.getByRole('button', { name: new RegExp(`^Move ${title}.* in the line$`) })
+      await handle.hover()
+      const box = await handle.boundingBox()
       if (box === null) throw new Error(`${title} has no grip`)
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
       await page.mouse.down()
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     }
@@ -151,24 +154,31 @@ test('lists reviews and a task waiting for an agent in Up next, and starts them 
     await page.mouse.up()
     await expect(rows.nth(3)).toContainText(JUMP)
     await expect(rows.nth(3)).toContainText('4th in line')
+    // The persisted default order removes the divider and shifts the rows before the next drag can measure them.
+    await expect(next.getByRole('button', { name: 'Back to oldest first' })).toHaveCount(0)
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
+    const up = await grab(JUMP)
     const above = await rows.nth(0).boundingBox()
     if (above === null) throw new Error('The line has no first row')
-    const up = await grab(JUMP)
-    await glide(up, { x: 4, y: above.y - 30 })
+    // Start the vertical drag inside the lane so it takes the pointer before leaving the lane.
+    await glide(up, { x: up.x, y: above.y + 8 })
+    await inOrder([JUMP, ...reviews])
+    await page.mouse.move(4, above.y - 30)
     await inOrder([JUMP, ...reviews])
     await page.mouse.up()
     await expect(rows.nth(0)).toContainText(JUMP)
+    await expect(next.getByRole('button', { name: 'Back to oldest first' })).toBeVisible()
     await inOrder([JUMP, ...reviews])
 
     // Escape mid-drag puts the row back; the release after it, and hovering the grips later, move nothing.
+    const cancelled = await grab(reviews[2] ?? '')
     const first = await rows.nth(0).boundingBox()
     if (first === null) throw new Error('The line isn’t laid out')
-    const cancelled = await grab(reviews[2] ?? '')
     await glide(cancelled, { x: cancelled.x, y: first.y + 4 })
     await inOrder([reviews[2] ?? '', JUMP, reviews[0] ?? '', reviews[1] ?? ''])
     await page.keyboard.press('Escape')
+    await expect(next.locator('ol[class*="sorting"]')).toHaveCount(0)
     await inOrder([JUMP, ...reviews])
     await page.mouse.up()
     await glide({ x: cancelled.x, y: first.y + 4 }, { x: cancelled.x, y: cancelled.y })
