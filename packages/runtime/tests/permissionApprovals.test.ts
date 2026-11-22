@@ -17,6 +17,7 @@ import {
 } from '@althar/transport-node'
 import { Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
 import { describe, expect, it } from 'vitest'
 
 import { connection, services } from '../src/Api'
@@ -207,6 +208,7 @@ describe('protected permission approvals', () => {
     const run = Effect.gen(function* () {
       const instance = yield* Instance
       const identities = yield* ClientIdentities
+      const sql = yield* SqlClient.SqlClient
       const key = yield* createDeviceKey
       const paired = yield* identities.register({ role: 'socket', publicKey: key.publicKey, name: 'Desktop' })
       const certificate = readFileSync(new URL('../../transport-node/tests/fixtures/tls/certificate.pem', import.meta.url))
@@ -299,6 +301,26 @@ describe('protected permission approvals', () => {
       const route = '/v1/permission-approvals'
       expect((yield* browser(route + '/view', { code: 'invalid' })).status).toBe(403)
       expect((yield* browser(route + '/result', { code: 'a'.repeat(43) })).status).toBe(403)
+      // The broker displays only a scope that this particular request offered.
+      const [stored] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE id = ${decision.attentionId}`
+      if (stored === undefined) throw new Error('The test permission was not recorded')
+      const policy = {
+        ...(JSON.parse(stored.payload) as Record<string, unknown>),
+        always: { command: 'make deploy', prefix: 'make', kind: 'Run shell', allow: ['exact', 'prefix'], deny: [] },
+      }
+      yield* sql`UPDATE attention_requests SET payload = ${JSON.stringify(policy)} WHERE id = ${decision.attentionId}`
+      yield* Effect.flip(preparePermissionApproval(target, sign, { ...decision, commandId: id(), always: 'kind' }))
+      yield* Effect.flip(preparePermissionApproval(target, sign, { ...decision, commandId: id(), always: 'exact', decision: 'reject' }))
+      const remember = yield* preparePermissionApproval(target, sign, {
+        ...decision,
+        commandId: id(),
+        always: 'prefix',
+        reason: 'For this project only',
+      })
+      const rememberCode = new URL(remember.url).hash.slice(1)
+      const scope = yield* browser(route + '/view', { code: rememberCode })
+      expect(scope.status).toBe(200)
+      expect(JSON.parse(scope.body)).toMatchObject({ scope: 'prefix', remembered: 'make', reason: 'For this project only' })
       const rejected = yield* preparePermissionApproval(target, sign, { ...decision, commandId: id(), decision: 'reject' })
       const rejectedCode = new URL(rejected.url).hash.slice(1)
       expect((yield* browser(route + '/answer', { code: rejectedCode, proof: {} })).status).toBe(403)
@@ -340,8 +362,13 @@ describe('protected permission approvals', () => {
       expect(JSON.parse((yield* browser(route + '/result', { code: oppositeCode })).body)).toEqual({ state: 'refused' })
       expect((yield* browser(route + '/answer', { code, proof })).status).toBe(403)
       expect((yield* Effect.flip(api.Answer({ ...decision, commandId: id() }))).reason).toBe('PersonRequired')
-      yield* until(thread, (entry) => entry.attention.length === 0)
+      yield* until(thread, (entry) => entry.attention.every(({ id }) => id !== decision.attentionId))
       yield* Effect.flip(preparePermissionApproval(target, sign, { ...decision, commandId: id() }))
+      // The status remains fenced even if the durable receipt is later marked uncertain or is no longer available.
+      yield* sql`UPDATE api_commands SET state = 'uncertain', result = NULL, error = '{}' WHERE command_id = ${decision.commandId}`
+      expect(JSON.parse((yield* browser(route + '/result', { code })).body)).toEqual({ state: 'refused' })
+      yield* sql`DELETE FROM api_commands WHERE command_id = ${decision.commandId}`
+      expect(JSON.parse((yield* browser(route + '/result', { code })).body)).toEqual({ state: 'pending' })
       yield* identities.revoke(paired.deviceId)
       expect((yield* browser(route + '/result', { code })).status).toBe(403)
     })
