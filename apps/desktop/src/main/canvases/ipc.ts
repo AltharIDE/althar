@@ -81,6 +81,11 @@ export const handleCanvases = (canvases: Canvases, mine: (contents: WebContents)
     const asked = groundPartOf(part)
     return conversation === null || asked === null ? null : canvases.find(conversation, asked)
   })
+  // The picture kept of a version as drawn, for its card in the project's Artifacts view.
+  ipcMain.handle('althar:canvas-picture', (event, manifest: unknown) => {
+    from(event)
+    return typeof manifest === 'string' && /^[0-9a-f]{64}$/.test(manifest) ? canvases.picture(manifest) : null
+  })
   ipcMain.on('althar:canvas-clear', (event, key: unknown) => {
     from(event)
     const conversation = keyOf(key)

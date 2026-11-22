@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
 import { type BrowserWindow, type NativeImage, type Session, session as sessions, WebContentsView, type WebContents } from 'electron'
 
 import { BOARDS_GROUND, canvasAddress, canvasAddressOf, canvasHost, CANVAS_SCHEME, canvasPartitionOf } from '@althar/contracts'
@@ -58,7 +61,14 @@ export interface CanvasesOptions {
   readonly ground?: () => string
   /** Tells the window showing a canvas of boards what its ground said. */
   readonly tell?: (window: BrowserWindow, key: string, news: CanvasGroundNews) => void
+  /** Where pictures of versions as drawn are kept, for the cards of the project's Artifacts view. */
+  readonly stills?: string
 }
+
+/** How long after a version's page loads its picture is taken, so its boards have drawn and fitted. */
+const STILL_AFTER_MS = 1_800
+/** How wide a card's picture is kept. */
+const STILL_WIDTH = 640
 
 interface View {
   readonly key: string
@@ -196,10 +206,45 @@ export const startCanvases = (options: CanvasesOptions) => {
     view.webContents.on('did-finish-load', () => {
       one.loads += 1
       if (one.target.boards === true) void ground(one, one.loads)
+      keepStill(one, one.loads)
     })
     void view.webContents.loadURL(loadAddress(target)).catch(() => undefined)
     window.once('closed', () => close(key))
     return one
+  }
+
+  /* ——— A picture of each version as drawn, for its card ——— */
+
+  const kept = new Set<string>()
+  const stillPath = (manifest: string) => (options.stills === undefined ? null : join(options.stills, `${manifest}.jpg`))
+
+  /** Keeps a picture of the version as it shows, once a version, a moment after it loads, where nothing of the window's is over it. */
+  const keepStill = (one: View, load: number) => {
+    const manifest = one.target.manifest
+    const path = stillPath(manifest)
+    if (path === null || kept.has(manifest)) return
+    setTimeout(() => {
+      if (views.get(one.key) !== one || one.loads !== load || !one.shown || covered.has(one.key) || one.view.webContents.isDestroyed())
+        return
+      if (one.target.manifest !== manifest || kept.has(manifest)) return
+      kept.add(manifest)
+      void (async () => {
+        const picture = await one.view.webContents.capturePage().catch(() => null)
+        if (picture === null || picture.isEmpty()) return void kept.delete(manifest)
+        const { width } = picture.getSize()
+        const small = width > STILL_WIDTH ? picture.resize({ width: STILL_WIDTH, quality: 'good' }) : picture
+        await mkdir(options.stills ?? '', { recursive: true })
+        await writeFile(path, small.toJPEG(80))
+      })().catch(() => kept.delete(manifest))
+    }, STILL_AFTER_MS)
+  }
+
+  /** The picture kept of a version as drawn, as a data address; null where none was kept. */
+  const picture = async (manifest: string): Promise<string | null> => {
+    const path = stillPath(manifest)
+    if (path === null) return null
+    const bytes = await readFile(path).catch(() => null)
+    return bytes === null ? null : `data:image/jpeg;base64,${bytes.toString('base64')}`
   }
 
   /* ——— A canvas of boards' ground ——— */
@@ -376,7 +421,7 @@ export const startCanvases = (options: CanvasesOptions) => {
   /** Loads the shown version again, as it was published: for a canvas that drew itself into a corner. */
   const reload = (key: string) => views.get(key)?.view.webContents.reload()
 
-  return { show, close, reload, still, cover, opened, change, pins, find, clear }
+  return { show, close, reload, still, cover, opened, change, pins, find, clear, picture }
 }
 
 export type Canvases = ReturnType<typeof startCanvases>

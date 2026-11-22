@@ -1268,6 +1268,7 @@ void ready.then(() => {
     root: join(locations().profile, 'artifacts'),
     tokens: () => canvasTokens(),
     ground: () => (groundScript ??= readFileSync(join(here, '../overlay/ground.js'), 'utf8')),
+    stills: join(locations().profile, 'canvas-stills'),
     tell: (window, key, news) => {
       if (!window.isDestroyed()) window.webContents.send('althar:canvas-ground', key, news)
     },

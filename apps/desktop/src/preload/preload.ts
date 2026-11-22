@@ -406,6 +406,7 @@ contextBridge.exposeInMainWorld('althar', {
     find: (threadId: string, part: { page: string; board: string; selector: string }): Promise<CanvasPointed | null> =>
       ipcRenderer.invoke('althar:canvas-find', threadId, part),
     clear: (threadId: string): void => ipcRenderer.send('althar:canvas-clear', threadId),
+    picture: (manifest: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-picture', manifest),
     onGround: (listener: (threadId: string, news: CanvasGroundNews) => void): (() => void) => {
       canvasGround.add(listener)
       return () => void canvasGround.delete(listener)

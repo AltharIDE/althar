@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import type { CanvasSummary } from '@althar/contracts'
@@ -55,13 +55,30 @@ export function ArtifactsView({
   /** Opens a canvas beside the conversation that drew it, by that conversation's thread and its task where it has one. */
   onBeside?: (canvasId: string, threadId: string, taskId: string | null) => void
 }) {
-  const { client } = useServices()
+  const { client, host } = useServices()
+  const views = host.canvases
   const list = useQuery(reads(client).canvases(projectId))
   const [open, setOpen] = useState<{ readonly canvasId: string; readonly version: number | null } | null>(null)
   const [shown, setShown] = useState(kept)
+  // A page's and a canvas of boards' cards show the picture kept of them as they were last drawn, where one was.
+  const drawn = (list.data ?? []).filter((one) => one.latest.kind === 'html' || one.latest.kind === 'boards')
+  const pictures = useQueries({
+    queries: drawn.map((one) => ({
+      queryKey: ['canvasPicture', one.latest.manifest] as const,
+      queryFn: async () => (await views?.picture?.(one.latest.manifest)) ?? null,
+      enabled: views?.picture !== undefined,
+      // A version's picture, once kept, never changes; one not kept yet is asked for again as the view comes back.
+      staleTime: (query: { state: { data: unknown } }) => (query.state.data === null ? 0 : Number.POSITIVE_INFINITY),
+    })),
+  })
+  const pictureOf = new Map(drawn.map((one, at) => [one.id, pictures[at]?.data ?? null]))
   return (
     <Artifacts
-      canvases={(list.data ?? []).map((one) => rowOf(one))}
+      canvases={(list.data ?? []).map((one) => {
+        const row = rowOf(one)
+        const picture = pictureOf.get(one.id)
+        return picture === undefined || picture === null ? row : { ...row, picture }
+      })}
       layout={shown.layout}
       onLayout={(layout) => setShown((kept = { ...kept, layout }))}
       filter={shown.filter}

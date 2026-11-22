@@ -338,6 +338,8 @@ export interface CanvasesHost {
   readonly find?: (threadId: string, part: { page: string; board: string; selector: string }) => Promise<CanvasPointed | null>
   /** Takes the outline off a part pointed at. */
   readonly clear?: (threadId: string) => void
+  /** The picture kept of a version as drawn (a page, or a canvas of boards), by its manifest; null where none was kept. */
+  readonly picture?: (manifest: string) => Promise<string | null>
   /** Hears what a canvas of boards' ground says, for every thread's; returns how to stop. */
   readonly onGround?: (listener: (threadId: string, news: CanvasGroundNews) => void) => () => void
 }

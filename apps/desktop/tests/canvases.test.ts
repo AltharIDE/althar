@@ -15,13 +15,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * listeners; and that only Althar's windows show one.
  */
 
-const channels = vi.hoisted(() => ({ listened: new Map<string, (...args: Array<unknown>) => void>() }))
+const channels = vi.hoisted(() => ({ listened: new Map<string, (...args: Array<unknown>) => unknown>() }))
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromWebContents: () => ({ id: 1 }) },
   ipcMain: {
-    on: (channel: string, listener: (...args: Array<unknown>) => void) => void channels.listened.set(channel, listener),
-    handle: (channel: string, listener: (...args: Array<unknown>) => void) => void channels.listened.set(channel, listener),
+    on: (channel: string, listener: (...args: Array<unknown>) => unknown) => void channels.listened.set(channel, listener),
+    handle: (channel: string, listener: (...args: Array<unknown>) => unknown) => void channels.listened.set(channel, listener),
   },
   session: { fromPartition: () => ({}) },
   WebContentsView: class {},
@@ -179,6 +179,7 @@ describe('the window’s calls about canvases', () => {
     const pinned = vi.fn(async () => [1])
     const found = vi.fn(async () => null)
     const cleared = vi.fn()
+    const pictured = vi.fn(async () => 'data:image/jpeg;base64,DDDD')
     handleCanvases(
       {
         show: shown,
@@ -191,6 +192,7 @@ describe('the window’s calls about canvases', () => {
         pins: pinned,
         find: found,
         clear: cleared,
+        picture: pictured,
       },
       (contents) => contents === (mine as never),
     )
@@ -232,6 +234,9 @@ describe('the window’s calls about canvases', () => {
     call('althar:canvas-clear', mine, THREAD)
     expect(cleared).toHaveBeenCalledWith(THREAD)
     expect(() => call('althar:canvas-ground', { name: 'a canvas' }, THREAD, { view: 'one' })).toThrow('Only Althar’s own windows')
+    // A card's picture, by a version's manifest alone.
+    expect(await call('althar:canvas-picture', mine, 'a'.repeat(64))).toBe('data:image/jpeg;base64,DDDD')
+    expect(await call('althar:canvas-picture', mine, '../etc/passwd')).toBeNull()
     expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: true })?.boards).toBe(true)
     expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: 'yes' })).toBeNull()
   })
