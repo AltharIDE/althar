@@ -179,7 +179,7 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
         projectId: run.projectId,
         withRoom: Option.isSome(low),
         planned,
-        ...(other === undefined ? {} : { other }),
+        ...(other === undefined ? {} : { other, ...(planned.key === 'review' ? { reviewing: true } : {}) }),
       })
       if (next === undefined) return undefined
       const { model } = next
@@ -416,7 +416,7 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
               projectId: on.run.projectId,
               ...(planned === undefined ? {} : { planned }),
               from: { agentId, model: currentModel },
-              ...(other === undefined ? {} : { other }),
+              ...(other === undefined ? {} : { other, ...(on.step === 'review' ? { reviewing: true } : {}) }),
             })
         if (next !== undefined) {
           const { model } = next

@@ -1712,7 +1712,7 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
           const live = yield* sessions.running(one.threadId)
           if (Option.isNone(live) || live.value.sessionId !== one.sessionId || live.value.stopping || live.value.nextLead !== undefined)
             continue
-          const standsIn = yield* standInOf(one.sessionId).pipe(contained('Runs.held', () => Option.none()))
+          const standsIn = yield* standInOf(one.sessionId, limits.sameModel).pipe(contained('Runs.held', () => Option.none()))
           if (Option.isNone(standsIn)) continue
           const at = yield* whenBack(standsIn.value, (given) =>
             given.accountId === null ? limits.out(given.agentId, one.projectId) : limits.outAccount(given.accountId),

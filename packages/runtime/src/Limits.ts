@@ -17,7 +17,7 @@ import { NotFound } from './errors'
 import { accountsOf, accountStrategyOf, Policies, usageLimitOf } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
-import { Models } from './Models'
+import { type AgentModels, Models } from './Models'
 import { ModelFacts } from './ModelFacts'
 import { makerOf, modelKey } from './modelMaker'
 import { Installs, isInstalled } from './Installs'
@@ -278,6 +278,8 @@ export class Limits extends Context.Service<
       readonly model: string | null
       readonly projectId: string
       readonly other?: ModelChoice
+      /** The work is a review of `other`'s: never `other` itself, on its agent and model (a lead reviewing its own work). */
+      readonly reviewing?: boolean
     }): Effect.Effect<Standing, Failure>
     /**
      * Whether the agent is out now, and until when: every account work could
@@ -331,6 +333,8 @@ export class Limits extends Context.Service<
       readonly planned?: ModelChoice
       readonly from?: ModelChoice
       readonly other?: ModelChoice
+      /** As `standing`'s: a review never goes to the step it reviews. */
+      readonly reviewing?: boolean
     }): Effect.Effect<Takeover | undefined, Failure>
     /**
      * Who could take over work a usage limit stopped, as the person picks
@@ -361,10 +365,18 @@ export class Limits extends Context.Service<
       readonly agentId: string
       readonly model: string | null
       readonly projectId: string
+      /** The other step's, where the work is a review of it: the review never goes to it (`standing`'s `reviewing`). */
+      readonly reviewing?: ModelChoice
     }): Effect.Effect<
       { readonly kind: 'here' } | { readonly kind: 'elsewhere'; readonly to: Takeover } | { readonly kind: 'none' },
       Failure
     >
+    /**
+     * Whether two choices run the same model, whichever agents offer it, as the takeover ranking reads it: by the id
+     * without its provider, the name as people know it, the list's id, an agent's named default resolved. Read against
+     * the agents' models as they are now.
+     */
+    readonly sameModel: Effect.Effect<(a: ModelChoice, b: ModelChoice) => boolean, SqlError.SqlError>
     /**
      * The strongest free model on the agent, using the takeover ranking.
      * Same-agent account rotation preserves the plan's selected model.
@@ -373,6 +385,8 @@ export class Limits extends Context.Service<
       readonly agentId: string
       readonly projectId: string
       readonly planned?: { readonly agentId: string; readonly model: string | null }
+      /** The step a review reviews: never its agent and model (`standing`'s `reviewing`). */
+      readonly reviewing?: ModelChoice
     }): Effect.Effect<string | null, Failure>
     /**
      * An agent's name, with the account's where it has more than one, and a
@@ -595,6 +609,28 @@ export class Limits extends Context.Service<
         })
 
       /** One ranking for both picking an agent and picking its model. */
+      // Which model it is, whichever agent offers it: by the agent's id for it without its provider
+      // (`opencode-go/gpt-6.2-sol` is Codex's `gpt-6.2-sol`), by its name as people know it, and by the list's id.
+      const modelKeys = (definition: AgentDefinition, model: { readonly id: string; readonly name: string }) => {
+        const fact = facts.of(definition, model)
+        return [
+          `id:${model.id.slice(model.id.lastIndexOf('/') + 1).toLowerCase()}`,
+          modelKey(null, definition, model),
+          ...(fact === null ? [] : [fact.slug]),
+        ]
+      }
+      /** The keys of the model a choice runs, its agent's named default resolved; none where it isn't known. */
+      const choiceKeys = (catalog: ReadonlyArray<AgentModels>, choice: ModelChoice | undefined) => {
+        const agent = agents.list.find((entry) => entry.definition.id === choice?.agentId)
+        const offered = catalog.find((one) => one.agentId === choice?.agentId)
+        // An agent's own default is the model its entry names, where it names one of the agent's.
+        const id = standsFor(offered?.models ?? [], choice?.model ?? offered?.model ?? null)
+        if (agent === undefined || id === null) return []
+        const model = offered?.models.find((one) => one.id === id)
+        if (model !== undefined && isAgentDefault(model)) return []
+        return modelKeys(agent.definition, model ?? { id, name: id.slice(id.lastIndexOf('/') + 1) })
+      }
+
       const ranked = (input: {
         readonly projectId?: string
         readonly planned?: ModelChoice
@@ -603,6 +639,7 @@ export class Limits extends Context.Service<
         readonly besides?: ReadonlyArray<string>
         readonly only?: string
         readonly withRoom?: boolean
+        readonly reviewing?: boolean
       }) =>
         Effect.gen(function* () {
           const catalog = yield* models.catalog
@@ -615,27 +652,7 @@ export class Limits extends Context.Service<
           }
           const otherMaker = makerFor(input.other)
           const fromMaker = makerFor(input.from ?? input.planned)
-          // Which model the work was on, whichever agent offers it: by the agent's id for it without its provider
-          // (`opencode-go/gpt-6.2-sol` is Codex's `gpt-6.2-sol`), by its name as people know it, and by the list's id.
-          const keysOf = (definition: AgentDefinition, model: { readonly id: string; readonly name: string }) => {
-            const fact = facts.of(definition, model)
-            return [
-              `id:${model.id.slice(model.id.lastIndexOf('/') + 1).toLowerCase()}`,
-              modelKey(null, definition, model),
-              ...(fact === null ? [] : [fact.slug]),
-            ]
-          }
-          const fromKeys = (() => {
-            const choice = input.from ?? input.planned
-            const agent = agents.list.find((entry) => entry.definition.id === choice?.agentId)
-            const offered = catalog.find((one) => one.agentId === choice?.agentId)
-            // An agent's own default is the model its entry names, where it names one of the agent's.
-            const id = standsFor(offered?.models ?? [], choice?.model ?? offered?.model ?? null)
-            if (agent === undefined || id === null) return []
-            const model = offered?.models.find((one) => one.id === id)
-            if (model !== undefined && isAgentDefault(model)) return []
-            return keysOf(agent.definition, model ?? { id, name: id.slice(id.lastIndexOf('/') + 1) })
-          })()
+          const fromKeys = choiceKeys(catalog, input.from ?? input.planned)
           const found: Array<
             Takeover & { low: boolean; sameMaker: boolean; sameModel: boolean; isOther: boolean; score: number; preferred: boolean }
           > = []
@@ -701,12 +718,13 @@ export class Limits extends Context.Service<
               }
               if (room === undefined || accountId === undefined || (input.withRoom === true && room)) continue
               const sameModel =
-                model.id !== null && keysOf(entry.definition, { id: model.id, name: model.name }).some((key) => fromKeys.includes(key))
+                model.id !== null && modelKeys(entry.definition, { id: model.id, name: model.name }).some((key) => fromKeys.includes(key))
               // The other step itself, on its agent and model: a review by the lead, or a lead by its reviewer, checks nothing.
               const isOther =
                 input.other !== undefined &&
                 agentId === input.other.agentId &&
                 (input.other.model === null || model.id === null || model.id === input.other.model)
+              if (isOther && input.reviewing === true) continue
               found.push({
                 agentId,
                 model: model.id,
@@ -745,11 +763,22 @@ export class Limits extends Context.Service<
           )
         })
 
-      const modelFor = (input: { readonly agentId: string; readonly projectId: string; readonly planned?: ModelChoice }) =>
+      const modelFor = (input: {
+        readonly agentId: string
+        readonly projectId: string
+        readonly planned?: ModelChoice
+        readonly reviewing?: ModelChoice
+      }) =>
         Effect.gen(function* () {
           // Same-agent account rotation keeps the step's selected model.
           if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
-          return (yield* ranked({ ...input, only: input.agentId }))[0]?.model ?? (yield* preferredModel(input))
+          const { reviewing, ...rest } = input
+          const list = yield* ranked({
+            ...rest,
+            only: input.agentId,
+            ...(reviewing === undefined ? {} : { other: reviewing, reviewing: true }),
+          })
+          return list[0]?.model ?? (reviewing === undefined ? yield* preferredModel(rest) : null)
         })
 
       const out = (agentId: string, projectId?: string) =>
@@ -834,6 +863,7 @@ export class Limits extends Context.Service<
         readonly model: string | null
         readonly projectId: string
         readonly other?: ModelChoice
+        readonly reviewing?: boolean
       }) =>
         Effect.gen(function* () {
           const stuck = yield* trouble(input.agentId, input.projectId, input.model)
@@ -847,6 +877,7 @@ export class Limits extends Context.Service<
             projectId: input.projectId,
             planned: { agentId: input.agentId, model: input.model },
             ...(input.other === undefined ? {} : { other: input.other }),
+            ...(input.reviewing === true ? { reviewing: true } : {}),
           })
           return first === undefined
             ? ({ kind: 'unable', unable: stuck } as Standing)
@@ -938,7 +969,12 @@ export class Limits extends Context.Service<
               SELECT model FROM model_blocks WHERE agent_id = ${input.agentId} AND model = ${input.model}`
             if (off === undefined) return { kind: 'here' as const }
             // Turned off there: the same model through another agent with room, never another model unasked.
-            const same = (yield* ranked({ projectId: input.projectId, from: input, besides: [input.agentId] })).find((one) => one.sameModel)
+            const same = (yield* ranked({
+              projectId: input.projectId,
+              from: { agentId: input.agentId, model: input.model },
+              besides: [input.agentId],
+              ...(input.reviewing === undefined ? {} : { other: input.reviewing, reviewing: true }),
+            })).find((one) => one.sameModel)
             if (same === undefined) return { kind: 'none' as const }
             return {
               kind: 'elsewhere' as const,
@@ -946,6 +982,10 @@ export class Limits extends Context.Service<
             }
           }),
         choices: (input) => choices(input),
+        sameModel: Effect.map(models.catalog, (catalog) => (a: ModelChoice, b: ModelChoice) => {
+          const keys = choiceKeys(catalog, a)
+          return choiceKeys(catalog, b).some((key) => keys.includes(key))
+        }),
         canTakeOver: (list) => canTakeOver(list),
         modelFor,
         named: (agentId, model, accountId = null) =>

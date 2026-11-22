@@ -146,7 +146,7 @@ describe('a task’s lead out of usage outside a step', () => {
       yield* atReset(back)
       const [next] = yield* until(queued(task.threadId), (leads) => leads.length === 1)
       assert.deepInclude(next, { agentId: 'claude-code', model: 'large' })
-      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       assert.notInclude(
         yield* said(task.threadId),
         'Large on Fake claude-code has usage again and takes over again from Small on Fake codex.',
@@ -246,7 +246,7 @@ describe('a task’s lead out of usage outside a step', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'First.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.agentId === 'codex' && row.content.includes('First.')))
       assert.include(yield* said(task.threadId), 'Fake codex carries on: the agent it was changed to couldn’t start.')
-      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       // Tried again for the next turn, it takes over.
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Second.' })
@@ -294,7 +294,7 @@ describe('a task’s lead out of usage outside a step', () => {
         { concurrency: 'unbounded' },
       )
       assert.deepStrictEqual(yield* queued(task.threadId), [{ agentId: 'codex', model: 'large' }])
-      assert.isTrue(Option.isNone(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isNone(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       // And once chosen, nothing gives it back.
       assert.isFalse(yield* sessions.giveBack({ threadId: task.threadId, sessionId: standIn?.id ?? '' }))
       assert.deepStrictEqual(yield* queued(task.threadId), [{ agentId: 'codex', model: 'large' }])
@@ -323,7 +323,10 @@ describe('a task’s planned lead already out of usage as its step starts', () =
       yield* ready(projectId)
       const [standIn] = yield* leads(task.threadId)
       assert.deepInclude(standIn, { agentId: 'codex' })
-      assert.deepInclude(Option.getOrUndefined(yield* standInOf(standIn?.id ?? '')) ?? {}, { agentId: 'claude-code', model: 'large' })
+      assert.deepInclude(Option.getOrUndefined(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)) ?? {}, {
+        agentId: 'claude-code',
+        model: 'large',
+      })
       yield* atReset(back)
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'How does it look?' })
@@ -420,7 +423,7 @@ describe('a stand-in on the given lead’s own agent', () => {
       yield* knownModels
       const { task, sessionId } = yield* standingIn({ model: null })
       // Its agent's default ran out and another of its models carries on: there is nothing to go back to, so nothing is said.
-      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId, (yield* Limits).sameModel)))
       const sessions = yield* Sessions
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))
@@ -445,7 +448,7 @@ describe('a stand-in on the given lead’s own agent', () => {
       const sessions = yield* Sessions
       const { task, sessionId } = yield* standingIn({ model: 'large', until: back }, { agentId: 'codex', model: 'small' })
       yield* sessions.setModel({ threadId: task.threadId, model: 'large' })
-      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId, (yield* Limits).sameModel)))
       yield* atReset(back)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))

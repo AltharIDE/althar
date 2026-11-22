@@ -40,9 +40,6 @@ export type StandIn = typeof StandIn.Type
 
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(StandIn))
 
-/** A model's id as agents share it, without its provider: OpenCode Go's `opencode-go/gpt-6.2-sol` is Codex's `gpt-6.2-sol`. */
-export const modelIdOf = (model: string) => model.slice(model.lastIndexOf('/') + 1).toLowerCase()
-
 /** Who leads a task as last chosen: the plan's lead, or a pick of lead made on its thread since, whichever came last. */
 const taskLeadOf = (sessionId: string) =>
   Effect.gen(function* () {
@@ -71,40 +68,45 @@ const taskLeadOf = (sessionId: string) =>
     return plan?.agentId == null ? undefined : { agentId: plan.agentId, model: plan.model, effort: plan.effort }
   })
 
+/** Whether two choices run the same model, whichever agents offer it (Limits' `sameModel`). */
+export type SameModel = (
+  a: { readonly agentId: string; readonly model: string | null },
+  b: { readonly agentId: string; readonly model: string | null },
+) => boolean
+
 /**
  * Who a stand-in stands in for, read against the task's lead as it is now: none where it is on the task's own model, as
  * it then is the lead, through another agent; and the task's lead where it stood in for another model (one the task no
- * longer has, or a stand-in before it), so the thread goes back to the lead the task has.
+ * longer has, or a stand-in before it), so the thread goes back to the lead the task has. That lead is back once its
+ * agent has usage: what kept the other model away (its reset, the step it failed) isn't its.
  */
 export const forTask = (
   standsIn: StandIn,
-  on: string | null,
+  on: { readonly agentId: string; readonly model: string | null },
   lead: { readonly agentId: string; readonly model: string | null; readonly effort: string | null } | undefined,
+  same: SameModel,
 ): StandIn | undefined => {
   if (lead?.model == null) return standsIn
-  const own = modelIdOf(lead.model)
-  if (on !== null && modelIdOf(on) === own) return undefined
-  if (standsIn.model !== null && modelIdOf(standsIn.model) === own) return standsIn
-  return {
-    ...standsIn,
-    agentId: lead.agentId,
-    model: lead.model,
-    effort: lead.effort,
-    accountId: lead.agentId === standsIn.agentId ? standsIn.accountId : null,
-  }
+  if (on.model !== null && same(on, lead)) return undefined
+  if (standsIn.model !== null && same(standsIn, lead)) return standsIn
+  return { agentId: lead.agentId, model: lead.model, effort: lead.effort, accountId: null, until: null, why: 'limit' }
 }
 
 /**
  * Who the session stands in for, while it still does; none where it was started as chosen, or chosen for since, or is on
- * the task's own model (`forTask`).
+ * the task's own model (`forTask`), as `same` reads models (Limits' `sameModel`).
  */
-export const standInOf = (sessionId: string) =>
+export const standInOf = <E>(sessionId: string, same: Effect.Effect<SameModel, E>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const kept = yield* keptStandInOf(sessionId)
     if (Option.isNone(kept)) return kept
-    const [session] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
-    return Option.fromNullishOr(forTask(kept.value, session?.model ?? null, yield* taskLeadOf(sessionId)))
+    const [session] = yield* sql<{ agentId: string; model: string | null }>`
+      SELECT agent_id, model FROM provider_sessions WHERE id = ${sessionId}`
+    const lead = yield* taskLeadOf(sessionId)
+    // The agents' models are read only where there is a stand-in to read against a lead.
+    if (session === undefined || lead?.model == null) return kept
+    return Option.fromNullishOr(forTask(kept.value, session, lead, yield* same))
   })
 
 /** Who the session was started standing in for, while that holds: as kept, before it is read against the task's lead. */

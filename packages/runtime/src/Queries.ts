@@ -1,5 +1,6 @@
 import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
+import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
@@ -1074,6 +1075,7 @@ type Store =
   | Instance
   | Agents
   | ModelFacts
+  | Limits
   | PlanUsage
   | Sessions
   | Coordinator
@@ -1445,7 +1447,7 @@ export class Queries extends Context.Service<
             : undefined
           const values = field(modelOption, 'values')
           // Handed the thread by a usage limit, it stands in for the lead the task was given, which takes over again at its reset.
-          const standsIn = Option.getOrUndefined(yield* standInOf(session.id))
+          const standsIn = Option.getOrUndefined(yield* standInOf(session.id, (yield* Limits).sameModel))
           return {
             id: session.id,
             agentId: session.agentId,

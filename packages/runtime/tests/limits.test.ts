@@ -504,27 +504,32 @@ describe('an agent out of usage', () => {
   })
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
-  const reviewerOut = Effect.gen(function* () {
-    // Make the replacement model known before a takeover can be selected.
-    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
-    const sessions = yield* Sessions
-    const projects = yield* Projects
-    const limits = yield* Limits
-    const { projectId, task, start } = yield* planned(
-      [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
-      'Retry the checkout [lead:finish] [review:pass]',
-    )
-    const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
-    yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
-    yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
-    yield* until(
-      Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
-      (outs) => outs.length === 1,
-    )
-    yield* start
-    yield* until(cardOf(projectId), (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'))
-    return yield* said(task.threadId)
-  })
+  const reviewerOut = reviewerOutUntil('ready')
+  function reviewerOutUntil(end: 'ready' | 'waits') {
+    return Effect.gen(function* () {
+      // Make the replacement model known before a takeover can be selected.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      const sessions = yield* Sessions
+      const projects = yield* Projects
+      const limits = yield* Limits
+      const { projectId, task, start } = yield* planned(
+        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
+      yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
+      yield* until(
+        Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
+        (outs) => outs.length === 1,
+      )
+      yield* start
+      yield* until(cardOf(projectId), (cards) =>
+        cards.some((card) => card.taskId === task.taskId && (end === 'ready' ? card.phase === 'ready' : card.waits != null)),
+      )
+      return yield* said(task.threadId)
+    })
+  }
 
   it.live('starts a planned reviewer that is out on the next free agent instead, other than the lead’s', () => {
     const back = Date.now() + HOUR
@@ -547,6 +552,17 @@ describe('an agent out of usage', () => {
         lines,
         `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake claude-code takes the review over, with the review by the same maker.`,
       )
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
+  })
+
+  it.live('never gives a review to the lead itself, even where it is the only one free: the review waits', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      // Large turned off on Claude Code: Small there, the lead itself, is the only model with room.
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'large', blocked: true })
+      const lines = yield* reviewerOutUntil('waits')
+      assert.notMatch(lines.join('\n'), /takes the review over/)
+      assert.match(lines.join('\n'), /Fake codex ran out of usage during the review/)
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
 

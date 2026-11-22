@@ -77,7 +77,7 @@ import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
-import { type StandIn, modelIdOf, standInOf } from './standIn'
+import { type StandIn, standInOf } from './standIn'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 import { stuckWhyOf, summarize } from './words'
@@ -1507,13 +1507,13 @@ export class Runs extends Context.Service<
           const planned = on.step === 'review' ? plannedReview : implement
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
           // One standing in on another model than the step's own: the step's own model comes first, its own lead included.
-          const own = planned?.model != null && failed.model !== null && modelIdOf(planned.model) !== modelIdOf(failed.model)
+          const own = planned?.model != null && failed.model !== null && !(yield* limits.sameModel)(planned, failed)
           return yield* limits.free({
             besides: [failed.agentId],
             projectId: on.run.projectId,
             from: own ? planned : failed,
             ...(planned === undefined ? {} : { planned }),
-            ...(other === undefined ? {} : { other }),
+            ...(other === undefined ? {} : { other, ...(on.step === 'review' ? { reviewing: true } : {}) }),
           })
         })
 
@@ -2433,7 +2433,7 @@ export class Runs extends Context.Service<
           const [last] = yield* sql<{ id: string; agentId: string; model: string | null }>`
             SELECT id, agent_id, model FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
           if (last === undefined || last.agentId !== on.agentId || (on.model !== null && last.model !== on.model)) return undefined
-          return Option.getOrUndefined(yield* standInOf(last.id))
+          return Option.getOrUndefined(yield* standInOf(last.id, limits.sameModel))
         })
 
       /**

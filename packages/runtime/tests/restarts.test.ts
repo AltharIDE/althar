@@ -18,6 +18,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Limits } from '../src/Limits'
 import { standInOf } from '../src/standIn'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeAgents, notices, repository, runtime, until } from './support'
@@ -235,7 +236,7 @@ describe('A step a restart stopped', () => {
         const [last] = yield* sql<{ id: string; agentId: string }>`
           SELECT id, agent_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
         assert.strictEqual(last?.agentId, 'codex')
-        assert.deepInclude(Option.getOrUndefined(yield* standInOf(last?.id ?? '')) ?? {}, {
+        assert.deepInclude(Option.getOrUndefined(yield* standInOf(last?.id ?? '', (yield* Limits).sameModel)) ?? {}, {
           agentId: 'claude-code',
           model: 'large',
           why: 'stall',

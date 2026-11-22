@@ -1276,7 +1276,7 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           // The lead a stand-in stood in for, taking the thread back as Althar queued it (`giveBack`): said now it does.
           const standing = Option.getOrUndefined(
-            yield* standInOf(previous.sessionId).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
+            yield* standInOf(previous.sessionId, limits.sameModel).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
           )
           const back =
             standing !== undefined && standing.agentId === next.agentId && (next.model === undefined || next.model === standing.model)
@@ -1828,7 +1828,7 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [was] = yield* sql<{ model: string | null; effort: string | null }>`
             SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
-          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId, limits.sameModel))
           const given = kept ?? {
             agentId: previous.entry.definition.id,
             model: was?.model ?? null,
@@ -2017,7 +2017,7 @@ export class Sessions extends Context.Service<
               return yield* Queue.offer(previous.wake, undefined)
             }
             // Started afresh, a stand-in still stands in for the lead it was given.
-            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId, limits.sameModel))
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* Effect.andThen(
@@ -2099,19 +2099,34 @@ export class Sessions extends Context.Service<
       /**
        * Where a session asked for on a model the person turned off for its agent starts: the same model through another
        * agent with room, never another model unasked; only where none has it, the agent's strongest other model. Either way
-       * the thread says so plainly. One already on the thread is left as it is.
+       * the thread says so plainly. One already on the thread is left as it is, unless it is being replaced (`replacing`).
+       * A review never goes to the lead it reviews.
        */
       const routed = <
         I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
       >(
         input: I,
+        replacing: boolean,
       ) =>
         Effect.gen(function* () {
-          if (threads.has(input.threadId)) return { input, said: undefined }
+          if (!replacing && threads.has(input.threadId)) return { input, said: undefined }
           const sql = yield* SqlClient.SqlClient
-          const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
+          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
+            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return { input, said: undefined }
-          const way = yield* limits.route({ agentId: input.agentId, model: input.model ?? null, projectId: thread.projectId })
+          // A review's thread: the lead it reviews, as it leads now on the task's thread.
+          const [lead] =
+            thread.kind === 'step' && thread.nodeKey === 'review' && thread.taskId !== null
+              ? yield* sql<{ agentId: string; model: string | null }>`
+                  SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+                  WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+              : []
+          const way = yield* limits.route({
+            agentId: input.agentId,
+            model: input.model ?? null,
+            projectId: thread.projectId,
+            ...(lead === undefined ? {} : { reviewing: lead }),
+          })
           if (way.kind === 'here') return { input, said: undefined }
           const from = yield* limits.named(input.agentId, input.model ?? null)
           const { model: _model, accountId: _account, ...rest } = input
@@ -2125,7 +2140,11 @@ export class Sessions extends Context.Service<
             } as I
             return { input: moved, said: routeWords({ from, to }) }
           }
-          const instead = yield* limits.modelFor({ agentId: input.agentId, projectId: thread.projectId })
+          const instead = yield* limits.modelFor({
+            agentId: input.agentId,
+            projectId: thread.projectId,
+            ...(lead === undefined ? {} : { reviewing: lead }),
+          })
           const to = instead === null ? undefined : yield* limits.named(input.agentId, instead)
           const kept = {
             ...rest,
@@ -2142,7 +2161,7 @@ export class Sessions extends Context.Service<
       /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
       const start = (asked: Parameters<typeof startOn>[0]) =>
         Effect.gen(function* () {
-          const { input, said } = yield* routed(asked)
+          const { input, said } = yield* routed(asked, false)
           const sessionId = yield* startOn(input)
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
@@ -2151,7 +2170,7 @@ export class Sessions extends Context.Service<
       /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
       const switchAgent = (asked: Parameters<typeof switchOn>[0]) =>
         Effect.gen(function* () {
-          const { input, said } = yield* routed(asked)
+          const { input, said } = yield* routed(asked, true)
           const sessionId = yield* switchOn(input)
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
@@ -2213,7 +2232,9 @@ export class Sessions extends Context.Service<
           // The last lead stood in for the one a usage limit stopped (standIn.ts): that one leads again where it has usage again,
           // after a stop or a restart too; else the stand-in carries on standing in.
           const standing =
-            on.agentId === last.agentId && on.model === last.model ? Option.getOrUndefined(yield* standInOf(last.id)) : undefined
+            on.agentId === last.agentId && on.model === last.model
+              ? Option.getOrUndefined(yield* standInOf(last.id, limits.sameModel))
+              : undefined
           // Queued back by `giveBack` before the stop, it is still standing in: the given lead starts, as it would have.
           if (standing !== undefined && (yield* backFrom(standing, last.projectId))) {
             yield* start({
@@ -2624,7 +2645,7 @@ export class Sessions extends Context.Service<
                 Effect.gen(function* () {
                   if (running.stopping || running.sessionId !== input.sessionId || running.handover !== 'none') return undefined
                   if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
-                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId))
+                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
                   if (standsIn === undefined) return undefined
                   const next = {
                     agentId: standsIn.agentId,

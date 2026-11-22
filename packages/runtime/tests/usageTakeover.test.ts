@@ -21,7 +21,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { standInOf } from '../src/standIn'
+import { isBack, type StandIn, standInOf } from '../src/standIn'
 import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until, withWork } from './support'
 
 const claude = { id: 'claude-strong', name: 'Claude Strong' }
@@ -762,6 +762,20 @@ describe('a lead whose model the person turned off for its agent', () => {
     }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
   )
 
+  it.live('hands a live thread to the same model through another agent, where the one asked for is turned off', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      yield* task.start
+      yield* until(agentsOn(task.threadId), (rows) => rows.length > 0)
+      yield* (yield* Models).setModelBlocked({ agentId: 'opencode', model: goSol.id, blocked: true })
+      // The thread's lead is live on Claude Code as it is handed to GPT Strong on OpenCode Go, turned off there.
+      yield* (yield* Sessions).switchAgent({ threadId: task.threadId, agentId: 'opencode', model: goSol.id })
+      const on = yield* until(agentsOn(task.threadId), (rows) => rows.length > 1)
+      assert.deepStrictEqual(on.at(-1), { agentId: 'codex', model: sol.id })
+      assert.include(yield* lines(task.threadId), 'GPT Strong is turned off for Fake opencode: it carries on through Fake codex.')
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
   it.live('goes on another model only where no agent with room offers it, and says that plainly', () =>
     Effect.gen(function* () {
       const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
@@ -779,19 +793,27 @@ describe('a lead whose model the person turned off for its agent', () => {
   )
 })
 
-describe('a stand-in read against the task’s lead', () => {
-  const standingIn = (on: ModelChoice & { readonly model: string }, given: ModelChoice) =>
-    Effect.gen(function* () {
-      const task = yield* startTask(undefined, undefined, { agentId: 'opencode', model: goSol.id })
-      const sessionId = yield* (yield* Sessions).start({
-        threadId: task.threadId,
-        agentId: on.agentId,
-        model: on.model,
-        standsIn: { ...given, effort: null, accountId: null, until: new Date(Date.now() + 3_600_000).toISOString() },
-      })
-      return Option.getOrUndefined(yield* standInOf(sessionId))
+/** A session started standing in for `given` (as `kept` says), read against the task's lead (`lead`). */
+const standingIn = (
+  on: ModelChoice & { readonly model: string },
+  given: ModelChoice,
+  kept: Partial<StandIn> = {},
+  lead: { readonly agentId: string; readonly model: string } = { agentId: 'opencode', model: goSol.id },
+) =>
+  Effect.gen(function* () {
+    // The agents' models read, as they are where a stand-in is read against the task's lead.
+    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
+    const task = yield* startTask(undefined, undefined, lead)
+    const sessionId = yield* (yield* Sessions).start({
+      threadId: task.threadId,
+      agentId: on.agentId,
+      model: on.model,
+      standsIn: { ...given, effort: null, accountId: null, until: new Date(Date.now() + 3_600_000).toISOString(), ...kept },
     })
+    return Option.getOrUndefined(yield* standInOf(sessionId, (yield* Limits).sameModel))
+  })
 
+describe('a stand-in read against the task’s lead', () => {
   it.live('isn’t one on the task’s own model, whoever it was started standing in for', () =>
     Effect.gen(function* () {
       // GPT Strong on Codex, kept as standing in for another model, while the task's lead is GPT Strong on OpenCode Go.
@@ -808,6 +830,54 @@ describe('a stand-in read against the task’s lead', () => {
         agentId: 'opencode',
         model: goSol.id,
       })
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+})
+
+describe('a stand-in read against the task’s lead, its model under other ids', () => {
+  // Codex offers GPT Strong under an id of its own; OpenCode Go's Default stands for its GPT Strong.
+  const codexSol = { id: 'gpt-strong-2026', name: 'GPT Strong' }
+  const goDefault = { id: 'default', name: 'Default (recommended)', description: 'OpenCode Go/GPT Strong' }
+
+  it.live('isn’t one where its model has the task’s model’s name under another id', () =>
+    Effect.gen(function* () {
+      assert.isUndefined(yield* standingIn({ agentId: 'codex', model: codexSol.id }, { agentId: 'opencode', model: third.id }))
+    }).pipe(Effect.provide(withAgents({ codex: { models: [codexSol] }, opencode: { models: [goSol, third] } }))),
+  )
+
+  it.live('isn’t one where the task’s lead is on its agent’s Default, which names its model', () =>
+    Effect.gen(function* () {
+      assert.isUndefined(
+        yield* standingIn(
+          { agentId: 'codex', model: sol.id },
+          { agentId: 'opencode', model: third.id },
+          {},
+          {
+            agentId: 'opencode',
+            model: goDefault.id,
+          },
+        ),
+      )
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goDefault, goSol, third] } }))),
+  )
+})
+
+describe('a stand-in kept for another model than the task’s lead', () => {
+  it.live('gives the thread back once the task’s lead has room, not at the other model’s reset', () =>
+    Effect.gen(function* () {
+      // Kept nearly out on DeepSeek Strong until its weekly reset; the task's lead is GPT Strong on OpenCode Go.
+      const week = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString()
+      const standsIn = yield* standingIn(
+        { agentId: 'claude-code', model: claude.id },
+        { agentId: 'opencode', model: third.id },
+        { why: 'low', until: week, attemptId: 'att_other' },
+      )
+      assert.deepInclude(standsIn, { agentId: 'opencode', model: goSol.id, until: null, why: 'limit' })
+      assert.notProperty(standsIn, 'attemptId')
+      const limits = yield* Limits
+      assert.isTrue(
+        yield* isBack(standsIn!, (one) => (one.accountId === null ? limits.out(one.agentId) : limits.outAccount(one.accountId))),
+      )
     }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
   )
 })
