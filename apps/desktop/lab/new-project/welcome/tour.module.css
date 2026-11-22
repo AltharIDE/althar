@@ -5,17 +5,30 @@
 }
 .card {
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   width: min(880px, 100%);
   height: min(600px, 100%);
-  overflow: hidden;
+  border-radius: 20px;
+  animation: card 380ms linear backwards;
+}
+/* The card's paper, a layer of its own, so opening and closing the card only scales and fades it. */
+.paper {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   border-radius: 20px;
   background: var(--paper);
   box-shadow:
     0 0 0 1px var(--line),
     var(--lift-dialog);
-  animation: card 380ms linear backwards;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+/* Back on page 2 and after, coming in as it's needed */
+.foot > * {
+  animation: fade 240ms linear backwards;
 }
 .head {
   display: flex;
@@ -215,9 +228,8 @@
   inset: 0;
   width: auto;
   height: auto;
+  overflow: hidden;
   border-radius: 0;
-  background: transparent;
-  box-shadow: none;
   animation: none;
 }
 /* its head, the card's width still, at the window's top */
@@ -240,23 +252,13 @@
 .finaleTitle {
   font-size: clamp(44px, 6vw, 72px);
 }
-/* the card's paper as it opens: past the window's edges, so its corners are never seen there */
-.card[data-open] {
-  isolation: isolate;
-}
-.paper {
-  position: absolute;
+/* opened, its paper past the window's edges, so its corners are never seen there, and gone */
+.card[data-open] .paper {
   inset: -32px;
-  z-index: -1;
-  background: var(--paper);
-  box-shadow:
-    0 0 0 1px var(--line),
-    var(--lift-dialog);
+  border-radius: 0;
   opacity: 0;
-  transform-origin: 0 0;
-  pointer-events: none;
 }
-/* what was on the card, blurring away as it opens */
+/* A still copy of what was on the card, or of a piece of it, over the card while a step morphs */
 .ghost {
   position: absolute;
   z-index: 3;
@@ -270,7 +272,8 @@
   animation: none !important;
   transition: none !important;
 }
-.ghost > header {
+.ghost > header,
+.ghost > .paper {
   visibility: hidden;
 }
 

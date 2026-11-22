@@ -340,7 +340,7 @@ export function HomeReady({
 }) {
   const needs = useNeeds().filter((one) => only === undefined || only.includes(one.key))
   return (
-    <ul className={p.ready} aria-label={label} data-compact={compact || undefined}>
+    <ul className={p.ready} aria-label={label} data-compact={compact || undefined} data-morph="ready" data-morph-as="box">
       {yours && (
         <li data-state="there">
           <span className={p.readyMark}>

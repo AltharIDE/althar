@@ -7,7 +7,8 @@ import { HomeReady, useNeeds } from '../directions/parts'
 import { HOME, YOURS } from '../world'
 import ar from './arrival.module.css'
 import t from './tour.module.css'
-import { Doors, ReadyStrip, useArrive, usePasteAnywhere } from './Welcome'
+import { type Pace, morphPairs, piecesIn, settle } from './morph'
+import { Doors, ReadyStrip, usePasteAnywhere } from './Welcome'
 import w from './welcome.module.css'
 
 /*
@@ -19,6 +20,10 @@ import w from './welcome.module.css'
  * and melts into it, the light rises behind, and the tour ends as the
  * arrival does, the mark coming up dot by dot over "Welcome to runner-1"
  * and the three doors in. Skip goes straight to that.
+ *
+ * Each step morphs into the next (`morph.ts`): its title and line move into
+ * the next's, runner-1's column of settings reshapes into the sign-ins' list,
+ * and the card itself opens into the window, its title into the arrival's.
  */
 
 type Page = 'home' | 'yours' | 'signins' | 'project'
@@ -76,6 +81,9 @@ const TEXT: Record<Exclude<Page, 'home' | 'project'>, { title: string; line: str
 
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const OPEN = 'cubic-bezier(0.55, 0, 0.15, 1)'
+/** A step on the card, and the card opening into the window or closing again. */
+const STEP: Pace = { length: 560, easing: 'cubic-bezier(0.4, 0, 0.1, 1)', out: 200, inAt: 140, inFor: 320 }
+const OPENING: Pace = { length: 960, easing: OPEN, out: 300, inAt: 320, inFor: 520 }
 
 export function TourWelcome() {
   const [at, setAt] = useState(0)
@@ -85,69 +93,104 @@ export function TourWelcome() {
   const card = useRef<HTMLElement>(null)
   const head = useRef<HTMLElement>(null)
   const paper = useRef<HTMLSpanElement>(null)
+  /** Lands the morph under way at once, where another starts before it's done. */
+  const landing = useRef<(() => void) | null>(null)
 
   /**
-   * Opens the card into the window: what was on it blurs away where it
-   * stood, the card's paper grows from the card to past the window's edges
-   * and melts into it, and its head glides up to the window's top, while the
-   * finale clears in on it. Only transforms, opacity and filter move, each on
-   * a layer of its own, so the compositor draws every frame; the page is read
-   * once before the switch and once after it.
+   * Turns to page `next`, morphing: what the pages share moves into its
+   * place on the next, the rest of the old fades out and the rest of the new
+   * fades in. Opening, the card's paper also grows to past the window's
+   * edges and melts into it, and its head glides to the window's top;
+   * closing, the paper comes back from there into the card.
    */
-  const morph = () => {
-    const root = card.current
+  const turn = (next: number) => {
+    landing.current?.()
     const holder = stage.current
+    const root = card.current
+    const sheet = paper.current
     const bar = head.current
-    if (root === null || holder === null || bar === null || typeof root.animate !== 'function' || reduced()) return setAt(LAST)
+    if (holder === null || root === null || sheet === null || bar === null || typeof root.animate !== 'function' || reduced())
+      return setAt(next)
+    const opening = next === LAST
+    const closing = at === LAST
+    const pace = opening || closing ? OPENING : STEP
+    // The page as it is: everything read before anything changes.
     const s = holder.getBoundingClientRect()
     const c = root.getBoundingClientRect()
-    const h = bar.getBoundingClientRect()
+    const p0 = sheet.getBoundingClientRect()
+    const h0 = bar.getBoundingClientRect()
+    const before = new Map(piecesIn(root).map((one) => [one.key, one]))
     const ghost = root.cloneNode(true) as HTMLElement
+    for (const one of [sheet, bar]) for (const move of one.getAnimations()) move.cancel()
+    if (closing) sheet.style.borderRadius = ''
+
+    flushSync(() => setAt(next))
+
+    // The page it's become: read once.
+    const fresh = root.querySelector<HTMLElement>('[data-morph-root]')
+    if (fresh === null) return
+    settle(fresh)
+    const p1 = sheet.getBoundingClientRect()
+    const h1 = bar.getBoundingClientRect()
+    const pairs = piecesIn(fresh).flatMap((b) => {
+      const a = before.get(b.key)
+      return a === undefined ? [] : [{ a, b }]
+    })
+
+    // The old card, still, over the new, its matched pieces left to their copies.
     ghost.querySelectorAll('[id]').forEach((one) => one.removeAttribute('id'))
     ghost.classList.add(t.ghost ?? 'ghost')
     ghost.setAttribute('aria-hidden', 'true')
     ghost.inert = true
-    Object.assign(ghost.style, {
-      left: `${c.left - s.left}px`,
-      top: `${c.top - s.top}px`,
-      width: `${c.width}px`,
-      height: `${c.height}px`,
-    })
+    Object.assign(ghost.style, { left: `${c.left - s.left}px`, top: `${c.top - s.top}px`, width: `${c.width}px`, height: `${c.height}px` })
+    // On the card the foot stays; opening, it goes with the rest.
+    if (!opening) ghost.querySelector<HTMLElement>(':scope > footer')?.style.setProperty('visibility', 'hidden')
+    for (const { a } of pairs) ghost.querySelector<HTMLElement>(`[data-morph="${a.key}"]`)?.style.setProperty('visibility', 'hidden')
     holder.append(ghost)
-    flushSync(() => setAt(LAST))
-    const sheet = paper.current
-    const g = bar.getBoundingClientRect()
-    if (sheet !== null) {
-      const p = sheet.getBoundingClientRect()
-      const sx = c.width / p.width
-      const sy = c.height / p.height
-      // The card's corners, as they were, at the scale it starts from.
-      sheet.style.borderRadius = `${20 / sx}px / ${20 / sy}px`
-      sheet.animate([{ transform: `translate(${c.left - p.left}px, ${c.top - p.top}px) scale(${sx}, ${sy})` }, { transform: 'none' }], {
-        duration: 960,
-        easing: OPEN,
+    const { laid, hidden, moves } = morphPairs(pairs, holder, s, t.ghost ?? 'ghost', pace)
+    laid.push(ghost)
+
+    ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: pace.out, easing: 'linear', fill: 'forwards' })
+    const arriving = closing ? [fresh, root.querySelector<HTMLElement>(':scope > footer')] : [fresh]
+    for (const one of arriving)
+      one?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: pace.inFor, delay: pace.inAt, easing: 'linear', fill: 'backwards' })
+
+    if (opening || closing) {
+      const sx = p0.width / p1.width
+      const sy = p0.height / p1.height
+      // Opening, the card's corners as they were at the scale it starts from.
+      if (opening) sheet.style.borderRadius = `${20 / sx}px / ${20 / sy}px`
+      sheet.animate([{ transform: `translate(${p0.left - p1.left}px, ${p0.top - p1.top}px) scale(${sx}, ${sy})` }, { transform: 'none' }], {
+        duration: pace.length,
+        easing: pace.easing,
       })
-      sheet.animate([{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }], { duration: 1300, easing: 'linear' })
+      sheet.animate(
+        opening
+          ? [{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }]
+          : [{ opacity: 0 }, { opacity: 1, offset: 0.5 }, { opacity: 1 }],
+        { duration: opening ? 1300 : pace.length, easing: 'linear' },
+      )
+      bar.animate([{ transform: `translate(${h0.left - h1.left}px, ${h0.top - h1.top}px)` }, { transform: 'none' }], {
+        duration: pace.length,
+        easing: pace.easing,
+      })
     }
-    bar.animate([{ transform: `translate(${h.left - g.left}px, ${h.top - g.top}px)` }, { transform: 'none' }], {
-      duration: 960,
-      easing: OPEN,
-    })
-    const away = ghost.animate(
-      [
-        { opacity: 1, filter: 'blur(0px)' },
-        { opacity: 0, filter: 'blur(10px)' },
-      ],
-      { duration: 300, easing: 'linear', fill: 'forwards' },
-    )
-    void away.finished.finally(() => ghost.remove())
+
+    let landed = false
+    const land = () => {
+      if (landed) return
+      landed = true
+      for (const one of laid) one.remove()
+      for (const one of hidden) one.style.visibility = ''
+      if (landing.current === land) landing.current = null
+    }
+    landing.current = land
+    void Promise.allSettled([...moves.map((one) => one.finished), new Promise((done) => setTimeout(done, pace.out))]).then(land)
   }
 
   const go = (to: number) => {
     const next = Math.max(0, Math.min(LAST, to))
-    if (next === at) return
-    if (next === LAST) return morph()
-    setAt(next)
+    if (next !== at) turn(next)
   }
   // The arrows go a page at a time, from where it is.
   const step = useRef((by: number) => go(at + by))
@@ -165,14 +208,14 @@ export function TourWelcome() {
   }, [])
 
   return (
-    <main ref={stage} className={`${w.stage} ${t.stage}`}>
+    <main ref={stage} className={`${w.stage} ${t.stage}`} data-morph-root>
       <div className={w.light} aria-hidden="true">
         <div className={t.lift} data-open={open || undefined}>
           <Light height={0.55} />
         </div>
       </div>
       <section ref={card} className={t.card} data-open={open || undefined} aria-labelledby="tour-title">
-        {open && <span ref={paper} className={t.paper} aria-hidden="true" />}
+        <span ref={paper} className={t.paper} aria-hidden="true" />
         <header ref={head} className={t.head}>
           <span className={t.brand}>
             <Icon name="home" size={16} />
@@ -202,16 +245,18 @@ export function TourWelcome() {
           <Finale />
         ) : (
           <>
-            <div key={page} className={t.body}>
+            <div key={page} className={t.body} data-morph-root>
               {page === 'home' || page === 'project' ? (
                 <Answering />
               ) : (
                 <>
                   <div className={t.words}>
-                    <h1 id="tour-title" className={`${w.display} ${t.title}`}>
+                    <h1 id="tour-title" className={`${w.display} ${t.title}`} data-morph="title">
                       {TEXT[page].title}
                     </h1>
-                    <p className={t.line}>{TEXT[page].line}</p>
+                    <p className={t.line} data-morph="line">
+                      {TEXT[page].line}
+                    </p>
                   </div>
                   <div className={t.scene}>
                     {page === 'yours' && <Carried />}
@@ -254,11 +299,11 @@ function Answering() {
   return (
     <div className={t.answering}>
       <div className={t.words}>
-        <span className={w.eyebrow}>
+        <span className={w.eyebrow} data-morph="eyebrow">
           <span className={t.dot} aria-hidden="true" />
           {HOME.remote ? `${SPEC.at} · ${SPEC.ping} ms away` : SPEC.at}
         </span>
-        <h1 id="tour-title" className={`${w.display} ${t.title} ${t.hello}`} aria-label={`This is ${HOME.name}`}>
+        <h1 id="tour-title" className={`${w.display} ${t.title} ${t.hello}`} aria-label={`This is ${HOME.name}`} data-morph="title">
           <span aria-hidden="true">This is </span>
           <span className={ar.name} aria-hidden="true">
             {[...HOME.name].map((letter, i) => (
@@ -268,7 +313,9 @@ function Answering() {
             ))}
           </span>
         </h1>
-        <p className={t.line}>Tasks you start in this window run on it, and keep going with this Mac closed.</p>
+        <p className={t.line} data-morph="line">
+          Tasks you start in this window run on it, and keep going with this Mac closed.
+        </p>
       </div>
       <div className={t.spec}>
         <dl className={t.figures}>
@@ -320,7 +367,7 @@ function Carried() {
       <span className={t.across} aria-hidden="true">
         <Icon name="arrow" size={16} />
       </span>
-      <section className={t.side} data-home>
+      <section className={t.side} data-home data-morph="ready" data-morph-as="box">
         <h2 className={t.sideName}>
           <Icon name="home" size={14} />
           {HOME.name}
@@ -343,22 +390,27 @@ function Carried() {
 
 /**
  * The tour's end, as the arrival is: the mark coming up dot by dot, the
- * home's name a letter at a time, and the doors in, with what the tour set
- * up along the foot. A repository's address pasted anywhere goes in.
+ * home's name, and the doors in, with what the tour set up along the foot,
+ * where the sign-ins land. A repository's address pasted anywhere goes in.
  */
 function Finale() {
-  const ref = useArrive<HTMLDivElement>()
   usePasteAnywhere()
   const needs = useNeeds()
   const signed = needs.filter((one) => one.state === 'there' && one.brand !== null).map((one) => one.name)
   return (
-    <div ref={ref} className={t.finale}>
+    <div className={t.finale} data-morph-root>
       <div className={ar.head}>
         <HalftoneMark size={64} className={ar.mark} />
-        <span className={w.eyebrow} data-arrive>
+        <span className={w.eyebrow} data-morph="eyebrow" data-morph-at="center">
           {HOME.remote ? `althar@${HOME.name} · ${HOME.what}` : HOME.what}
         </span>
-        <h1 id="tour-title" className={`${w.display} ${ar.title} ${t.finaleTitle}`} aria-label={`Welcome to ${HOME.name}`}>
+        <h1
+          id="tour-title"
+          className={`${w.display} ${ar.title} ${t.finaleTitle}`}
+          aria-label={`Welcome to ${HOME.name}`}
+          data-morph="title"
+          data-morph-at="center"
+        >
           <span className={ar.welcome}>Welcome to</span>{' '}
           <span className={ar.name} aria-hidden="true">
             {[...HOME.name].map((letter, i) => (
@@ -368,14 +420,14 @@ function Finale() {
             ))}
           </span>
         </h1>
-        <p className={ar.line} data-arrive>
+        <p className={ar.line} data-morph="line" data-morph-at="center">
           {signed.length > 0
             ? `Your settings are on it and ${signed.join(' and ')} signed in. Bring it its first project.`
             : 'Your settings are on it. Bring it its first project.'}
         </p>
       </div>
       <Doors label="Ways in" />
-      <div className={ar.foot} data-arrive>
+      <div className={ar.foot}>
         <ReadyStrip label={`Ready on ${HOME.name}`} />
       </div>
     </div>
