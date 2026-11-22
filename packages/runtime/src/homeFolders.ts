@@ -1,10 +1,12 @@
-import { readFile, statfs } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { readFile, realpath, statfs } from 'node:fs/promises'
 import { cpus, release, totalmem } from 'node:os'
 import { join } from 'node:path'
 
 import type { HomeFolders, Machine } from '@althar/contracts'
 import { Effect } from 'effect'
 
+import type { GrantKind } from './Folders'
 import { git } from './git'
 import { clonePlaceFor, findRepositories, placesFor, shownAt } from './repositoriesFound'
 
@@ -21,22 +23,35 @@ export const firstPlace = (home: string, platform: NodeJS.Platform) => join(home
 
 /**
  * The repositories found where people keep code under `home`, and the place
- * a clone or a new repository goes, each by a grant from `allow`. A folder is
- * granted once a launch, however often it's found.
+ * a clone or a new repository goes, each by a grant from `allow`: a
+ * repository's opens it alone, and the place's only takes new code. A folder
+ * is granted once a launch, however often it's found.
  */
-export const homeFolders = (allow: (path: string) => Effect.Effect<string>, home: string, platform: NodeJS.Platform = process.platform) => {
+export const homeFolders = (
+  allow: (path: string, kind: Exclude<GrantKind, 'chosen'>) => Effect.Effect<string>,
+  given: string,
+  platform: NodeJS.Platform = process.platform,
+) => {
   const granted = new Map<string, string>()
-  const grantOf = (path: string) =>
+  const grantOf = (path: string, kind: Exclude<GrantKind, 'chosen'>) =>
     Effect.suspend(() => {
-      const known = granted.get(path)
-      return known === undefined ? Effect.tap(allow(path), (grant) => Effect.sync(() => granted.set(path, grant))) : Effect.succeed(known)
+      const known = granted.get(`${kind}:${path}`)
+      return known === undefined
+        ? Effect.tap(allow(path, kind), (grant) => Effect.sync(() => granted.set(`${kind}:${path}`, grant)))
+        : Effect.succeed(known)
     })
   return Effect.gen(function* () {
+    // As the disk has it, so where things are is said from it however the home is reached (/home a link, say).
+    const home = yield* Effect.promise(() => realpath(given).catch(() => given))
     const places = placesFor(home, platform)
     const found = yield* Effect.promise(() => findRepositories(places))
-    const place = (yield* Effect.promise(() => clonePlaceFor(found, places))) ?? firstPlace(home, platform)
+    // Where there's no usual place for code yet, the first is made as it's used: ~/projects, or the first not taken.
+    const place =
+      (yield* Effect.promise(() => clonePlaceFor(found, places))) ??
+      [firstPlace(home, platform), ...places].find((one) => !existsSync(one)) ??
+      firstPlace(home, platform)
     const repositories = yield* Effect.forEach(found.repositories, (repository) =>
-      Effect.map(grantOf(repository.real), (grant) => ({
+      Effect.map(grantOf(repository.real, 'repository'), (grant) => ({
         grant,
         name: repository.name,
         where: shownAt(repository.path, home),
@@ -47,7 +62,7 @@ export const homeFolders = (allow: (path: string) => Effect.Effect<string>, home
     return {
       lookedIn: found.lookedIn.map((one) => shownAt(one, home)),
       repositories,
-      place: { grant: yield* grantOf(place), where: shownAt(place, home) },
+      place: { grant: yield* grantOf(place, 'place'), where: shownAt(place, home) },
     } satisfies HomeFolders
   })
 }

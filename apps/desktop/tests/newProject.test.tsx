@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  SOCKET_CALLS,
   type ConnectionList,
   type FolderReading,
   type FoundRepository,
@@ -21,9 +22,10 @@ import { NewProjectView } from '../src/renderer/features/newProject/NewProjectVi
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
-import { connectionList, fakeClient, fakeHost, githubConnection, project } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { UPDATE_COMMAND } from '../src/renderer/features/homes/useHomes'
 
 /*
  * A new project, in a tab of its own: named on its left, set up on its right.
@@ -783,26 +785,30 @@ describe('where code is hosted', () => {
 })
 
 describe('a new project on a home on another computer', () => {
-  const homeId = `home_${'1'.repeat(32)}`
   const SITE = repo('/home/althar/code/site', 'git@github.com:acme/site.git')
+  /** What the home refuses this window, as it does a socket: putting a repository on a host, and a project's tracker. */
+  const refused = () =>
+    vi.fn(async () => {
+      throw new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' })
+    })
   /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
-  const onHome = () => {
+  const onHome = (overrides: Parameters<typeof fakeClient>[0] = {}, calls: ReadonlyArray<string> | null = SOCKET_CALLS) => {
     const fake = fakeClient({
-      connection: {
-        identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
-        hostDeviceId: `dev_${'3'.repeat(32)}`,
-        apiVersion: 1,
-        appVersion: 'fixture',
-        position: { homeId, cursor: 0, checkpoint: null },
-      },
+      connection: remoteConnection(calls),
       readFolder: vi.fn(async (grant: string) =>
         grant === 'grant_site' ? { kind: 'repository' as const, name: 'site', repositories: [SITE], project: null } : readings.grant_ops!,
       ),
+      publishRepository: refused(),
+      listRepositoryOwners: refused(),
+      setProjectTracker: refused(),
+      listContainers: refused(),
+      ...overrides,
     })
     const host = fakeHost()
+    const onCreated = vi.fn()
     draftsOf(fake.client).start()
-    withServices(<NewProject onCreated={vi.fn()} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
-    return { ...fake, host }
+    withServices(<NewProject onCreated={onCreated} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
+    return { ...fake, host, onCreated }
   }
 
   it('offers the repositories the home found, each read by the grant the home made, and no folder picker', async () => {
@@ -824,5 +830,66 @@ describe('a new project on a home on another computer', () => {
     await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalledWith('grant_code', 'Tide Tables'))
     expect(screen.queryByRole('button', { name: /^Change/ })).toBeNull()
     expect(at.host.pickPlace).not.toHaveBeenCalled()
+  })
+
+  it('makes it with a code host and a tracker connected there, offering neither where the home won’t let this window use them', async () => {
+    const at = onHome({ listConnections: vi.fn(async () => connected) })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    expect(screen.queryByRole('radiogroup', { name: 'Where its code lives' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /Linear/ })).toBeNull()
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+    expect(at.client.makeRepository).toHaveBeenCalled()
+    expect(at.client.openProject).toHaveBeenCalled()
+    for (const call of [at.client.publishRepository, at.client.listRepositoryOwners, at.client.setProjectTracker, at.client.listContainers])
+      expect(call).not.toHaveBeenCalled()
+  })
+
+  it('says where it couldn’t ask the home where a new repository goes, and lets Create go on once it can', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    expect(await screen.findByText('The home disconnected.')).not.toBeNull()
+    expect(draftsOf(at.client).get()?.reading).toEqual([])
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+  })
+
+  it('says it couldn’t look on the home, rather than that it found nothing there, and looks again', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^A folder/))
+    expect(await screen.findByText('Couldn’t look on this home just now.')).not.toBeNull()
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Look again' }))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    expect(within(list).getByRole('checkbox', { name: /^site/ })).not.toBeNull()
+    expect(at.client.findHomeFolders).toHaveBeenCalled()
+  })
+
+  it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {
+    const at = onHome({}, null)
+    expect(await screen.findByText(/this home runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
+    expect(screen.getByText(UPDATE_COMMAND)).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy the update command' })).not.toBeNull()
+    expect(at.client.findHomeFolders).not.toHaveBeenCalled()
   })
 })

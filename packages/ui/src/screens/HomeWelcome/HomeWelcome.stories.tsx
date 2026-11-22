@@ -93,6 +93,21 @@ export const Bare: Story = {
   },
 }
 
+/** Where it couldn't look on the home's disk: the folder door stays, saying so. */
+export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
+
+/** A home from before windows made projects there: its update command in place of the ways in, and no tour. */
+export const Older: Story = {
+  args: {
+    toured: false,
+    machine: null,
+    git: undefined,
+    repositories: [],
+    found: null,
+    update: { command: 'sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait' },
+  },
+}
+
 /** A long name, in the app's narrowest window. */
 export const Narrow: Story = {
   args: { name: 'build-server-eu-west-2', at: 'althar@build-server-eu-west-2.internal', toured: true },

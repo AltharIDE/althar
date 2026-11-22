@@ -21,7 +21,7 @@ import { brandOf } from '../src/renderer/shared/agents'
 import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
-import { card, changed, fakeClient, fakeHost, home, load, project } from './fixtures'
+import { card, changed, fakeClient, fakeHost, home, load, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, yours: 0 }
@@ -111,6 +111,7 @@ const windowAt = (
   projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera],
   host: Host = fakeHost(),
   homeFor: (projects: ReadonlyArray<ProjectSummary>) => HomeSnapshot = homeOf,
+  more: Parameters<typeof fakeClient>[0] = {},
 ) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
@@ -119,6 +120,7 @@ const windowAt = (
   const { client, emit } = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects })),
     getHome: vi.fn(async () => homeFor(projects)),
+    ...more,
   })
   making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
@@ -286,6 +288,26 @@ describe('the window’s tabs', () => {
     // Another project hasn't been on one.
     go('/projects/p2')
     await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
+  })
+
+  it('on another computer’s home with no projects, ⌘N goes from its welcome into New project, which has its tab', async () => {
+    const { client } = windowAt('/', [], fakeHost(), homeOf, { connection: remoteConnection() })
+    // No projects there: the window is all welcome, with no tabs.
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull())
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    await waitFor(() => expect(where()).toBe('/new'))
+    expect(draftsOf(client).get()).not.toBeNull()
+    expect(names()).toEqual(['Home', 'New project'])
+  })
+
+  it('open New project where another window’s Manage homes asks for it', async () => {
+    let asked: () => void = () => {}
+    const homes = { onProject: () => () => {}, onNewProject: (listener: () => void) => ((asked = listener), () => {}) }
+    const { client } = windowAt('/projects/p1', [project], fakeHost({ homes: homes as unknown as Host['homes'] }))
+    await waitFor(() => expect(names()).toEqual(['Home', 'meridian, work running']))
+    act(() => asked())
+    await waitFor(() => expect(where()).toBe('/new'))
+    expect(draftsOf(client).get()).not.toBeNull()
   })
 
   it('start a new project in a tab of its own, named as it is typed, and closed with nothing made', async () => {

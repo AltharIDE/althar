@@ -14,6 +14,7 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  SOCKET_CALLS,
   SocketAllowed,
   type MessageSender,
   type ClientIdentity,
@@ -233,14 +234,6 @@ export const text = {
     'The person wants to be asked first from now on: each issue, and each change to one, as a card for them to file or apply.',
 }
 
-const realpathOf = (path: string) => {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
-  }
-}
-
 /** Whether something is at a path, a link to nothing included. */
 const isThere = (path: string) => {
   try {
@@ -360,14 +353,7 @@ export const handlers = apiLayer(
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
     /** A folder the person chose, by its grant, or a path inside it, as the runtime read one there: never a path elsewhere. */
-    const within = (grant: string, path?: string) =>
-      Effect.gen(function* () {
-        const chosen = realpathOf(yield* folders.path(grant))
-        if (path === undefined) return chosen
-        const inside = realpathOf(path)
-        if (inside !== chosen && !inside.startsWith(`${chosen}${sep}`)) return yield* new NotFound({ kind: 'folder', id: path })
-        return inside
-      })
+    const within = (grant: string, path?: string) => folders.inside(grant, path)
     /** A connection's code host, signed in through it; refused where it is a tracker's, or gone. */
     const codeHostOf = (connectionId: string) =>
       Effect.flatMap(connections.adapters(connectionId), ({ host }) =>
@@ -424,7 +410,7 @@ export const handlers = apiLayer(
     const config = yield* RuntimeConfig
     // The person's home on this computer, where they keep code: what a window on another computer finds folders in.
     const personHome = config.elsewhere?.home ?? homedir()
-    const onHome = homeFolders((path) => folders.allow(path), personHome)
+    const onHome = homeFolders((path, kind) => folders.allow(path, kind), personHome)
     // What About › Storage measures: kept for the session, and stopped when the window gives up.
     const sizes =
       config.storage === undefined
@@ -970,6 +956,7 @@ export const handlers = apiLayer(
               apiVersion: API_VERSION,
               appVersion: config.appVersion,
               position: { homeId: instance.homeId, cursor: last?.cursor ?? 0, checkpoint: last?.checkpoint ?? null },
+              ...(identity.role === 'socket' ? { calls: [...SOCKET_CALLS] } : {}),
             }),
           ),
         ),
@@ -1055,12 +1042,12 @@ export const handlers = apiLayer(
         ),
       FindHomeFolders: () => api(onHome),
       GetMachine: () => api(machineFacts(personHome)),
-      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.place(grant), (parent) => placeRepository(parent, name))),
       MakeRepository: ({ grant, name }) =>
         api(
           Effect.gen(function* () {
-            const made = yield* makeRepository(yield* folders.path(grant), name)
-            return { grant: yield* folders.allow(made.path), path: made.path }
+            const made = yield* makeRepository(yield* folders.place(grant), name)
+            return { grant: yield* folders.allow(made.path, 'repository'), path: made.path }
           }),
         ),
       PrepareFolder: ({ commandId, grant, path }) =>
@@ -1078,10 +1065,10 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const parent = yield* folders.path(grant)
+              const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
               const path = yield* cloneRepository({ parent, ...source })
-              return { grant: yield* folders.allow(path), path }
+              return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
         ),
@@ -1133,15 +1120,7 @@ export const handlers = apiLayer(
             const roots =
               repositories === undefined
                 ? undefined
-                : yield* Effect.forEach(repositories, (repository) =>
-                    Effect.gen(function* () {
-                      const within = realpathOf(yield* folders.path(repository.grant))
-                      const root = realpathOf(repository.path)
-                      if (root !== within && !root.startsWith(`${within}${sep}`))
-                        return yield* new NotFound({ kind: 'folder', id: repository.path })
-                      return root
-                    }),
-                  )
+                : yield* Effect.forEach(repositories, (repository) => within(repository.grant, repository.path))
             const opened = yield* projects.open({
               envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,

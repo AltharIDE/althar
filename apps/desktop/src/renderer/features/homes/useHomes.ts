@@ -42,6 +42,9 @@ const useFollowed = <A>(read: (() => Promise<A>) | undefined, follow: ((listener
 
 export const useHomeState = (homes: HomesHost | undefined): HomeState | null => useFollowed(homes?.state, homes?.onState)
 
+/** How a home installed as the desktop sets one up updates itself, run there (apps/host/README.md, Managed releases and updates). */
+export const UPDATE_COMMAND = 'sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait'
+
 /**
  * The home the window is on, as its words name it: another computer's by its
  * name (runner-1), this one's as this computer is named (this Mac).

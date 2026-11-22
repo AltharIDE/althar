@@ -126,6 +126,8 @@ export interface HomesHost {
   readonly save: (checkId: string, name: string) => Promise<void>
   /** Its window, opened or brought forward; on one of its projects, where one is given. */
   readonly open: (id: string, projectId?: string) => Promise<void>
+  /** Its window, opened or brought forward, on New project. */
+  readonly openNew: (id: string) => Promise<void>
   readonly rename: (id: string, name: string) => Promise<void>
   /** A saved home's connection, from a check that found the same home there. */
   readonly change: (id: string, checkId: string) => Promise<void>
@@ -141,6 +143,8 @@ export interface HomesHost {
   readonly onOpen: (listener: () => void) => () => void
   /** A project to show, asked from another window's Manage homes: held until the window listens. */
   readonly onProject: (listener: (projectId: string) => void) => () => void
+  /** New project, asked from another window's Manage homes: held until the window listens. */
+  readonly onNewProject: (listener: () => void) => () => void
 }
 
 export const isHomeState = (value: unknown): value is HomeState => {

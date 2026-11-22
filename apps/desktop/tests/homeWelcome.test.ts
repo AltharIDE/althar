@@ -51,6 +51,12 @@ describe('what work on a home needs', () => {
       expect.objectContaining({ id: 'claude-code', state: 'unchecked', why: 'It didn’t answer.' }),
     ])
   })
+
+  it('never ticks an agent whose sign-in couldn’t be read: it’s unchecked, not ready', () => {
+    expect(needsOf(status([{ ...claude, problem: null, signIn: 'unknown' }]), null, null)).toEqual([
+      expect.objectContaining({ id: 'claude-code', state: 'unchecked', why: 'Sign-in not checked' }),
+    ])
+  })
 })
 
 describe('a repository’s address pasted on the welcome', () => {

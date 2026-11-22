@@ -17,10 +17,11 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, remoteConnection, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
 import { draftsOf } from '../src/renderer/features/newProject/draft'
+import { UPDATE_COMMAND } from '../src/renderer/features/homes/useHomes'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -958,17 +959,7 @@ describe('the start', () => {
 })
 
 it('welcomes an empty remote home with what it found there, and goes into New project the way chosen', async () => {
-  const homeId = `home_${'1'.repeat(32)}`
-  const { client } = fakeClient({
-    connection: {
-      identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
-      hostDeviceId: `dev_${'3'.repeat(32)}`,
-      apiVersion: 1,
-      appVersion: 'fixture',
-      position: { homeId, cursor: 0, checkpoint: null },
-    },
-    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-  })
+  const { client } = fakeClient({ connection: remoteConnection(), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
   const host = fakeHost()
   const onNew = vi.fn()
   withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
@@ -982,4 +973,36 @@ it('welcomes an empty remote home with what it found there, and goes into New pr
   await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
   expect(onNew).toHaveBeenCalledOnce()
   expect(draftsOf(client).get()?.way).toBe('new')
+})
+
+it('asks a home from before windows made projects there to update, with its command, in place of the ways in', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const host = fakeHost()
+  const copied = vi.fn(async () => {})
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  // No tour: the home can't say what it is.
+  expect(await screen.findByRole('heading', { name: 'Welcome to this home' })).not.toBeNull()
+  expect(screen.getByText(/this home runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
+  expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
+  expect(copied).toHaveBeenCalledWith(UPDATE_COMMAND)
+  expect(client.findHomeFolders).not.toHaveBeenCalled()
+  expect(client.getMachine).not.toHaveBeenCalled()
+})
+
+it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({
+    connection: remoteConnection(),
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    findHomeFolders: vi.fn(async () => {
+      throw new Error('The home disconnected.')
+    }),
+  })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(fakeHost(), client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('Couldn’t look on this home just now', {}, { timeout: 5000 })).not.toBeNull()
+  expect(screen.getByRole('button', { name: 'A folder on this home' })).not.toBeNull()
 })

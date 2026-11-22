@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, parse, sep } from 'node:path'
 
@@ -159,15 +160,6 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
     }).pipe(Effect.onError(() => undo))
   })
 
-/** What is in a folder, or nothing where it can't be read. */
-const readdirSafe = (path: string) => {
-  try {
-    return readdirSync(path)
-  } catch {
-    return []
-  }
-}
-
 /** Whether `path` holds nothing: no folder, or an empty one. */
 const free = (path: string) => {
   if (!existsSync(path)) return true
@@ -195,8 +187,11 @@ export const whyCloneFailed = (stderr: string): { readonly reason: 'sso' | 'not_
  * Clones a repository into a folder of its name in `parent`, each folder
  * made where it isn't there: its path. An empty folder of that name is used
  * as it is; one with something in it is refused, as it may be someone's
- * work. What this made is taken away again where the clone fails, or is
- * stopped, so trying again finds the place free.
+ * work. git clones into a hidden folder of this clone's own beside it, moved
+ * into place once it's whole, and only where that is still free: two clones
+ * of one name at once never meet, and the one that finds the place taken
+ * takes away only its own. Where the clone fails, or is stopped, what it made
+ * goes, so trying again finds the place free.
  */
 export const cloneRepository = (input: {
   readonly parent: string
@@ -214,25 +209,46 @@ export const cloneRepository = (input: {
     if (!free(path)) return yield* new FolderRefused({ reason: 'taken', path })
     // The place itself is made where it isn't there yet, as a home's first place for projects is.
     yield* Effect.sync(() => mkdirSync(parent, { recursive: true }))
-    // git clones into an empty folder as well as making one; what it left where it failed goes, the empty folder staying.
-    const there = existsSync(path)
-    // What is in it is read as it is taken away, so what the clone had put there by then goes too.
-    const undo = there
-      ? Effect.suspend(() =>
-          Effect.forEach(readdirSafe(path), (entry) => cleanUp(join(path, entry), 'where a clone failed'), { discard: true }),
-        )
-      : cleanUp(path, 'where a clone failed')
-    yield* cloneInto(parent, input.folder, input.target).pipe(
-      Effect.mapError((failed) => {
-        const why = whyCloneFailed(failed.stderr)
-        return new CloneRefused({
-          ...why,
-          remote: input.remote,
-          host: input.host,
-          ...(why.reason === 'failed' ? { detail: failed.timedOut === true ? 'It took too long.' : failed.stderr } : {}),
-        })
-      }),
-      Effect.onError(() => undo),
+    // This clone's own, hidden as the finder passes it over, on the same disk so it moves into place whole.
+    const staging = `.${input.folder}.cloning-${randomBytes(6).toString('hex')}`
+    yield* Effect.acquireUseRelease(
+      Effect.succeed(join(parent, staging)),
+      () =>
+        Effect.gen(function* () {
+          yield* cloneInto(parent, staging, input.target).pipe(
+            Effect.mapError((failed) => {
+              const why = whyCloneFailed(failed.stderr)
+              return new CloneRefused({
+                ...why,
+                remote: input.remote,
+                host: input.host,
+                ...(why.reason === 'failed' ? { detail: failed.timedOut === true ? 'It took too long.' : failed.stderr } : {}),
+              })
+            }),
+          )
+          yield* Effect.try({
+            try: () => settleInto(join(parent, staging), path),
+            catch: () => new FolderRefused({ reason: 'taken', path }),
+          })
+        }),
+      // Gone once it's in place; what's left of it where it isn't goes.
+      (left) => (existsSync(left) ? cleanUp(left, 'where a clone failed') : Effect.void),
     )
     return real(path)
   })
+
+/**
+ * Moves a whole clone to `path`, where that is free: not there, or an empty
+ * folder, which goes (only an empty one can). Refused where something is in
+ * it by now, another clone of the same name say, which stays as it is.
+ */
+const settleInto = (from: string, path: string) => {
+  try {
+    // oxlint-disable-next-line althar/one-removal -- Only an empty folder may go: removing more would take what another clone just put there.
+    rmdirSync(path)
+  } catch (failure) {
+    if ((failure as NodeJS.ErrnoException).code !== 'ENOENT') throw failure
+  }
+  // Where a folder of the name was made since, the move is refused rather than putting this one in it.
+  renameSync(from, path)
+}

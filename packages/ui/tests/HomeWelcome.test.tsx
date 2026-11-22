@@ -150,6 +150,20 @@ describe('a home’s welcome, every time after', () => {
     expect(within(doors).queryByRole('button', { name: /A folder/ })).toBeNull()
   })
 
+  it('keeps the folder door where it couldn’t look, saying so rather than that there was nothing', () => {
+    welcome({ toured: true, found: 'failed' })
+    expect(screen.getByRole('button', { name: 'A folder on runner-1', description: 'Couldn’t look on runner-1 just now' })).not.toBeNull()
+  })
+
+  it('asks an older home to update, with its command to copy, in place of the ways in and the tour', () => {
+    const at = welcome({ toured: false, update: { command: 'sh launcher update --apply --wait' } })
+    expect(screen.getByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
+    expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
+    expect(screen.getByText(/runner-1 runs an older Althar/)).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
+    expect(at.onCopy).toHaveBeenCalledWith('sh launcher update --apply --wait')
+  })
+
   it('shows what the home has along its foot, with what one that isn’t ready takes', () => {
     const at = welcome({ toured: true })
     const strip = screen.getByRole('list', { name: 'On runner-1' })

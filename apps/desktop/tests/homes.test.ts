@@ -138,15 +138,15 @@ describe('managing saved homes', () => {
   const fixture = (inspect = async (_target: unknown) => status) => {
     let at = 1_000
     const profile = temporary()
-    const opened: Array<{ home: WindowHome; projectId?: string }> = []
+    const opened: Array<{ home: WindowHome; projectId?: string; fresh?: true }> = []
     const told: Array<{ owner: number; name: string }> = []
     let overviews = 0
     const glances = homeGlances({ profile, now: () => at, writeAfter: 0, wanted: () => controller.wanted() })
     const controller = homeController({
       store: homeStore(profile),
       inspect,
-      open: (home, projectId) => {
-        opened.push({ home, ...(projectId === undefined ? {} : { projectId }) })
+      open: (home, projectId, fresh) => {
+        opened.push({ home, ...(projectId === undefined ? {} : { projectId }), ...(fresh === true ? { fresh } : {}) })
       },
       changed: (owner, state) => {
         if (state.current.kind === 'ssh') told.push({ owner, name: state.current.home.name })
@@ -291,6 +291,14 @@ describe('managing saved homes', () => {
     await at.controller.open(1, 'local', 'althar')
     expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' }, projectId: 'althar' })
     await expect(at.controller.open(1, home.id, '../../etc')).rejects.toThrow('project')
+  })
+  it('opens a home on New project, and only where it was asked for in so many words', async () => {
+    const at = fixture()
+    const home = await at.saved()
+    await at.controller.open(1, home.id, undefined, true)
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'ssh', home }, fresh: true })
+    await at.controller.open(1, 'local', undefined, 'yes')
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' } })
   })
 })
 

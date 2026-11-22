@@ -104,8 +104,11 @@ export interface HomeWelcomeText {
   arrivalLine: (name: string) => string
   doors: string
   clone: { title: string; line: string }
-  folder: { title: (name: string) => string; line: (found: number | null, name: string) => string }
+  folder: { title: (name: string) => string; line: (found: number | 'failed' | null, name: string) => string }
   fresh: { title: string; line: (name: string) => string }
+  older: (name: string) => string
+  updateLabel: (name: string) => string
+  copyUpdate: string
 }
 
 export const homeWelcomeText: HomeWelcomeText = {
@@ -143,9 +146,19 @@ export const homeWelcomeText: HomeWelcomeText = {
   folder: {
     title: (name) => `A folder on ${name}`,
     line: (found, name) =>
-      found === null ? 'Looking…' : found === 1 ? `1 repository found on ${name}` : `${found} repositories found on ${name}`,
+      found === null
+        ? 'Looking…'
+        : found === 'failed'
+          ? `Couldn’t look on ${name} just now`
+          : found === 1
+            ? `1 repository found on ${name}`
+            : `${found} repositories found on ${name}`,
   },
   fresh: { title: 'Start empty', line: (name) => `A new repository, made on ${name}` },
+  older: (name) =>
+    `${name} runs an older Althar, which can’t make projects from this window. Update it there, then open this window again.`,
+  updateLabel: (name) => `Updating ${name}`,
+  copyUpdate: 'Copy the update command',
 }
 
 export interface HomeWelcomeProps {
@@ -161,8 +174,13 @@ export interface HomeWelcomeProps {
   needs: readonly WelcomeNeed[] | null
   /** The newest of your repositories on the code hosts it's connected to, drawn on the clone door; none where it has none. */
   repositories: readonly { readonly id: string; readonly ink: ProjectInk }[]
-  /** Where the repositories found on it are (~/code/site), drawn on the folder door; null while they're looked for. */
-  found: readonly string[] | null
+  /** Where the repositories found on it are (~/code/site), drawn on the folder door; null while they're looked for, `failed` where they couldn't be. */
+  found: readonly string[] | 'failed' | null
+  /**
+   * The home is older than making projects from a window: its command for
+   * updating, run there, in place of the ways in, and no tour.
+   */
+  update?: { readonly command: string }
   /** A way in pressed, from the door pressed. */
   onDoor: (door: HomeDoor, from: HTMLElement) => void
   /** Something pasted anywhere but a field: true where it was a repository's address, taken in as a clone. */
@@ -209,6 +227,7 @@ export function HomeWelcome({
   needs,
   repositories,
   found,
+  update,
   onDoor,
   onPaste,
   toured,
@@ -219,8 +238,9 @@ export function HomeWelcome({
   text,
 }: HomeWelcomeProps) {
   const t = { ...homeWelcomeText, ...text }
-  // Whether this visit tours is settled as it opens: seen once, every visit after starts on the arrival.
-  const [touring] = useState(!toured)
+  // Whether this visit tours is settled as it opens: seen once, every visit after starts on the arrival. An older home,
+  // which can't say what it is, starts there too.
+  const [touring] = useState(!toured && update === undefined)
   const [page, setPage] = useState(touring ? 0 : LAST)
   const open = page === LAST
   const stage = useRef<HTMLElement>(null)
@@ -408,6 +428,7 @@ export function HomeWelcome({
       needs={needs}
       repositories={repositories}
       found={found}
+      update={update}
       onDoor={onDoor}
       copied={copied}
       onCopy={copy}
@@ -688,6 +709,7 @@ function Arrival({
   needs,
   repositories,
   found,
+  update,
   onDoor,
   copied,
   onCopy,
@@ -700,7 +722,8 @@ function Arrival({
   titleRef: RefObject<HTMLHeadingElement | null>
   needs: readonly WelcomeNeed[] | null
   repositories: HomeWelcomeProps['repositories']
-  found: readonly string[] | null
+  found: HomeWelcomeProps['found']
+  update: HomeWelcomeProps['update']
   onDoor: HomeWelcomeProps['onDoor']
   copied: string | null
   onCopy: (id: string, command: string) => void
@@ -729,10 +752,24 @@ function Arrival({
           <Letters of={name} />
         </h1>
         <p className={s.arrivalLine} data-morph="line" data-morph-at="center">
-          {t.arrivalLine(name)}
+          {update === undefined ? t.arrivalLine(name) : t.older(name)}
         </p>
       </div>
-      <Doors name={name} repositories={repositories} found={found} onDoor={onDoor} t={t} />
+      {update === undefined ? (
+        <Doors name={name} repositories={repositories} found={found} onDoor={onDoor} t={t} />
+      ) : (
+        <section className={s.update} aria-label={t.updateLabel(name)}>
+          <code className={s.updateCommand}>{update.command}</code>
+          <Button
+            size="small"
+            icon={copied === 'update' ? 'check' : 'copy'}
+            onClick={() => onCopy('update', update.command)}
+            aria-label={t.copyUpdate}
+          >
+            {copied === 'update' ? t.copied : t.copy}
+          </Button>
+        </section>
+      )}
       {needs !== null && needs.length > 0 && (
         <ul className={s.strip} aria-label={t.readyLabel(name)}>
           {needs.map((need) => (
@@ -772,7 +809,7 @@ function Doors({
 }: {
   name: string
   repositories: HomeWelcomeProps['repositories']
-  found: readonly string[] | null
+  found: HomeWelcomeProps['found']
   onDoor: HomeWelcomeProps['onDoor']
   t: HomeWelcomeText
 }) {
@@ -796,16 +833,16 @@ function Doors({
           </span>
         ),
     },
-    ...(found !== null && found.length === 0
+    ...(Array.isArray(found) && found.length === 0
       ? []
       : [
           {
             key: 'folder' as const,
             title: t.folder.title(name),
-            line: t.folder.line(found?.length ?? null, name),
+            line: t.folder.line(found === null || found === 'failed' ? found : found.length, name),
             art: (
               <span className={s.paths}>
-                {(found ?? []).slice(0, 3).map((where, i) => (
+                {(Array.isArray(found) ? found : []).slice(0, 3).map((where, i) => (
                   <span key={where} className={s.path} style={cssVars({ '--i': i })}>
                     <Icon name="folder" size={12} />
                     {where}

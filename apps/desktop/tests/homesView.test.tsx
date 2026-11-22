@@ -1,4 +1,5 @@
 import { StrictMode } from 'react'
+import { SOCKET_CALLS } from '@althar/contracts'
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
@@ -55,6 +56,7 @@ const fixture = () => {
     connect: vi.fn(async () => {}),
     save: vi.fn(async () => {}),
     open: vi.fn(async () => {}),
+    openNew: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     change: vi.fn(async () => {}),
     forget: vi.fn(async () => {}),
@@ -76,6 +78,7 @@ const fixture = () => {
     },
     onOpen: () => () => {},
     onProject: () => () => {},
+    onNewProject: () => () => {},
   } satisfies HomesHost
   return {
     homes,
@@ -318,6 +321,19 @@ it('shows each home by its projects, live while its window is connected, and ope
   await userEvent.click(within(dialog).getByRole('button', { name: /ledger/ }))
   expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id, 'prj_ledger')
   expect(close).toHaveBeenCalledOnce()
+})
+
+it('offers New project after each home’s projects, opening that home’s window on it', async () => {
+  const at = fixture()
+  const { close } = manage(at)
+  const dialog = await screen.findByRole('dialog', { name: 'Homes' })
+  const [here, there] = within(dialog).getAllByRole('button', { name: 'New project' })
+  await userEvent.click(there!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenCalledExactlyOnceWith(home.id))
+  expect(close).toHaveBeenCalledOnce()
+  await userEvent.click(here!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenLastCalledWith('local'))
+  expect(at.homes.open).not.toHaveBeenCalled()
 })
 
 it('manages paired homes by their origin and offers a new pairing instead of SSH edits', async () => {
@@ -981,6 +997,7 @@ it.each([remote, { current: { kind: 'https' as const, home: paired }, connection
         apiVersion: 1,
         appVersion: 'test',
         position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+        calls: SOCKET_CALLS,
       },
       listProjects: vi.fn(() => listed.promise),
     })

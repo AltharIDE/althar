@@ -1,8 +1,9 @@
 import { useState } from 'react'
 
-import { keys, LinkButton, modKey, OtherTools, RepositoryPick } from '@althar/ui'
-import { NewProject } from '@althar/ui/screens'
+import { Button, keys, LinkButton, modKey, OtherTools, Problem, RepositoryPick } from '@althar/ui'
+import { homeWelcomeText, NewProject } from '@althar/ui/screens'
 
+import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
 import { device, platform } from '../../shared/device'
 import { codeHostOf } from '../../shared/remotes'
@@ -10,7 +11,7 @@ import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectD
 import type { ConnectionsModel } from '../connections/useConnections'
 import { words as elsewhereWords } from '../elsewhere/tiles'
 import { useElsewhere } from '../elsewhere/useElsewhere'
-import { useHomeName } from '../homes/useHomes'
+import { UPDATE_COMMAND, useHomeName } from '../homes/useHomes'
 import { factsOf, useFound } from '../../shared/found'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
@@ -42,6 +43,8 @@ export const text = {
     find: `Find a repository on ${home}`,
     none: `None found where code is usually kept on ${home}.`,
   }),
+  lookFailed: (home: string) => `Couldn’t look on ${home} just now.`,
+  lookAgain: 'Look again',
   open: (name: string) => `Open ${name}`,
   signIn: 'Sign in',
 }
@@ -97,7 +100,10 @@ export function NewProjectView({
 }) {
   const { host, client } = useServices()
   const home = useHomeName()
-  const found = useFound()
+  // A home from before windows made projects there is asked to update: nothing on this page would work on it.
+  const older = home.remote && !canCall(client, 'FindHomeFolders')
+  const found = useFound(!older)
+  const [copied, setCopied] = useState(false)
   // When each found was last worked on is said from when the page opened.
   const [now] = useState(() => new Date())
   const [dropping, setDropping] = useState(false)
@@ -107,6 +113,31 @@ export function NewProjectView({
   // Not on another computer's home, where other tools' work isn't read.
   const grants = setup?.way === 'folder' && !home.remote ? [...new Set((draft?.folders ?? []).map((folder) => folder.grant))] : []
   const elsewhere = useElsewhere(client, grants.length === 0 ? null : { grants })
+  if (older)
+    return (
+      <div className={s.window}>
+        <main className={s.older}>
+          <Problem
+            banner
+            action={
+              <Button
+                size="small"
+                icon={copied ? 'check' : 'copy'}
+                onClick={() => {
+                  setCopied(true)
+                  void navigator.clipboard.writeText(UPDATE_COMMAND).catch(() => setCopied(false))
+                }}
+              >
+                {copied ? homeWelcomeText.copied : homeWelcomeText.copyUpdate}
+              </Button>
+            }
+          >
+            {homeWelcomeText.older(home.name)}
+          </Problem>
+          <code className={s.olderCommand}>{UPDATE_COMMAND}</code>
+        </main>
+      </div>
+    )
   if (draft === null || setup === null) return null
   const go = elsewhere.go
   // On another computer's home there's no picker and nothing dropped is there: its folders are those it found.
@@ -128,9 +159,18 @@ export function NewProjectView({
         if (kept === undefined) void model.add(id)
         else model.leaveOut(kept.path)
       }}
-      text={text.onHome(home.name)}
+      text={{ ...text.onHome(home.name), ...(found.isError ? { none: text.lookFailed(home.name) } : {}) }}
     />
   ) : undefined
+  const onHomeWay =
+    onHome !== undefined && found.isError ? (
+      <>
+        {onHome}
+        <LinkButton onClick={() => void found.refetch()}>{text.lookAgain}</LinkButton>
+      </>
+    ) : (
+      onHome
+    )
   return (
     <div
       className={s.window}
@@ -177,7 +217,7 @@ export function NewProjectView({
               onLeaveOut={model.leaveOut}
               onReplace={(path) => void model.replace(path)}
               onStartFresh={() => void model.startFresh()}
-              {...(home.remote ? { homeName: home.name, folderWay: onHome } : { onChooseCloneInto: () => void model.chooseCloneInto() })}
+              {...(home.remote ? { homeName: home.name, folderWay: onHomeWay } : { onChooseCloneInto: () => void model.chooseCloneInto() })}
               onOpenProject={onOpen}
               dropping={dropping && !home.remote}
             />

@@ -196,8 +196,10 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
   // A project Manage homes asked for, in this window or another's: its tab, and the window on it.
   const showProject = useEffectEvent((projectId: string) => tabs.open(projectId))
-  const { host: frameHost } = useServices()
+  const showNew = useEffectEvent(() => tabs.newProject())
+  const { host: frameHost, client } = useServices()
   useEffect(() => frameHost.homes?.onProject(showProject), [frameHost.homes])
+  useEffect(() => frameHost.homes?.onNewProject(showNew), [frameHost.homes])
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // Where dictation said from anywhere goes, chosen from its pill.
@@ -259,8 +261,15 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         setUsage((open) => !open)
         return
       }
-      // Before there is a project, the first screen has ⌘N for a folder of its own.
-      if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+      // Before there is a project, this computer's first screen has ⌘N for a folder of its own; another computer's home's
+      // welcome goes into New project, as its ways in do.
+      if (
+        commandDown(event) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'n' &&
+        (!none || client.connection !== undefined)
+      ) {
         event.preventDefault()
         newProject()
         return
@@ -287,7 +296,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home, client])
   return (
     <CarriedBack.Provider value={back}>
       <CarriedPlace.Provider value={openPlacing}>

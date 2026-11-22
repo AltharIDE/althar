@@ -6552,6 +6552,11 @@ export const AcpApi = RpcGroup.make(
 
 export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
 export type Api = typeof Api
+
+/** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
+export const SOCKET_CALLS: ReadonlyArray<string> = [...Api.requests.values()]
+  .filter((rpc) => Context.get(rpc.annotations, SocketAllowed))
+  .map((rpc) => rpc._tag)
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
 

@@ -1042,7 +1042,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
       ? rawApi
       : new Proxy(rawApi, {
           get(target, tag, receiver): unknown {
-            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+            // What the home says this connection may call, where it says; else what this app's own contracts allow a socket.
+            if (typeof tag === 'string' && tag in target && !(connection?.calls?.includes(tag) ?? socketCanCall(tag)))
               return () =>
                 Effect.fail(
                   new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
@@ -1489,3 +1490,12 @@ export const receivePort = (
     target.addEventListener('message', onMessage)
     signal?.addEventListener('abort', aborted, { once: true })
   })
+
+/**
+ * Whether this window may make a call: any, on this computer's own runtime;
+ * on another computer's home, what the home says its connection may. A home
+ * from before it said is taken to allow none of what came since, such as
+ * making projects from a window: its window offers no more than it can do.
+ */
+export const canCall = (client: Pick<Client, 'connection'>, tag: string) =>
+  client.connection === undefined || (client.connection.calls?.includes(tag) ?? false)

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { type ConnectionList, inkFor, type Machine, type Status } from '@althar/contracts'
 import type { HomeDoor, HomeWelcomeProps, WelcomeNeed } from '@althar/ui/screens'
 
+import { canCall } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
@@ -14,7 +15,7 @@ import { productBrand } from '../../shared/products'
 import { remoteOf } from '../../shared/remotes'
 import { hostsCode, serviceOfProduct } from '../connections/ways'
 import { type Draft, draftsOf } from '../newProject/draft'
-import { useHomeState } from '../homes/useHomes'
+import { UPDATE_COMMAND, useHomeState } from '../homes/useHomes'
 
 /*
  * A home with no projects, on another computer: what its welcome reads from
@@ -65,6 +66,7 @@ export const needsOf = (status: Status | null, machine: Machine | null, list: Co
     if (agent.problem !== null) return { ...base, state: 'unchecked', why: agent.problem }
     if (!agent.installed) return { ...base, state: 'missing', ...(agent.guide === null ? {} : { guide: agent.guide }) }
     if (agent.signIn === 'signed_out') return { ...base, state: 'signedOut', command: agent.login }
+    if (agent.signIn === 'unknown') return { ...base, state: 'unchecked', why: 'Sign-in not checked' }
     return { ...base, state: 'ready', ...(agent.version === null ? {} : { note: agent.version }) }
   })
   if (machine !== null)
@@ -93,10 +95,14 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
   const { client, host } = useServices()
   const read = reads(client)
   const here = useHomeState(host.homes)
+  // A home from before windows made projects there says neither what it is nor what it finds: it's asked to update.
+  const makes = canCall(client, 'FindHomeFolders')
   const status = useQuery(read.status()).data ?? null
-  const machine = useQuery({ queryKey: ['machine'], queryFn: () => client.getMachine(), staleTime: 60_000 }).data ?? null
-  const list = useQuery(read.connections()).data ?? null
-  const found = useFound()
+  const machine =
+    useQuery({ queryKey: ['machine'], queryFn: () => client.getMachine(), staleTime: 60_000, enabled: canCall(client, 'GetMachine') })
+      .data ?? null
+  const list = useQuery({ ...read.connections(), enabled: canCall(client, 'ListConnections') }).data ?? null
+  const found = useFound(makes)
   const { repositories } = useHostRepositories(list, '')
   const [toured] = useState(touredHere)
   const home = here !== null && here.current.kind !== 'local' ? here.current.home : null
@@ -118,7 +124,8 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
     ...(machine === null ? {} : { git: machine.git }),
     needs: needsOf(status, machine, list),
     repositories: (repositories ?? []).slice(0, 5).map((one) => ({ id: one.id, ink: kitInk(inkFor(one.id, [])) })),
-    found: found.isError ? [] : (found.data?.repositories.map((one) => one.where) ?? null),
+    found: found.isError ? 'failed' : (found.data?.repositories.map((one) => one.where) ?? null),
+    ...(makes ? {} : { update: { command: UPDATE_COMMAND } }),
     onDoor: (door) => enter((now) => ({ ...now, way: way[door] })),
     onPaste: (text) => {
       const ref = pastedRepository(text)
