@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { Ledger } from '@althar/persistence-sqlite'
 import { Api, CANVASES_FOLDER, clientProtocol, emitterPort, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Deferred, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
@@ -14,10 +16,13 @@ import { until } from '@althar/testing/effect'
 import { connection, services } from '../src/Api'
 import { asideFor, canvasesIn, holdsOnly, isCopyPath, manifestOf, readCopy } from '../src/canvasFiles'
 import { entryAmong, titleFromName } from '../src/Canvases'
+import { Connections } from '../src/Connections'
 import { Folders } from '../src/Folders'
+import { git, gitExactly, gitOutcome, gitWithInput } from '../src/git'
+import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeAgents, fakeConnectors, listTools, repository } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, listTools, repository } from './support'
 
 /*
  * A project's canvases (ADR-104): drawn by its agents, each a version for
@@ -31,36 +36,38 @@ import { callTool, fakeAgents, fakeConnectors, listTools, repository } from './s
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
-const connected = Effect.gen(function* () {
-  const channel = new MessageChannel()
-  yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-  const context = yield* Layer.build(
-    services({
-      database: ':memory:',
-      worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
-      appVersion: '0.0.0-test',
-      deviceName: 'Test Mac',
-      agents: fakeAgents({}, [], {}),
-      secrets: Secrets.memory(),
-      connectors: fakeConnectors({}),
-      accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
-      artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
-    }),
-  )
-  yield* Effect.forkScoped(
-    Layer.launch(
-      connection(
-        emitterPort(channel.port1, (data) => data),
-        { kind: 'window' },
-      ),
-    ).pipe(Effect.provideContext(context)),
-  )
-  const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
-  const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-  const grant = (path: string) => Context.get(context, Folders).allow(path)
-  return { client, grant, context, sql: Context.get(context, SqlClient.SqlClient) }
-})
+const connectedWith = (github?: FakeService) =>
+  Effect.gen(function* () {
+    const channel = new MessageChannel()
+    yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+    const context = yield* Layer.build(
+      services({
+        database: ':memory:',
+        worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+        appVersion: '0.0.0-test',
+        deviceName: 'Test Mac',
+        agents: fakeAgents({}, [], {}),
+        secrets: Secrets.memory(),
+        connectors: fakeConnectors(github === undefined ? {} : { github }),
+        accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+        artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
+      }),
+    )
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
+    const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+    const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+    const grant = (path: string) => Context.get(context, Folders).allow(path)
+    return { client, grant, context, sql: Context.get(context, SqlClient.SqlClient) }
+  })
 
+const connected = connectedWith()
 type Setup = Effect.Success<typeof connected>
 
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
@@ -70,10 +77,10 @@ const ask = (setup: Setup, access: ToolAccess, name: string, args?: Record<strin
   callTool(access, name, args).pipe(Effect.provideContext(setup.context))
 
 /** A project with two tasks whose leads have worktrees on this computer, each lead's access, and the coordinator's. */
-const project = (setup: Setup) =>
+const project = (setup: Setup, checkout = repository()) =>
   Effect.gen(function* () {
     const { client, grant, sql } = setup
-    const opened = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+    const opened = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(checkout) })
     const coordinator = yield* client.GetCoordinator({ projectId: opened.id })
     const lead = (title: string) =>
       Effect.gen(function* () {
@@ -464,6 +471,246 @@ describe('a project’s canvases', () => {
         draw(first.folder, 'chart', { 'chart.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="2"/>' })
         assert.include(yield* ask(setup, first.access, 'canvas_publish', { name: 'chart' }), 'Published chart v2 on v1')
         assert.lengthOf(yield* setup.client.ListCanvases({ projectId: opened.id }), 1)
+      }),
+    ),
+  )
+})
+
+const atOrigin = Effect.gen(function* () {
+  const checkout = repository()
+  const bare = mkdtempSync(join(tmpdir(), 'althar-artifact-origin-'))
+  mkdirSync(join(checkout, 'designs', 'existing'), { recursive: true })
+  writeFileSync(join(checkout, 'designs', 'existing', 'intro.md'), '# Existing\n')
+  writeFileSync(join(checkout, '.gitattributes'), '*.md text eol=lf\n')
+  yield* git(checkout, 'add', '.')
+  yield* git(checkout, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-m', 'Designs')
+  yield* git(checkout, 'clone', '--bare', '.', bare)
+  yield* git(checkout, 'remote', 'add', 'origin', bare)
+  yield* git(checkout, 'fetch', 'origin')
+  return { checkout, bare }
+})
+
+const publishedAt = (setup: Setup, checkout: string) =>
+  Effect.gen(function* () {
+    const { first, project: opened } = yield* project(setup, checkout)
+    const projectId = opened.id
+    const [binding] = yield* setup.sql<{ id: string }>`SELECT id FROM repository_bindings WHERE project_id = ${projectId}`
+    const repositoryId = binding?.id ?? assert.fail('No repository')
+    draw(first.folder, 'sign-in', { 'index.md': '# Sign in\r\n', 'css/site.css': 'h1{}' })
+    const publish = ask(setup, first.access, 'canvas_publish', { name: 'sign-in' })
+    assert.include(yield* publish, 'Published sign-in v1')
+    const [canvas] = yield* setup.client.ListCanvases({ projectId })
+    const canvasId = canvas?.id ?? assert.fail('No canvas')
+    const detail = () => setup.client.GetCanvas({ canvasId })
+    const save = (path: string, how: 'pr' | 'main' = 'main', follow = true, makeHome?: boolean) =>
+      setup.client.SaveCanvas({ commandId: commandId(), canvasId, repositoryId, path, how, follow, makeHome })
+    const settled = () => until(detail(), ({ summary }) => summary.saved?.state === 'saved' || summary.saved?.state === 'failed')
+    return { canvasId, repositoryId, projectId, folder: first.folder, detail, publish, save, settled }
+  })
+
+describe('saving a canvas to its repository', () => {
+  it.live('guesses from the remote tree, sets the first home, mirrors files, follows, moves, and stops', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { checkout, bare } = yield* atOrigin
+        const setup = yield* connected
+        const { projectId, repositoryId, canvasId, folder, save, settled, publish, detail } = yield* publishedAt(setup, checkout)
+        const { client } = setup
+        const place = client.GetArtifactsPlace({ projectId })
+        const folders = client.ListRepositoryFolders({ projectId, repositoryId })
+        assert.deepStrictEqual(yield* folders, { folders: ['designs/', 'designs/existing/'], truncated: false })
+        const guessed = yield* place
+        assert.isNull(guessed.home)
+        assert.include(guessed.guess, { repositoryId, folder: 'designs/', how: 'pr', follow: true })
+        assert.include(guessed.guess?.why, 'keeps its designs')
+
+        yield* save('designs/sign-in/')
+        const first = (yield* settled()).summary.saved
+        assert.include(first, { state: 'saved', version: 1, pullRequest: null, how: 'main', problem: null })
+        assert.strictEqual(first?.commit, yield* git(bare, 'rev-parse', 'main'))
+        assert.strictEqual(yield* gitExactly(bare, 'show', 'main:designs/sign-in/index.md'), '# Sign in\r\n')
+        assert.strictEqual(yield* git(bare, 'show', '-s', '--format=%s', 'main'), 'Save Sign in v1 from Althar')
+        const firstHome = yield* place
+        assert.include(firstHome.home, { repositoryId, folder: 'designs/', how: 'main', follow: true })
+        assert.isNull(firstHome.guess)
+
+        rmSync(join(folder, CANVASES_FOLDER, 'sign-in', 'css'), { recursive: true })
+        draw(folder, 'sign-in', { 'index.md': '# Better sign in\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        yield* until(detail(), ({ summary }) => summary.saved?.version === 2 && summary.saved.state === 'saved')
+        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/index.md'), '# Better sign in')
+        assert.strictEqual(yield* git(bare, 'ls-tree', '-r', '--name-only', 'main', '--', 'designs/sign-in'), 'designs/sign-in/index.md')
+        assert.strictEqual(yield* git(bare, 'show', '-s', '--format=%s', 'main'), 'Update Sign in to v2')
+
+        yield* save('docs/design/sign-in/', 'main', true, true)
+        assert.include((yield* settled()).summary.saved, { state: 'saved', version: 2, path: 'docs/design/sign-in/' })
+        assert.strictEqual(yield* git(bare, 'show', '-s', '--format=%s', 'main'), 'Move Sign in to docs/design/sign-in/')
+        assert.strictEqual(yield* git(bare, 'ls-tree', '--name-only', 'main', '--', 'designs/sign-in'), '')
+        assert.strictEqual(yield* git(bare, 'show', 'main:docs/design/sign-in/index.md'), '# Better sign in')
+        assert.include((yield* folders).folders, 'docs/design/sign-in/')
+        assert.include((yield* place).home, { folder: 'docs/design/' })
+
+        const home = { repositoryId, folder: '', how: 'pr' as const, follow: false }
+        yield* client.SetArtifactsHome({ commandId: commandId(), projectId, home })
+        assert.include((yield* place).home, home)
+        yield* client.SetArtifactsHome({ commandId: commandId(), projectId, home: null })
+        assert.isNull((yield* place).home)
+
+        const before = yield* git(bare, 'rev-parse', 'main')
+        yield* client.StopSavingCanvas({ commandId: commandId(), canvasId })
+        draw(folder, 'sign-in', { 'index.md': '# A third version\n' })
+        assert.include(yield* publish, 'Published sign-in v3')
+        assert.isNull((yield* detail()).summary.saved)
+        assert.isNull((yield* client.ListCanvases({ projectId }))[0]?.saved)
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), before)
+        assert.lengthOf(
+          (yield* git(checkout, 'worktree', 'list')).split('\n').filter((line) => line.includes('.canvas-save-')),
+          0,
+        )
+      }),
+    ),
+  )
+
+  it.live('answers while git work is waiting and follows each version in one pull request', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        const wait = yield* Deferred.make<void>()
+        const github = makeFakeService({
+          pushUrl: () => bare,
+          waitsFor: (method) => (method === 'findChange' ? Deferred.await(wait) : Effect.void),
+        })
+        github.addRepository(['meridian', 'api'])
+        const setup = yield* connectedWith(github)
+        const instance = Context.get(setup.context, Instance)
+        const connections = Context.get(setup.context, Connections)
+        yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+        const { canvasId, projectId, folder, save, detail, publish } = yield* publishedAt(setup, working)
+        const branch = 'althar/artifacts/sign-in'
+        const ledger = Context.get(setup.context, Ledger)
+        const changes = () =>
+          ledger
+            .changesSince(0, 1000)
+            .pipe(Effect.map((feed) => feed.filter((change) => change.aggregateType === 'canvas' && change.aggregateId === canvasId)))
+        const before = (yield* changes()).length
+        yield* save('design/sign-in/', 'pr')
+        assert.include((yield* detail()).summary.saved, { state: 'saving', version: null, commit: null, pullRequest: null })
+        assert.include((yield* setup.client.ListCanvases({ projectId }))[0]?.saved, { state: 'saving' })
+        assert.lengthOf(yield* changes(), before + 1)
+        draw(folder, 'sign-in', { 'index.md': '# Version two\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        draw(folder, 'sign-in', { 'index.md': '# Version three\n' })
+        assert.include(yield* publish, 'Published sign-in v3')
+        yield* Deferred.succeed(wait, undefined)
+        const { summary } = yield* until(detail(), ({ summary }) => summary.saved?.version === 3 && summary.saved.state === 'saved')
+        assert.strictEqual(summary.saved?.commit, yield* git(bare, 'rev-parse', branch))
+        assert.strictEqual(yield* git(bare, 'show', `${branch}:design/sign-in/index.md`), '# Version three')
+        assert.strictEqual(
+          yield* git(bare, 'log', '--format=%s', `main..${branch}`),
+          'Update Sign in to v3\nUpdate Sign in to v2\nSave Sign in v1 from Althar',
+        )
+        assert.lengthOf(github.changes, 1)
+        const [pull] = github.changes
+        assert.include(pull, { title: 'Add Sign in', source: branch, target: 'main' })
+        assert.include(pull?.body, 'v1')
+        assert.deepStrictEqual(summary.saved?.pullRequest, { number: pull?.number, url: pull?.url })
+        assert.isAbove((yield* changes()).length, before + 1)
+      }),
+    ),
+  )
+
+  it.live('lists only the first 5000 folders and still finds a design folder past that limit', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { checkout, bare } = yield* atOrigin
+        const folder = yield* git(checkout, 'rev-parse', 'main:designs/existing')
+        const names = Array.from({ length: 5000 }, (_, i) => `a-${String(i).padStart(4, '0')}`)
+        const input = [...names, 'design'].map((name) => `040000 tree ${folder}\t${name}\n`).join('')
+        const tree = (yield* gitWithInput(checkout, input, 'mktree')).trim()
+        const parent = yield* git(checkout, 'rev-parse', 'main')
+        const commit = yield* git(
+          checkout,
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@althar.test',
+          'commit-tree',
+          tree,
+          '-p',
+          parent,
+          '-m',
+          'Many folders',
+        )
+        yield* git(checkout, 'push', bare, `${commit}:refs/heads/main`)
+        yield* git(checkout, 'fetch', 'origin')
+        const { client, grant } = yield* connected
+        const { id: projectId } = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(checkout) })
+        const { guess } = yield* client.GetArtifactsPlace({ projectId })
+        assert.include(guess, { folder: 'design/' })
+        assert.include(guess?.why, 'keeps its designs')
+        const repositoryId = guess?.repositoryId ?? assert.fail('No repository')
+        assert.deepStrictEqual(yield* client.ListRepositoryFolders({ projectId, repositoryId }), {
+          folders: names.map((name) => `${name}/`),
+          truncated: true,
+        })
+      }),
+    ),
+  )
+
+  it.live('retries opening a pull request without another commit, then follows from main once it closes', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        const github = makeFakeService({ pushUrl: () => bare })
+        github.addRepository(['meridian', 'api'])
+        github.failNext('openChange', 'unreachable')
+        const setup = yield* connectedWith(github)
+        const { personId } = Context.get(setup.context, Instance)
+        yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
+        const { folder, save, settled, detail, publish } = yield* publishedAt(setup, working)
+        const branch = 'althar/artifacts/sign-in'
+        yield* save('design/sign-in/', 'pr')
+        assert.include((yield* settled()).summary.saved, { state: 'failed', pullRequest: null })
+        const first = yield* git(bare, 'rev-parse', branch)
+
+        yield* save('design/sign-in/', 'pr')
+        const retried = (yield* settled()).summary.saved
+        assert.include(retried, { state: 'saved', commit: first, version: 1 })
+        assert.strictEqual(github.changes[0]?.title, 'Add Sign in')
+        github.close(retried?.pullRequest?.number ?? assert.fail('No pull request'))
+
+        draw(folder, 'sign-in', { 'index.md': '# Next version\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        const followed = yield* until(detail(), ({ summary }) => summary.saved?.state === 'saved' && summary.saved.version === 2)
+        assert.strictEqual(yield* git(bare, 'rev-parse', `${branch}^`), yield* git(bare, 'rev-parse', 'main'))
+        assert.lengthOf(github.changes, 2)
+        assert.strictEqual(followed.summary.saved?.pullRequest?.number, github.changes[1]?.number)
+      }),
+    ),
+  )
+
+  it.live('keeps a refused save for retry and removes its worktree on either outcome', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { checkout, bare } = yield* atOrigin
+        const setup = yield* connected
+        const { save, settled } = yield* publishedAt(setup, checkout)
+        const before = yield* git(bare, 'rev-parse', 'main')
+        yield* git(bare, 'config', 'receive.hideRefs', 'refs/heads/main')
+        yield* save('designs/sign-in/')
+        const failed = (yield* settled()).summary.saved
+        assert.include(failed, { state: 'failed', path: 'designs/sign-in/', commit: null, version: null })
+        assert.include(failed?.problem, 'refused the push')
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), before)
+        assert.notInclude(yield* git(checkout, 'worktree', 'list'), '.canvas-save-')
+
+        yield* git(bare, 'config', '--unset', 'receive.hideRefs')
+        yield* save('designs/sign-in/')
+        const retried = (yield* settled()).summary.saved
+        assert.include(retried, { state: 'saved', version: 1, problem: null })
+        assert.strictEqual(retried?.commit, yield* git(bare, 'rev-parse', 'main'))
+        assert.notInclude(yield* git(checkout, 'worktree', 'list'), '.canvas-save-')
+        assert.notEqual((yield* gitOutcome(checkout, 'show', 'HEAD:designs/sign-in/index.md')).code, 0)
       }),
     ),
   )

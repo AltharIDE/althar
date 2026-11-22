@@ -30,6 +30,7 @@ import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
@@ -223,7 +224,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
-        Canvases.layer,
+        Canvases.layer.pipe(Layer.provideMerge(CanvasSaves.layer)),
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
         Elsewhere.layer,
         MachineLoad.layer,

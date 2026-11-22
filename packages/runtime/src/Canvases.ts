@@ -25,7 +25,18 @@ import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
-import { asideFor, canvasesIn, type CopyFile, holdsOnly, isCopyPath, manifestOf, readCopy, writeCopy } from './canvasFiles'
+import {
+  asideFor,
+  canvasesIn,
+  type CopyFile,
+  holdsOnly,
+  isCopyPath,
+  manifestOf,
+  readCopy,
+  readVersionFiles,
+  writeCopy,
+} from './canvasFiles'
+import { CanvasSaves } from './CanvasSaves'
 import { RuntimeConfig } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
@@ -195,13 +206,14 @@ export class Canvases extends Context.Service<
   static readonly layer: Layer.Layer<
     Canvases,
     never,
-    SqlClient.SqlClient | Ledger | Artifacts | RuntimeConfig | Instance | ToolServer | Crypto.Crypto
+    SqlClient.SqlClient | Ledger | Artifacts | CanvasSaves | RuntimeConfig | Instance | ToolServer | Crypto.Crypto
   > = Layer.effect(
     Canvases,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const ledger = yield* Ledger
       const artifacts = yield* Artifacts
+      const saves = yield* CanvasSaves
       const instance = yield* Instance
       const toolServer = yield* ToolServer
       const context = yield* Effect.context<SqlClient.SqlClient | Ledger | RuntimeConfig | Instance | Crypto.Crypto>()
@@ -233,21 +245,7 @@ export class Canvases extends Context.Service<
           (rows) => rows[0] ?? null,
         )
 
-      /** A version's manifest and its files' bytes, from the artifact store. */
-      const filesOf = (version: VersionRow) =>
-        Effect.gen(function* () {
-          const raw = yield* artifacts.read(version.manifest)
-          if (raw === null) return null
-          const manifest = yield* decodeManifest(new TextDecoder().decode(raw)).pipe(Effect.orElseSucceed(() => null))
-          if (manifest === null) return null
-          const files: Array<CopyFile> = []
-          for (const file of manifest.files) {
-            const bytes = yield* artifacts.read(file.sha256)
-            if (bytes === null) return null
-            files.push({ path: file.path, bytes })
-          }
-          return { manifest, files }
-        })
+      const filesOf = (version: VersionRow) => readVersionFiles(artifacts, version.manifest)
 
       const copyOf = (folder: string, path: string) =>
         Effect.map(
@@ -358,6 +356,7 @@ export class Canvases extends Context.Service<
                   versions: counts?.versions ?? 0,
                   openComments: counts?.open ?? 0,
                   archived: canvas.archivedAt !== null,
+                  saved: yield* saves.saved(canvas.id),
                 }
           return summary
         })
@@ -636,6 +635,7 @@ export class Canvases extends Context.Service<
             return yield* refuse(
               `Not published: another agent published ${name} at the same moment. canvas_get it again and bring your change onto it.`,
             )
+          yield* saves.published(done.canvas.id)
           yield* postItem(access, done.canvas, done.version, 'published', open)
           return [
             `Published ${name} v${done.version.number}${done.version.number === 1 ? ', a new canvas of the project’s' : ` on v${base}`}: ${done.version.title}, ${plural(read.files.length, 'file', 'files')}, drawn from ${entry} (${kind}).`,

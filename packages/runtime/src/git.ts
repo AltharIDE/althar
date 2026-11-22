@@ -219,6 +219,18 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/** A git command with text on stdin, for lists too large to pass in its arguments. */
+export const gitWithInput = (cwd: string, input: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+  run(60_000, cwd, args, {}, false, input)
+
+/** Who git commits as: the person, or Althar where this computer names no one. */
+export const committerIn = (cwd: string) =>
+  Effect.map(gitOutcome(cwd, 'config', 'user.email'), (email) =>
+    email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
+      ? []
+      : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
+  )
+
 /** A blob's bytes, as base64, every byte as it was: a picture at a commit, which text would spoil. */
 export const blobBase64 = (cwd: string, object: string): Effect.Effect<string, GitFailed> =>
   runProcess(60_000, cwd, ['cat-file', 'blob', object], {}, undefined, true).pipe(

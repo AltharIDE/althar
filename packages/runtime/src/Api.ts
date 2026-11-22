@@ -185,6 +185,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
@@ -330,6 +331,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const canvasSaves = yield* CanvasSaves
     const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
@@ -1377,6 +1379,8 @@ export const handlers = apiLayer(
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
+      GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
+      ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),
       ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
       ReadCode: ({ threadId, path, commit, line, image }) =>
@@ -2193,6 +2197,9 @@ export const handlers = apiLayer(
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
+      SetArtifactsHome: ({ commandId, projectId, home }) => once(commandId, api(canvasSaves.setHome(projectId, home))),
+      SaveCanvas: ({ commandId, ...asked }) => once(commandId, api(canvasSaves.save(asked))),
+      StopSavingCanvas: ({ commandId, canvasId }) => once(commandId, api(canvasSaves.stop(canvasId))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
