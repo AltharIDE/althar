@@ -556,6 +556,32 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(await screen.findByText(/FAIL limit\.test\.ts/)).toBeTruthy()
   })
 
+  it('links the second of two checks of one name where only it has a page, never the first', async () => {
+    const title = 'The merge queue took PR #1 out: test and test failed.'
+    show([
+      items.you('Ship it'),
+      items.says('Shipped.'),
+      items.notice(
+        {
+          source: 'runtime',
+          title,
+          links: [
+            { label: 'PR #1', url: 'https://ci/pr/1', at: 21 },
+            { label: 'test', url: 'https://ci/test-2', at: title.lastIndexOf('test') },
+          ],
+        },
+        null,
+      ),
+    ])
+    const line = (await screen.findByRole('link', { name: 'PR #1' })).closest('p, div') as HTMLElement
+    expect(
+      within(line)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href')),
+    ).toEqual(['https://ci/pr/1', 'https://ci/test-2'])
+    expect(line.innerHTML).toContain('out: test and <a')
+  })
+
   it('shows what the coordinator passed on on the person’s side, in a line and the rest on a click', async () => {
     show([
       items.notice(

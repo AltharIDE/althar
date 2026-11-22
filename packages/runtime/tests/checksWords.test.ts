@@ -271,6 +271,16 @@ describe('a merge queue send-back, and whose it is', () => {
         ['out', 'https://ci/out', 'out', 'd '],
       ],
     )
+    // Two checks of one name, the first without a page: the second's page links the second, never the first.
+    const twice = leftQueueLinked('PR #4', 'https://pr/4', 'checks', {
+      ...detail(['test', 'test']),
+      pages: [
+        { name: 'test', url: null },
+        { name: 'test', url: 'https://ci/test-2' },
+      ],
+    })
+    assert.strictEqual(twice.title, 'The merge queue took PR #4 out: test and test failed.')
+    assert.deepStrictEqual(twice.links.slice(1), [{ label: 'test', url: 'https://ci/test-2', at: twice.title.lastIndexOf('test') }])
     // No job named: the pull request alone.
     assert.deepStrictEqual(leftQueueLinked('PR #4', 'https://pr/4', 'conflict', failed).links, [
       { label: 'PR #4', url: 'https://pr/4', at: 21 },

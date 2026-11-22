@@ -163,9 +163,11 @@ export const leftQueueLinked = (
   const pages = [...(detail?.pages ?? [])]
   let at = head.length
   failing.forEach((job, index) => {
-    const page = pages.findIndex((one) => one.name === job && one.url !== null)
-    const found = page < 0 ? undefined : pages.splice(page, 1)[0]?.url
-    if (found !== undefined && found !== null) links.push({ label: job, url: found, at })
+    // The pages are the failed checks in the same order: each name takes the next of that name, with its page or without one,
+    // so two checks both named test never swap theirs.
+    const page = pages.findIndex((one) => one.name === job)
+    const found = page < 0 ? null : (pages.splice(page, 1)[0]?.url ?? null)
+    if (found !== null) links.push({ label: job, url: found, at })
     at += job.length + (index === failing.length - 2 ? ' and '.length : ', '.length)
   })
   return { title, links }
