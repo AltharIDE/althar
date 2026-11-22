@@ -1,4 +1,4 @@
-import { budget } from '@althar/testing'
+import { budget, identify } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -160,8 +160,7 @@ const onGitHub = () => {
   const pushes = { to: bare }
   const github = makeFakeService({ pushUrl: () => pushes.to })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github, pushes }
 }
 
@@ -620,8 +619,7 @@ describe('a task’s next pull request, in its repositories', () => {
     const upstream = mkdtempSync(join(tmpdir(), 'althar-upstream-'))
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: upstream })
     git(working, 'push', '-q', upstream, 'main')
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     const github = makeFakeService({ pushUrl: (path) => (path.join('/') === 'meridian/api' ? upstream : fork) })
     github.addRepository(['you', 'api'])
     github.addRepository(['meridian', 'api'])

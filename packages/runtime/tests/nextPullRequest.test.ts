@@ -1,4 +1,4 @@
-import { removeTreeSync } from '@althar/testing'
+import { identify, removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -68,8 +68,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

@@ -21,6 +21,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Talking to a lead once its plan is done (a task is a conversation plus
@@ -54,8 +55,7 @@ const onGitHub = (more: Omit<Parameters<typeof makeFakeService>[0] & object, 'pu
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare, ...more })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

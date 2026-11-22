@@ -40,6 +40,7 @@ import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 
 import { callTool, fakeAgents, fakeConnectors, HOST, hosted, onTestClock, repository, ROOMY, runtime } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Presets in Settings, and what a task's menu asks of the runtime besides,
@@ -938,8 +939,7 @@ describe('a review after a merge, between its turns', () => {
       const github = makeFakeService({ pushUrl: () => bare })
       github.addRepository(['meridian', 'api'])
       const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
+      identify(working, 'Fake', 'fake@althar.test')
       const place = holds()
       return Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient

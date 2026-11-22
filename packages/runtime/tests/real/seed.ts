@@ -10,6 +10,7 @@ import { Queries } from '../../src/Queries'
 import * as Runtime from '../../src/Runtime'
 import { Sessions } from '../../src/Sessions'
 import { hosted, until } from '../support'
+import { identify } from '@althar/testing'
 
 /*
  * How the responsiveness run (responsiveness.test.ts) and the nightly benches
@@ -33,8 +34,7 @@ export const onGitHub = (hostMs: () => number) => {
     waitsFor: () => (hostMs() > 0 ? Effect.sleep(Duration.millis(hostMs())) : Effect.void),
   })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

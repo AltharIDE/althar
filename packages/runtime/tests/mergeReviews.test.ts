@@ -22,6 +22,7 @@ import { PlanParameters, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * The review after a merge, in the same task (a task is a conversation plus
@@ -54,8 +55,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

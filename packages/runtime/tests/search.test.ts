@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 import type { FoundTask } from '@althar/contracts'
@@ -21,6 +20,7 @@ import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Finding a task by what it was about (ADR-035): its row is written where
@@ -277,8 +277,7 @@ describe('finding tasks', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    execFileSync('git', ['config', 'user.name', 'Fake'], { cwd: working })
-    execFileSync('git', ['config', 'user.email', 'fake@althar.test'], { cwd: working })
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const connections = yield* Connections
       const instance = yield* Instance

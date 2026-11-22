@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process'
-
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -12,6 +10,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Opening a task or the coordinator reads a page of its thread. Every query
@@ -98,15 +97,12 @@ const scansOf = (text: string, params: ReadonlyArray<unknown>, times: number) =>
     })
   })
 
-const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
-
 describe('opening a thread', () => {
   it.live('finds every row it reads by an index, in a task with a run and a long thread, and in the coordinator', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const instance = yield* Instance
       const projects = yield* Projects

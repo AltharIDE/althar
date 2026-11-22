@@ -20,6 +20,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A task's own step that opens its pull request, where changes.test.ts and
@@ -43,8 +44,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 
@@ -284,8 +284,7 @@ describe('opening a task’s pull request', () => {
       waitsFor: (method) => (method === 'openChange' && ++opens === 2 ? Deferred.await(gate) : Effect.void),
     })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const changes = yield* Changes

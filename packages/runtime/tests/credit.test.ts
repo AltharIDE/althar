@@ -9,6 +9,7 @@ import { Effect } from 'effect'
 import { coAuthorLine, creditBranch, type CreditOptions, creditedMessage, forgetful, type Memory, withoutAgentCredit } from '../src/credit'
 import { remoteTip } from '../src/git'
 import { repository } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * What leaves the Mac carries the person as author and Althar as co-author,
@@ -141,8 +142,7 @@ const claude = '\n\nCo-Authored-By: Claude <noreply@anthropic.com>'
 /** A repository the person works in as Ada, as agents commit for them. */
 const ours = () => {
   const path = repository()
-  git(path, 'config', 'user.name', 'Ada')
-  git(path, 'config', 'user.email', 'ada@example.com')
+  identify(path, 'Ada', 'ada@example.com')
   return path
 }
 

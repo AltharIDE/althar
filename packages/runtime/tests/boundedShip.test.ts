@@ -21,6 +21,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /* A Ship's persisted accepted endpoints survive late commits, first/next publication and retries. */
 
@@ -41,8 +42,7 @@ const onGitHub = (more: Omit<Parameters<typeof makeFakeService>[0] & object, 'pu
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare, ...more })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

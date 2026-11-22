@@ -19,6 +19,7 @@ import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 import { runtimeWith, connect, ask, cards, tipOf, git, pushByHand } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -50,8 +51,7 @@ describe('the Push button', () => {
     const held: { head: string | null } = { head: null }
     const github = makeFakeService({ pushUrl: () => bare, headOf: () => held.head ?? tip() })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     const opened = Effect.gen(function* () {
       yield* connect('github', HOST)
       // Pushes are the person's here: what the lead commits waits for their press.

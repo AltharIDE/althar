@@ -17,6 +17,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { words } from '../src/words'
 import { notices, repository, runtime } from './support'
+import { identify } from '@althar/testing'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -46,8 +47,7 @@ const taskIn = (roots: ReadonlyArray<string>, opened: string) =>
     const projects = yield* Projects
     const sql = yield* SqlClient.SqlClient
     for (const root of roots) {
-      git(root, 'config', 'user.name', 'T')
-      git(root, 'config', 'user.email', 't@t.test')
+      identify(root, 'T', 't@t.test')
     }
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: opened })
     const task = yield* projects.createTask({

@@ -22,6 +22,7 @@ import { type PlanStep, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A sanity pass over a task's life in the runtime: the edges between its
@@ -43,8 +44,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

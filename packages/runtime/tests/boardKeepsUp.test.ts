@@ -23,7 +23,8 @@ import * as Runtime from '../src/Runtime'
 import { retitleTask } from '../src/taskTitle'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { callTool, fakeConnectors, HOST, hosted, runtime, turns, until } from './support'
-import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
+import { ask, cards, connect, runtimeWith, tipOf } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * The board keeps up with tasks as the task view does: a window reads its
@@ -138,8 +139,7 @@ describe('the board keeps up with a task as its view does', () => {
       const { working, bare } = hosted()
       const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
       github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
+      identify(working, 'Fake', 'fake@althar.test')
       return Effect.gen(function* () {
         yield* connect('github', HOST)
         const queries = yield* Queries
@@ -242,8 +242,7 @@ describe('the board keeps up with several tasks moving at once', () => {
       const { working, bare } = hosted()
       const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
       github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
+      identify(working, 'Fake', 'fake@althar.test')
       return Effect.gen(function* () {
         yield* connect('github', HOST)
         const queries = yield* Queries

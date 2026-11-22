@@ -1,4 +1,4 @@
-import { removeTree } from '@althar/testing'
+import { identify, removeTree } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -92,8 +92,7 @@ const onGitHub = (heads = false) => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare, ...(heads ? { headOf: tipOf(bare) } : {}) })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 
