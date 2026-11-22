@@ -714,7 +714,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: min(640px, 100%);
+  /* Wide enough for the whole update command on one line, scrolling only in a narrow window. */
+  max-width: min(720px, 100%);
   padding: 8px 8px 8px 14px;
   border-radius: 12px;
   background: var(--paper);

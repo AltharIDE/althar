@@ -16,7 +16,7 @@
   padding: 32px;
 }
 .olderCommand {
-  max-width: min(640px, 100%);
+  max-width: min(720px, 100%);
   overflow-x: auto;
   padding: 8px 12px;
   border-radius: 10px;
