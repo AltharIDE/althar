@@ -508,6 +508,9 @@ const publishedAt = (setup: Setup, checkout: string) =>
     return { canvasId, repositoryId, projectId, folder: first.folder, detail, publish, save, settled }
   })
 
+/** A canvas's own branch for its pull requests: its name and its id, so no other artifact's shares it. */
+const branchOf = (canvasId: string) => `althar/artifacts/sign-in-${canvasId.replace(/^cnv_/, '').slice(0, 12)}`
+
 describe('saving a canvas to its repository', () => {
   it.live('guesses from the remote tree, sets the first home, mirrors files, follows, moves, and stops', () =>
     Effect.scoped(
@@ -571,6 +574,64 @@ describe('saving a canvas to its repository', () => {
     ),
   )
 
+  it.live('never takes over a folder that holds files, keeps what others added, and refuses over what others changed', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { checkout, bare } = yield* atOrigin
+        const setup = yield* connected
+        const { save, settled, publish, detail, folder } = yield* publishedAt(setup, checkout)
+        const before = yield* git(bare, 'rev-parse', 'main')
+
+        // A first save into a folder that already holds files refuses, and nothing is pushed.
+        yield* save('designs/existing/')
+        const occupied = (yield* settled()).summary.saved
+        assert.strictEqual(occupied?.state, 'failed')
+        assert.include(occupied?.problem ?? '', 'already holds files')
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), before)
+
+        // Saved in a folder of its own; then someone adds a file beside it, in git.
+        yield* save('designs/sign-in/')
+        assert.strictEqual((yield* settled()).summary.saved?.state, 'saved')
+        const other = mkdtempSync(join(tmpdir(), 'althar-artifact-other-'))
+        yield* git(other, 'clone', '-q', bare, '.')
+        writeFileSync(join(other, 'designs', 'sign-in', 'notes.md'), '# Ana’s notes\n')
+        yield* git(other, 'add', 'designs/sign-in/notes.md')
+        yield* git(other, '-c', 'user.name=Ana', '-c', 'user.email=ana@althar.test', 'commit', '-q', '-m', 'Notes')
+        yield* git(other, 'push', '-q', 'origin', 'HEAD:main')
+
+        // A new version replaces the artifact's own files and keeps Ana's.
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v2\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        yield* until(detail(), ({ summary }) => summary.saved?.version === 2 && summary.saved.state === 'saved')
+        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/notes.md'), '# Ana’s notes')
+        assert.strictEqual(yield* git(bare, 'show', 'main:designs/sign-in/index.md'), '# Sign in, v2')
+
+        // A move to a folder that holds files refuses; to an empty one, it takes only its own files and leaves Ana's.
+        yield* save('designs/existing/')
+        assert.include((yield* settled()).summary.saved?.problem ?? '', 'already holds files')
+        yield* save('docs/sign-in/')
+        assert.include((yield* settled()).summary.saved, { state: 'saved', path: 'docs/sign-in/' })
+        assert.strictEqual(yield* git(bare, 'ls-tree', '-r', '--name-only', 'main', '--', 'designs/sign-in'), 'designs/sign-in/notes.md')
+        assert.strictEqual(yield* git(bare, 'show', 'main:docs/sign-in/index.md'), '# Sign in, v2')
+
+        // Where someone changed one of its own files, it refuses rather than overwrite their work.
+        yield* git(other, 'fetch', '-q', 'origin')
+        yield* git(other, 'reset', '-q', '--hard', 'origin/main')
+        writeFileSync(join(other, 'docs', 'sign-in', 'index.md'), '# Sign in, as Ana left it\n')
+        yield* git(other, 'add', 'docs/sign-in/index.md')
+        yield* git(other, '-c', 'user.name=Ana', '-c', 'user.email=ana@althar.test', 'commit', '-q', '-m', 'Ana’s edit')
+        yield* git(other, 'push', '-q', 'origin', 'HEAD:main')
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v3\n' })
+        assert.include(yield* publish, 'Published sign-in v3')
+        // It stays saved at v2, and says why v3 isn't.
+        const refused = yield* until(detail(), ({ summary }) => summary.saved?.state === 'failed')
+        assert.strictEqual(refused.summary.saved?.version, 2)
+        assert.include(refused.summary.saved?.problem ?? '', 'Someone changed docs/sign-in/index.md')
+        assert.strictEqual(yield* git(bare, 'show', 'main:docs/sign-in/index.md'), '# Sign in, as Ana left it')
+      }),
+    ),
+  )
+
   it.live('answers while git work is waiting and follows each version in one pull request', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -586,7 +647,7 @@ describe('saving a canvas to its repository', () => {
         const connections = Context.get(setup.context, Connections)
         yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
         const { canvasId, projectId, folder, save, detail, publish } = yield* publishedAt(setup, working)
-        const branch = 'althar/artifacts/sign-in'
+        const branch = branchOf(canvasId)
         const ledger = Context.get(setup.context, Ledger)
         const changes = () =>
           ledger
@@ -667,8 +728,8 @@ describe('saving a canvas to its repository', () => {
         const setup = yield* connectedWith(github)
         const { personId } = Context.get(setup.context, Instance)
         yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
-        const { folder, save, settled, detail, publish } = yield* publishedAt(setup, working)
-        const branch = 'althar/artifacts/sign-in'
+        const { canvasId, folder, save, settled, detail, publish } = yield* publishedAt(setup, working)
+        const branch = branchOf(canvasId)
         yield* save('design/sign-in/', 'pr')
         assert.include((yield* settled()).summary.saved, { state: 'failed', pullRequest: null })
         const first = yield* git(bare, 'rev-parse', branch)
@@ -685,6 +746,31 @@ describe('saving a canvas to its repository', () => {
         assert.strictEqual(yield* git(bare, 'rev-parse', `${branch}^`), yield* git(bare, 'rev-parse', 'main'))
         assert.lengthOf(github.changes, 2)
         assert.strictEqual(followed.summary.saved?.pullRequest?.number, github.changes[1]?.number)
+      }),
+    ),
+  )
+
+  it.live('saves on a branch of its own, and never continues a pull request from it that it didn’t open', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        const github = makeFakeService({ pushUrl: () => bare })
+        const repository = github.addRepository(['meridian', 'api'])
+        const setup = yield* connectedWith(github)
+        const { personId } = Context.get(setup.context, Instance)
+        yield* Context.get(setup.context, Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
+        const { canvasId, save, settled } = yield* publishedAt(setup, working)
+        // Its branch is its own: its name and its id, so another project's sign-in never shares it.
+        const branch = branchOf(canvasId)
+        assert.match(branch, /^althar\/artifacts\/sign-in-[0-9a-f]{12}$/)
+        // Someone's pull request from that branch, which this artifact never opened.
+        yield* git(working, 'push', '-q', bare, `HEAD:refs/heads/${branch}`)
+        yield* github.openChange(repository, { title: 'Not Althar’s', body: '', source: branch, target: 'main', draft: false })
+        yield* save('design/sign-in/', 'pr')
+        const refused = (yield* settled()).summary.saved
+        assert.include(refused, { state: 'failed', pullRequest: null })
+        assert.include(refused?.problem ?? '', 'didn’t open for this artifact')
+        assert.lengthOf(github.changes, 1)
       }),
     ),
   )

@@ -233,9 +233,23 @@ const make = Effect.gen(function* () {
         return yield* refuse(`Althar couldn’t find the files for v${row.nextVersion} on this device. Try again where it was published.`)
       const prior = yield* publishedOf(row)
       const previous = prior?.repositoryId === row.repositoryId ? prior : null
+      // What its last save wrote, and where: only those files are its own to replace, move or remove.
+      const [last] =
+        previous === null
+          ? []
+          : yield* sql<{
+              manifest: string
+            }>`SELECT manifest FROM canvas_versions WHERE canvas_id = ${canvas.id} AND number = ${previous.version}`
+      const lastFiles = last === undefined ? null : yield* readVersionFiles(artifacts, last.manifest)
+      if (previous !== null && lastFiles === null)
+        return yield* refuse(
+          `Althar couldn’t find the files of v${previous.version}, its last save, on this device, so it can’t tell its own files in git from others’. Try again where it was published.`,
+        )
+      const wrote = previous === null || lastFiles === null ? null : { path: folderPath(previous.path), files: lastFiles.files }
       const remote = yield* remoteForSave(connections, checkout, row.repository, row.how)
       const pr = remote.hosted
-      const branch = row.how === 'main' ? remote.branch : `althar/artifacts/${canvas.name}`
+      // Its own branch, by its id as well as its name: another project's artifact of the same name never shares it.
+      const branch = row.how === 'main' ? remote.branch : `althar/artifacts/${canvas.name}-${canvas.id.replace(/^cnv_/, '').slice(0, 12)}`
       const baseRef = `refs/remotes/origin/${remote.branch}`
       const fault = (step: string) => Effect.mapError((error: unknown) => refuse(problemIn(row.repository, branch, step, error)))
       const base = yield* fetchedInto(checkout, remote.fetch, remote.branch, baseRef).pipe(fault('fetch'))
@@ -247,6 +261,13 @@ const make = Effect.gen(function* () {
           ? null
           : yield* fetchedInto(checkout, remote.target, branch, `refs/althar/artifacts/${canvas.id}`).pipe(fault('fetch'))
       const knownBranch = head !== null && previous?.how === 'pr' && previous.commit === head
+      // An open pull request is this artifact's only where it is the one its last save recorded, or, before one was
+      // recorded, where its branch's tip is that save's commit. Anything else is someone else's, never continued.
+      const ours = open === null || (previous?.pullRequest != null ? previous.pullRequest.number === open.number : knownBranch)
+      if (!ours)
+        return yield* refuse(
+          `${row.repository} has a pull request open from ${branch} that Althar didn’t open for this artifact. Close it or rename its branch, then try again.`,
+        )
       // After a push that didn't open its pull request, continue from that push. Once a
       // pull request closes, start from the default branch again, even after a squash.
       const continueFrom = open !== null || (knownBranch && previous?.pullRequest === null)
@@ -265,7 +286,7 @@ const make = Effect.gen(function* () {
       const sameOpen = open === null ? null : { number: open.number, url: open.url }
       const commit = yield* withCanvasWorktree(checkout, worktreeRoot, start, (worktree) =>
         Effect.gen(function* () {
-          yield* stageCanvas(worktree, folderPath(row.path), moved ? folderPath(previous.path) : null, files.files)
+          yield* stageCanvas(worktree, folderPath(row.path), wrote, files.files)
           const same =
             previous?.version === row.nextVersion &&
             previous.commit === start &&

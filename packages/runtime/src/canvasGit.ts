@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { lstat, mkdir, mkdtemp } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -118,24 +119,62 @@ const checkedFolder = (worktree: string, path: string) =>
     ),
   )
 
-/** Mirrors just the canvas's folders, with the store's bytes even where git would apply a filter. */
-export const stageCanvas = (worktree: string, path: string, oldPath: string | null, files: ReadonlyArray<CopyFile>) =>
+/** A commit's files under a folder, by their paths inside it, with their blobs. */
+const filesUnder = (worktree: string, rev: string, path: string) =>
+  Effect.map(git(worktree, 'ls-tree', '-r', '-z', rev, '--', `${path}/`), (listed) => {
+    const files = new Map<string, string>()
+    for (const entry of listed.split('\0')) {
+      const tab = entry.indexOf('\t')
+      if (tab === -1) continue
+      const [, type, blob] = entry.slice(0, tab).split(' ')
+      const file = entry.slice(tab + 1)
+      if (type === 'blob' && blob !== undefined && file.startsWith(`${path}/`)) files.set(file.slice(path.length + 1), blob)
+    }
+    return files
+  })
+
+/** The blob git would keep for these bytes, unfiltered, in the repository's own hash. */
+const blobOf = (format: string, bytes: Uint8Array) =>
+  createHash(format === 'sha256' ? 'sha256' : 'sha1')
+    .update(`blob ${bytes.length}\0`)
+    .update(bytes)
+    .digest('hex')
+
+/**
+ * Stages the canvas's files at `path`, with the store's bytes even where git would apply a filter, touching nothing it
+ * didn't write itself. A first save, and a move, need a folder that holds nothing yet. A save after that replaces and
+ * removes only the files its last save wrote (`previous`: that version's files, where it put them), as long as no one
+ * changed them since; files others added beside them stay. Where someone changed one of its files, it refuses rather than
+ * overwrite or delete their work.
+ */
+export const stageCanvas = (
+  worktree: string,
+  path: string,
+  previous: { readonly path: string; readonly files: ReadonlyArray<CopyFile> } | null,
+  files: ReadonlyArray<CopyFile>,
+) =>
   Effect.gen(function* () {
-    if (!safePath(path) || (oldPath !== null && !safePath(oldPath)) || files.some((file) => !safePath(file.path)))
+    if (!safePath(path) || (previous !== null && !safePath(previous.path)) || files.some((file) => !safePath(file.path)))
       return yield* refuse('A file or folder name can’t be saved safely in git. Rename it and try again.')
     const folder = yield* checkedFolder(worktree, path)
-    yield* git(
-      worktree,
-      '--literal-pathspecs',
-      'rm',
-      '-r',
-      '-f',
-      '--cached',
-      '--ignore-unmatch',
-      '--',
-      path,
-      ...(oldPath === null ? [] : [oldPath]),
-    )
+    const moved = previous !== null && previous.path !== path
+    const here = yield* filesUnder(worktree, 'HEAD', path)
+    if ((previous === null || moved) && here.size > 0)
+      return yield* refuse(`${path}/ already holds files in git. Pick a folder of its own for this artifact, or move those files first.`)
+    const removed: Array<string> = []
+    if (previous !== null) {
+      const format = yield* git(worktree, 'rev-parse', '--show-object-format')
+      const owned = new Map(previous.files.map((file) => [file.path, blobOf(format, file.bytes)]))
+      const there = moved ? yield* filesUnder(worktree, 'HEAD', previous.path) : here
+      const changed = [...owned].filter(([name, blob]) => there.has(name) && there.get(name) !== blob).map(([name]) => name)
+      if (changed.length > 0)
+        return yield* refuse(
+          `Someone changed ${changed.map((name) => `${previous.path}/${name}`).join(', ')} in git since Althar last saved it. Bring those changes into the artifact or move them aside, then save again.`,
+        )
+      const kept = new Set(files.map((file) => file.path))
+      for (const name of owned.keys()) if (there.has(name) && (moved || !kept.has(name))) removed.push(`${previous.path}/${name}`)
+    }
+    if (removed.length > 0) yield* git(worktree, '--literal-pathspecs', 'rm', '-q', '-f', '--cached', '--ignore-unmatch', '--', ...removed)
     yield* writeCopy(folder, files).pipe(
       Effect.catchCause((cause) =>
         Effect.andThen(
