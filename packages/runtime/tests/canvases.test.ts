@@ -644,6 +644,52 @@ describe('saving a canvas to its repository', () => {
     ),
   )
 
+  it.live('counts a submodule someone added as theirs, and a file of its own made executable as changed', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { checkout, bare } = yield* atOrigin
+        const setup = yield* connected
+        const { save, settled, publish, detail, folder } = yield* publishedAt(setup, checkout)
+        yield* save('designs/sign-in/')
+        assert.strictEqual((yield* settled()).summary.saved?.state, 'saved')
+        const other = mkdtempSync(join(tmpdir(), 'althar-artifact-other-'))
+        yield* git(other, 'clone', '-q', bare, '.')
+        const push = (message: string) =>
+          Effect.gen(function* () {
+            yield* git(other, '-c', 'user.name=Ana', '-c', 'user.email=ana@althar.test', 'commit', '-q', '-m', message)
+            yield* git(other, 'push', '-q', 'origin', 'HEAD:main')
+            return yield* git(bare, 'rev-parse', 'main')
+          })
+
+        // Ana adds a submodule beside it; a version with a file where it is refuses, and leaves it and main as they were.
+        const pinned = yield* git(other, 'rev-parse', 'HEAD')
+        yield* git(other, 'update-index', '--add', '--cacheinfo', `160000,${pinned},designs/sign-in/examples`)
+        const withSubmodule = yield* push('Examples')
+        draw(folder, 'sign-in', { 'index.md': '# Sign in\r\n', examples: 'a file of the artifact’s\n' })
+        assert.include(yield* publish, 'Published sign-in v2')
+        const over = yield* until(detail(), ({ summary }) => summary.saved?.state === 'failed')
+        assert.include(over.summary.saved?.problem ?? '', 'would write over designs/sign-in/examples')
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), withSubmodule)
+        assert.strictEqual(
+          yield* git(bare, 'ls-tree', 'main', '--', 'designs/sign-in/examples'),
+          `160000 commit ${pinned}\tdesigns/sign-in/examples`,
+        )
+
+        // Ana makes one of its files executable, its bytes as they were; the next version refuses rather than undo it.
+        rmSync(join(folder, CANVASES_FOLDER, 'sign-in', 'examples'))
+        yield* git(other, 'update-index', '--chmod=+x', 'designs/sign-in/css/site.css')
+        const executable = yield* push('Run it')
+        draw(folder, 'sign-in', { 'index.md': '# Sign in, v3\n' })
+        assert.include(yield* publish, 'Published sign-in v3')
+        const changed = yield* until(detail(), ({ summary }) => (summary.saved?.problem ?? '').includes('Someone changed'))
+        assert.include(changed.summary.saved, { state: 'failed', version: 1 })
+        assert.include(changed.summary.saved?.problem ?? '', 'designs/sign-in/css/site.css')
+        assert.strictEqual(yield* git(bare, 'rev-parse', 'main'), executable)
+        assert.match(yield* git(bare, 'ls-tree', 'main', '--', 'designs/sign-in/css/site.css'), /^100755 blob /)
+      }),
+    ),
+  )
+
   it.live('answers while git work is waiting and follows each version in one pull request', () =>
     Effect.scoped(
       Effect.gen(function* () {

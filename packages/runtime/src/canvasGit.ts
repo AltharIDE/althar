@@ -119,19 +119,24 @@ const checkedFolder = (worktree: string, path: string) =>
     ),
   )
 
-/** A commit's files under a folder, by their paths inside it, with their blobs. */
+/**
+ * A commit's entries under a folder, by their paths inside it, each as git has it: its mode, its type and its object
+ * (`100644 blob …`). Every kind counts: a submodule (`160000 commit …`) or a link is someone's as much as a file is.
+ */
 const filesUnder = (worktree: string, rev: string, path: string) =>
   Effect.map(git(worktree, 'ls-tree', '-r', '-z', rev, '--', `${path}/`), (listed) => {
     const files = new Map<string, string>()
     for (const entry of listed.split('\0')) {
       const tab = entry.indexOf('\t')
       if (tab === -1) continue
-      const [, type, blob] = entry.slice(0, tab).split(' ')
       const file = entry.slice(tab + 1)
-      if (type === 'blob' && blob !== undefined && file.startsWith(`${path}/`)) files.set(file.slice(path.length + 1), blob)
+      if (file.startsWith(`${path}/`)) files.set(file.slice(path.length + 1), entry.slice(0, tab))
     }
     return files
   })
+
+/** The entry a canvas's file is staged as: always a plain file, never executable. */
+const entryOf = (format: string, bytes: Uint8Array) => `100644 blob ${blobOf(format, bytes)}`
 
 /**
  * The incoming paths that would land on a file in git that isn't the canvas's own, or that would turn a folder of theirs
@@ -185,9 +190,10 @@ export const stageCanvas = (
     const removed: Array<string> = []
     if (previous !== null) {
       const format = yield* git(worktree, 'rev-parse', '--show-object-format')
-      const owned = new Map(previous.files.map((file) => [file.path, blobOf(format, file.bytes)]))
+      // Its own entries as it staged them: someone changing one's bytes, its mode or its kind changed it.
+      const owned = new Map(previous.files.map((file) => [file.path, entryOf(format, file.bytes)]))
       const there = moved ? yield* filesUnder(worktree, 'HEAD', previous.path) : here
-      const changed = [...owned].filter(([name, blob]) => there.has(name) && there.get(name) !== blob).map(([name]) => name)
+      const changed = [...owned].filter(([name, entry]) => there.has(name) && there.get(name) !== entry).map(([name]) => name)
       if (changed.length > 0)
         return yield* refuse(
           `Someone changed ${changed.map((name) => `${previous.path}/${name}`).join(', ')} in git since Althar last saved it. Bring those changes into the artifact or move them aside, then save again.`,
