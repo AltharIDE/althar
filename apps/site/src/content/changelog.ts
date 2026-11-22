@@ -45,7 +45,7 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Connect to a home over SSH, or pair with a one-time code over HTTPS. Connect a home can also set one up over SSH, step by step, once the host’s first signed release is out.',
+        text: 'Connect to a home over SSH, or pair with a one-time code over HTTPS. Setting one up over SSH, step by step, comes with the host’s first signed release and a version of Althar that trusts its key.',
       },
       {
         kind: 'new',
