@@ -219,7 +219,13 @@ describe('a project’s canvases', () => {
           const [summary] = yield* setup.client.ListCanvases({ projectId: opened.id })
           assert.strictEqual(summary?.name, 'sign-in')
           assert.strictEqual(summary?.latest.number, 3)
-          assert.deepStrictEqual(summary?.latest.by, { role: 'lead', taskId: first.task.id, taskTitle: 'Redesign sign-in' })
+          // Who published it, and the conversation it was published from, where it is talked about.
+          assert.deepStrictEqual(summary?.latest.by, {
+            role: 'lead',
+            taskId: first.task.id,
+            taskTitle: 'Redesign sign-in',
+            threadId: first.access.threadId,
+          })
           const detail = yield* setup.client.GetCanvas({ canvasId: summary?.id ?? '' })
           assert.deepStrictEqual(
             detail.versions.map((one) => [one.number, one.base, one.by.role]),
