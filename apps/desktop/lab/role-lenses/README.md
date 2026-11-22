@@ -16,4 +16,4 @@ At `http://localhost:6181`. The bar along the bottom, or its keys: `A` `B` `C` t
 
 A feature's timeline opens in the board's place in every direction: its stages, what each put in the repository and who passed its gate, and the handoff waiting, with what the coordinator proposes to start.
 
-`shoot.mjs` shoots each direction's four states (Engineering's home, DevOps's home, the timeline, the lens switch), light and dark, into `shots/`. Run it outside an agent's sandbox, where it can reach the lab's server.
+`shoot.mjs` shoots each direction's six states (each lens's home, the timeline, the lens switch), light and dark, into `shots/`. Run it outside an agent's sandbox, where it can reach the lab's server.

@@ -163,6 +163,16 @@ export const HANDOFFS: ReadonlyArray<Handoff> = [
   },
   {
     feature: 'gift-cards',
+    from: 'Design',
+    to: 'Spec',
+    role: 'product',
+    ago: '35m',
+    facts: ['From Design, on the balance screen'],
+    proposed: [],
+    question: 'Can a gift card pay for shipping, or only for items?',
+  },
+  {
+    feature: 'gift-cards',
     from: 'Spec',
     to: 'Design',
     role: 'design',
