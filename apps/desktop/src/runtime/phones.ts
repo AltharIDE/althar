@@ -19,6 +19,9 @@ import { Clock, Context, Effect, Exit, Scope } from 'effect'
  */
 
 export const PHONE_PORT = 6769
+/** Tests name where phones reach the Mac themselves: a .local name may not resolve on CI, and port 6769 may be taken. */
+const hostHere = () => process.env.ALTHAR_PHONE_HOST ?? localName()
+const portHere = () => Number.parseInt(process.env.ALTHAR_PHONE_PORT ?? '', 10) || PHONE_PORT
 const SETTING = 'phones.json'
 const TLS = 'phones-tls.json'
 
@@ -79,13 +82,14 @@ export const phonesIn = (profile: string, context: Context.Context<never>) =>
       Effect.promise(() => writePrivate(join(profile, SETTING), JSON.stringify({ on }), true).catch(() => false))
     const start = Effect.gen(function* () {
       if (open !== undefined) return
-      const name = localName()
+      const name = hostHere()
+      const port = portHere()
       const tls = yield* tlsFor(profile, name)
       const scope = yield* Scope.make()
       yield* listenNetworkApi({
-        origin: `https://${name}:${PHONE_PORT}`,
+        origin: `https://${name}:${port}`,
         address: '0.0.0.0',
-        port: PHONE_PORT,
+        port,
         certificate: Buffer.from(tls.certificate),
         key: Buffer.from(tls.key),
         version: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
@@ -94,7 +98,7 @@ export const phonesIn = (profile: string, context: Context.Context<never>) =>
         Scope.provide(scope),
         Effect.tapError(() => Scope.close(scope, Exit.void)),
         Effect.mapError(() =>
-          failed(`Phones can’t be let in: port ${PHONE_PORT} is taken, or this Mac’s network refused it. Quit what uses it and try again.`),
+          failed(`Phones can’t be let in: port ${port} is taken, or this Mac’s network refused it. Quit what uses it and try again.`),
         ),
       )
       open = scope

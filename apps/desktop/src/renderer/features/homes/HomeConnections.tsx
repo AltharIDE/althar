@@ -104,7 +104,25 @@ function HomesMenu({
 /** At the bar's end: the home's name in its window; a plug in this computer's, including for its first connection. */
 export function HomeButton() {
   const { host } = useServices()
-  return host.homes === undefined ? null : <Chip homes={host.homes} />
+  return host.homes === undefined ? null : (
+    <>
+      <Chip homes={host.homes} />
+      <PhonesFromMenu homes={host.homes} />
+    </>
+  )
+}
+
+/** Pair a phone…, opened from the menu: here, with the window's services, which the dialog reaches the home through. */
+function PhonesFromMenu({ homes }: { homes: HomesHost }) {
+  const here = useHomeState(homes)
+  const { dialog } = useHomesUi()
+  if (dialog !== 'phones' || here === null) return null
+  return (
+    <PhonesDialog
+      home={here.current.kind === 'local' ? 'This Mac' : here.current.home.name}
+      onClose={() => homesUi.set({ dialog: null })}
+    />
+  )
 }
 
 export function Chip({ homes }: { homes: HomesHost }) {
@@ -196,8 +214,6 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
   const close = () => homesUi.set({ dialog: null })
   if (dialog === 'connect')
     return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} />
-  if (dialog === 'phones' && here !== null)
-    return <PhonesDialog home={here.current.kind === 'local' ? 'This Mac' : here.current.home.name} onClose={close} />
   if (dialog === 'manage')
     return (
       <ManageHomes
