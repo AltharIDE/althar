@@ -1290,6 +1290,7 @@ export class Sessions extends Context.Service<
         handed(running.thread.threadId, holder)
         holder.adopted = holder.pick
         running.nextLead = holder.pick
+        running.adoptedLead = holder.pick !== undefined
       }
 
       /** What the session that took the thread was given as its lead, said on it, unless it has taken it up already. */

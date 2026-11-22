@@ -271,7 +271,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const readying = yield* Clock.currentTimeMillis
       // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it. A session's
       // first turn, its brief, takes up the lead picked while it started (`adopt`), though nothing else waits.
-      const briefing = running.brief !== undefined && running.waitsForWords !== true
+      const briefing = running.adoptedLead === true && running.brief !== undefined && running.waitsForWords !== true
       if (running.nextLead !== undefined && (briefing || (yield* inputWaiting(thread.threadId)))) {
         const next = running.nextLead
         if (next.agentId !== running.entry.definition.id) {
@@ -510,6 +510,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       if (!compacting) {
         running.brief = undefined
         running.waitsForWords = undefined
+        running.adoptedLead = undefined
         if (knowsTime && (brief !== undefined || timeNews !== null)) running.timeTold = { at: timeNow, zone }
       } else running.timeTold = undefined
       running.turnRunning = true

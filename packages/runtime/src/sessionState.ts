@@ -392,6 +392,8 @@ export interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /** Its `nextLead` was picked while it took the thread over: its first turn, the brief alone though it be, takes it up first. */
+  adoptedLead?: boolean | undefined
   /** Held while its agent is set to a model or effort, so two settings never cross: the chosen one and the one before (`chooseLead`). */
   leadLock: Semaphore.Semaphore
   /** Its agent is being set to a model or effort now. */

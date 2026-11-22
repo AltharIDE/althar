@@ -152,9 +152,20 @@ describe('pending lead choices on the client feed', () => {
               (rows) => rows.length === 1,
             )
           else yield* until(sessions.running(lead.threadId), Option.isNone)
+          // Taken over as the switch asked, until something is picked.
+          assert.deepStrictEqual(Option.getOrThrow(yield* sessions.handingOver(lead.threadId)), {
+            agentId: 'codex',
+            model: 'large',
+            effort: 'high',
+          })
           // Two picks, as the picker sends a model and an effort: both kept for the session starting, never refused.
           assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, model: 'small' }), 'later')
           assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, effort: 'low' }), 'later')
+          assert.deepStrictEqual(Option.getOrThrow(yield* sessions.handingOver(lead.threadId)), {
+            agentId: 'codex',
+            model: 'small',
+            effort: 'low',
+          })
           if (at === 'connects')
             assert.deepStrictEqual(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead, {
               agentId: 'codex',
@@ -198,6 +209,8 @@ describe('pending lead choices on the client feed', () => {
       )
       // A Codex model, as the picker shows it while OpenCode starts: Codex's, never set on OpenCode.
       assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, agentId: 'codex', model: 'small' }), 'later')
+      // The one going out, picked back, takes the thread as picked.
+      assert.deepStrictEqual(Option.getOrThrow(yield* sessions.handingOver(lead.threadId)), { agentId: 'codex', model: 'small' })
       held.open()
       yield* Fiber.join(switching)
       // OpenCode took the thread, and Codex took it back on the model picked, before OpenCode's first turn.
