@@ -2,10 +2,12 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { budget } from '@althar/testing/budget'
+
 export const workerCertificates = (root: string, extra = false) => {
   const path = (name: string): string => join(root, name)
   const openssl = (...args: string[]): void => {
-    execFileSync('openssl', args, { cwd: root, timeout: 5000, stdio: 'pipe' })
+    execFileSync('openssl', args, { cwd: root, timeout: budget.medium, stdio: 'pipe' })
   }
   const authority = (name: string): void => {
     openssl(

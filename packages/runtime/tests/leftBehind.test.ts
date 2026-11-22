@@ -254,9 +254,9 @@ describe.skipIf(windows)('a task that settles', () => {
       assert.isBelow(took, 10_000)
       yield* stopped(marked)
       // Process death is visible before the run's finalizers finish and remove its entry from Launches.
+      yield* until((yield* Launches).ofProject(project.projectId), (launches) => launches.length === 0, 'merged task runs')
       yield* until((yield* LeftBehind).stopping, (stopping) => !stopping.has(task.taskId), 'merged task cleanup')
       assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-      assert.deepStrictEqual(yield* (yield* Launches).ofProject(project.projectId), [])
       // Keeping a place no longer lists it.
       assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
     }).pipe(

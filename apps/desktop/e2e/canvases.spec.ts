@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, reveal, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * The project's canvases (ADR-104), in a real window with the fake agents.
@@ -244,7 +244,7 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByText('First directions')).toBeVisible()
     const answer = page.getByRole('paragraph').filter({ hasText: 'The repository also has' })
-    await answer.scrollIntoViewIfNeeded()
+    await reveal(page, answer)
     await expect(doc).toBeInViewport()
     await shoot(page, electronApp, page, 'test-results/aside-canvas-beside.png')
     await answer.getByRole('button', { name: 'Open README.md' }).click()

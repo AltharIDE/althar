@@ -87,8 +87,8 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
 
     // It asks before it takes the checkout, in its thread; nothing switches under the edit.
     await page
-      .getByRole('button', { name: /Open task/ })
-      .last()
+      .getByRole('article', { name: 'Fix the login', exact: true })
+      .getByRole('button', { name: /^(Open task|Answer)/ })
       .click()
     const wait = page.getByRole('button', { name: 'Wait until they’re committed' })
     await expect(wait).toBeVisible()

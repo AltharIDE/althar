@@ -32,7 +32,9 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await startTask(page, 'Add a retry', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Add a retry', exact: true })).toContainText('Running')
     await startTask(page, 'Check links', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Check links', exact: true })).toContainText('Waiting · 1 agent busy')
     await startTask(page, 'Tidy the docs', '[lead:wait]')
     await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(2)
     await page
@@ -70,6 +72,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await next.screenshot({ path: 'test-results/up-next-places-dark.png', scale: 'css', animations: 'disabled' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
     await sizeWindow(electronApp, page, 1440, 900)
+    await expect(next.getByRole('listitem').nth(1)).toContainText('Tidy the docs')
     await next.getByRole('button', { name: 'Tidy the docs', exact: true }).click()
     await toConversation(page)
 

@@ -53,6 +53,12 @@ test('going back to an open project shows the screen it kept, where the person l
     const said = 16
     for (let n = 1; n <= said; n += 1)
       await say(page, `Message ${n}: ${'what the person says about the checkout and its retries, at some length. '.repeat(6)}`)
+    await expect(
+      conversation(page)
+        .getByRole('article', { name: 'Coordinator' })
+        .filter({ hasText: `Message ${said}:` })
+        .last(),
+    ).toBeVisible()
     // Every message answered: nothing queued, and no turn running. The composer's queue is the one that says so: a kept
     // screen's board, hidden or beside the conversation, says "Nothing queued" of its own whether a message waits or not.
     await expect(page.getByRole('region', { name: /^(Queued|\d+ queued)$/ })).toHaveCount(0)
@@ -72,19 +78,24 @@ test('going back to an open project shows the screen it kept, where the person l
     await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await say(page, 'Halyard first words')
+    await expect(conversation(page).getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'Halyard first words' })).toBeVisible()
     await expect(page.locator('section[aria-label="Conversation"][aria-busy]:visible')).toHaveCount(0)
 
     // Back on meridian: said one more thing, then scrolled up, with something half written, as the person leaves it.
     await tabs.getByRole('button', { name: /^meridian/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await say(page, `More: ${'and another thing. '.repeat(10)}`)
-    await scroller(page).evaluate(
-      (element) =>
-        new Promise((resolve) => {
-          element.addEventListener('scroll', resolve, { once: true })
-          element.scrollTop = 400
-        }),
-    )
+    await expect(
+      conversation(page).getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'More: and another thing.' }),
+    ).toBeVisible()
+    await expect(conversation(page)).not.toHaveAttribute('aria-busy')
+    await scroller(page).evaluate((element) => (element.scrollTop = 400))
+    await expect.poll(() => scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
+    const firstMessage = conversation(page)
+      .getByText(/^Message \d+:/)
+      .first()
+    await expect(firstMessage).toBeVisible()
+    const keptMessage = await firstMessage.innerText()
     await box.fill('Half a thought about')
     const left = await conversation(page).elementHandle()
     await tabs.getByRole('button', { name: /^halyard/ }).click()
@@ -97,7 +108,7 @@ test('going back to an open project shows the screen it kept, where the person l
     await tabs.getByRole('button', { name: /^meridian/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     // What was in view where the person left it: the thread draws only what is near the view (VirtualBlocks).
-    await expect(conversation(page)).toContainText('Message 1:')
+    await expect(conversation(page)).toContainText(keptMessage)
     expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
     await expect(box).toHaveValue('Half a thought about')
     expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)

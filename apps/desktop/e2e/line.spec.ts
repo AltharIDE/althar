@@ -128,6 +128,8 @@ test('lists reviews and a task waiting for an agent in Up next, and starts them 
 
     // Presses a row's grip, to drag it from there.
     const grab = async (title: string) => {
+      await expect(next.locator('ol[class*="sorting"]')).toHaveCount(0)
+      await still(page)
       await rows.filter({ hasText: title }).hover()
       const box = await next.getByRole('button', { name: new RegExp(`^Move ${title}.* in the line$`) }).boundingBox()
       if (box === null) throw new Error(`${title} has no grip`)
@@ -169,6 +171,7 @@ test('lists reviews and a task waiting for an agent in Up next, and starts them 
     await glide(cancelled, { x: cancelled.x, y: first.y + 4 })
     await inOrder([reviews[2] ?? '', JUMP, reviews[0] ?? '', reviews[1] ?? ''])
     await page.keyboard.press('Escape')
+    await expect(next.locator('ol[class*="sorting"]')).toHaveCount(0)
     await inOrder([JUMP, ...reviews])
     await page.mouse.up()
     await glide({ x: cancelled.x, y: first.y + 4 }, { x: cancelled.x, y: cancelled.y })

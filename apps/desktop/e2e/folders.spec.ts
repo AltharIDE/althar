@@ -102,8 +102,6 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await expect(work.getByText('Finished', { exact: true })).toBeVisible()
     await work.getByRole('button', { name: TITLE }).click()
     const header = page.getByRole('banner', { name: TITLE })
-    await header.getByRole('button', { name: 'Done' }).click()
-    await expect(header.getByText('Done', { exact: true })).toBeVisible()
     const kept = folder()
     expect(kept).not.toBeNull()
     expect(existsSync(kept ?? '')).toBe(true)
@@ -116,6 +114,9 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'pkg.node'), join(pkg, 'pkg.node')])
     else linkSync(join(store, 'pkg.node'), join(pkg, 'pkg.node'))
     writeFileSync(join(pkg, 'built.node'), Buffer.alloc(12 * 1024 ** 2, 2))
+    // Settling makes the folder eligible for sizing, so seed its install first.
+    await header.getByRole('button', { name: 'Done' }).click()
+    await expect(header.getByText('Done', { exact: true })).toBeVisible()
 
     // Work on this computer lists its folder as one that can go; Clean up removes it, and says what it freed.
     await thisComputer()
