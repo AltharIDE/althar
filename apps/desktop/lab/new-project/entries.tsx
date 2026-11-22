@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import { LinkButton } from '@althar/ui'
+import { LinkButton, type SetupWay } from '@althar/ui'
 
 import type { Client } from '../../src/renderer/data/client'
 import { draftsOf } from '../../src/renderer/features/newProject/draft'
@@ -43,8 +43,57 @@ export const useGuide = () =>
     () => guideOpen,
   )
 
+/** What a welcome picked on its way in: the New project page opens on it. */
+export interface Intent {
+  readonly way?: SetupWay
+  /** A repository's id, to clone. */
+  readonly repo?: string
+  /** What was typed or pasted to find it. */
+  readonly query?: string
+  /** A folder found on the home. */
+  readonly folder?: string
+  /** A folder typed by its path on the home. */
+  readonly path?: string
+  /** A new repository's name. */
+  readonly fresh?: string
+}
+let intent: Intent | null = null
+/** What the welcome picked, read as the page's choice starts; anything else that opens the page starts it empty. */
+export const intentNow = () => intent
+
+const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))
+
+/**
+ * Goes from a welcome to the New project page, with what it picked. Where
+ * `door` is given (what was pressed), it grows into the page: the page
+ * arrives from where the press was, as the view's transition draws it.
+ */
+export const enter = (next: Intent = {}, door?: HTMLElement | null) => {
+  const go = () => {
+    startNew()
+    intent = next
+  }
+  const view = (document as Document & { startViewTransition?: (update: () => Promise<void>) => { finished: Promise<void> } })
+    .startViewTransition
+  if (view === undefined || lab.get().d === 'b' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return go()
+  if (door) door.style.viewTransitionName = 'lab-door'
+  const transition = view.call(document, async () => {
+    if (door) door.style.viewTransitionName = ''
+    go()
+    // The page is drawn a frame or two after the route changes; until it is, the old view holds still.
+    for (let i = 0; i < 20 && document.querySelector('[data-lab-page]') === null; i++) await frame()
+    const page = document.querySelector<HTMLElement>('[data-lab-page]')
+    if (page !== null && door) page.style.viewTransitionName = 'lab-door'
+  })
+  void transition.finished.finally(() => {
+    const page = document.querySelector<HTMLElement>('[data-lab-page]')
+    if (page !== null) page.style.viewTransitionName = ''
+  })
+}
+
 /** Starts a new project the way the direction does. */
 export const startNew = (files?: ReadonlyArray<File>, fallback?: (files?: ReadonlyArray<File>) => void) => {
+  intent = null
   homesUi.set({ dialog: null, menu: false })
   if (lab.get().d === 'b') return guide.open()
   if (fallback !== undefined) return fallback(files)

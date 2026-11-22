@@ -15,14 +15,16 @@ import { fakeHost } from '../../tests/fixtures'
 import { makeClient } from './data'
 import { Guide } from './directions/b'
 import { startNew, useGuide, wire } from './entries'
-import { DIRECTIONS, lab, useLab } from './state'
+import { DIRECTIONS, lab, useLab, WELCOMES } from './state'
+import './welcome/transition.css'
 import { HOME, homesHost, onOpenProject, world } from './world'
 import s from './lab.module.css'
 
 /*
  * The new project lab (README.md): the desktop app's window, whole, in the
  * browser, on a made-up home, with the page's bar under it. The bar swaps
- * the direction in place (A–D, keys too), the home the window is on (H:
+ * the welcome an empty home opens on (1–4, 0 for none, starting over), the
+ * direction its New project goes on with in place (A–D, keys too), the home the window is on (H:
  * runner-1 or this Mac), light and dark (T), the app's narrowest window (N),
  * whether the home's next clone drops partway (F), and Settings on the home
  * as today rather than as proposed (S). R starts over.
@@ -53,7 +55,7 @@ onOpenProject((projectId) => {
 })
 
 function Bar() {
-  const { d, home, dark, narrow, fail, settings } = useLab()
+  const { w, d, home, dark, narrow, fail, settings } = useLab()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -62,6 +64,8 @@ function Bar() {
       const key = event.key.toLowerCase()
       const direction = DIRECTIONS.find((one) => one.kbd.toLowerCase() === key)
       if (direction !== undefined) return lab.set({ d: direction.key })
+      const welcome = WELCOMES.find((one) => one.key === key)
+      if (welcome !== undefined) return lab.restart({ w: welcome.key })
       if (key === 'h') return lab.restart({ home: lab.get().home === 'mac' ? 'runner' : 'mac' })
       if (key === 't') return lab.set({ dark: !lab.get().dark })
       if (key === 'n') return lab.set({ narrow: !lab.get().narrow })
@@ -74,6 +78,19 @@ function Bar() {
   }, [])
   return (
     <div className={s.bar} role="toolbar" aria-label="Directions">
+      <span className={s.group}>Welcome</span>
+      {WELCOMES.map((one) => (
+        <button
+          key={one.key}
+          type="button"
+          aria-pressed={w === one.key}
+          onClick={() => lab.restart({ w: one.key })}
+          title="Starts over on the home, with this welcome"
+        >
+          <kbd>{one.key}</kbd> {one.label}
+        </button>
+      ))}
+      <span className={s.group}>then</span>
       {DIRECTIONS.map((one) => (
         <button key={one.key} type="button" aria-pressed={d === one.key} onClick={() => lab.set({ d: one.key })}>
           <kbd>{one.kbd}</kbd> {one.label}
@@ -95,7 +112,7 @@ function Bar() {
         onClick={() => lab.restart({ fail: !fail })}
         title="Starts over, with the next clone dropping partway"
       >
-        <kbd>F</kbd> Clone drops
+        <kbd>F</kbd> Drops
       </button>
       <button
         type="button"
@@ -103,10 +120,10 @@ function Bar() {
         onClick={() => lab.reload({ settings: settings === 'today' ? 'proposed' : 'today' })}
         title="Settings on the home: as today, or by whose each setting is"
       >
-        <kbd>S</kbd> Settings as today
+        <kbd>S</kbd> Old settings
       </button>
       <button type="button" onClick={() => lab.restart()}>
-        <kbd>R</kbd> Start over
+        <kbd>R</kbd> Restart
       </button>
     </div>
   )

@@ -6,9 +6,22 @@ Making a project from the app, on whichever home the window is on, in four direc
 cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/new-project/vite.config.ts
 ```
 
-At `http://localhost:6188`. The bar along the bottom, or its keys, swaps the direction in place: `A`–`D`. `H` starts over on the other home (runner-1, this Mac), `T` dark, `N` the app's narrowest window, `F` makes the next clone drop partway, `S` shows Settings as it is today rather than as proposed, `R` starts over. The address keeps it all: `?d=b&home=runner&theme=dark`, `?d=c&home=mac`, `#/settings/tasks`.
+At `http://localhost:6188`. The bar along the bottom, or its keys, picks the welcome an empty home opens on (`1`–`4`, `0` for none; each starts over), and swaps the direction its New project goes on with in place: `A`–`D`. `H` starts over on the other home (runner-1, this Mac), `T` dark, `N` the app's narrowest window, `F` makes the next clone drop partway, `S` shows Settings as it is today rather than as proposed, `R` starts over. The address keeps it all: `?w=2&d=a`, `?d=b&home=runner&theme=dark`, `?d=c&home=mac`, `#/settings/tasks`.
 
 Seams, all in `vite.config.ts`: the start screen and the New project tab are the lab's (`StartView.tsx`, `NewProjectView.tsx`); the tab bar's + and ⌘N, and Manage homes' line for a home with no projects, start the direction's flow; the Settings page takes its side's groups, each section's line and a card for the home from `settings.tsx`.
+
+## The welcome
+
+A home with no projects opens on a welcome, and the welcome opens the New project page (or the direction's flow, `A`–`D`), with what was picked on it already chosen there (`Intent` in `entries.tsx`). Where the browser draws view transitions, what was pressed grows into the page while the welcome falls back behind it (`welcome/transition.css`). Four, in `welcome/`:
+
+- **1 · Arrival.** The home's welcome as the window's launch is: Althar's light (the kit's `Light`) rises tall off the foot, the mark comes up dot by dot (`HalftoneMark`), and "Welcome to runner-1" arrives a letter at a time over its facts. Then three doors in, each drawn as what's behind it (your repositories fanned, spreading as you reach; the home's folders stacked; a blank whose mark is drawn as you reach for it), and a strip of what the home has, each missing sign-in a press. A repository's address pasted anywhere goes straight in.
+- **2 · Orbit.** runner-1 at the middle of its own system: your GitHub repositories circling it on the outer ring, the folders already on it on the inner, a blank to start empty. Reach for one and the rings hold still while a line flows from it to the home; press it and it flies in, the home takes it, and the home opens into the New project page with it chosen. Beside it, the words, a field for an address, and New project.
+- **3 · Tour.** The first-run welcome's card and track, for a home: what it is (its facts read in a row at a time, beside the home answering), that your settings are there already (each flies across from this Mac and is ticked where it lands), what it signs in itself (the presses that do it), and its first project (the doors). Its main button opens the page out of the card.
+- **4 · Ask.** One big question and one big line. As you type, the question becomes what pressing will do ("Clone althar", "Open legacy-billing", "Start invoices empty"), the project's mark-to-be swells up behind it, and what matches lines up under the line. Return opens the page on it.
+
+Underneath, a welcome needs nothing the directions don't: it reads what the New project page reads (the code host's repositories, what's found on the home, what the home has), and hands its pick to the page. The Arrival's and Tour's facts line wants the host to say what it is (system, cores, free space, tools), which `Status` doesn't today. Connect a home could end on it too, rather than on the empty home.
+
+**Pick: 1, Arrival, with Ask's line.** It's the one that makes landing on a new home feel like an event without slowing anyone down: one screen, three presses in. Give its doors Ask's field above them (type or paste, and the headline says what it'll do) for whoever knows what they want. Orbit is the most fun and worth keeping in mind for the moment a repository is chosen (the fly-in), but its moving targets are harder to press. The Tour is right once, for a person's first home, and wrong every time after.
 
 ## The directions
 

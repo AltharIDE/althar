@@ -9,16 +9,18 @@ import { BEmpty } from './directions/b'
 import { CPage } from './directions/c'
 import { DPage } from './directions/d'
 import { useLab } from './state'
+import { LabWelcome } from './welcome/Welcome'
 import { HOME } from './world'
 
 /*
  * The start screen, as the start route has it in the lab (vite.config.ts's
- * seam): a home with no projects is drawn as the direction has it; this
- * Mac, and a home with projects, as the app has them.
+ * seam): a home with no projects opens on the welcome the bar picks (1–4),
+ * or with none (0), as the direction has it; this Mac, and a home with
+ * projects, as the app has them.
  */
 
 export function StartView(props: ComponentProps<typeof AppStartView>) {
-  const { d } = useLab()
+  const { d, w } = useLab()
   const projects = props.model.projects
   if (!HOME.remote) return <AppStartView {...props} />
   if (projects === null) return <HomePending />
@@ -26,7 +28,7 @@ export function StartView(props: ComponentProps<typeof AppStartView>) {
   return (
     <div className={st.window}>
       <BareBar />
-      {d === 'a' ? <AEmpty /> : d === 'b' ? <BEmpty /> : d === 'c' ? <CPage first /> : <DPage first />}
+      {w !== '0' ? <LabWelcome key={w} /> : d === 'a' ? <AEmpty /> : d === 'b' ? <BEmpty /> : d === 'c' ? <CPage first /> : <DPage first />}
     </div>
   )
 }

@@ -22,7 +22,7 @@ export function NewProjectView({ onCreated, onClose }: ComponentProps<typeof App
     // A home with no projects has no tabs: the window's bar stays over the page.
     <div className={st.window}>
       <BareBar />
-      <div className={l.fill}>
+      <div className={l.fill} data-lab-page>
         {d === 'a' ? (
           <APage onCreated={onCreated} onClose={onClose} />
         ) : d === 'b' ? (

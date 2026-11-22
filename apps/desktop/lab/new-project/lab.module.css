@@ -126,3 +126,14 @@
   line-height: 1.45;
   color: var(--t-2);
 }
+
+/* a group of the bar's buttons, named */
+.group {
+  flex-shrink: 0;
+  margin: 0 4px 0 8px;
+  font-size: 11px;
+  color: var(--t-4);
+}
+.group:first-child {
+  margin-left: 2px;
+}

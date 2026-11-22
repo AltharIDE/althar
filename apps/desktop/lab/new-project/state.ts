@@ -8,15 +8,26 @@ import { useSyncExternalStore } from 'react'
  */
 
 export const DIRECTIONS = [
-  { key: 'a', kbd: 'A', label: 'New project page' },
-  { key: 'b', kbd: 'B', label: 'Guided steps' },
-  { key: 'c', kbd: 'C', label: 'Pick and go' },
-  { key: 'd', kbd: 'D', label: 'Agent sets it up' },
+  { key: 'a', kbd: 'A', label: 'Page' },
+  { key: 'b', kbd: 'B', label: 'Steps' },
+  { key: 'c', kbd: 'C', label: 'Pick' },
+  { key: 'd', kbd: 'D', label: 'Agent' },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
+
+/** The welcome a home with no projects opens on, before the New project page; 0 is none, the direction's own empty home. */
+export const WELCOMES = [
+  { key: '1', label: 'Arrival' },
+  { key: '2', label: 'Orbit' },
+  { key: '3', label: 'Tour' },
+  { key: '4', label: 'Ask' },
+  { key: '0', label: 'None' },
+] as const
+export type WelcomeKey = (typeof WELCOMES)[number]['key']
 export type HomeKey = 'runner' | 'mac'
 
 export interface LabState {
+  readonly w: WelcomeKey
   readonly d: Direction
   readonly home: HomeKey
   readonly dark: boolean
@@ -29,7 +40,9 @@ export interface LabState {
 
 const params = new URLSearchParams(window.location.search)
 const asked = params.get('d')
+const welcome = params.get('w')
 let state: LabState = {
+  w: WELCOMES.find((one) => one.key === welcome)?.key ?? '1',
   d: DIRECTIONS.find((one) => one.key === asked)?.key ?? 'a',
   home: params.get('home') === 'mac' ? 'mac' : 'runner',
   dark: params.get('theme') === 'dark',
@@ -41,6 +54,7 @@ const listeners = new Set<() => void>()
 
 const urlOf = (next: LabState) => {
   const url = new URL(window.location.href)
+  url.searchParams.set('w', next.w)
   url.searchParams.set('d', next.d)
   url.searchParams.set('home', next.home)
   for (const [key, on] of [

@@ -35,6 +35,7 @@ import {
   world,
   YOURS,
 } from '../world'
+import { intentNow } from '../entries'
 import p from './parts.module.css'
 
 /*
@@ -78,12 +79,14 @@ const foundAt = (path: string): Found => {
 }
 
 export const usePick = (start: SetupWay = 'clone'): Pick => {
-  const [way, onWay] = useState<SetupWay>(start)
-  const [query, onQuery] = useState('')
-  const [chosen, setChosen] = useState<string | null>(null)
-  const [folder, setFolder] = useState<string | null>(null)
-  const [typed, setTyped] = useState<readonly Found[]>([])
-  const [fresh, onFresh] = useState('')
+  // What a welcome picked on its way here, chosen already.
+  const [picked] = useState(intentNow)
+  const [way, onWay] = useState<SetupWay>(picked?.way ?? start)
+  const [query, onQuery] = useState(picked?.query ?? '')
+  const [chosen, setChosen] = useState<string | null>(picked?.repo ?? null)
+  const [folder, setFolder] = useState<string | null>(picked?.folder ?? (picked?.path === undefined ? null : foundAt(picked.path).id))
+  const [typed, setTyped] = useState<readonly Found[]>(picked?.path === undefined ? [] : [foundAt(picked.path)])
+  const [fresh, onFresh] = useState(picked?.fresh ?? '')
   const pasted = pastedOf(query)
   const repo = REPOS.find((one) => one.id === chosen) ?? (pasted?.id === chosen ? pasted : undefined)
   const found = [...FOUND, ...typed].find((one) => one.id === folder)

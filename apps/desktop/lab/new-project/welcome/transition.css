@@ -1,0 +1,66 @@
+/*
+ * A welcome's way into the New project page, as the view's transition draws
+ * it: what was pressed (a door, the home, the card) grows into the page,
+ * while the welcome behind falls back and the page comes up through it.
+ * Global: the transition's parts are the document's, not a module's.
+ */
+
+[data-lab-window] {
+  view-transition-name: lab-window;
+}
+::view-transition-old(lab-window) {
+  animation: 420ms cubic-bezier(0.23, 1, 0.32, 1) both lab-fall;
+}
+::view-transition-new(lab-window) {
+  animation: 520ms cubic-bezier(0.23, 1, 0.32, 1) 120ms both lab-come;
+}
+::view-transition-group(lab-door) {
+  z-index: 2;
+  overflow: clip;
+  border-radius: 18px;
+  animation-duration: 620ms;
+  animation-timing-function: cubic-bezier(0.3, 0.8, 0.2, 1);
+}
+::view-transition-old(lab-door),
+::view-transition-new(lab-door) {
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+::view-transition-old(lab-door) {
+  animation: 260ms ease-out both lab-out;
+}
+::view-transition-new(lab-door) {
+  animation: 420ms cubic-bezier(0.23, 1, 0.32, 1) 120ms both lab-in;
+}
+
+@keyframes lab-fall {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(4px);
+  }
+}
+@keyframes lab-come {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lab-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes lab-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 1ms !important;
+  }
+}
