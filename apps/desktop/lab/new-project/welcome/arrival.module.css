@@ -26,7 +26,7 @@
   font-weight: 550;
   letter-spacing: -0.015em;
   color: var(--t-3);
-  animation: blur-in 560ms linear 200ms backwards;
+  animation: blur-in 440ms linear 160ms backwards;
 }
 /* the home's name, a letter at a time, each a blur clearing where it stands */
 .name {
@@ -35,8 +35,8 @@
 .name span {
   display: inline-block;
   white-space: pre;
-  animation: blur-in 600ms linear backwards;
-  animation-delay: calc(340ms + var(--i) * 40ms);
+  animation: blur-in 460ms linear backwards;
+  animation-delay: calc(270ms + var(--i) * 32ms);
 }
 .line {
   max-width: 440px;

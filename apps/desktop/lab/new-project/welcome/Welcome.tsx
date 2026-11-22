@@ -35,7 +35,7 @@ export function LabWelcome() {
  * line, in place, nothing rising. Later the further down and across a piece
  * sits. Only opacity and filter move, so the compositor draws it.
  */
-export const BLUR_IN = { length: 560, blur: 10, start: 160, down: 480, across: 100 } as const
+export const BLUR_IN = { length: 440, blur: 10, start: 120, down: 380, across: 80 } as const
 
 const ARRIVING = '[data-arrive], [data-arrive-each] > *'
 

@@ -40,7 +40,7 @@
   overflow: hidden;
   font-size: clamp(40px, 5vw, 66px);
   text-overflow: ellipsis;
-  animation: say 480ms linear backwards;
+  animation: say 380ms linear backwards;
 }
 /* what pressing will do, on one line */
 .title[data-says] {
@@ -60,7 +60,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--t-2);
-  animation: say 480ms linear 60ms backwards;
+  animation: say 380ms linear 50ms backwards;
 }
 
 /* the one big line, its button beside it */
@@ -122,8 +122,8 @@
 }
 .matches li {
   min-width: 0;
-  animation: card 420ms linear backwards;
-  animation-delay: calc(var(--i) * 45ms);
+  animation: card 340ms linear backwards;
+  animation-delay: calc(var(--i) * 36ms);
 }
 .match {
   display: flex;

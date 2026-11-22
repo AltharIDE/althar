@@ -15,7 +15,7 @@
   box-shadow:
     0 0 0 1px var(--line),
     var(--lift-dialog);
-  animation: card 480ms linear backwards;
+  animation: card 380ms linear backwards;
 }
 .head {
   display: flex;
@@ -57,7 +57,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  animation: rise 520ms linear backwards;
+  animation: rise 420ms linear backwards;
 }
 .title {
   font-size: 34px;
@@ -76,7 +76,7 @@
   flex-direction: column;
   justify-content: center;
   min-height: 0;
-  animation: rise 520ms linear 90ms backwards;
+  animation: rise 420ms linear 70ms backwards;
 }
 .foot {
   display: flex;
@@ -127,8 +127,8 @@
   min-width: 0;
   padding: 18px 20px 0;
   border-left: 1px solid var(--line);
-  animation: land 560ms linear backwards;
-  animation-delay: calc(560ms + var(--i) * 110ms);
+  animation: land 440ms linear backwards;
+  animation-delay: calc(440ms + var(--i) * 90ms);
 }
 .figure:first-child {
   padding-left: 0;
@@ -173,7 +173,7 @@
   font-family: var(--mono);
   font-size: 12px;
   color: var(--t-3);
-  animation: land 560ms linear 900ms backwards;
+  animation: land 440ms linear 720ms backwards;
 }
 .tools span {
   display: inline-flex;
@@ -327,8 +327,8 @@
 }
 .side[data-home] .chips li {
   background: var(--n-1);
-  animation: rise 520ms linear backwards;
-  animation-delay: calc(360ms + var(--i) * 90ms);
+  animation: rise 420ms linear backwards;
+  animation-delay: calc(290ms + var(--i) * 72ms);
 }
 .chips b {
   font-weight: 600;
@@ -346,8 +346,8 @@
 .chipTick {
   align-self: center;
   color: var(--t-3);
-  animation: pop 360ms linear backwards;
-  animation-delay: calc(700ms + var(--i) * 90ms);
+  animation: pop 290ms linear backwards;
+  animation-delay: calc(560ms + var(--i) * 72ms);
 }
 .across {
   display: grid;

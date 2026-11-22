@@ -138,7 +138,7 @@ export function TourWelcome() {
         { opacity: 1, filter: 'blur(0px)' },
         { opacity: 0, filter: 'blur(10px)' },
       ],
-      { duration: 360, easing: 'linear', fill: 'forwards' },
+      { duration: 300, easing: 'linear', fill: 'forwards' },
     )
     void away.finished.finally(() => ghost.remove())
   }
