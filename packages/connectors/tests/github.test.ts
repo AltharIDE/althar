@@ -2562,32 +2562,51 @@ describe('GitHub’s pictures', () => {
   const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'empty state.png', mediaType: 'image/png' }
   const UPLOADS = /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/
 
-  it.effect('keeps an upload size rejection distinct from a response size failure', () =>
+  /** What GitHub answers an upload it takes for too big: as it answered one whose bytes never arrived. */
+  const tooBig = {
+    status: 422,
+    text: String.raw`{"message":"Validation Failed","errors":[{"resource":"UserAsset","code":"custom","field":"size","message":"size Yowza that's a big file. \u003cspan class='drag-and-drop-error-info'\u003e \u003cspan class='btn-link'\u003eTry again\u003c/span\u003e with a file size less than 10MB.\u003c/span\u003e"}]}`,
+  }
+
+  it.effect('keeps an upload size rejection distinct from a response size failure, for a picture over the limit', () =>
     Effect.gen(function* () {
-      const { host } = github([
-        [
-          'POST',
-          UPLOADS,
-          {
-            status: 422,
-            json: {
-              message: 'Validation Failed',
-              errors: [
-                {
-                  message: `Yowza that's a big file. <span class="drag-and-drop-error-info"><span class="btn-link">Try again</span> with a file size less than 10MB.</span>`,
-                },
-              ],
-            },
-          },
-        ],
-      ])
-      const error = yield* Effect.flip(host.uploadPicture!(repository, picture))
+      const { host } = github([['POST', UPLOADS, tooBig]])
+      const big = { ...picture, bytes: new Uint8Array(11_000_000) }
+      const error = yield* Effect.flip(host.uploadPicture!(repository, big))
       assert.strictEqual(error.reason, 'rejected')
       assert.strictEqual(error.status, 422)
       assert.strictEqual(error.uploadLimit, 10_000_000)
       assert.isUndefined(error.sizeLimit)
       assert.notInclude(error.message, '<span')
       assert.include(error.message, 'less than 10MB')
+    }),
+  )
+
+  it.effect('says the bytes didn’t arrive, where GitHub calls a picture well under its limit too big', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', UPLOADS, tooBig]])
+      const shot = { ...picture, name: 'lead-01.png', bytes: new Uint8Array(150_000).fill(7) }
+      const error = yield* Effect.flip(host.uploadPicture!(repository, shot))
+      // What was sent was the picture, whole.
+      assert.strictEqual(sent[0]?.bytes?.byteLength, 150_000)
+      assert.strictEqual(error.reason, 'rejected')
+      assert.strictEqual(error.status, 422)
+      // No smaller copy would help: no limit to fit it under.
+      assert.isUndefined(error.uploadLimit)
+      assert.strictEqual(
+        error.message,
+        "GitHub refused lead-01.png as too big, though it is 150 KB, under its 10 MB limit: the picture's bytes didn't reach it. Try again.",
+      )
+    }),
+  )
+
+  it.effect('never sends an empty picture, which GitHub would call too big', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', UPLOADS, tooBig]])
+      const error = yield* Effect.flip(host.uploadPicture!(repository, { ...picture, bytes: new Uint8Array() }))
+      assert.strictEqual(error.reason, 'rejected')
+      assert.match(error.message, /empty state\.png is empty/)
+      assert.isEmpty(sent)
     }),
   )
 

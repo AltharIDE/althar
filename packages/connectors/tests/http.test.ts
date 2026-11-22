@@ -56,6 +56,18 @@ it('turns HTML in host JSON and GraphQL errors into plain words and keeps the up
   assert.strictEqual(messageOf('<html><body>Bad gateway</body></html>', 'Bad gateway'), 'Bad gateway')
 })
 
+it('says GitHub’s refusal of an empty upload in plain words, as GitHub sends it and escaped', () => {
+  // What uploads.github.com answered an upload whose bytes never arrived (an empty body), field and all.
+  const said = String.raw`{"message":"Validation Failed","request_id":"9222:3451A4","documentation_url":"https://docs.github.com/rest","errors":[{"resource":"UserAsset","code":"custom","field":"size","message":"size Yowza that's a big file. \u003cspan class='drag-and-drop-error-info'\u003e \u003cspan class='btn-link'\u003eTry again\u003c/span\u003e with a file size less than 10MB.\u003c/span\u003e"}]}`
+  const plain = "Validation Failed: size Yowza that's a big file. Try again with a file size less than 10MB."
+  const error = failureOf('github', 422, new Headers(), said, 0)
+  assert.strictEqual(error.message, plain)
+  assert.strictEqual(error.uploadLimit, 10_000_000)
+  const escaped = said.replaceAll('\\u003c', '&lt;').replaceAll('\\u003e', '&gt;')
+  assert.strictEqual(failureOf('github', 422, new Headers(), escaped, 0).message, plain)
+  assert.strictEqual(messageOf(JSON.stringify({ message: 'Denied &lt;b class="x"&gt;here&lt;/b&gt;&lt;br/&gt;' }), 'Error'), 'Denied here')
+})
+
 describe('a call to a service', () => {
   it.effect('signs in with the header asked for on each call, and reads the answer', () =>
     Effect.gen(function* () {

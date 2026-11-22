@@ -228,10 +228,15 @@ describe('a task’s screenshots on its pull request', () => {
       yield* (yield* PullRequestScreenshots).post({ taskId, url, leftOut: [] })
       assert.deepStrictEqual(sent, [bytes])
       const body = comments(github)[0]?.body ?? ''
-      assert.include(body, 'GitHub said: Validation Failed')
-      assert.include(body, 'Try again with a file size less than 10MB.')
+      // A picture well under the limit, called too big: said as what it is, in plain words, never resized.
+      assert.include(body, 'GitHub said: GitHub refused')
+      assert.include(body, "under its 10 MB limit: the picture's bytes didn't reach it.")
+      assert.notInclude(body, '<span')
       assert.notInclude(body, "could not fit the host's upload limit")
-      assert.include((yield* standing(threadId))?.failed ?? '', 'GitHub said: Validation Failed')
+      const state = yield* standing(threadId)
+      assert.match(state?.failed ?? '', /didn’t go up\. GitHub said: GitHub refused .* as too big/)
+      assert.notInclude(state?.failed ?? '', '<span')
+      assert.lengthOf(state?.notUp ?? [], 1)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

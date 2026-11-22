@@ -571,6 +571,10 @@ export const tail = (log: string): string => {
 /** What every call to GitHub's API carries: its media type, and the version of the API it is written against. */
 const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
 
+/** A file's size in a person's words, as GitHub counts it: 150 KB, 10 MB. */
+const sizeOf = (bytes: number) =>
+  bytes >= 1_000_000 ? `${Math.round(bytes / 100_000) / 10} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`
+
 /** What GitHub says of a picture it took for a repository's conversations: where it is served from. */
 const AssetAnswer = Schema.Struct({ url: Schema.String })
 
@@ -2048,9 +2052,28 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     uploadPicture: (repository, picture) =>
       Effect.gen(function* () {
         if (uploads === null) return yield* noPictures(product)
+        // GitHub takes the asset's size from what arrives: none arriving, it says the file is too big (its words for any size it refuses).
+        if (picture.bytes.byteLength === 0)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'rejected',
+            message: `${picture.name} is empty: there is no picture to upload`,
+          })
         // By the repository's own number, so it is served to those who can see the repository: its id, as GitHub gave it.
         const query = new URLSearchParams({ name: picture.name, content_type: picture.mediaType, repository_id: repository.id })
-        const asset = yield* http.upload(AssetAnswer, `${uploads}?${query.toString()}`, picture.bytes, 'application/octet-stream')
+        const asset = yield* http.upload(AssetAnswer, `${uploads}?${query.toString()}`, picture.bytes, 'application/octet-stream').pipe(
+          Effect.mapError((error) =>
+            // Too big, of one well under its limit: what arrived wasn't the picture, so a smaller one wouldn't help.
+            error.uploadLimit !== undefined && picture.bytes.byteLength < error.uploadLimit
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'rejected',
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                  message: `GitHub refused ${picture.name} as too big, though it is ${sizeOf(picture.bytes.byteLength)}, under its ${sizeOf(error.uploadLimit)} limit: the picture's bytes didn't reach it. Try again.`,
+                })
+              : error,
+          ),
+        )
         // It is shown by its address in a comment anyone with the repository reads: never one off GitHub's own.
         const at = URL.parse(asset.url)
         if (

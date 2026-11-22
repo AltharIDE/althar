@@ -49,6 +49,7 @@ export function ScreenshotsOnPullRequest({
       pullRequest={text.named(change)}
       shots={shots}
       leftOut={screenshots.leftOut}
+      {...(screenshots.notUp === undefined ? {} : { notUp: screenshots.notUp })}
       changed={screenshots.changed}
       destination={text.destination(change)}
       host={productName(change.product)}

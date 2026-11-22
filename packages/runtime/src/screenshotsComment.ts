@@ -27,6 +27,8 @@ export const PostedShot = Schema.Struct({
   digest: Schema.String,
   url: Schema.String,
   note: Schema.optional(Schema.String),
+  /** Where its picture didn't go up: why, in a few words without its name. */
+  why: Schema.optional(Schema.String),
   /** The pull request's head when it was posted; null where it wasn't known. */
   head: Schema.NullOr(Schema.String),
 })
@@ -108,6 +110,20 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
   const leftOut = kept?.leftOut ?? []
   const posting = postingOf(now, leftOut)
   const changed = kept === undefined || kept.commentId === null ? posting.length : changedBetween(posting, kept.shown)
+  const shown = kept?.shown ?? []
+  const failed =
+    kept?.failed ??
+    notUpWords(
+      shown.filter((shot) => shot.url === '' && goes(posting, shot)).map((shot) => ({ name: shot.caption, why: shot.why ?? shot.note })),
+      posting.length,
+    )
+  // Where the last try failed: each view going up whose picture the pull request doesn't show as it is now.
+  const notUp =
+    failed === null
+      ? []
+      : posting
+          .filter((shot) => !shown.some((was) => was.key === shot.key && was.digest === shot.digest && was.url !== ''))
+          .map((shot) => shot.key)
   return {
     standing: kept === undefined || kept.commentId === null ? 'unposted' : changed === 0 ? 'posted' : 'changed',
     changed,
@@ -115,14 +131,32 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
     // Only the views Outputs still shows: one gone is nothing to leave out.
     leftOut: leftOut.filter((key) => now.some((shot) => shot.key === key)),
     commentUrl: kept?.commentUrl ?? null,
-    failed:
-      kept?.failed ??
-      (kept?.shown
-        .filter((shot) => shot.url === '' && posting.some((now) => now.key === shot.key && now.digest === shot.digest))
-        .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
-        .join(' ') ||
-        null),
+    failed,
+    ...(notUp.length === 0 ? {} : { notUp }),
   }
+}
+
+const goes = (posting: ReadonlyArray<Pick<Posting, 'key' | 'digest'>>, shot: PostedShot) =>
+  posting.some((now) => now.key === shot.key && now.digest === shot.digest)
+
+/**
+ * What the card says of the pictures that didn't go up, where some didn't:
+ * how many of how many, a couple by name, and each reason once, as the
+ * host's refusal is often the same for all of them.
+ */
+export const notUpWords = (
+  missing: ReadonlyArray<{ readonly name: string; readonly why?: string | undefined }>,
+  of: number,
+): string | null => {
+  if (missing.length === 0) return null
+  const names = missing.map((shot) => shot.name)
+  const named = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+  const whys = [...new Set(missing.map((shot) => shot.why ?? ''))].filter((why) => why !== '')
+  const head =
+    missing.length === of
+      ? `${of === 1 ? `${named} didn’t go up` : `None of the ${of} screenshots went up`}`
+      : `${missing.length} of ${of} screenshots didn’t go up: ${named}`
+  return `${head}.${whys.length === 0 ? '' : ` ${whys.join(' ')}`}`.slice(0, 600)
 }
 
 /**

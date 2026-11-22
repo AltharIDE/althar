@@ -23,6 +23,10 @@ const headersOf = (said: Readonly<Record<string, string | ReadonlyArray<string>>
  */
 const manually = (net: AppNet, url: string, init: RequestInit): Promise<Response> =>
   new Promise((resolve, reject) => {
+    const body = init.body
+    // Never sent without it: a body left out goes as an empty one, which a host answers as something else (GitHub: "too big").
+    if (body != null && typeof body !== 'string' && !ArrayBuffer.isView(body) && !(body instanceof ArrayBuffer))
+      return reject(new TypeError(`The app's network can't send a ${Object.prototype.toString.call(body).slice(8, -1)} body as it is`))
     const request = net.request({ url, method: init.method ?? 'GET', redirect: 'manual' })
     let settled = false
     const settle = (end: () => void) => {
@@ -62,7 +66,6 @@ const manually = (net: AppNet, url: string, init: RequestInit): Promise<Response
       )
     })
     request.on('error', (error) => settle(() => reject(error)))
-    const body = init.body
     if (typeof body === 'string') request.write(body)
     else if (ArrayBuffer.isView(body)) request.write(Buffer.from(body.buffer, body.byteOffset, body.byteLength))
     else if (body instanceof ArrayBuffer) request.write(Buffer.from(body))

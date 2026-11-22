@@ -23,6 +23,7 @@ import {
   earlierAfter,
   isScreenshotsComment,
   type Kept,
+  notUpWords,
   PostedShot,
   postingOf,
   standingOf,
@@ -189,6 +190,7 @@ export class PullRequestScreenshots extends Context.Service<
           if (upload === undefined) return yield* refuse('no_pictures', on.change)
           const uploads: Record<string, string> = { ...kept?.uploads }
           const notes: Record<string, string> = {}
+          const whys: Record<string, string> = {}
           for (const shot of posting) {
             if (uploads[shot.digest] !== undefined) {
               const note = kept?.shown.find((was) => was.digest === shot.digest)?.note
@@ -233,17 +235,18 @@ export class PullRequestScreenshots extends Context.Service<
                 const { product, status, reason, message } = result.failure
                 yield* Effect.logWarning(`Could not upload PR picture ${shot.name}`, { product, status, reason, message, attemptedBytes })
                 if (reason !== 'rejected') return yield* result.failure
-                notes[shot.digest] = `Left out: ${shot.name}. ${hostName(product)} said: ${message}`
+                whys[shot.digest] = `${hostName(product)} said: ${message}`
               }
             }
-            if (uploads[shot.digest] === undefined)
-              notes[shot.digest] ??= preparationFailed
-                ? `Left out: ${shot.name}. The image processor could not prepare it. Try again.`
-                : `Left out: ${shot.name} could not fit the host's upload limit.`
-            else if (fitted?.note) notes[shot.digest] = fitted.note
+            if (uploads[shot.digest] === undefined) {
+              whys[shot.digest] ??= preparationFailed
+                ? 'The image processor could not prepare it. Try again.'
+                : "It could not fit the host's upload limit."
+              notes[shot.digest] = `Left out: ${shot.name}. ${whys[shot.digest]}`
+            } else if (fitted?.note) notes[shot.digest] = fitted.note
             yield* keep(on.linkId, on.projectId, { uploads })
           }
-          return { uploads, notes }
+          return { uploads, notes, whys }
         })
 
       /**
@@ -284,7 +287,7 @@ export class PullRequestScreenshots extends Context.Service<
               })
             // What is left out is kept first: it holds whatever happens to the rest.
             if (input.leftOut !== undefined) yield* keep(on.linkId, on.projectId, { leftOut })
-            const { uploads, notes } = yield* uploaded(on, posting, kept)
+            const { uploads, notes, whys } = yield* uploaded(on, posting, kept)
             const head = on.change.headSha
             const shown = posting.map((shot): PostedShot => ({
               key: shot.key,
@@ -292,6 +295,7 @@ export class PullRequestScreenshots extends Context.Service<
               digest: shot.digest,
               url: uploads[shot.digest] ?? '',
               ...(notes[shot.digest] === undefined ? {} : { note: notes[shot.digest] }),
+              ...(whys[shot.digest] === undefined ? {} : { why: whys[shot.digest] }),
               head,
             }))
             // A view shown again as it was keeps the commit it was taken of.
@@ -337,11 +341,10 @@ export class PullRequestScreenshots extends Context.Service<
               leftOut,
               uploads,
               postedAt: new Date(comment.at).toISOString(),
-              failed:
-                posted
-                  .filter((shot) => shot.url === '')
-                  .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
-                  .join(' ') || null,
+              failed: notUpWords(
+                posting.filter((shot) => uploads[shot.digest] === undefined).map((shot) => ({ name: shot.name, why: whys[shot.digest] })),
+                posting.length,
+              ),
             })
             yield* touchTask(input.taskId)
           }).pipe(

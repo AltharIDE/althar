@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events'
 
+import { makeGitHub } from '@althar/connectors'
+import { Effect } from 'effect'
 import type { ClientRequest, ClientRequestConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -86,6 +88,61 @@ describe("the app's fetch", () => {
     })
     expect(answer.status).toBe(201)
     expect(Buffer.concat(asked[0]?.body ?? [])).toEqual(Buffer.from([137, 80, 78, 71, 255]))
+  })
+
+  it('refuses a body it can’t write, rather than send an empty one', async () => {
+    const { net, asked } = fakeNet((request) => respond(request, 201, {}, ['{}']))
+    const fetch = appFetchOf(net)
+    for (const body of [new Blob([Uint8Array.of(1, 2)]), new URLSearchParams({ a: '1' })])
+      await expect(fetch('https://uploads.github.com/x', { method: 'POST', redirect: 'manual', body })).rejects.toThrow(/can't send/)
+    expect(asked).toHaveLength(0)
+  })
+
+  it('takes a picture to GitHub whole, through GitHub’s connection as the app runs it', async () => {
+    // GitHub as it answers: the asset's size is what arrives, and none arriving is "too big" (0.8.0's transport sent none).
+    const { net, asked } = fakeNet((request) => {
+      const sent = Buffer.concat(asked.at(-1)?.body ?? [])
+      if (sent.byteLength === 0)
+        respond(request, 422, { 'content-type': 'application/json' }, [
+          String.raw`{"message":"Validation Failed","errors":[{"resource":"UserAsset","code":"custom","field":"size","message":"size Yowza that's a big file. <span class='drag-and-drop-error-info'> <span class='btn-link'>Try again</span> with a file size less than 10MB.</span>"}]}`,
+        ])
+      else
+        respond(request, 201, { 'content-type': 'application/json' }, [
+          JSON.stringify({ url: 'https://github.com/user-attachments/assets/1' }),
+        ])
+    })
+    const github = makeGitHub({
+      fetch: appFetchOf(net),
+      apiUrl: 'https://api.github.com',
+      webUrl: 'https://github.com',
+      credential: Effect.succeed({ kind: 'bearer', token: 't' }),
+    })
+    const png = new Uint8Array(150_000).fill(7)
+    png.set([137, 80, 78, 71])
+    const url = await Effect.runPromise(
+      github.uploadPicture!(
+        {
+          id: '1375156701',
+          path: ['AltharIDE', 'althar'],
+          defaultBranch: 'main',
+          webUrl: 'https://github.com/AltharIDE/althar',
+          canPush: true,
+          merges: ['squash'],
+        },
+        {
+          bytes: png,
+          name: 'lead-01.png',
+          mediaType: 'image/png',
+        },
+      ),
+    )
+    expect(url).toBe('https://github.com/user-attachments/assets/1')
+    expect(asked[0]?.options).toMatchObject({ method: 'POST', redirect: 'manual' })
+    expect(asked[0]?.options.url).toMatch(
+      /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?name=lead-01\.png&content_type=image%2Fpng&repository_id=1375156701$/,
+    )
+    expect(asked[0]?.headers['content-type']).toBe('application/octet-stream')
+    expect(Buffer.concat(asked[0]?.body ?? []).equals(Buffer.from(png))).toBe(true)
   })
 
   it('fails as the network does, and stops when told to', async () => {

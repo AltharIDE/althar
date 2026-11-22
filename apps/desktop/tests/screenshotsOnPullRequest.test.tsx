@@ -96,6 +96,19 @@ describe('a task’s screenshots on its pull request, from its Outputs', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(2)
   })
 
+  it('marks the pictures that didn’t go up, and says which and why, where some went and some didn’t', async () => {
+    const failed = '1 of 2 screenshots didn’t go up: A2.png. GitHub said: File type not allowed'
+    show(
+      task({ screenshots: standing({ standing: 'changed', changed: 1, commentUrl: `${URL}#issuecomment-9`, failed, notUp: ['A2'] }) }),
+      vi.fn(),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /^Update PR #1/ }))
+    expect(await screen.findByText(failed)).toBeTruthy()
+    // Still ticked to go, to try again: only the one that didn't go up says so.
+    expect(screen.getByRole('checkbox', { name: 'Include A2 · The error line · Didn’t go up' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Include A1 · The retry button' }).getAttribute('aria-checked')).toBe('true')
+  })
+
   it('says where they stand: changed since, synced, and what is left out', () => {
     show(
       task({ screenshots: standing({ standing: 'changed', changed: 1, leftOut: ['A2'], commentUrl: `${URL}#issuecomment-9` }) }),

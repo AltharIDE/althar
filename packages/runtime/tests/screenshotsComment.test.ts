@@ -8,6 +8,7 @@ import {
   EARLIER_KEPT,
   earlierAfter,
   isScreenshotsComment,
+  notUpWords,
   type Kept,
   type PostedShot,
   postingOf,
@@ -137,7 +138,24 @@ describe('where the screenshots stand', () => {
       leftOut: [],
       commentUrl: 'https://github.test/meridian/api/pull/1#issuecomment-91',
       failed: 'GitHub refused.',
+      // The try failed: the view taken again isn't on the pull request as it is now.
+      notUp: ['A1'],
     })
+  })
+
+  it('say which pictures didn’t go up, and why once, where some went and some didn’t', () => {
+    const shown = [posted('A1', 'a'), { ...posted('A2', 'b'), url: '', why: 'GitHub said: File type not allowed' }, posted('A3', 'c')]
+    const standing = standingOf([now('A1', 'a'), now('A2', 'b'), now('A3', 'c')], kept({ shown }), false)
+    assert.deepStrictEqual(standing.notUp, ['A2'])
+    assert.strictEqual(standing.failed, '1 of 3 screenshots didn’t go up: A2 · A view. GitHub said: File type not allowed')
+    const refused = 'GitHub said: Validation Failed'
+    const many = Array.from({ length: 17 }, (_, i) => ({ name: `lead-${i + 1}.png`, why: refused }))
+    assert.strictEqual(notUpWords(many, 17), `None of the 17 screenshots went up. ${refused}`)
+    assert.strictEqual(notUpWords(many.slice(0, 3), 17), `3 of 17 screenshots didn’t go up: lead-1.png, lead-2.png and 1 more. ${refused}`)
+    assert.strictEqual(notUpWords([{ name: 'a.png' }], 1), 'a.png didn’t go up.')
+    assert.isNull(notUpWords([], 4))
+    // Nothing failed: nothing is marked, however much changed.
+    assert.isUndefined(standingOf([now('A1', 'z')], kept({ shown: [posted('A1', 'a')] }), false).notUp)
   })
 
   it('leave out only views Outputs still shows', () => {

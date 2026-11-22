@@ -189,7 +189,14 @@ const wordsOf = (said: unknown): string => {
 /** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
 const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
-/** Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text. */
+/** HTML's own elements, as a host's message may carry them escaped: `&lt;span class='btn-link'&gt;`. */
+const ESCAPED_ELEMENT =
+  /<\/?(?:a|abbr|b|br|code|div|em|font|h[1-6]|hr|i|img|kbd|li|ol|p|pre|small|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul)(?:\s[^<>]*|\s*\/?)>/gi
+
+/**
+ * Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text; what
+ * decodes to one of HTML's own elements goes too, while a placeholder such as `<branch>` stays the host's words.
+ */
 export const plainError = (value: string): string =>
   value
     .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
@@ -202,6 +209,7 @@ export const plainError = (value: string): string =>
       /&(lt|gt|amp|quot|apos|nbsp);/gi,
       (_, name: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' })[name.toLowerCase()] ?? '',
     )
+    .replace(ESCAPED_ELEMENT, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MESSAGE_KEPT)

@@ -98,6 +98,26 @@ export const Posting: Story = { args: { defaultOpen: true, posting: true } }
 export const Failed: Story = {
   args: { defaultOpen: true, standing: 'changed', changed: 1, error: 'GitHub didn’t answer. Nothing was posted.' },
 }
+/** Some went up and some didn't: those that didn't are ringed and marked, and the line says which and why. */
+export const SomeNotUp: Story = {
+  args: {
+    defaultOpen: true,
+    standing: 'changed',
+    changed: 2,
+    shots: MANY,
+    notUp: ['view-1', 'view-6'],
+    commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1',
+    error:
+      '2 of 12 screenshots didn’t go up: A2 · A view of the refunds, 2 of 12 and B3 · A view of the refunds, 7 of 12. GitHub said: File type not allowed.',
+  },
+  play: async ({ canvasElement }) => {
+    const sheet = within(canvasElement.ownerDocument.body)
+    // Still ticked to go, to try again; marked as not up.
+    await expect(await sheet.findByRole('checkbox', { name: /^Include A2 .* · Didn’t go up$/ })).toBeChecked()
+    await expect(sheet.getByRole('checkbox', { name: /^Include A1 .*12$/ })).toBeChecked()
+    await expect(sheet.getAllByRole('checkbox', { name: /Didn’t go up$/ })).toHaveLength(2)
+  },
+}
 /** Twelve screenshots: four across, and the grid scrolls past three rows. */
 export const Many: Story = { args: { defaultOpen: true, shots: MANY, leftOut: ['view-3', 'view-7'] } }
 

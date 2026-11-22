@@ -22,7 +22,8 @@ import s from './PostScreenshots.module.css'
  * A task's screenshots, as they are now, in one comment on its pull request:
  * a quiet line at the end of What it looks like's heading that says where
  * they stand there, and opens a sheet of them, each ticked to go or left out,
- * with the press that posts them or brings the comment up to date. What is
+ * with the press that posts them or brings the comment up to date; where the
+ * last try failed, each one that didn't go up is marked as such. What is
  * left out is the consumer's to keep, per pull request; the sheet only
  * drafts it until it is posted.
  */
@@ -52,6 +53,8 @@ export interface PostScreenshotsText {
   goes: (count: ReactNode, n: number, destination: string) => ReactNode
   /** A screenshot's toggle. */
   include: (caption: string) => string
+  /** A screenshot whose picture didn't reach the pull request, as its toggle and its tooltip say it. */
+  notUp: (caption: string) => string
   /** The press, before any are posted. */
   confirmPost: (n: number, pullRequest: string) => string
   /** The press, once they are. */
@@ -77,6 +80,7 @@ export const postScreenshotsText: PostScreenshotsText = {
     </>
   ),
   include: (caption) => `Include ${caption}`,
+  notUp: (caption) => `${caption} · Didn’t go up`,
   confirmPost: (n, pr) => `Post ${n} to ${pr}`,
   confirmUpdate: (pr) => `Update ${pr}`,
   none: 'Choose at least one screenshot.',
@@ -95,6 +99,8 @@ export type PostScreenshotsProps = RootProps<
     shots: ReadonlyArray<PostScreenshotsShot>
     /** The keys left out of this pull request. */
     leftOut: ReadonlyArray<string>
+    /** Where the last try failed: the keys whose picture didn't reach the pull request. */
+    notUp?: ReadonlyArray<string>
     /** With `changed`: how many screenshots differ from what the pull request shows. */
     changed?: number
     /** Where they go, formatted: a comment on acme/web #142. */
@@ -120,6 +126,7 @@ export function PostScreenshots({
   pullRequest,
   shots,
   leftOut,
+  notUp = [],
   changed,
   destination,
   onPost,
@@ -216,13 +223,15 @@ export function PostScreenshots({
         <div className={s.grid}>
           {shots.map((shot) => {
             const on = !draft.has(shot.key)
+            const missed = notUp.includes(shot.key)
+            const caption = missed ? t.notUp(shot.caption) : shot.caption
             return (
-              <Tooltip key={shot.key} label={shot.caption} placement="above">
+              <Tooltip key={shot.key} label={caption} placement="above">
                 <Checkbox.Root
                   checked={on}
                   onCheckedChange={(next) => toggle(shot.key, next === true)}
-                  aria-label={t.include(shot.caption)}
-                  className={cx(s.thumb, !on && s.out)}
+                  aria-label={t.include(caption)}
+                  className={cx(s.thumb, !on && s.out, missed && s.notUp)}
                 >
                   <span
                     className={s.frame}
@@ -232,6 +241,11 @@ export function PostScreenshots({
                   >
                     <ImageView image={shot} size="thumb" fit="cover" text={t.image} />
                   </span>
+                  {missed && (
+                    <span className={s.missed} aria-hidden="true">
+                      <Icon name="problem" size={10} />
+                    </span>
+                  )}
                   <span className={s.box} aria-hidden="true">
                     <Checkbox.Indicator className={s.mark}>
                       <Icon name="check" size={9} />

@@ -1723,6 +1723,8 @@ export const ScreenshotsOnChange = Schema.Struct({
   leftOut: Schema.Array(Schema.String),
   commentUrl: Schema.NullOr(Schema.String),
   failed: Schema.NullOr(Schema.String),
+  /** Where the last try failed: the keys of the views going up whose picture the pull request doesn't show as it is now. */
+  notUp: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ScreenshotsOnChange = typeof ScreenshotsOnChange.Type
 
