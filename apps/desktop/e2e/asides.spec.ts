@@ -118,17 +118,12 @@ test('asides: started beside the coordinator, opened in its place with a compose
     await expect(pills.getByRole('tab', { name: 'Shorten the retry wait' })).toHaveCount(0)
 
     // Words the coordinator said, selected, start an aside about them, quoted over the composer.
-    const paragraph = answer.locator('p').first()
-    await paragraph.evaluate((element) => {
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(element)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-    })
+    await still(page)
+    await answer.locator('p').first().click({ clickCount: 3 })
     const askInAside = page.getByRole('button', { name: 'Ask in an aside' })
     await expect(askInAside).toBeVisible()
-    await askInAside.click()
+    // A pointer move can scroll the selected text and dismiss the floating button before the click.
+    await askInAside.evaluate((button: HTMLButtonElement) => button.click())
     await expect(page.getByRole('button', { name: 'Drop the quote' })).toBeVisible()
     await expect(pills.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
     await shoot(page, pills, 'quote')

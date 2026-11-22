@@ -36,7 +36,7 @@ test("a plan card's pickers stay within their row beside the board, through pick
     await say(page, 'Rework how the cache expires. [coordinator:plan-effort] [coordinator:plan-no-review] [lead:finish]')
     const conversation = page.getByRole('region', { name: 'Conversation' })
     const plan = conversation.locator('[data-rhythm="card"]').filter({
-      has: conversation.getByText('Rework how the cache expires', { exact: true }),
+      has: page.getByText('Rework how the cache expires', { exact: true }),
     })
     await plan.getByRole('button', { name: 'Hold', exact: true }).click()
     await expect(plan.getByRole('button', { name: 'Start', exact: true })).toBeVisible()

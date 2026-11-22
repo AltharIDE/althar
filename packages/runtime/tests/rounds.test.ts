@@ -1253,7 +1253,7 @@ describe('changing the team of a task that has begun', () => {
         'codex',
       )
       // The lead it has now takes over from its next turn: the picker shows it, and the thread's lead is who runs until then.
-      assert.deepStrictEqual((yield* queries.thread(task.threadId)).session?.nextLead?.agentId, 'codex')
+      yield* until(queries.thread(task.threadId), (thread) => thread.session?.nextLead?.agentId === 'codex')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 

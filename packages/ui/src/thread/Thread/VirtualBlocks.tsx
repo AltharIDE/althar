@@ -96,10 +96,10 @@ const blockAt = (prefix: Float64Array, count: number, at: number) => {
   return Math.min(low, Math.max(count - 1, 0))
 }
 
-/** Where the person left the view: how far it was scrolled, and the blocks in view, each where it was in the content. */
+/** Where the person left the view: the scroll position and the first visible parts of its blocks. */
 interface Place {
   at: number
-  readonly blocks: ReadonlyArray<{ readonly key: string; offset: number }>
+  readonly anchors: ReadonlyArray<{ readonly key: string; readonly element: Element; offset: number }>
 }
 
 interface Window {
@@ -197,7 +197,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
    * The block in view as the person last left it, and how far under the scroller's top it was: kept there as the thread
    * draws, measures, or gains earlier pages above it, unless it follows its bottom.
    */
-  const place = useRef<Place>({ at: 0, blocks: [] })
+  const place = useRef<Place>({ at: 0, anchors: [] })
   /** Blocks drawn before, so one drawn again doesn't rise in as if it had just arrived. */
   const seen = useRef(new Set<string>())
   /** The thread's last block as it was last drawn: blocks after it are new. */
@@ -320,19 +320,19 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
 
   /**
-   * The first drawn block in view and the one after it, each with where its top is in the scroller's content: two, as
-   * the first may be keyed again by the time it is kept in place.
+   * The first visible element of each of two blocks. An earlier element inside the same block may be above the view
+   * and change height without moving the block's own top.
    */
   const inView = (scroller: HTMLElement): Place => {
     const edge = scroller.getBoundingClientRect().top
-    const found: Array<{ key: string; offset: number }> = []
+    const anchors: Array<{ key: string; element: Element; offset: number }> = []
     for (const [key, els] of elements.current) {
-      const first = els[0]
-      if (first === undefined) continue
-      if (found.length > 0 || els.at(-1)!.getBoundingClientRect().bottom > edge) found.push({ key, offset: offsetIn(scroller, first) })
-      if (found.length === 2) break
+      const element = els.find((el) => el.getBoundingClientRect().bottom > edge)
+      if (element === undefined) continue
+      anchors.push({ key, element, offset: offsetIn(scroller, element) })
+      if (anchors.length === 2) break
     }
-    return { at: scroller.scrollTop, blocks: found }
+    return { at: scroller.scrollTop, anchors }
   }
 
   /**
@@ -342,10 +342,9 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
    */
   const keep = (scroller: HTMLElement, place: Place) => {
     if (Math.abs(scroller.scrollTop - place.at) >= 1) return
-    for (const one of place.blocks) {
-      const first = elements.current.get(one.key)?.[0]
-      if (first === undefined) continue
-      const offset = offsetIn(scroller, first)
+    for (const one of place.anchors) {
+      if (!elements.current.get(one.key)?.includes(one.element)) continue
+      const offset = offsetIn(scroller, one.element)
       const moved = offset - one.offset
       // Kept where it now is, so it moves the view once for each move of its own.
       one.offset = offset
