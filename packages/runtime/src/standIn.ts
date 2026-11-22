@@ -61,10 +61,10 @@ const taskLeadOf = (sessionId: string) =>
         AND f.aggregate_type = 'provider_session' AND f.type = 'provider_session.lead_choice_changed'
         AND json_extract(f.payload, '$.choice') IS NOT NULL
       ORDER BY f.sequence DESC LIMIT 1`
-    const picked =
-      pick === undefined ? undefined : (JSON.parse(pick.choice) as { agentId: string; model?: string | null; effort?: string | null })
-    if (picked !== undefined && (plan?.agentId == null || (pick?.sequence ?? 0) > (plan.sequence ?? 0)))
+    if (pick !== undefined && (plan?.agentId == null || pick.sequence > (plan.sequence ?? 0))) {
+      const picked = JSON.parse(pick.choice) as { agentId: string; model?: string | null; effort?: string | null }
       return { agentId: picked.agentId, model: picked.model ?? null, effort: picked.effort ?? null }
+    }
     return plan?.agentId == null ? undefined : { agentId: plan.agentId, model: plan.model, effort: plan.effort }
   })
 

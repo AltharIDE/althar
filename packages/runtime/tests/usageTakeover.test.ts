@@ -905,6 +905,31 @@ describe('a stand-in kept for another model than the task’s lead', () => {
   )
 })
 
+describe('whether a lead is spent', () => {
+  it.live('reads its own account where it names one: spent with no room left, until an hour on where no reset is read', () =>
+    Effect.gen(function* () {
+      const limits = yield* Limits
+      const [account] = yield* (yield* Accounts).of('opencode')
+      const lead = { agentId: 'opencode', accountId: account!.id, model: goSol.id }
+      // Not read yet: not spent.
+      assert.isTrue(Option.isNone(yield* limits.spent(lead)))
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: account!.id,
+        agentId: 'opencode',
+        source: 'agent',
+        windows: JSON.stringify([{ kind: 'weekly', usedPercent: 100 }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      const spent = Option.getOrUndefined(yield* limits.spent(lead))
+      assert.deepInclude(spent ?? {}, { agentId: 'opencode', accountId: account!.id, resetsAt: null })
+      assert.isAbove(Date.parse(spent?.until ?? ''), Date.now() + 50 * 60_000)
+      // An account no longer kept is never spent.
+      assert.isTrue(Option.isNone(yield* limits.spent({ ...lead, accountId: 'acc_gone' })))
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+})
+
 describe('a stand-in on its lead’s own agent, giving the thread back to a model turned off there', () => {
   it.live('gives it to the same model through another agent, and says so', () =>
     Effect.gen(function* () {
