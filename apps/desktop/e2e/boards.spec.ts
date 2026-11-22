@@ -126,6 +126,22 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await expect.poll(async () => (await canvasView(electronApp)) !== null).toBe(true)
     await shoot(page, electronApp, page, 'test-results/boards-pinned.png')
 
+    // Save to repo opens on the project's place for artifacts, the canvas's folder named in place; the canvas steps aside for it.
+    await panel.getByRole('button', { name: 'Save to repo' }).click()
+    const save = page.getByRole('dialog', { name: 'Save to repo' })
+    await expect(save.getByRole('textbox', { name: 'Its folder’s name' })).toHaveValue('gift-a-class')
+    await expect.poll(() => canvasView(electronApp)).toBeNull()
+    await shoot(page, electronApp, page, 'test-results/boards-save.png')
+    await page.keyboard.press('Escape')
+    await expect(save).toBeHidden()
+    // Download offers what a canvas of boards downloads as.
+    await panel.getByRole('button', { name: 'Download' }).click()
+    await expect(page.getByRole('menuitem', { name: /PNG, a board each/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /PDF, a page a board/ })).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/boards-download.png')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+
     // The project's Artifacts view has it as a card, with a picture of it as it was drawn; opened, it goes beside its conversation.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
