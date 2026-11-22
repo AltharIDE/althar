@@ -86,6 +86,16 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       assert.strictEqual(unknownProject._tag, 'HostError')
       yield* assign(projectId)
       assert.deepStrictEqual(last(), { projectId, workerId })
+      assert.throws(() => parseOptions(['revoke-worker', '--worker-id', workerId, '--project-id', 'invalid'], {}, root))
+      yield* command('revoke-worker', '--worker-id', workerId, '--project-id', projectId, '--json')
+      assert.deepStrictEqual(last(), { projectId, workerId, revoked: true })
+      const revoked = yield* Effect.promise(() => openWorkerStore(profile, homeId))
+      try {
+        assert.isFalse(revoked.agents.permits(workerId, projectId))
+      } finally {
+        revoked.close()
+      }
+      yield* assign(projectId)
       const foreign = yield* Effect.flip(projectRun(`proj_${'f'.repeat(32)}`))
       assert.strictEqual(foreign._tag, 'HostError')
       if (foreign._tag === 'HostError') assert.include(foreign.message, 'registered on this home')
