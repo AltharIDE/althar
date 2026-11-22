@@ -19,31 +19,34 @@ const press = {
   fold: async (page) => page.getByRole('button', { name: /^0\.10\.0/ }).click(),
 }
 
+// [name, query, width, what to press, height]: a tall window shows a look whole.
+const WHOLE = 2400
 const shots = [
-  // A: the window opens on What's new's tab.
-  ['a-1-opens', 'd=a', 1280],
-  ['a-2-quick-settings', 'd=a', 1280, 'quick'],
-  // B: the window opens where it was; the bar's end offers it; pressed, the tab and its highlights.
+  // The three looks, as the window opens on What's new (A), then whole.
+  ['1-light', 'd=a&look=launch#/whats-new', 1280],
+  ['1-light-whole', 'd=a&look=launch#/whats-new', 1280, undefined, WHOLE],
+  ['1-light-narrow', 'd=a&look=launch&narrow=1#/whats-new', 880],
+  ['2-live', 'd=a&look=live#/whats-new', 1280],
+  ['2-live-whole', 'd=a&look=live#/whats-new', 1280, undefined, 3400],
+  ['2-live-narrow', 'd=a&look=live&narrow=1#/whats-new', 880],
+  ['3-log', 'd=a&look=log#/whats-new', 1280],
+  ['3-log-whole', 'd=a&look=log#/whats-new', 1280, undefined, 3000],
+  ['3-log-narrow', 'd=a&look=log&narrow=1#/whats-new', 880],
+  // Where it lives, unchanged: B's line, C's home, D's tab and its Coming next.
   ['b-1-line', 'd=b', 1280],
-  ['b-2-highlights', 'd=b', 1280, 'line'],
-  ['b-3-every-change', 'd=b#/whats-new', 1280, 'every'],
-  ['b-4-narrow', 'd=b&narrow=1#/whats-new', 880],
-  // C: the home at rest says it; pressed, the notes in its place.
   ['c-1-home', 'd=c', 1280],
-  ['c-2-notes', 'd=c', 1280, 'homeButton'],
-  ['c-3-highlights', 'd=c&read=highlights', 1280, 'homeButton'],
-  // D: Althar's tab, with a dot; its page, two releases new; Coming next.
+  ['c-2-page', 'd=c&look=launch', 1280, 'homeButton'],
   ['d-1-tab', 'd=d', 1280],
-  ['d-2-page-from-0.8.0', 'd=d&from=0.8.0#/whats-new', 1280, 'fold'],
+  ['d-2-page', 'd=d&look=log#/whats-new', 1280],
   ['d-3-coming', 'd=d&view=coming#/whats-new', 1280],
-  ['d-4-narrow', 'd=d&narrow=1#/whats-new', 880],
 ]
 const only = process.argv.slice(2)
-for (const [name, query, width, then] of shots) {
+for (const [name, query, width, then, height = 760] of shots) {
   if (only.length > 0 && !only.some((one) => name.startsWith(one))) continue
-  const page = await browser.newPage({ viewport: { width, height: 760 }, deviceScaleFactor: 1 })
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 })
   await page.goto(`http://localhost:6183/?${query}`)
-  await page.waitForTimeout(1200)
+  // The light and the mark come up over a second or so.
+  await page.waitForTimeout(2200)
   if (then !== undefined) {
     await press[then](page)
     await page.waitForTimeout(700)

@@ -1,0 +1,558 @@
+/* Look 1: Althar's light. On the kit's tokens; cobalt, Althar's own, the one accent. */
+
+.page {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--n-2);
+}
+
+/* ---- the release, on the light ---- */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  min-height: 520px;
+  padding: 64px 32px 190px;
+  text-align: center;
+}
+/* The light, fading out at its foot rather than cut off where the page goes on */
+.glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 78%, transparent);
+  mask-image: linear-gradient(#000 78%, transparent);
+}
+.back {
+  position: absolute;
+  top: 14px;
+  left: 20px;
+  z-index: 2;
+}
+.heroIn {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+}
+.eyebrow {
+  display: flex;
+  gap: 12px;
+  margin: 22px 0 14px;
+  font: 500 12px/1.3 var(--font-label);
+  letter-spacing: 0.04em;
+  color: var(--t-3);
+}
+.version {
+  color: var(--live);
+}
+.title {
+  max-width: 780px;
+  margin: 0;
+  font: 640 56px/1.02 var(--font-display);
+  letter-spacing: -0.04em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.why {
+  max-width: 520px;
+  margin: 18px 0 0;
+  font-size: 17px;
+  line-height: 1.5;
+  letter-spacing: -0.008em;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+/* ---- the bands under it ---- */
+
+.band {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 32px 72px;
+}
+.kicker {
+  margin: 0 0 18px;
+  font: 500 11.5px/1.3 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-3);
+  text-align: center;
+}
+.sectionTitle {
+  margin: 0 0 18px;
+  font: 620 24px/1.2 var(--font-display);
+  letter-spacing: -0.025em;
+  color: var(--t-1);
+}
+
+/* Where the work runs: three places, linked */
+.places {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 44px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.placeCell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+.link {
+  position: absolute;
+  top: 50%;
+  left: -44px;
+  width: 44px;
+  height: 1px;
+  overflow: hidden;
+  background: var(--line-3);
+}
+/* the work, going from the window to the home to the worker */
+.link i {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--live);
+  animation: carry 2.4s var(--ease-out) infinite;
+}
+.placeCell:nth-child(3) .link i {
+  animation-delay: 1.2s;
+}
+@keyframes carry {
+  from {
+    transform: translateX(-12px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    transform: translateX(46px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .link i {
+    display: none;
+  }
+}
+.place {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  width: 100%;
+  padding: 18px 18px 16px;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.placeIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  border-radius: 9px;
+  background: var(--live-dim);
+  color: var(--live);
+}
+.placeRole {
+  font: 500 11px/1.3 var(--font-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.placeName {
+  font: 620 17px/1.3 var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.placeCode {
+  font: 560 16px/1.3 var(--mono);
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+}
+.holds {
+  display: grid;
+  gap: 5px;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.holds li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.holds li > svg,
+.holds li > span:first-child {
+  flex: none;
+  color: var(--t-4);
+}
+
+/* Also new: tiles, the first two large */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tile {
+  grid-column: span 2;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  align-content: start;
+  min-width: 0;
+  padding: 20px 20px 18px;
+  border-radius: 14px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.big {
+  grid-column: span 3;
+  padding: 24px 24px 22px;
+}
+.tileIcon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 16px;
+  border-radius: 9px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-1);
+}
+.big .tileIcon {
+  width: 40px;
+  height: 40px;
+  background: var(--live-dim);
+  box-shadow: none;
+  color: var(--live);
+}
+.tileName {
+  margin: 0 0 6px;
+  font: 620 16px/1.25 var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.big .tileName {
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+.tileLine {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.big .tileLine {
+  font-size: 14.5px;
+}
+.way {
+  justify-self: start;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+/* the last, the width of the row: its words, then its picture */
+.wide {
+  grid-column: span 6;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 16px;
+  align-items: center;
+}
+.wide .tileIcon {
+  grid-row: span 2;
+  margin: 0;
+}
+.wide .tileName {
+  margin: 0;
+}
+.wide .tileLine {
+  grid-column: 2;
+  max-width: 560px;
+}
+.wide .artFrom {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  margin: 0;
+}
+
+/* the tiles' pictures, in the app's own marks and type */
+.artAsk,
+.artBoard,
+.artGoal,
+.artMarks,
+.artTerm,
+.artFrom {
+  margin: 16px 0 0;
+}
+/* computer use: its ask, as the thread asks it */
+.artAsk {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 10px;
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.askIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--signal-raised);
+  color: var(--signal-ink);
+}
+.askWords {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  font-size: 13px;
+}
+.askWords b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.askWords span {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.askWays {
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+/* artifacts: a board, pointed at, said, and its next version */
+.artBoard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.board {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  width: 112px;
+  height: 72px;
+  flex: none;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.board i {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--n-4);
+}
+.boardHead {
+  width: 70%;
+}
+.boardLine {
+  width: 90%;
+}
+.board .boardPrice {
+  width: 44%;
+  height: 14px;
+  margin-top: 4px;
+  background: var(--live-dim);
+}
+.pin,
+.saidPin {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--live);
+  font: 600 10px/1 var(--font);
+  color: var(--on-dark);
+}
+.pin {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  box-shadow: 0 0 0 3px var(--paper);
+}
+.said {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  color: var(--t-1);
+}
+.next {
+  font: 560 13px/1 var(--mono);
+  color: var(--live);
+}
+.artGoal {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  color: var(--t-2);
+}
+.slash {
+  font: 560 13px/1 var(--mono);
+  color: var(--live);
+}
+.artMarks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.markChip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-2);
+}
+.artTerm {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--term);
+  font: 500 12px/1.6 var(--mono);
+  color: var(--term-t2);
+  white-space: pre;
+  overflow: hidden;
+}
+.prompt {
+  color: var(--live-on-ink);
+}
+.dim {
+  color: var(--term-t3);
+}
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  vertical-align: -2px;
+  background: var(--term-t2);
+}
+.artFrom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--t-2);
+}
+.into {
+  color: var(--t-4);
+}
+.intoTask {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* Better everywhere: four short facts */
+.felt {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-2);
+  list-style: none;
+}
+.felt li {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 18px 20px 0 0;
+}
+.felt li + li {
+  padding-left: 20px;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.felt b {
+  font: 620 15px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.felt span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+.foot {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 32px 88px;
+}
+
+/* ---- the narrowest window ---- */
+
+@container window (width < 960px) {
+  .title {
+    font-size: 42px;
+  }
+  .places {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .link {
+    display: none;
+  }
+  .tile,
+  .big {
+    grid-column: span 6;
+  }
+  .wide {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .wide .artFrom {
+    grid-column: 2;
+    grid-row: auto;
+    margin-top: 12px;
+  }
+  .felt {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .felt li:nth-child(3) {
+    padding-left: 0;
+    box-shadow: none;
+  }
+}

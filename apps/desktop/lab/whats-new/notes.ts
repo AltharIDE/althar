@@ -1,3 +1,5 @@
+import type { IconName } from '@althar/ui'
+
 import { type Change, type Kind, type Release, RELEASES, ROADMAP } from './changelog'
 
 /*
@@ -46,6 +48,9 @@ export interface Highlight {
   readonly name: string
   /** What it is, in a line: its release line, cut to its first sentence. */
   readonly line: string
+  /** Its whole release line, past its name. */
+  readonly whole: string
+  readonly icon: IconName
   readonly way?: { readonly label: string; readonly to: Way }
 }
 
@@ -56,15 +61,33 @@ const first = (text: string) => {
 }
 
 const lineOf = (start: string) => NOW.changes.find((change) => change.text.startsWith(start))?.text ?? start
+const wholeOf = (start: string) => named(lineOf(start)).rest
+
+/** Why the flagship matters, in the site's words (its flight log's highlight for 0.10.0). */
+export const FLAGSHIP_WHY = 'Run Althar on a server of yours, and your own machines as its workers. Close the laptop, and the work goes on.'
+
+/** The improvements a person feels, the release's first few. */
+export const FELT = [
+  { name: 'Answers at once', line: 'However busy your computer is: the model picker, search and the board included.' },
+  { name: 'Light at rest', line: 'Idle coordinators rest after half an hour and wake on your message.' },
+  { name: 'Full sessions carry on', line: 'A full session compacts in place, rather than starting afresh.' },
+  { name: 'Long threads, smooth', line: 'Threads open and scroll smoothly, at any length.' },
+] as const
 
 /** What B leads with after the flagship: the new things a person would go and try, in the release's order. */
 export const HIGHLIGHTS: readonly Highlight[] = [
-  { name: 'Computer use', line: first(lineOf('Computer use')) },
-  { name: 'Artifacts you talk to', line: first(lineOf('Artifacts you talk to')) },
-  { name: 'Goals', line: first(lineOf('Goals')) },
-  { name: 'More agents', line: first(lineOf('More agents')), way: { label: 'Add an agent', to: 'agents' } },
-  { name: 'Terminals in Althar', line: first(lineOf('Terminals in Althar')) },
-  { name: 'Bring in your work', line: first(lineOf('Bring in work from')) },
+  { name: 'Computer use', line: first(lineOf('Computer use')), whole: wholeOf('Computer use'), icon: 'viewport' },
+  { name: 'Artifacts you talk to', line: first(lineOf('Artifacts you talk to')), whole: wholeOf('Artifacts you talk to'), icon: 'canvas' },
+  { name: 'Goals', line: first(lineOf('Goals')), whole: wholeOf('Goals'), icon: 'pin' },
+  {
+    name: 'More agents',
+    line: first(lineOf('More agents')),
+    whole: wholeOf('More agents'),
+    icon: 'agents',
+    way: { label: 'Add an agent', to: 'agents' },
+  },
+  { name: 'Terminals in Althar', line: first(lineOf('Terminals in Althar')), whole: wholeOf('Terminals in Althar'), icon: 'terminal' },
+  { name: 'Bring in your work', line: first(lineOf('Bring in work from')), whole: wholeOf('Bring in work from'), icon: 'download' },
 ]
 
 /** The flagship's few lines B shows, each its own line's first sentence. */

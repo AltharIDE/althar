@@ -21,7 +21,7 @@ import { PENDING } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { ALTHAR, makeClient, TABS } from './data'
 import { go, setRouter, WHATS_NEW } from './go'
-import { arrival, DIRECTIONS, type Direction, lab, READINGS, readingOf, useLab } from './state'
+import { arrival, DIRECTIONS, type Direction, lab, LOOKS, useLab } from './state'
 import { WhatsNewScreen } from './WhatsNew'
 import s from './lab.module.css'
 
@@ -30,8 +30,9 @@ import s from './lab.module.css'
  * browser, on made-up data, just restarted into Althar 0.10.0, with the
  * page's bar under it. The bar swaps the direction in place (A–D, with keys
  * too), and each opens as the window would on its first launch after the
- * update; R does that again. 1 and 2 switch how A, B and C read: the
- * notes whole, or the highlights first. N narrows the window to the app's narrowest; F
+ * update; R does that again. 1, 2 and 3 switch how the page looks, in
+ * every direction: Althar's light, the real thing, or the site's flight
+ * log, and open it. N narrows the window to the app's narrowest; F
  * says the person updated from 0.8.0, so two releases are new to them.
  */
 
@@ -68,13 +69,19 @@ const land = (d: Direction) => {
 }
 
 /** The update again, in a direction: the window as it opens on 0.10.0 for the first time. */
-const restart = (d: Direction, reading = d === lab.get().d ? lab.get().reading : readingOf(d)) => {
-  lab.set({ d, reading, ...arrival(d) })
+const restart = (d: Direction) => {
+  lab.set({ d, ...arrival(d) })
   land(d)
 }
 
+/** A look, seen: the page opens on What's new where it isn't. */
+const see = (look: (typeof LOOKS)[number]['key']) => {
+  lab.set({ look, view: 'new' })
+  go.whatsNew()
+}
+
 function Bar() {
-  const { d, narrow, skipped, reading } = useLab()
+  const { d, narrow, skipped, look } = useLab()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -83,8 +90,8 @@ function Bar() {
       const key = event.key.toLowerCase()
       const direction = DIRECTIONS.find((one) => one.kbd.toLowerCase() === key)
       if (direction !== undefined) return restart(direction.key)
-      const read = READINGS.find((one) => one.kbd === key)
-      if (read !== undefined) return lab.set({ reading: read.key })
+      const chosen = LOOKS.find((one) => one.kbd === key)
+      if (chosen !== undefined) return see(chosen.key)
       if (key === 'r') return restart(lab.get().d)
       if (key === 'n') return lab.set({ narrow: !lab.get().narrow })
       if (key === 'f') return lab.set({ skipped: !lab.get().skipped })
@@ -99,15 +106,9 @@ function Bar() {
           <kbd>{one.kbd}</kbd> {one.label}
         </button>
       ))}
-      <span className={s.round}>Reads</span>
-      {READINGS.map((one) => (
-        <button
-          key={one.key}
-          type="button"
-          aria-pressed={d !== 'd' && reading === one.key}
-          disabled={d === 'd'}
-          onClick={() => lab.set({ reading: one.key })}
-        >
+      <span className={s.round}>Looks</span>
+      {LOOKS.map((one) => (
+        <button key={one.key} type="button" aria-pressed={look === one.key} onClick={() => see(one.key)}>
           <kbd>{one.kbd}</kbd> {one.label}
         </button>
       ))}

@@ -1,0 +1,1365 @@
+import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
+import { sealSvg } from '@althar/ui/seal'
+import { type CSSProperties, Fragment as Piece, type ReactNode, useEffect, useRef, useState } from 'react'
+
+import { Agent, AGENTS } from '../../../../../site/src/content/agents'
+import { Fragment } from '../../../../../site/src/home/bodies/desktop/Fragment'
+import automations from '../../../../../site/src/home/bodies/desktop/styled/d-automations.html?raw'
+import { cx } from '../../../../../site/src/lib/cx'
+import { AgentMark } from '../../../../../site/src/shared/AgentMark'
+import { OsMark } from '../../../../../site/src/shared/OsMark'
+import p from './LogPictures.module.css'
+
+/** The pictures the highlights are shown with (the site's LogData.ts). */
+export type Picture =
+  | 'home'
+  | 'undo'
+  | 'browser'
+  | 'canvas'
+  | 'findings'
+  | 'automations'
+  | 'plans'
+  | 'windows'
+  | 'reviewer'
+  | 'report'
+  | 'run'
+  | 'evidence'
+  | 'plan'
+
+/*
+ * Copied for the lab from the site's flight log on the 0.10.0 entry's branch
+ * (#1097, apps/site/src/changelog/takes/LogPictures.tsx), only its imports
+ * pointed at the site's sources on main.
+ *
+ * The highlights' pictures: each a feature drawn as an interface lit by one
+ * light, as the homepage draws them, on the log's own warm dark. Drawn in
+ * the app's own words and marks, in the kit's demo world (Tally, a payments
+ * API). Each is laid out in em on a width of `w` em, scaled to the width it
+ * is given, so it stays crisp; in a narrow place it lays itself out again on
+ * `n` em, larger, so it still reads on a phone. A picture: nothing in it can
+ * be pressed, and it reads as its label, a figure.
+ */
+
+function Frame({
+  label,
+  w,
+  n,
+  foot = false,
+  className,
+  children,
+}: {
+  label: string
+  /** Its width in em, as drawn; in a narrow place, `n`. */
+  w: number
+  n: number
+  /** Running off its foot, as a screenshot does. */
+  foot?: boolean
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <figure className={cx(p.frame, foot && p.foot, className)} aria-label={label} data-nosnippet>
+      <div className={p.art} style={{ '--w': w, '--n': n } as CSSProperties} aria-hidden="true">
+        {children}
+      </div>
+    </figure>
+  )
+}
+
+/** A window's own bar: its three buttons, and what it holds. */
+function Bar({ children, end }: { children?: ReactNode; end?: ReactNode }) {
+  return (
+    <div className={p.bar}>
+      <span className={p.dots}>
+        <i />
+        <i />
+        <i />
+      </span>
+      {children}
+      {end && <span className={p.barEnd}>{end}</span>}
+    </div>
+  )
+}
+
+/** A project's tab in the bar. */
+const Tab = ({ name, ink, on = false }: { name: string; ink: string; on?: boolean }) => (
+  <span className={cx(p.tab, on && p.on)}>
+    <i style={{ background: ink }} />
+    {name}
+  </span>
+)
+
+const Tabs = () => (
+  <>
+    <span className={p.tab}>
+      <Logo size={12} className={p.logo} />
+      Home
+    </span>
+    <Tab name="Tally" ink="#2f6f7a" on />
+    <Tab name="Halyard" ink="#b4532a" />
+  </>
+)
+
+/* ---- 0.5.0: Althar on Windows, the seven new agents joining the three ---- */
+
+const FIRST_THREE = 3
+
+function Windows() {
+  return (
+    <Frame
+      label="Althar on Windows, its agents: Claude Code, Codex and OpenCode, and seven new ones: GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity"
+      w={66}
+      n={31}
+      className={p.screen}
+    >
+      <div className={p.desk}>
+        <div className={cx(p.win, p.winOnDesk)}>
+          <Bar end={<span className={p.crumb}>Settings</span>}>
+            <Tabs />
+          </Bar>
+          <div className={p.agentsPage}>
+            <div className={p.pageHead}>
+              <b>Agents</b>
+              <span>Each one asks before it acts.</span>
+            </div>
+            <ul className={p.agents}>
+              {AGENTS.map((agent, i) => (
+                <li key={agent.id} className={cx(i >= FIRST_THREE && p.joined)}>
+                  <span className={p.mk}>
+                    <AgentMark agent={agent.id} size={16} />
+                  </span>
+                  <span className={p.who}>
+                    <b>{agent.name}</b>
+                    <span>{agent.signIn}</span>
+                  </span>
+                  {i >= FIRST_THREE ? <em className={p.new}>New</em> : <em className={p.ready}>Signed in</em>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        {/* The taskbar along the screen's foot: Start, search, Althar open and running, and the time. */}
+        <div className={p.taskbar}>
+          <span className={p.tasks}>
+            <span className={p.task}>
+              <OsMark id="windows" size={14} />
+            </span>
+            <span className={p.search}>
+              <Icon name="search" size={12} />
+              Search
+            </span>
+            <span className={cx(p.task, p.open)}>
+              <Logo size={14} className={p.logo} />
+            </span>
+            <span className={p.task}>
+              <Icon name="folder" size={14} />
+            </span>
+            <span className={p.task}>
+              <Icon name="terminal" size={14} />
+            </span>
+          </span>
+          <span className={p.tray}>
+            <span>ENG</span>
+            <span className={p.clock}>
+              18:18
+              <br />
+              20/10/2026
+            </span>
+          </span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.4.1: a pull request written for its reviewer ---- */
+
+function Reviewer() {
+  return (
+    <Frame
+      label="A pull request Althar opened, its description written for a reviewer: why, what changed, and how it was checked"
+      w={56}
+      n={30}
+      foot
+    >
+      <div className={cx(p.win, p.page)}>
+        <div className={p.prHead}>
+          <span className={p.state}>
+            <Icon name="pr" size={12} />
+            Open
+          </span>
+          <b>Return 409 when a refund idempotency key is reused</b>
+          <span className={p.prNo}>#1191</span>
+        </div>
+        <div className={p.prMeta}>
+          <span className={p.by}>
+            <Logo size={11} className={p.logo} />
+            Althar opened this for task 416
+          </span>
+          <code>tal-416-reused-key → main</code>
+          <span className={p.diff}>
+            <ins>+212</ins> <del>−41</del>
+          </span>
+        </div>
+        <div className={p.md}>
+          <h4>Why</h4>
+          <p>
+            A partner retrying a refund with the same key got a second refund. A reused key should get the first one back, as Stripe does.
+          </p>
+          <h4>What changed</h4>
+          <ul>
+            <li>A refund keeps the idempotency key it was made with.</li>
+            <li>
+              A reused key answers <code>409</code> with the first refund’s id.
+            </li>
+            <li>A migration adds a unique index on partner and key.</li>
+          </ul>
+          <h4>How it was checked</h4>
+          <ul className={p.checked}>
+            <li>
+              <Icon name="check" size={12} />
+              <span>
+                <code>pnpm test refunds</code>: 48 passed, 3 of them new, for reused keys.
+              </span>
+            </li>
+            <li>
+              <Icon name="check" size={12} />
+              <span>Replayed last week’s partner retries on staging: no second refunds.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.4.0: Report a problem, and what goes with it ---- */
+
+const SENT = [
+  ['Version', 'Althar 0.4.0'],
+  ['System', 'macOS 15.1, Apple silicon'],
+  ['Logs', 'The last 500 lines of each'],
+  ['Folders and keys', 'Taken out'],
+] as const
+
+function Switch() {
+  return (
+    <span className={p.switch}>
+      <i />
+    </span>
+  )
+}
+
+function Report() {
+  const t = reportProblemText
+  return (
+    <Frame
+      label="Report a problem: what happened, in your words, with a screenshot of the window and Althar’s logs, and a list of everything that goes with it"
+      w={52}
+      n={30}
+      className={p.dim}
+    >
+      <div className={p.behind}>
+        <div className={cx(p.win, p.ghost)}>
+          <Bar>
+            <Tabs />
+          </Bar>
+          <div className={p.lanes}>
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+        </div>
+      </div>
+      <div className={p.dialog}>
+        <b className={p.dialogTitle}>{t.title}</b>
+        <span className={p.fieldLabel}>{t.what}</span>
+        <div className={p.area}>
+          Pushing task 432 failed with “remote rejected”, and its card stayed on Pushing.
+          <i className={p.caret} />
+        </div>
+        <div className={p.option}>
+          <Switch />
+          <span className={p.optionWords}>
+            <b>{t.screenshot}</b>
+          </span>
+          <span className={p.thumb}>
+            <i />
+            <i />
+            <i />
+          </span>
+        </div>
+        <div className={p.option}>
+          <Switch />
+          <span className={p.optionWords}>
+            <b>{t.logs}</b>
+            <span>{t.logsNote}</span>
+            <span className={p.see}>
+              {t.hideSent}
+              <Icon name="chevronU" size={10} />
+            </span>
+            <span className={p.sent}>
+              {SENT.map(([k, v]) => (
+                <span key={k}>
+                  <i>{k}</i>
+                  {v}
+                </span>
+              ))}
+            </span>
+          </span>
+        </div>
+        <div className={p.actions}>
+          <span className={p.quiet}>{t.cancel}</span>
+          <span className={p.fill}>{t.send}</span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.3.0: Run, split, and everything a project runs ---- */
+
+const RUNS = [
+  { name: 'web', command: 'pnpm dev', at: 'localhost:5173' },
+  { name: 'api', command: 'pnpm --filter api start', at: 'localhost:8080' },
+  { name: 'worker', command: 'pnpm --filter worker start' },
+  { name: 'storybook', command: 'pnpm storybook' },
+] as const
+
+/** The Run button's words as 0.3.0 said them: the picture is of that release, not of Run now. */
+const RUN_THEN = {
+  run: (label: string) => `Run ${label}`,
+  label: 'What it runs',
+  resting: 'Not running',
+  add: 'Add something to run…',
+  edit: 'Edit the list…',
+  note: 'Checked ones are running. Pick one to start or stop it.',
+}
+
+function Run() {
+  const t = RUN_THEN
+  return (
+    <Frame
+      label="Run, split: a press runs web, and its list starts or stops each thing the project runs: web and the API running, the worker and Storybook not"
+      w={50}
+      n={30}
+      foot
+    >
+      <div className={cx(p.win, p.runWin)}>
+        <Bar
+          end={
+            <span className={p.split}>
+              <span className={p.splitMain}>
+                <Icon name="play" size={11} />
+                {t.run('web')}
+              </span>
+              <span className={p.splitMore}>
+                <Icon name="chevronD" size={11} />
+              </span>
+            </span>
+          }
+        >
+          <Tabs />
+        </Bar>
+        <div className={p.runBody}>
+          <div className={p.lanes}>
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className={p.menu}>
+            <span className={p.menuLabel}>{t.label}</span>
+            {RUNS.map((run, i) => {
+              const on = 'at' in run
+              return (
+                <span key={run.name} className={cx(p.item, on && p.running, i === 1 && p.hover)}>
+                  <span className={p.box}>{on && <Icon name="check" size={10} />}</span>
+                  <span className={p.itemWords}>
+                    <b>{run.name}</b>
+                    <code>{run.command}</code>
+                  </span>
+                  <span className={p.itemState}>
+                    {on ? (
+                      <>
+                        <i className={p.dot} />
+                        {run.at}
+                      </>
+                    ) : (
+                      t.resting
+                    )}
+                  </span>
+                </span>
+              )
+            })}
+            <span className={p.sep} />
+            <span className={p.plain}>{t.add}</span>
+            <span className={p.plain}>{t.edit}</span>
+            <span className={p.menuNote}>{t.note}</span>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.2.0: a finished task, with its evidence ---- */
+
+function Evidence() {
+  return (
+    <Frame
+      label="A finished task: what it built, the evidence its lead showed (two screenshots and a test run), what it couldn’t check, and the reviewer’s word"
+      w={60}
+      n={30}
+      foot
+    >
+      <div className={cx(p.win, p.page)}>
+        <div className={p.done}>
+          <span className={p.doneMark}>
+            <Icon name="check" size={12} />
+          </span>
+          <span className={p.doneWords}>
+            <b>Finished</b>
+            <span>Task 416 · Return 409 when a refund idempotency key is reused</span>
+          </span>
+        </div>
+        <span className={p.section}>What it built</span>
+        <p className={p.built}>A reused idempotency key now gets the first refund back, with 409, and a unique index keeps it that way.</p>
+        <span className={p.section}>Evidence</span>
+        <div className={p.evidence}>
+          <span className={p.shot}>
+            <span className={p.shotPic}>
+              <span className={p.req}>
+                <code>POST /v1/refunds</code>
+                <b>409 Conflict</b>
+                <code className={p.json}>{'{ "refund": "re_8Hk2…", "reused": true }'}</code>
+              </span>
+            </span>
+            <span className={p.caption}>The second request, answered</span>
+          </span>
+          <span className={p.shot}>
+            <span className={p.shotPic}>
+              <span className={p.rows}>
+                <b>Refunds · Acme</b>
+                <span className={p.rowOn}>
+                  <code>re_8Hk2…</code>
+                  <span>€42.00</span>
+                  <span>Refunded</span>
+                </span>
+                <span>
+                  <code>re_3Pq9…</code>
+                  <span>€18.50</span>
+                  <span>Refunded</span>
+                </span>
+              </span>
+            </span>
+            <span className={p.caption}>Partner dashboard: one refund</span>
+          </span>
+          <span className={cx(p.shot, p.term)}>
+            <span className={p.shotPic}>
+              <span className={p.out}>
+                <code>
+                  <span className={p.prompt}>$</span> pnpm test refunds
+                </code>
+                <code className={p.pass}>✓ 48 passed</code>
+                <code className={p.faint}>3 new · 2.1s</code>
+              </span>
+            </span>
+            <span className={p.caption}>Test run</span>
+          </span>
+        </div>
+        <span className={p.section}>Couldn’t check</span>
+        <p className={p.couldnt}>Refunds made before the index: staging has none with a reused key.</p>
+        <div className={p.reviewed}>
+          <span className={p.mk}>
+            <BrandMark brand={Brand.Codex} size={14} />
+          </span>
+          <span>
+            <b>Reviewed by Codex.</b> Read the evidence; the reused-key test covers both partners.
+          </span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.1.0: the coordinator plans what you asked for ---- */
+
+const PLANNED = [
+  { title: 'Receive Stripe’s refund webhooks', lead: Agent.Claude, review: Agent.Codex },
+  { title: 'Post each refund to the ledger', lead: Agent.Codex, review: Agent.Claude },
+  { title: 'Backfill the refunds missed so far', lead: Agent.OpenCode, review: Agent.Codex },
+] as const
+
+const NAME = Object.fromEntries(AGENTS.map((a) => [a.id, a.name])) as Record<Agent, string>
+
+function Plan() {
+  return (
+    <Frame
+      label="You ask for refunds to follow Stripe’s webhooks; the coordinator plans three tasks, each with a lead and a review"
+      w={60}
+      n={30}
+      foot
+    >
+      <div className={cx(p.win, p.page, p.thread)}>
+        <div className={p.you}>Refunds should follow Stripe’s webhooks, and the ledger has to stay in step.</div>
+        <div className={p.coord}>
+          <span className={p.coordMark}>
+            <Logo size={13} className={p.logo} />
+          </span>
+          <span className={p.coordWords}>
+            <b>Coordinator</b>
+            <span>Three tasks, each with a lead and a review. The ledger waits for the webhooks.</span>
+          </span>
+        </div>
+        <ol className={p.planned}>
+          {PLANNED.map((task, i) => (
+            <li key={task.title}>
+              <span className={p.no}>{i + 1}</span>
+              <b>{task.title}</b>
+              <span className={p.roles}>
+                <span>
+                  <i>Lead</i>
+                  <span className={p.mk}>
+                    <AgentMark agent={task.lead} size={14} />
+                  </span>
+                  {NAME[task.lead]}
+                </span>
+                <span>
+                  <i>Review</i>
+                  <span className={p.mk}>
+                    <AgentMark agent={task.review} size={14} />
+                  </span>
+                  {NAME[task.review]}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className={p.actions}>
+          <span className={p.quiet}>Change the plan</span>
+          <span className={p.fill}>Start</span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.6.0: plan usage, in light and in dark ---- */
+
+const PLANS = [
+  { agent: Agent.Claude, account: 'Max', window: '5 hours', left: 38, until: '14:00' },
+  { agent: Agent.Codex, account: 'Pro', window: '5 hours', left: 64, until: '15:20' },
+  { agent: Agent.Kimi, account: null, window: 'Week', left: 90, until: 'Mon 09:00' },
+  { agent: Agent.Grok, account: null, window: 'Week', left: 96, until: 'Thu 18:00' },
+] as const
+
+/** The window's bar with the plans' gauge, and the peek it opens: each agent, least room first. */
+function PlanPeek() {
+  const t = planPeekText
+  const tightest = PLANS[0]
+  return (
+    <div className={cx(p.win, p.planWin)}>
+      <Bar
+        end={
+          <span className={p.gauge}>
+            <span className={p.track}>
+              <i style={{ width: `${tightest.left}%` }} />
+            </span>
+            {t.share(tightest.left)}
+          </span>
+        }
+      >
+        <Tabs />
+      </Bar>
+      <div className={p.peek}>
+        <div className={p.peekHead}>
+          <b>{t.heading}</b>
+          <span>{t.level.down(NAME[tightest.agent])}</span>
+        </div>
+        {PLANS.map((plan) => (
+          <div key={plan.agent} className={p.plan}>
+            <span className={p.mk}>
+              <AgentMark agent={plan.agent} size={14} />
+            </span>
+            <span className={p.planWho}>
+              <b>{NAME[plan.agent]}</b>
+              <span>{plan.account ? `${plan.account} · ${plan.window}` : plan.window}</span>
+            </span>
+            <span className={p.planBar}>
+              <i style={{ width: `${plan.left}%` }} />
+            </span>
+            <span className={p.planLeft}>
+              <b>{t.left(plan.left)}</b>
+              <span>{t.until(plan.until)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The same peek by day and by night, the line between them lit. */
+function Plans() {
+  return (
+    <Frame
+      label="Plan usage, in light and in dark: Claude Code has 38% of its five hours left until 14:00, Codex 64%, Kimi Code 90% of its week, Grok Build 96%"
+      w={52}
+      n={30}
+      foot
+      className={p.dayNight}
+    >
+      <PlanPeek />
+      <div className={p.seam} />
+      <div className={p.day}>
+        <PlanPeek />
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.6.0: automations, as the homepage draws them ---- */
+
+function Automations() {
+  return (
+    <figure
+      className={p.drawn}
+      aria-label="An automation: weekdays at 07:00, review each new pull request, with Opus 5.5 as its lead, on this computer"
+    >
+      <Fragment source={automations} tone="dark" className={p.drawnStage} />
+    </figure>
+  )
+}
+
+/* ---- 0.7.0: a review read three times, its findings at their lines, and the seal ---- */
+
+/** A line of the diff: its number, added or taken out, and its code in runs of one colour. */
+interface DiffLine {
+  no: number
+  sign?: '+' | '-'
+  code: readonly (string | readonly [kind: 'k' | 'f' | 's', text: string])[]
+}
+
+const DIFF: readonly DiffLine[] = [
+  { no: 38, code: [['k', 'export async function '], ['f', 'refund'], '(req: RefundRequest) {'] },
+  { no: 39, code: ['  ', ['k', 'const '], 'key = req.headers[', ['s', "'idempotency-key'"], ']'] },
+  { no: 40, sign: '-', code: ['  ', ['k', 'const '], 'prior = ', ['k', 'await '], 'refunds.', ['f', 'find'], '(key)'] },
+  { no: 40, sign: '+', code: ['  ', ['k', 'const '], 'prior = ', ['k', 'await '], 'refunds.', ['f', 'find'], '(req.partner, key)'] },
+  { no: 41, sign: '+', code: ['  ', ['k', 'if '], '(prior) ', ['k', 'return '], ['f', 'conflict'], '(prior)'] },
+  { no: 42, code: ['  ', ['k', 'const '], 'refund = ', ['k', 'await '], 'stripe.refunds.', ['f', 'create'], '({'] },
+  { no: 43, sign: '+', code: ['    idempotencyKey: key,'] },
+  { no: 44, code: ['    amount: req.amount,'] },
+  { no: 45, code: ['  })'] },
+  { no: 46, sign: '+', code: ['  ', ['k', 'await '], 'refunds.', ['f', 'save'], '(req.partner, key, refund)'] },
+  { no: 47, code: ['  ', ['k', 'return '], ['f', 'ok'], '(refund)'] },
+]
+
+/** The two findings, each under the line it is about, and what the lead did. */
+const NOTES = [
+  {
+    after: 4,
+    weight: 'Major',
+    heavy: true,
+    title: 'A reused key with a new amount still gets the first refund',
+    claim: 'A partner that changes the amount on a retry is told it succeeded.',
+    state: 'Fixed',
+    answer: ['Compares the amount too, and answers 422 when it differs.', '3f2a1c4'],
+  },
+  {
+    after: 9,
+    weight: 'Minor',
+    heavy: false,
+    title: 'Two retries at once can both miss find() and save twice',
+    claim: 'Nothing stops the second save.',
+    state: 'Kept',
+    answer: ['The unique index on partner and key refuses the second.', null],
+  },
+] as const
+
+const SEAL = `data:image/svg+xml,${encodeURIComponent(sealSvg('ring', { model: 'Opus 5.5', sha: '3f2a1c4', passes: 3, date: '2026-11-04' }, 'dark'))}`
+
+/*
+ * The beats, by when each starts, in ms of a loop: the first pass reads the
+ * change and raises two findings; the second sees one fixed and one kept;
+ * the third finds nothing left, and the pull request takes its seal. Then
+ * it holds, and clears for the next loop.
+ */
+const REVIEWED: Timeline = { beats: [0, 1300, 2100, 3400, 4300, 5100, 6400, 7900, 13600], loop: 14400, rest: 7 }
+const SEALED = REVIEWED.rest
+const SCANS: readonly number[] = [0, 3, 6]
+
+/** A picture's loop: when each beat starts, in ms; how long the loop is; and the beat it rests on, its most telling. */
+interface Timeline {
+  readonly beats: readonly number[]
+  readonly loop: number
+  readonly rest: number
+}
+
+/** The beat it is on: it plays only while on screen, in a shown tab, with motion allowed; otherwise it rests on `rest`. */
+function useBeat(ref: { readonly current: HTMLElement | null }, { beats, loop, rest }: Timeline): number {
+  const [beat, setBeat] = useState(rest)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const still = matchMedia('(prefers-reduced-motion: reduce)')
+    // It starts where the drawing rests, so nothing jumps when it wakes.
+    let t: number = beats[rest] ?? 0
+    let since = 0
+    let timer = 0
+    let seen = false
+    const step = () => {
+      const now = performance.now()
+      t = (t + now - since) % loop
+      since = now
+      const at = beats.findLastIndex((start) => start <= t)
+      setBeat(at)
+      timer = window.setTimeout(step, (beats[at + 1] ?? loop) - t + 1)
+    }
+    const sync = () => {
+      window.clearTimeout(timer)
+      if (seen && !document.hidden && !still.matches) {
+        since = performance.now()
+        step()
+      } else if (still.matches) setBeat(rest)
+    }
+    const io = new IntersectionObserver((seen_) => {
+      seen = seen_.at(-1)?.isIntersecting ?? false
+      sync()
+    })
+    io.observe(el)
+    document.addEventListener('visibilitychange', sync)
+    still.addEventListener('change', sync)
+    return () => {
+      window.clearTimeout(timer)
+      io.disconnect()
+      document.removeEventListener('visibilitychange', sync)
+      still.removeEventListener('change', sync)
+    }
+  }, [ref, beats, loop, rest])
+  return beat
+}
+
+function Findings() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, REVIEWED)
+  const out = beat === REVIEWED.beats.length - 1
+  const pass = beat < 3 || out ? 1 : beat < 6 ? 2 : 3
+  const shown = (from: number) => beat >= from && !out
+  const notes = [
+    { ...NOTES[0], shown: shown(1), settled: shown(4) },
+    { ...NOTES[1], shown: shown(2), settled: shown(5) },
+  ]
+  const sealed = shown(SEALED)
+  return (
+    <Frame
+      label="A review read in three passes: two findings at their lines, one fixed in 3f2a1c4 and one kept with the lead’s reason, and the pull request sealed, reviewed by Opus 5.5 in 3 passes"
+      w={62}
+      n={32}
+      foot
+      className={p.reviewed7}
+    >
+      <div ref={ref} className={p.rvStage} data-sealed={sealed}>
+        <div className={cx(p.win, p.rvWin)}>
+          <Bar>
+            <Tabs />
+          </Bar>
+          <div className={p.rvHead}>
+            <code>src/refunds/idempotency.ts</code>
+            <span className={p.diff}>
+              <ins>+5</ins> <del>−1</del>
+            </span>
+            <span className={p.rvPass}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <span key={pass} className={p.rvPassWords}>
+                {sealed ? 'Opus 5.5 · nothing left to change' : `Opus 5.5 · pass ${pass} of 3`}
+              </span>
+            </span>
+          </div>
+          <div className={p.rvCode}>
+            {SCANS.includes(beat) && <i key={beat} className={p.rvScan} />}
+            {DIFF.map((line, i) => (
+              <div key={i} className={p.rvRows}>
+                <div className={p.rvLine} data-sign={line.sign}>
+                  <span className={p.rvNo}>{line.no}</span>
+                  <span className={p.rvSign}>{line.sign ?? ''}</span>
+                  <code>
+                    {line.code.map((run, j) =>
+                      typeof run === 'string' ? (
+                        run
+                      ) : (
+                        <span key={j} className={p[run[0]]}>
+                          {run[1]}
+                        </span>
+                      ),
+                    )}
+                  </code>
+                </div>
+                {notes
+                  .filter((note) => note.after === i)
+                  .map((note) => (
+                    <div key={note.title} className={p.rvFold} data-shown={note.shown}>
+                      <div className={p.rvNote} data-settled={note.settled}>
+                        <span className={p.rvNoteHead}>
+                          <span className={note.heavy && !note.settled ? p.rvHeavy : p.rvWeight}>{note.weight}</span>
+                          <b>{note.title}</b>
+                          <span className={p.rvState} data-fixed={note.state === 'Fixed'}>
+                            {note.state === 'Fixed' && <Icon name="check" size={11} />}
+                            {note.state}
+                          </span>
+                        </span>
+                        <span className={p.rvSay}>
+                          <span className={p.rvClaim}>{note.claim}</span>
+                          <span className={p.rvAnswer}>
+                            {note.answer[0]}
+                            {note.answer[1] !== null && <code>{note.answer[1]}</code>}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={p.rvPr} data-shown={sealed}>
+          <span className={p.rvPrWords}>
+            <span className={p.rvOpen}>
+              <Icon name="pr" size={12} />
+              Open
+            </span>
+            <b>Return 409 when a refund key is reused</b>
+            <span className={p.rvPrLine}>Reviewed by Opus 5.5 in 3 passes, at 3f2a1c4</span>
+          </span>
+          <img className={p.rvSeal} src={SEAL} alt="" />
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.8.0: a browser built in ---- */
+
+/*
+ * The beats: the payment page as the lead built it; the person points at its
+ * Refund button; their comment goes, its pin left on the button; the lead
+ * types the amount into the page; the button says it; the lead presses it, and
+ * the page says it went; the lead answers. Then it holds, and clears.
+ */
+const BROWSED: Timeline = { beats: [0, 1400, 2800, 4400, 5800, 7200, 8600, 13000], loop: 13800, rest: 6 }
+
+/** What the lead is doing in the page, beat by beat, as its one live line says it. */
+const AT_WORK: Readonly<Record<number, string>> = {
+  3: 'Typing 40.00 in Amount',
+  4: 'Reading the page again',
+  5: 'Clicking Refund €40.00',
+}
+
+function Browser() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, BROWSED)
+  const out = beat === BROWSED.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  // Who points at what: the person at the button, then the lead at the field, then at the button.
+  const on = beat === 1 || beat === 2 ? 'button' : beat === 3 ? 'amount' : beat === 4 || beat === 5 ? 'button' : null
+  const lead = beat >= 3 && beat <= 5
+  const named = at(4)
+  return (
+    <Frame
+      label="A task’s app open beside its conversation: the person comments on the Refund button, and the lead types the amount, presses the button and says the page refunded €40.00"
+      w={66}
+      n={34}
+      foot
+    >
+      <div ref={ref} className={cx(p.win, p.brWin)}>
+        <Bar>
+          <Tabs />
+        </Bar>
+        <div className={p.brBody}>
+          <div className={p.brTalk}>
+            <div className={p.brTask}>
+              <b>Refund from a payment’s page</b>
+              <code>althar/refund-button</code>
+            </div>
+            <div className={p.brLead}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <p>Built the refund form. It’s running beside us.</p>
+            </div>
+            <div className={p.brYou} data-shown={at(2)}>
+              <p>Say the amount on it.</p>
+              <span className={p.brChip}>
+                <i>1</i>
+                Refund button
+              </span>
+            </div>
+            <div className={p.brAfter}>
+              <div className={p.brLive} data-shown={lead}>
+                <i />
+                <span key={beat}>{AT_WORK[beat] ?? ''}</span>
+              </div>
+              <div className={p.brLead} data-shown={at(6)}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>
+                  The button says the amount now. I typed 40.00, pressed it, and the page said <b>Refunded €40.00</b>.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className={p.brPage}>
+            <div className={p.brPageBar}>
+              <span className={p.brNav}>
+                <Icon name="chevronL" size={12} />
+                <Icon name="chevron" size={12} />
+                <Icon name="reload" size={12} />
+              </span>
+              <span className={p.brAddress}>
+                <Icon name="lock" size={10} />
+                localhost:5173/payments/pay_8Hk2
+              </span>
+              <span className={p.brTool} data-on={beat === 1 || beat === 2}>
+                <Icon name="comment" size={12} />
+                Comment
+              </span>
+            </div>
+            <div className={p.brWho} data-shown={lead}>
+              Opus 5.5 is using the page
+            </div>
+            <div className={p.brSite}>
+              <div className={p.brSiteNav}>
+                <b>
+                  <i />
+                  tally
+                </b>
+                <span>Payments</span>
+                <span>Payouts</span>
+              </div>
+              <div className={p.brPay}>
+                <span>Payment pay_8Hk2</span>
+                <b>€120.00</b>
+                <em>Paid 11 Nov · Halyard Coffee</em>
+              </div>
+              <div className={p.brForm}>
+                <span className={p.brLabel}>Amount to refund</span>
+                <span className={p.brField} data-at={on === 'amount'} data-lead={lead}>
+                  <span>€</span>
+                  <span className={p.brValue} data-typed={at(3)}>
+                    {at(3) ? '40.00' : '0.00'}
+                  </span>
+                </span>
+                <span className={p.brButton} data-at={on === 'button'} data-lead={lead}>
+                  <span key={String(named)} className={p.brButtonWords}>
+                    {named ? 'Refund €40.00' : 'Refund'}
+                  </span>
+                  {at(2) && <i className={p.brPin}>1</i>}
+                </span>
+                <div className={p.brNote} data-shown={beat === 1}>
+                  Say the amount on it.
+                </div>
+              </div>
+              <div className={p.brToast} data-shown={at(5)}>
+                <Icon name="check" size={11} />
+                Refunded €40.00
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.8.0: canvases ---- */
+
+/*
+ * The beats: version 2 of a launch page the lead drew; the person's comment
+ * pinned on its headline; the lead drawing version 3; version 3, its headline
+ * bigger and bolder, the comment answered, and the thread's line for it. Then
+ * it holds, and clears.
+ */
+const DRAWN: Timeline = { beats: [0, 1500, 3100, 4500, 10200], loop: 11000, rest: 3 }
+
+function Canvas() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, DRAWN)
+  const out = beat === DRAWN.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const v3 = at(3)
+  return (
+    <Frame
+      label="A launch page the lead drew on a canvas: a comment pinned on its headline, and version 3 answering it with a bigger, bolder headline"
+      w={50}
+      n={32}
+    >
+      <div ref={ref} className={p.cvStage}>
+        <div className={p.cvBehind} data-shown={v3} />
+        <div className={cx(p.win, p.cvWin)}>
+          <div className={p.cvBar}>
+            <span className={p.mk}>
+              <Icon name="canvas" size={12} />
+            </span>
+            <b>Payouts launch page</b>
+            <span key={String(v3)} className={p.cvVer}>
+              {v3 ? 'v3' : 'v2'}
+            </span>
+            <span className={p.cvDrawing} data-shown={beat === 2}>
+              Drawing v3
+            </span>
+            <span className={p.cvComment}>
+              <Icon name="comment" size={12} />
+              Comment
+            </span>
+          </div>
+          <div className={p.cvPage} data-drawing={beat === 2}>
+            <div className={p.cvMesh} />
+            <div className={p.cvNav}>
+              <b>
+                <i />
+                tally
+              </b>
+              <em>Start</em>
+            </div>
+            <div className={p.cvHero}>
+              <h4 className={p.cvHead} data-v3={v3}>
+                Payouts in
+                <br />
+                forty seconds.
+              </h4>
+              <span className={p.cvCta}>Get started</span>
+            </div>
+            <div className={p.cvPayout}>
+              <span>Arriving today</span>
+              <b>€12,480.00</b>
+              <div className={p.cvBars}>
+                {[38, 52, 44, 70, 58, 86, 64, 100].map((h, i) => (
+                  <i key={i} style={{ '--h': `${h}%` } as CSSProperties} />
+                ))}
+              </div>
+            </div>
+            <div className={p.cvPin} data-shown={at(1)} data-done={v3}>
+              <i>1</i>
+              <span>
+                Bigger, bolder headline.
+                <em>Done in v3</em>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className={p.cvLine} data-shown={v3}>
+          <Icon name="canvas" size={12} />
+          <span>
+            Drew <b>Payouts launch page</b>, version 3
+          </span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.9.0: undo from a message ---- */
+
+/*
+ * The beats: a task's two turns, and the four files they changed; the person
+ * points at their second message, and its Undo from here shows; the question,
+ * over the window; it's pressed; the message and its reply leave, the two
+ * files that turn made go back, and the prompt is back in the draft. Then it
+ * holds, and clears.
+ */
+const UNDONE: Timeline = { beats: [0, 1500, 2700, 5600, 6300, 11600], loop: 12400, rest: 2 }
+
+/** The files the task changed, and the turn that changed each. */
+const TOUCHED = [
+  { path: 'src/refunds/refund.ts', ins: 31, del: 3, turn: 1 },
+  { path: 'src/refunds/refund.test.ts', ins: 15, del: 0, turn: 1 },
+  { path: 'src/emails/refund-email.ts', ins: 52, del: 0, turn: 2 },
+  { path: 'src/webhooks/settled.ts', ins: 9, del: 1, turn: 2 },
+] as const
+
+const ASKED = 'Also email the customer each time.'
+
+function Undo() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, UNDONE)
+  const out = beat === UNDONE.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const pointed = beat === 1 || beat === 2 || beat === 3
+  const asking = beat === 2 || beat === 3
+  const undone = at(4)
+  const kept = TOUCHED.filter((file) => !undone || file.turn === 1)
+  const ins = kept.reduce((sum, file) => sum + file.ins, 0)
+  const del = kept.reduce((sum, file) => sum + file.del, 0)
+  return (
+    <Frame
+      label="Undo from here, in a task: the person undoes their second message, its reply leaves the conversation, the two files that turn made go back, and the prompt returns to the draft"
+      w={64}
+      n={32}
+      foot
+    >
+      <div ref={ref} className={cx(p.win, p.unWin)}>
+        <Bar>
+          <Tabs />
+        </Bar>
+        <div className={p.unBody} data-asking={asking}>
+          <div className={p.unTalk}>
+            <div className={p.brTask}>
+              <b>Partial refunds</b>
+              <code>althar/partial-refunds</code>
+            </div>
+            <div className={p.unYou}>
+              <p>Let a refund be for part of a payment.</p>
+            </div>
+            <div className={p.brLead}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <p>A refund takes an amount now, up to what’s left on the payment.</p>
+            </div>
+            <div className={p.unTurn} data-gone={undone}>
+              <div className={p.unYou}>
+                <p data-at={pointed}>{ASKED}</p>
+                <span className={p.unUndo} data-shown={pointed}>
+                  Undo from here
+                </span>
+              </div>
+              <div className={p.brLead}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>Added a refund email, sent when the refund settles.</p>
+              </div>
+            </div>
+            <div className={p.unDraft} data-back={undone}>
+              <span key={String(undone)} className={p.unDraftWords}>
+                {undone ? (
+                  <>
+                    {ASKED}
+                    <i className={p.caret} />
+                  </>
+                ) : (
+                  'Message the lead'
+                )}
+              </span>
+            </div>
+          </div>
+          <div className={p.unChanges}>
+            <div className={p.unTabs}>
+              <span>Outputs</span>
+              <b>Changes</b>
+              <span key={ins} className={cx(p.diff, p.unSum)}>
+                <ins>+{ins}</ins> <del>−{del}</del>
+              </span>
+            </div>
+            <ul className={p.unFiles}>
+              {TOUCHED.map((file) => (
+                <li key={file.path} data-gone={undone && file.turn === 2}>
+                  <code>
+                    <span>{file.path.slice(0, file.path.lastIndexOf('/') + 1)}</span>
+                    {file.path.slice(file.path.lastIndexOf('/') + 1)}
+                  </code>
+                  <span className={p.diff}>
+                    <ins>+{file.ins}</ins>
+                    {file.del > 0 && <del>−{file.del}</del>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className={p.unAsk} data-shown={asking}>
+            <b className={p.dialogTitle}>{undoTurnText.title}</b>
+            <span className={p.unSay}>{undoTurnText.description}</span>
+            <blockquote className={p.unQuote}>{ASKED}</blockquote>
+            <span className={p.unSay}>{undoTurnText.draft}</span>
+            <span className={p.unWords}>
+              <span>{undoTurnText.cancel}</span>
+              <b data-pressed={beat === 3}>{undoTurnText.undo}</b>
+            </span>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.10.0: your own host, your own workers ---- */
+
+/*
+ * The beats: Althar on your computer, its window open on a home on your own
+ * server, a task at work there, its lead running on a worker of yours; the
+ * window closes, and the server carries on: the worker runs the project's
+ * setup and its tests for the task, and sends its commits back to the home,
+ * and the task finishes. The window opens again on the finished task. Then
+ * it holds, and clears.
+ */
+const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
+
+/** The server's tasks, and the beat each finishes on, if it does. The first one's lead runs on the worker. */
+const ON_HOME = [
+  { name: 'Partial refunds', agent: Agent.Claude, done: 5, worker: true },
+  { name: 'Webhook retries', agent: Agent.Codex, done: null, worker: false },
+  { name: 'Payout export', agent: Agent.Claude, done: null, worker: false },
+] as const
+
+/** What the worker does for the task: the commands it runs typed, what comes back not, and the beat each line comes on. */
+const ON_WORKER = [
+  { at: 0, line: 'Lead for Partial refunds · Claude Code', typed: false },
+  { at: 2, line: 'bun install', typed: true },
+  { at: 2, line: 'Setup done in 4.2 s', typed: false },
+  { at: 3, line: 'bun test src/refunds', typed: true },
+  { at: 4, line: '✓ 23 passed', typed: false },
+  { at: 5, line: '2 commits back to build-01', typed: false },
+] as const
+
+function Home() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, HOSTED)
+  const out = beat === HOSTED.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const closed = beat >= 1 && beat <= 5
+  const sent = at(5)
+  const working = !out && !sent
+  return (
+    <Frame
+      label="Your own host and workers: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work; a task's lead runs on a worker of yours, which runs the project's setup and tests and sends its commits back to the home; the window opens again on the finished task"
+      w={64}
+      n={32}
+    >
+      <div ref={ref} className={p.hoStage}>
+        <div className={cx(p.win, p.hoWin)} data-closed={closed}>
+          <Bar end={<span className={p.hoChip}>build-01</span>}>
+            <Tab name="Tally" ink="#2f6f7a" on />
+          </Bar>
+          <div className={p.hoTalk}>
+            <div className={p.brTask}>
+              <b>Partial refunds</b>
+              <code>althar/partial-refunds</code>
+            </div>
+            <div className={p.unYou}>
+              <p>Let a refund be for part of a payment.</p>
+            </div>
+            <div className={p.brAfter}>
+              <span className={p.brLive} data-shown={!at(5)}>
+                <i />
+                <span>Writing src/refunds/refund.ts</span>
+              </span>
+              <div className={p.brLead} data-shown={at(5)}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>
+                  A refund takes an amount now, up to what’s left on the payment.{' '}
+                  <span className={p.diff}>
+                    <ins>+31</ins> <del>−3</del>
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={p.hoLink} data-closed={closed}>
+          <span className={p.hoWire} />
+          <span className={p.hoVia}>{closed ? 'Window closed' : 'SSH'}</span>
+        </div>
+        <div className={p.hoBox}>
+          <div className={p.hoHead}>
+            <span className={p.hoOs}>
+              <OsMark id="linux" size={15} />
+            </span>
+            <span className={p.who}>
+              <b>build-01</b>
+              <span>Your server · arm64</span>
+            </span>
+            <span className={p.hoReady}>Ready</span>
+          </div>
+          <span className={p.hoLabel}>Tasks</span>
+          <ul className={p.hoTasks}>
+            {ON_HOME.map((task) => {
+              const done = task.done !== null && at(task.done)
+              return (
+                <li key={task.name}>
+                  <span className={p.mk}>
+                    <AgentMark agent={task.agent} size={12} />
+                  </span>
+                  <span className={p.hoName}>{task.name}</span>
+                  <span key={String(done)} className={p.hoState} data-done={done}>
+                    {done ? (
+                      <>
+                        <Icon name="check" size={11} />
+                        Finished
+                      </>
+                    ) : (
+                      <>
+                        <i />
+                        {task.worker ? 'On runner-1' : 'At work'}
+                      </>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          <span className={p.hoLabel}>Worker</span>
+          <div className={p.hoWorker}>
+            <div className={p.hoRun}>
+              <code>runner-1</code>
+              <span key={sent ? 'sent' : working ? 'working' : 'idle'} className={p.hoState} data-done={sent}>
+                {sent ? (
+                  <>
+                    <Icon name="check" size={11} />
+                    Sent back
+                  </>
+                ) : working ? (
+                  <>
+                    <i />
+                    Running a lead
+                  </>
+                ) : (
+                  'Free'
+                )}
+              </span>
+            </div>
+            {/* What the worker runs for the task, as its run shows it. */}
+            <ol className={p.hoLog}>
+              {ON_WORKER.map((line) => (
+                <li key={line.line} data-shown={at(line.at)} data-typed={line.typed}>
+                  {/* Each word whole: a line breaks between its arguments, never inside a flag or an ID. */}
+                  {line.line.split(' ').map((word, i) => (
+                    <Piece key={i}>
+                      {i > 0 && ' '}
+                      <span>{word}</span>
+                    </Piece>
+                  ))}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+const PICTURES: Record<Picture, () => ReactNode> = {
+  home: Home,
+  undo: Undo,
+  browser: Browser,
+  canvas: Canvas,
+  findings: Findings,
+  plans: Plans,
+  windows: Windows,
+  reviewer: Reviewer,
+  report: Report,
+  run: Run,
+  evidence: Evidence,
+  plan: Plan,
+  automations: Automations,
+}
+
+export function LogPicture({ picture }: { picture: Picture }) {
+  const Drawn = PICTURES[picture]
+  return <Drawn />
+}

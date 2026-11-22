@@ -20,12 +20,13 @@ export type Direction = (typeof DIRECTIONS)[number]['key']
 /** D's two views. */
 export type View = 'new' | 'coming'
 
-/** How What's new reads, in A, B and C: the notes whole, or the highlights first. */
-export const READINGS = [
-  { key: 'notes', kbd: '1', label: 'Notes' },
-  { key: 'highlights', kbd: '2', label: 'Highlights' },
+/** How What's new looks, in every direction: Althar's light, the real thing, or the site's flight log. */
+export const LOOKS = [
+  { key: 'launch', kbd: '1', label: 'Light' },
+  { key: 'live', kbd: '2', label: 'The real thing' },
+  { key: 'log', kbd: '3', label: 'Flight log' },
 ] as const
-export type Reading = (typeof READINGS)[number]['key']
+export type Look = (typeof LOOKS)[number]['key']
 
 export interface LabState {
   readonly d: Direction
@@ -40,8 +41,8 @@ export interface LabState {
   readonly homeNotes: boolean
   /** D: the view its page is on. */
   readonly view: View
-  /** A, B and C: how the page reads. */
-  readonly reading: Reading
+  /** How the page looks. */
+  readonly look: Look
 }
 
 const params = new URLSearchParams(window.location.search)
@@ -56,15 +57,12 @@ export const arrival = (direction: Direction): Pick<LabState, 'tab' | 'unseen' |
   view: 'new',
 })
 
-/** How each direction reads first: B leads with the highlights, the others with the notes. */
-export const readingOf = (direction: Direction): Reading => (direction === 'b' ? 'highlights' : 'notes')
-
 let state: LabState = {
   d,
   narrow: params.get('narrow') === '1',
   skipped: params.get('from') === '0.8.0',
   ...arrival(d),
-  reading: READINGS.find((one) => one.key === params.get('read'))?.key ?? readingOf(d),
+  look: LOOKS.find((one) => one.key === params.get('look'))?.key ?? 'launch',
   // Opened on What's new's own address, its tab is open and it has been seen.
   ...(window.location.hash === '#/whats-new' && d !== 'c' ? { tab: true, unseen: false } : {}),
   ...(params.get('notes') === '1' ? { homeNotes: true, unseen: false } : {}),
@@ -78,7 +76,7 @@ export const lab = {
     state = { ...state, ...change }
     const url = new URL(window.location.href)
     url.searchParams.set('d', state.d)
-    url.searchParams.set('read', state.reading)
+    url.searchParams.set('look', state.look)
     for (const [key, on, value] of [
       ['narrow', state.narrow, '1'],
       ['from', state.skipped, '0.8.0'],

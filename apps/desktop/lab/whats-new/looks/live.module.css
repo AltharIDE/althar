@@ -1,0 +1,227 @@
+/* Look 2, the real thing: each feature's words beside a stage with the kit's own piece of it, live. On the kit's tokens only. */
+
+.page {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--n-2);
+  container: look / inline-size;
+}
+.column {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 36px 48px 88px;
+}
+
+/* ---- the release, large ---- */
+.hero {
+  max-width: 760px;
+  padding: 40px 0 60px;
+}
+.eyebrow {
+  margin: 0 0 16px;
+  font: 500 12px/1.3 var(--font-label);
+  letter-spacing: 0.02em;
+  color: var(--t-3);
+}
+.version {
+  color: var(--live);
+}
+.title {
+  margin: 0;
+  font: 650 44px/1.08 var(--font-display);
+  letter-spacing: -0.03em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.lede {
+  max-width: 580px;
+  margin: 18px 0 0;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+
+/* ---- a feature: words, and its stage ---- */
+.feature {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: center;
+  gap: 56px;
+  padding: 52px 0;
+  border-top: 1px solid var(--line);
+}
+.feature[data-flip] .words {
+  order: 2;
+}
+.words {
+  min-width: 0;
+}
+.kicker {
+  margin: 0;
+  font: 500 11px/1.3 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--live);
+}
+.name {
+  margin: 10px 0 14px;
+  font: 650 26px/1.15 var(--font-display);
+  letter-spacing: -0.022em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.text {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 18px;
+  font-size: 13px;
+}
+
+/* The stage: a raised tray with a faint grid of dots, its height pinned so nothing on it moves the page. */
+.stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: var(--h);
+  min-width: 0;
+  padding: 28px 32px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.stage[data-align='end'] {
+  justify-content: flex-end;
+}
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: radial-gradient(circle, var(--line-3) 1px, transparent 1.5px);
+  background-size: 18px 18px;
+  background-position: 9px 9px;
+  -webkit-mask: radial-gradient(ellipse 80% 75% at 50% 45%, #000 20%, transparent 85%);
+  mask: radial-gradient(ellipse 80% 75% at 50% 45%, #000 20%, transparent 85%);
+}
+.piece {
+  width: 100%;
+  max-width: 540px;
+  min-width: 0;
+}
+.drawn {
+  margin-bottom: 14px;
+}
+
+/* Terminals: the foot of a window, set into the stage, its drawer up. */
+.stage:has(.window) {
+  padding: 0;
+  justify-content: flex-end;
+}
+.window {
+  position: relative;
+  align-self: stretch;
+  height: calc(100% - 28px);
+  margin: 28px 32px 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--n-2);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.foot {
+  position: relative;
+  flex: none;
+}
+.drawerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.drawerName {
+  font-weight: 500;
+  color: var(--t-1);
+}
+.drawerWhere {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- also improved: what you feel, two by two ---- */
+.felt {
+  padding: 52px 0 60px;
+  border-top: 1px solid var(--line);
+}
+.feltTitle {
+  margin: 0 0 24px;
+  font: 500 11.5px/1.3 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.feltList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 26px 56px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.feltList li {
+  display: grid;
+  gap: 5px;
+}
+.feltName {
+  font: 600 17px/1.3 var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.feltLine {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+.releases {
+  padding-top: 8px;
+}
+
+/* The narrowest window: each feature's words over its stage. */
+@container window (width < 960px) {
+  .column {
+    padding: 28px 28px 72px;
+  }
+  .title {
+    font-size: 36px;
+  }
+  .feature {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 40px 0;
+  }
+  .feature[data-flip] .words {
+    order: 0;
+  }
+  .feltList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
