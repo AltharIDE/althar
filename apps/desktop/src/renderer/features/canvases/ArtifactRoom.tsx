@@ -96,6 +96,8 @@ export function ArtifactRoom({
   )
   const draft = draftKey.artifact(canvasId ?? open.id)
   const starting = useRef<string | null>(null)
+  // Where the canvas's versions and actions go: the end of the artifact's row.
+  const [actions, setActions] = useState<HTMLSpanElement | null>(null)
 
   const start = useCallback(() => {
     if (chat !== null || canvasId === null || summary === null || lead === null || starting.current === canvasId) return
@@ -151,52 +153,64 @@ export function ArtifactRoom({
 
   return (
     <div className={s.room}>
-      <section className={s.chat} aria-label={artifactRoomText.chat}>
-        <ArtifactHead
-          current={summary?.id ?? open.id}
-          title={title}
-          by={summary === null ? null : byOf(summary)}
-          artifacts={artifacts}
-          onPick={(id) => onOpen({ id, version: null })}
-          onBack={onBack}
-          kbd="esc"
-        />
-        {chat !== null && queued === null ? (
-          <Conversation key={chat.threadId} threadId={chat.threadId} draft={draft} opened={canvasId} onCanvas={onCanvas} onBack={onBack} />
-        ) : (
-          <FirstWords
-            draft={draft}
-            queued={queued}
-            onStart={start}
-            onSend={(words) => {
-              setFailed(null)
-              setQueued(words)
-              setDraftText(draft, '')
-              start()
-            }}
-            failed={failed}
-            onAgain={() => {
-              starting.current = null
-              start()
-            }}
-          />
-        )}
-      </section>
-      <div className={s.canvas}>
-        {summary !== null && shownBy !== null ? (
-          <CanvasHost
-            key={summary.id}
-            threadId={shownBy}
-            open={{ canvasId: summary.id, version: open.version, follow: open.version === null }}
-            draft={draft}
-            onVersion={(version) => onOpen({ id: summary.id, version })}
-            onClose={onBack}
-          />
-        ) : (
-          <div className={s.drawing} aria-busy="true">
-            <span>{artifactRoomText.drawing}</span>
-          </div>
-        )}
+      {/* Its one top row, in place of the project's: the artifact's, with its canvas's versions and actions at the end. */}
+      <ArtifactHead
+        current={summary?.id ?? open.id}
+        title={title}
+        by={summary === null ? null : byOf(summary)}
+        artifacts={artifacts}
+        onPick={(id) => onOpen({ id, version: null })}
+        onBack={onBack}
+        kbd="esc"
+        end={<span ref={setActions} className={s.actions} />}
+      />
+      <div className={s.body}>
+        <section className={s.chat} aria-label={artifactRoomText.chat}>
+          {chat !== null && queued === null ? (
+            <Conversation
+              key={chat.threadId}
+              threadId={chat.threadId}
+              draft={draft}
+              opened={canvasId}
+              onCanvas={onCanvas}
+              onBack={onBack}
+            />
+          ) : (
+            <FirstWords
+              draft={draft}
+              queued={queued}
+              onStart={start}
+              onSend={(words) => {
+                setFailed(null)
+                setQueued(words)
+                setDraftText(draft, '')
+                start()
+              }}
+              failed={failed}
+              onAgain={() => {
+                starting.current = null
+                start()
+              }}
+            />
+          )}
+        </section>
+        <div className={s.canvas}>
+          {summary !== null && shownBy !== null ? (
+            <CanvasHost
+              key={summary.id}
+              threadId={shownBy}
+              open={{ canvasId: summary.id, version: open.version, follow: open.version === null }}
+              draft={draft}
+              onVersion={(version) => onOpen({ id: summary.id, version })}
+              onClose={onBack}
+              actionsIn={actions}
+            />
+          ) : (
+            <div className={s.drawing} aria-busy="true">
+              <span>{artifactRoomText.drawing}</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

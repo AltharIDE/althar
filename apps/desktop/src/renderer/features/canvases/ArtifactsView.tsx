@@ -1,5 +1,5 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import type { ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
 import { type ArtifactRow, Artifacts, type ArtifactsFilter, type ArtifactsLayout } from '@althar/ui'
@@ -59,10 +59,13 @@ export const drawingRowOf = (one: ArtifactDrawing, now = new Date()): ArtifactRo
 
 export function ArtifactsView({
   projectId,
+  header = null,
   threadId,
   lead,
 }: {
   projectId: string
+  /** The project's top row, shown over every artifact; one opened has its own row in its place. */
+  header?: ReactNode
   /** The coordinator's thread: what an artifact no one has talked to yet is shown by. */
   threadId: string | null
   /** Who answers in an artifact's chat started here: the coordinator's composer's pick. */
@@ -98,35 +101,38 @@ export function ArtifactsView({
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   return (
-    <Artifacts
-      canvases={[
-        ...(drawing.data ?? []).map((one) => drawingRowOf(one)),
-        ...(list.data ?? []).map((one) => {
-          const row = rowOf(one)
-          const picture = pictureOf.get(one.id)
-          return picture === undefined || picture === null ? row : { ...row, picture }
-        }),
-      ]}
-      layout={shown.layout}
-      onLayout={(layout) => setShown((kept = { ...kept, layout }))}
-      filter={shown.filter}
-      onFilter={(filter) => setShown((kept = { ...kept, filter }))}
-      onOpen={(row) => setOpen({ id: row.id, version: null })}
-      {...(list.isError ? { error: messageOf(list.error) } : {})}
-      open={
-        open !== null && (
-          <ArtifactRoom
-            projectId={projectId}
-            coordinatorThreadId={threadId}
-            open={open}
-            canvases={list.data ?? []}
-            drawing={drawing.data ?? []}
-            lead={lead}
-            onOpen={setOpen}
-            onBack={() => setOpen(null)}
-          />
-        )
-      }
-    />
+    <>
+      {open === null && header}
+      <Artifacts
+        canvases={[
+          ...(drawing.data ?? []).map((one) => drawingRowOf(one)),
+          ...(list.data ?? []).map((one) => {
+            const row = rowOf(one)
+            const picture = pictureOf.get(one.id)
+            return picture === undefined || picture === null ? row : { ...row, picture }
+          }),
+        ]}
+        layout={shown.layout}
+        onLayout={(layout) => setShown((kept = { ...kept, layout }))}
+        filter={shown.filter}
+        onFilter={(filter) => setShown((kept = { ...kept, filter }))}
+        onOpen={(row) => setOpen({ id: row.id, version: null })}
+        {...(list.isError ? { error: messageOf(list.error) } : {})}
+        open={
+          open !== null && (
+            <ArtifactRoom
+              projectId={projectId}
+              coordinatorThreadId={threadId}
+              open={open}
+              canvases={list.data ?? []}
+              drawing={drawing.data ?? []}
+              lead={lead}
+              onOpen={setOpen}
+              onBack={() => setOpen(null)}
+            />
+          )
+        }
+      />
+    </>
   )
 }

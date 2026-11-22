@@ -357,3 +357,19 @@ button.pinMark:hover {
 .answered .pinMark {
   background: var(--t-4);
 }
+
+/* ---- In an artifact's room: no head of its own ------------------------ */
+/* the room's one top row is the artifact's; the panel is only what is on it, edge to edge */
+.bare {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+/* its versions and actions, at the end of the artifact's row */
+.inRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

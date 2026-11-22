@@ -7,7 +7,19 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   background: var(--paper);
+}
+/* under its row, the chat and the canvas, side by side; neither has a head of its own */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* the canvas's versions and actions, at the end of the row */
+.actions {
+  display: inline-flex;
+  align-items: center;
 }
 .chat {
   flex: none;
@@ -70,7 +82,7 @@
   }
 }
 @media (max-width: 760px) {
-  .room {
+  .body {
     flex-direction: column;
   }
   .chat {

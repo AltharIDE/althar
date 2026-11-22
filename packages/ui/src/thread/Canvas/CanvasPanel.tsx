@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { type ReactNode, type Ref, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
@@ -90,13 +91,9 @@ export interface CanvasPanelComment {
 export interface CanvasPanelProps {
   name: string
   title: string
-  kind: CanvasKind
   /** The version shown, and the latest there is. */
   version: number
   latest: number
-  /** Who published the version shown, and when, in words: “The lead of Sign-in redesign · 4 min ago”. */
-  by: string
-  note?: string | null
   /** Shows another version; without it, the versions don't step. */
   onVersion?: (version: number) => void
   /**
@@ -121,6 +118,11 @@ export interface CanvasPanelProps {
   bar?: ReactNode
   /** Back to where it was opened from, such as every artifact of the project. */
   onBack?: () => void
+  /**
+   * Where its head is someone else's, as in an artifact's room, whose one top row is the artifact's: the panel draws no
+   * head of its own, and its versions and actions go in this element (null while it is being laid out).
+   */
+  actionsIn?: Element | null
   /** A comment in the list pressed: its pin shows on its part. */
   onCommentPick?: (id: string) => void
   onClose: () => void
@@ -136,11 +138,8 @@ export interface CanvasPanelProps {
 export function CanvasPanel({
   name,
   title,
-  kind,
   version,
   latest,
-  by,
-  note,
   onVersion,
   newer = null,
   onComment,
@@ -150,6 +149,7 @@ export function CanvasPanel({
   extra,
   bar,
   onBack,
+  actionsIn,
   onCommentPick,
   onClose,
   children,
@@ -164,62 +164,42 @@ export function CanvasPanel({
   const [aimed, setAimed] = useState<string | null>(null)
   const older = version > 1
   const later = version < latest
-  return (
-    <SidePanel
-      label={title}
-      onClose={onClose}
-      {...(onBack === undefined ? {} : { onBack })}
-      text={t}
-      className={s.panel}
-      head={
-        <>
-          <span className={s.panelTile} aria-hidden="true">
-            <Icon name="canvas" size={14} />
-          </span>
-          <span className={s.panelHead}>
-            <SidePanelTitle>{title}</SidePanelTitle>
-            <span className={s.panelName}>{name}</span>
-          </span>
-        </>
-      }
-      actions={
-        <>
-          {onVersion !== undefined && latest > 1 && (
-            <span className={s.versions}>
-              <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
-              <span className={s.versionWord}>{t.version(version, latest)}</span>
-              <IconButton icon="chevron" label={t.newer} kbd="]" size="small" disabled={!later} onClick={() => onVersion(version + 1)} />
-            </span>
-          )}
-          {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
-          {extra}
-          {onComment !== undefined && error === undefined && (
-            <ActionButton
-              icon="comment"
-              aria-pressed={writing}
-              onClick={() => {
-                setAimed(selected)
-                setWriting((was) => !was)
-              }}
-            >
-              {t.comment}
-            </ActionButton>
-          )}
-        </>
-      }
-    >
-      <div className={s.facts}>
-        <span className={s.fact}>
-          {t.kinds[kind]} · {by}
+  const actions = (
+    <>
+      {onVersion !== undefined && latest > 1 && (
+        <span className={s.versions}>
+          <IconButton icon="chevronL" label={t.older} kbd="[" size="small" disabled={!older} onClick={() => onVersion(version - 1)} />
+          <span className={s.versionWord}>{t.version(version, latest)}</span>
+          <IconButton icon="chevron" label={t.newer} kbd="]" size="small" disabled={!later} onClick={() => onVersion(version + 1)} />
         </span>
-        {note !== undefined && note !== null && note !== '' && <span className={s.note}>{note}</span>}
-        {later && onVersion !== undefined && (
+      )}
+      {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
+      {extra}
+      {onComment !== undefined && error === undefined && (
+        <ActionButton
+          icon="comment"
+          aria-pressed={writing}
+          onClick={() => {
+            setAimed(selected)
+            setWriting((was) => !was)
+          }}
+        >
+          {t.comment}
+        </ActionButton>
+      )}
+    </>
+  )
+  const content = (
+    <>
+      {/* Only what the person can act on: a newer version than the one shown. */}
+      {later && onVersion !== undefined && (
+        <div className={s.facts}>
           <span className={s.behind}>
             {newer !== null ? t.newerOut(newer) : t.notLatest}
             <LinkButton onClick={() => onVersion(newer ?? latest)}>{newer !== null ? t.show : t.latest}</LinkButton>
           </span>
-        )}
-      </div>
+        </div>
+      )}
       {/* what stands in for it, still being read or unreadable, sits at reading width even where it would fill */}
       <div className={cx(s.body, fill && !loading && error === undefined ? s.fill : s.reading)} data-canvas-body="">
         {loading ? (
@@ -282,6 +262,37 @@ export function CanvasPanel({
           )}
         </div>
       )}
+    </>
+  )
+  // In a room whose top row is the artifact's: no head of its own, its versions and actions there.
+  if (actionsIn !== undefined)
+    return (
+      <aside className={cx(s.panel, s.bare)} aria-label={title}>
+        {actionsIn !== null && createPortal(<span className={s.inRow}>{actions}</span>, actionsIn)}
+        {content}
+      </aside>
+    )
+  return (
+    <SidePanel
+      label={title}
+      onClose={onClose}
+      {...(onBack === undefined ? {} : { onBack })}
+      text={t}
+      className={s.panel}
+      head={
+        <>
+          <span className={s.panelTile} aria-hidden="true">
+            <Icon name="canvas" size={14} />
+          </span>
+          <span className={s.panelHead}>
+            <SidePanelTitle>{title}</SidePanelTitle>
+            <span className={s.panelName}>{name}</span>
+          </span>
+        </>
+      }
+      actions={actions}
+    >
+      {content}
     </SidePanel>
   )
 }

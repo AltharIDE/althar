@@ -1030,7 +1030,8 @@ export function ProjectView({
           teamFor,
         ]}
       >
-        {header}
+        {/* An artifact open in Artifacts takes the window as a task does: its row is in the project's place. */}
+        {room === Room.Artifacts ? null : header}
         {room === Room.Automations ? (
           <AutomationsView
             projectId={projectId}
@@ -1044,6 +1045,7 @@ export function ProjectView({
         ) : room === Room.Artifacts ? (
           <ArtifactsView
             projectId={projectId}
+            header={header}
             threadId={coordinator?.threadId ?? null}
             // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
             lead={

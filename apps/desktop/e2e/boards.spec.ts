@@ -106,7 +106,6 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
   const { electronApp, page, panel } = await open(home)
   try {
     // Every board of the first page, side by side, fitted; its controls float over them, drawn in the canvas's own page.
-    await expect(panel.getByText('Boards · The lead of Gift a class')).toBeVisible()
     await expect
       .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('.althar-controls [role="toolbar"]') !== null`))
       .toBe(true)
@@ -195,16 +194,18 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await shoot(page, electronApp, page, 'test-results/boards-artifacts.png')
     await card.click()
     await expect(page.getByRole('complementary', { name: 'Gift a class' })).toBeVisible()
-    const chat = page.getByRole('region', { name: 'Its chat' })
-    await expect(chat.getByRole('button', { name: /^Gift a class/ })).toBeVisible()
-    await expect(chat.getByText('Lead of Gift a class')).toBeVisible()
+    // One row over it all, the artifact's: the project's header gives way to it, and the canvas has no head of its own.
+    await expect(page.getByRole('button', { name: /^Gift a class/ })).toBeVisible()
+    await expect(page.getByText('Lead of Gift a class')).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'View' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Its chat' })).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/\.althar\/boards\.html$/)
     await expect.poll(() => frames(electronApp)).toBe(4)
     await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
     await page.waitForTimeout(1_000)
     await shoot(page, electronApp, page, 'test-results/boards-from-artifacts.png')
     // And back to every artifact.
-    await chat.getByRole('button', { name: 'Back to Artifacts' }).click()
+    await page.getByRole('button', { name: 'Back to Artifacts' }).click()
     await expect(cards).toBeVisible()
   } finally {
     await electronApp.close()

@@ -6,7 +6,7 @@ import { ApiError, type CanvasCommentFacts, type CanvasDetail, type CanvasVersio
 
 import { pictureUrl } from '../src/main/pictureAddress'
 import type { CanvasesHost } from '../src/renderer/data/services'
-import { byWords, CanvasHost, commentsShown, type OpenCanvas, shownVersion, svgAddress } from '../src/renderer/features/canvases/CanvasHost'
+import { CanvasHost, commentsShown, type OpenCanvas, shownVersion, svgAddress } from '../src/renderer/features/canvases/CanvasHost'
 import { commentsOf, forgetComments } from '../src/renderer/shared/comments'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
@@ -86,21 +86,6 @@ const show = (
   return { ...view, onVersion, onClose }
 }
 
-describe('who published a version', () => {
-  const now = new Date('2026-09-29T12:04:00.000Z')
-
-  it('is the lead of its task, or the coordinator, and when', () => {
-    expect(byWords(version(1), now)).toBe('The lead of Redesign sign-in · 4m ago')
-    expect(byWords(version(1, { by: { role: 'coordinator', taskId: null, taskTitle: null } }), now)).toBe('The coordinator · 4m ago')
-  })
-
-  it('is a task’s lead where the task has no title, and leaves out a time it can’t read', () => {
-    expect(byWords(version(1, { by: { role: 'lead', taskId: 'task_1', taskTitle: null }, at: 'not a time' }), now)).toBe(
-      'The lead of a task',
-    )
-  })
-})
-
 describe('the version shown', () => {
   const held = detail([version(1), version(2), version(3)])
 
@@ -173,7 +158,7 @@ describe('the comments sent on a canvas', () => {
 })
 
 describe('a document beside the conversation', () => {
-  it('shows its words, its name, who published it and the comments sent on it', async () => {
+  it('shows its words, its name, its versions and the comments sent on it', async () => {
     const { client } = canvasClient(
       detail(
         [version(1), version(2, { note: 'Shorter errors' })],
@@ -193,8 +178,6 @@ describe('a document beside the conversation', () => {
     const panel = await screen.findByRole('complementary', { name: 'Sign-in flow' })
     expect(await within(panel).findByRole('heading', { name: 'Errors' })).toBeTruthy()
     expect(within(panel).getByText('sign-in-flow')).toBeTruthy()
-    expect(within(panel).getByText(/Document · The lead of Redesign sign-in/)).toBeTruthy()
-    expect(within(panel).getByText('Shorter errors')).toBeTruthy()
     expect(within(panel).getByText('v2')).toBeTruthy()
     const sent = within(panel).getByRole('list', { name: '1 comment' })
     expect(within(sent).getByText('Make it shorter')).toBeTruthy()
@@ -371,7 +354,6 @@ describe('a canvas of another kind', () => {
     show(client)
     const panel = await screen.findByRole('complementary', { name: 'The flow' })
     expect(await within(panel).findByText(/A --> B/)).toBeTruthy()
-    expect(within(panel).getByText(/Diagram · /)).toBeTruthy()
   })
 
   it('draws an SVG as a picture of it, so nothing in it runs', async () => {

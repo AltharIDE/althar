@@ -118,10 +118,8 @@ describe('a canvas’s panel', () => {
       <CanvasPanel
         name="gift-a-class"
         title="Gift a class"
-        kind="boards"
         version={2}
         latest={2}
-        by="The lead of Gift a class"
         onClose={() => {}}
         onBack={onBack}
         onCommentPick={onPick}
@@ -138,7 +136,6 @@ describe('a canvas’s panel', () => {
         </CanvasPagePlace>
       </CanvasPanel>,
     )
-    expect(screen.getByText('Boards · The lead of Gift a class')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save to repo' })).toBeInTheDocument()
     expect(screen.getByRole('toolbar', { name: 'The boards’ own' })).toBeInTheDocument()
     expect(screen.getByText('Over the canvas')).toBeInTheDocument()
@@ -149,15 +146,46 @@ describe('a canvas’s panel', () => {
     expect(onBack).toHaveBeenCalled()
   })
 
+  it('in an artifact’s room, has no head of its own: its versions and actions are in the row it is given', async () => {
+    const row = document.createElement('div')
+    document.body.append(row)
+    const onVersion = vi.fn()
+    render(
+      <CanvasPanel
+        name="gift-a-class"
+        title="Gift a class"
+        version={2}
+        latest={3}
+        newer={3}
+        onVersion={onVersion}
+        onClose={() => {}}
+        actionsIn={row}
+        extra={<button type="button">Save to repo</button>}
+        fill
+      >
+        <CanvasPagePlace canvas="cnv_1" />
+      </CanvasPanel>,
+    )
+    const panel = screen.getByRole('complementary', { name: 'Gift a class' })
+    // No head, no close: the room's row is the artifact's.
+    expect(within(panel).queryByRole('button', { name: 'Close the panel' })).toBeNull()
+    expect(within(panel).queryByText('gift-a-class')).toBeNull()
+    expect(within(row).getByRole('button', { name: 'Save to repo' })).toBeInTheDocument()
+    expect(within(row).getByText('v2 of 3')).toBeInTheDocument()
+    // A newer version than the one shown is still said, over the canvas, with Show.
+    expect(within(panel).getByText('v3 is out')).toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('button', { name: /Newer version/ }))
+    expect(onVersion).toHaveBeenCalledWith(3)
+    row.remove()
+  })
+
   it('shows a pin’s number without pressing where nothing listens', () => {
     render(
       <CanvasPanel
         name="n"
         title="T"
-        kind="boards"
         version={1}
         latest={1}
-        by=""
         onClose={() => {}}
         comments={[{ id: 'c1', version: 1, body: 'B', place: 'p', answered: false, n: 3 }]}
       />,

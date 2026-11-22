@@ -48,7 +48,7 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' })).toBeVisible()
     const panel = page.getByRole('complementary', { name: 'Sign-in page' })
     await expect(panel).toBeVisible()
-    await expect(panel.getByText('Page · The lead of Redesign sign-in')).toBeVisible()
+    await expect(panel.getByText('sign-in-page')).toBeVisible()
 
     // It is a view of its own at its version's address, in the project's canvas partition, its style from a file beside it.
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/^althar-canvas:\/\/[0-9a-f]{32}\/v1\/$/)
@@ -80,7 +80,6 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await directions.click()
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByRole('img', { name: 'Diagram' })).toBeVisible()
-    await expect(doc.getByText('First directions')).toBeVisible()
 
     // The person selects words in it and comments on them; the comment waits in the composer, the person's own until sent.
     await doc.getByText('B, split:').evaluate((node) => {
@@ -111,7 +110,6 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // Its line for v2: the reply streams in before the window has read the line, so it is waited for, not taken as the last.
     await directions.filter({ hasText: 'v2' }).click()
     const again = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(again.getByText('The picture on the left, as asked')).toBeVisible()
     await expect(again.getByText('v2', { exact: true })).toBeVisible()
     await expect(again.getByText(/on v1 · Answered/)).toBeVisible()
     await expect(again.getByText('Moved the picture to the left in v2.')).toBeVisible()
@@ -120,7 +118,7 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // A step back shows v1 as it was, and says v2 is out.
     await again.getByRole('button', { name: 'Older version' }).click()
     await expect(again.getByText('v2 is out')).toBeVisible()
-    await expect(again.getByText('First directions')).toBeVisible()
+    await expect(again.getByText('v1 of 2')).toBeVisible()
     await shoot(page, electronApp, again, 'test-results/canvas-older.png')
     await page.screenshot({ path: 'test-results/canvas-thread.png', scale: 'css' })
 
@@ -153,10 +151,14 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // Opened, it is the artifact itself, with its own chat beside it: the chat's top row is the artifact's, never a task's.
     await table.getByRole('button', { name: 'Sign-in page' }).click()
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    // Its one top row is the artifact's, in the project's place: no project header, no task's, and no head on the canvas.
     const chat = page.getByRole('region', { name: 'Its chat' })
-    await expect(chat.getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
-    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'View' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Back to meridian' })).toHaveCount(0)
+    await expect(page.getByRole('complementary', { name: 'Sign-in page' }).getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
+    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
 
@@ -212,7 +214,7 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     await reply.fill('Open the sign-in document. [lead:canvas-open]')
     await reply.press('Enter')
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(doc.getByText('First directions')).toBeVisible()
+    await expect(doc.getByText('sign-in', { exact: true })).toBeVisible()
     const answer = page.getByRole('paragraph').filter({ hasText: 'The repository also has' })
     // The streamed answer gives way to the kept one: scrolled to once it stays.
     await expect(async () => await answer.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()

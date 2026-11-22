@@ -1,16 +1,21 @@
+import type { ReactNode } from 'react'
+
+import { BackCrumb } from '../../chrome/BackCrumb/BackCrumb'
+import { TitleBar } from '../../chrome/TitleBar/TitleBar'
 import { Icon } from '../../foundations/Icon/Icon'
-import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
-import { cx } from '../../lib/cx'
 import s from './ArtifactHead.module.css'
 
 /*
- * An artifact's own chat's top row (ADR-104, "Talking to an artifact"). The
- * chat is the artifact's, so the row is the artifact's, never a task's: no
- * step, no state, nothing that waits on the person. The way back to every
- * artifact, then the artifact by its name, which opens the project's
- * artifacts to go to another, and who made it, quietly. The canvas beside it
- * keeps its own head: its versions, comments, saving and sharing.
+ * An artifact's top row (ADR-104, "Talking to an artifact"): opened from the
+ * project's Artifacts, the artifact takes the window as a task does, and this
+ * is its one row, in place of the project's. The chat beside it is the
+ * artifact's, so the row is the artifact's, never a task's: no step, no
+ * state, nothing that waits on the person. The way back to every artifact,
+ * then the artifact by its name, which opens the project's artifacts to go to
+ * another, and who made it, quietly; at its end what is for the whole
+ * artifact (its versions, comments, saving and downloading), which its canvas
+ * puts there. The canvas keeps only what floats on it.
  */
 
 export interface ArtifactHeadText {
@@ -22,7 +27,7 @@ export interface ArtifactHeadText {
 }
 
 export const artifactHeadText: ArtifactHeadText = {
-  back: 'Back to Artifacts',
+  back: 'Artifacts',
   others: 'The project’s artifacts',
   drawing: 'Drawing',
 }
@@ -45,15 +50,20 @@ export interface ArtifactHeadProps {
   onBack: () => void
   /** The key that goes back, said in its tooltip; the consumer binds it. */
   kbd?: string
+  /** What is for the whole artifact, at the row's end: its canvas's versions and actions. */
+  end?: ReactNode
   className?: string
   text?: Partial<ArtifactHeadText>
 }
 
-export function ArtifactHead({ current, title, by, artifacts, onPick, onBack, kbd, className, text }: ArtifactHeadProps) {
+export function ArtifactHead({ current, title, by, artifacts, onPick, onBack, kbd, end, className, text }: ArtifactHeadProps) {
   const t = { ...artifactHeadText, ...text }
   return (
-    <div className={cx(s.head, className)}>
-      <IconButton icon="chevronL" label={t.back} {...(kbd === undefined ? {} : { kbd })} size="small" className={s.back} onClick={onBack} />
+    <TitleBar lights="none" end={end} {...(className === undefined ? {} : { className })}>
+      <BackCrumb to={t.back} onBack={onBack} {...(kbd === undefined ? {} : { kbd })} />
+      <span className={s.sep} aria-hidden="true">
+        /
+      </span>
       <Menu
         label={t.others}
         width={300}
@@ -73,6 +83,6 @@ export function ArtifactHead({ current, title, by, artifacts, onPick, onBack, kb
         </MenuRadioGroup>
       </Menu>
       {by !== undefined && by !== null && by !== '' && <span className={s.by}>{by}</span>}
-    </div>
+    </TitleBar>
   )
 }

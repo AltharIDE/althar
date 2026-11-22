@@ -337,19 +337,22 @@ describe('the project’s Artifacts view', () => {
     await userEvent.click(within(table).getByRole('button', { name: 'Sign-in flow, take 3' }))
     const panel = await panelOf('Sign-in flow, take 3')
     expect(screen.queryByRole('table')).toBeNull()
-    // Its chat's top row is the artifact's: its name, which opens every artifact, and who made it; never a task's step.
+    // Its one top row is the artifact's, in the project's place: its name, which opens every artifact, and who made it, then
+    // its versions and actions; never a task's step. The panel has no head of its own.
     const chat = screen.getByRole('region', { name: 'Its chat' })
-    expect(within(chat).getByRole('button', { name: /Sign-in flow, take 3/ })).toBeTruthy()
-    expect(within(chat).getByText('Lead of Redesign sign-in')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Sign-in flow, take 3/ })).toBeTruthy()
+    expect(screen.getByText('Lead of Redesign sign-in')).toBeTruthy()
+    expect(within(panel).queryByRole('button', { name: 'Close the panel' })).toBeNull()
+    expect(within(chat).getByPlaceholderText('Ask about it, or say what to change')).toBeTruthy()
     // Nothing starts for an artifact only looked at.
     expect(client.startTask).not.toHaveBeenCalled()
 
-    await userEvent.click(within(panel).getByRole('button', { name: /Older version/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Older version/ }))
     const older = await panelOf('Sign-in flow, take 2')
     expect(await within(older).findByRole('heading', { name: 'Take 2' })).toBeTruthy()
 
     // A comment on it is the artifact's, kept for its chat, which starts as the person means to talk.
-    await userEvent.click(within(older).getByRole('button', { name: 'Comment' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }))
     await userEvent.type(within(older).getByRole('textbox'), 'Keep this one')
     await userEvent.click(within(older).getByRole('button', { name: 'Add to message' }))
     expect(commentsOf(ARTIFACT_DRAFT).map((one) => (one.on.kind === 'canvas' ? one.on.version : null))).toEqual([2])
@@ -359,7 +362,7 @@ describe('the project’s Artifacts view', () => {
       ),
     )
 
-    await userEvent.click(within(chat).getByRole('button', { name: 'Back to Artifacts' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to Artifacts' }))
     expect(await screen.findByRole('table', { name: 'The project’s artifacts' })).toBeTruthy()
   })
 

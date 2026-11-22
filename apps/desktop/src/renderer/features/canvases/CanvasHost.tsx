@@ -11,7 +11,6 @@ import { messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { type CanvasSpot, canvasPlace, drop, gather, savePageComment, useComments } from '../../shared/comments'
-import { ago } from '../../shared/time'
 import { useCovered } from '../browser/cover'
 import { boardsOfText, pinsOf, useGround } from './boards'
 import { DownloadCanvas } from './DownloadCanvas'
@@ -52,16 +51,14 @@ export interface CanvasHostProps {
   readonly onClose: () => void
   /** Back to where it was opened from: every artifact of the project. */
   readonly onBack?: () => void
+  /**
+   * In an artifact's room, whose one top row is the artifact's: where its versions and actions go, the panel drawing no head
+   * of its own (null while the row is laid out).
+   */
+  readonly actionsIn?: Element | null
 }
 
 const LONGEST_SELECTION = 240
-
-/** Who published a version, as the panel says it. */
-export const byWords = (version: CanvasVersionFacts, now = new Date()) => {
-  const who = version.by.role === 'coordinator' ? 'The coordinator' : `The lead of ${version.by.taskTitle ?? 'a task'}`
-  const when = ago(version.at, now)
-  return when === '' ? who : `${who} · ${when}`
-}
 
 /** The comments sent on a canvas, open first, as its panel lists them. */
 export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelComment & { readonly anchor: CanvasAnchor }> =>
@@ -109,7 +106,7 @@ export const svgAddress = (svg: string) => {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }: CanvasHostProps) {
+export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn }: CanvasHostProps) {
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
   const version = detail.data === undefined ? null : shownVersion(detail.data, open)
@@ -233,17 +230,15 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }
     <CanvasPanel
       name={summary?.name ?? ''}
       title={version?.title ?? ''}
-      kind={kind}
       version={version?.number ?? 1}
       latest={latest}
-      by={version === null ? '' : byWords(version)}
-      note={version?.note ?? null}
       onVersion={onVersion}
       newer={!open.follow && version !== null && version.number < latest ? latest : null}
       selected={passage?.text ?? null}
       comments={comments}
       onClose={onClose}
       {...(onBack === undefined ? {} : { onBack })}
+      {...(actionsIn === undefined ? {} : { actionsIn })}
       {...(summary === undefined || version === null || error !== undefined
         ? {}
         : {

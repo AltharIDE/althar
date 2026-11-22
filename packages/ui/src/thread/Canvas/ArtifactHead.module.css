@@ -1,22 +1,8 @@
-/* An artifact's own chat's top row: as tall as the canvas's head beside it, so the two read as one line. */
-.head {
+/* An artifact's top row, in place of the project's: the way back, a slash, its name as a menu, who made it. */
+.sep {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 48px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
-}
-/* the way back: a round chevron, as a side panel's step back has */
-.back {
-  flex: none;
-  border-radius: 99px;
-  background: var(--sunk);
-}
-.back:hover:not(:disabled) {
-  background: var(--pressed-paper);
+  color: var(--t-4);
+  font-size: 13px;
 }
 .name {
   min-width: 0;
