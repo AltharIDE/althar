@@ -1,0 +1,62 @@
+/* An artifact's own chat's top row: as tall as the canvas's head beside it, so the two read as one line. */
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+/* the way back: a round chevron, as a side panel's step back has */
+.back {
+  flex: none;
+  border-radius: 99px;
+  background: var(--sunk);
+}
+.back:hover:not(:disabled) {
+  background: var(--pressed-paper);
+}
+.name {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--t-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.name:hover,
+.name[aria-expanded='true'] {
+  background: var(--sunk);
+}
+.name:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+.name svg {
+  flex: none;
+  color: var(--t-3);
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.by {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+}

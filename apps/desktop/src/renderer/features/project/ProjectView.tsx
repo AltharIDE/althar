@@ -60,7 +60,6 @@ import { pages, usePage } from '../browser/pages'
 import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
-import { askBeside } from '../canvases/beside'
 import {
   composerComment,
   cropsOf,
@@ -1046,17 +1045,12 @@ export function ProjectView({
           <ArtifactsView
             projectId={projectId}
             threadId={coordinator?.threadId ?? null}
-            draft={draftOf}
-            onBeside={(canvasId, threadId, taskId) => {
-              askBeside(threadId, canvasId, projectId)
-              // The coordinator's own conversation, and an aside that opens over it, are here; a task's is its own screen.
-              if (threadId === coordinator?.threadId) return setRoom(Room.Talk)
-              if (taskId !== null && (seen?.tasks ?? NO_TASKS).some((one) => one.taskId === taskId && opensInPlace(one))) {
-                asides.pick(taskId)
-                return setRoom(Room.Talk)
-              }
-              onTask(threadId)
-            }}
+            // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
+            lead={
+              chosen === null
+                ? null
+                : { key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false }
+            }
           />
         ) : room === Room.Settings ? (
           <div className={s.settings}>

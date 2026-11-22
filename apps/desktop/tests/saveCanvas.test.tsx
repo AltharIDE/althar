@@ -13,7 +13,6 @@ vi.mock('@tanstack/react-router', async (original) => ({
 const { CanvasHost } = await import('../src/renderer/features/canvases/CanvasHost')
 const { ruleOf } = await import('../src/renderer/features/canvases/SaveCanvas')
 const { ArtifactsGroup, placesOf } = await import('../src/renderer/features/projectSettings/ArtifactsGroup')
-const { askBeside, useAskedBeside } = await import('../src/renderer/features/canvases/beside')
 const { boardsOfText, changedState, FIRST_STATE, pinsOf } = await import('../src/renderer/features/canvases/boards')
 const { fakeClient } = await import('./fixtures')
 const { withServices } = await import('./render')
@@ -184,23 +183,6 @@ describe('the project’s place for artifacts, in its settings', () => {
     const each = await screen.findByRole('switch', { name: /Commit each new version/ })
     expect(each).toHaveProperty('disabled', true)
     expect(await screen.findByText('Set by the first save')).toBeTruthy()
-  })
-})
-
-describe('an artifact opened from the Artifacts view', () => {
-  it('opens beside the conversation asked, once, as it shows', () => {
-    const opened = vi.fn()
-    askBeside('thr_other', CANVAS, PROJECT)
-    const { rerender } = renderHook(({ thread }) => useAskedBeside(thread, opened), {
-      initialProps: { thread: 'thr_mine' as string | null },
-    })
-    expect(opened).not.toHaveBeenCalled()
-    rerender({ thread: 'thr_other' })
-    expect(opened).toHaveBeenCalledWith({ canvasId: CANVAS, from: PROJECT })
-    rerender({ thread: null })
-    act(() => askBeside('thr_other', CANVAS, PROJECT))
-    rerender({ thread: 'thr_other' })
-    expect(opened).toHaveBeenCalledTimes(2)
   })
 })
 

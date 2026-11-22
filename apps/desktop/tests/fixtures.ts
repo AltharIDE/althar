@@ -1152,6 +1152,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       lines: 3,
     })),
     listCanvases: vi.fn(async () => []),
+    listArtifactsDrawing: vi.fn(async () => []),
     getCanvas: vi.fn(async () => {
       throw new Error('No canvas')
     }),

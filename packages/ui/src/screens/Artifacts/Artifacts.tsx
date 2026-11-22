@@ -50,6 +50,8 @@ export interface ArtifactsText {
   inGit: (path: string) => string
   savingTo: (path: string) => string
   saveFailed: string
+  /** An artifact its own chat is still drawing the first version of. */
+  drawing: string
 }
 
 export const artifactsText: ArtifactsText = {
@@ -79,6 +81,7 @@ export const artifactsText: ArtifactsText = {
   inGit: (path) => `In git at ${path}`,
   savingTo: (path) => `Saving to ${path}`,
   saveFailed: 'Saving failed',
+  drawing: 'Drawing the first version',
 }
 
 /** An artifact as its row shows it. Today every one is a canvas. */
@@ -100,6 +103,8 @@ export interface ArtifactRow {
   readonly picture?: string | null
   /** Where it is saved in git, where it is: the folder in its repository, and how its last save went. */
   readonly saved?: { readonly repository: string; readonly path: string; readonly state: 'saving' | 'saved' | 'failed' } | null
+  /** Its own chat is drawing its first version: it has no version, picture or kind of its own yet. */
+  readonly drawing?: boolean
 }
 
 /** What the table sorts by: a column. */
@@ -475,8 +480,8 @@ export function Artifacts({
                             </span>
                           </span>
                         </td>
-                        <td className={s.wide}>{t.kinds[row.kind]}</td>
-                        <td className={cx(s.num, s.wide)}>{row.version}</td>
+                        <td className={s.wide}>{row.drawing === true ? t.drawing : t.kinds[row.kind]}</td>
+                        <td className={cx(s.num, s.wide)}>{row.drawing === true ? '' : row.version}</td>
                         <td className={s.num}>
                           {row.openComments === 0 ? (
                             <span className={s.zero} aria-label={t.none}>
@@ -507,7 +512,7 @@ function Card({ row, t, onOpen }: { row: ArtifactRow; t: ArtifactsText; onOpen: 
   const saved = row.saved ?? null
   return (
     <button type="button" className={s.card} onClick={onOpen}>
-      <span className={s.cardPicture} aria-hidden="true">
+      <span className={cx(s.cardPicture, row.drawing === true && s.cardDrawn)} aria-hidden="true">
         {row.picture !== undefined && row.picture !== null ? (
           <img src={row.picture} alt="" draggable={false} />
         ) : (
@@ -519,11 +524,17 @@ function Card({ row, t, onOpen }: { row: ArtifactRow; t: ArtifactsText; onOpen: 
       <span className={s.cardWords}>
         <span className={s.cardTitle}>{row.title}</span>
         <span className={s.cardFacts}>
-          <span className={s.cardKind}>
-            <Icon name={GLYPHS[row.kind]} size={12} />
-            {t.kinds[row.kind]}
-          </span>
-          <span>{t.versions(row.version)}</span>
+          {row.drawing === true ? (
+            <span className={s.cardKind}>{t.drawing}</span>
+          ) : (
+            <>
+              <span className={s.cardKind}>
+                <Icon name={GLYPHS[row.kind]} size={12} />
+                {t.kinds[row.kind]}
+              </span>
+              <span>{t.versions(row.version)}</span>
+            </>
+          )}
           <span className={s.cardWhen}>{row.when}</span>
         </span>
         <span className={s.cardFacts}>

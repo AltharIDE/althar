@@ -20,6 +20,7 @@ import {
   type ArtifactsHow,
   type ArtifactsPlace,
   type CanvasDetail,
+  type ArtifactDrawing,
   type CanvasSummary,
   type CanvasText,
   type RepositoryFolders,
@@ -266,6 +267,8 @@ export interface Client {
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
   readonly listCanvases: (projectId: string, archived?: boolean) => Promise<ReadonlyArray<CanvasSummary>>
+  /** A project's artifacts whose own chat draws their first version, newest first. */
+  readonly listArtifactsDrawing: (projectId: string) => Promise<ReadonlyArray<ArtifactDrawing>>
   /** One of a project's canvases whole: its versions and the comments sent on it. */
   readonly getCanvas: (canvasId: string) => Promise<CanvasDetail>
   /** A version's entry, as the window draws a document, a diagram or an SVG. */
@@ -590,6 +593,11 @@ export interface Client {
     readonly chat?: boolean
     /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
     readonly taskId?: string
+    /**
+     * With `chat`, an artifact's own chat rather than an aside (ADR-104, "Talking to an artifact"): about the canvas by its
+     * id, or a new artifact it draws first with null. A canvas whose chat is open answers with that one.
+     */
+    readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string, workerId?: string) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
@@ -1132,6 +1140,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
+    listArtifactsDrawing: (projectId) => settle(api.ListArtifactsDrawing({ projectId })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getArtifactsPlace: (projectId) => settle(api.GetArtifactsPlace({ projectId })),

@@ -67,6 +67,8 @@ export const keys = {
   document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
   /** A project's canvases (ADR-104), each with its latest version. */
   canvases: (projectId: string) => ['canvases', projectId] as const,
+  /** A project's artifacts still drawing their first version, in their own chats. */
+  artifactsDrawing: (projectId: string) => ['artifactsDrawing', projectId] as const,
   /** One canvas whole: its versions and comments, read again as it changes. */
   canvas: (canvasId: string) => ['canvas', canvasId] as const,
   /** A version's words, which never change. */
@@ -227,6 +229,8 @@ export const reads = (client: Client) => ({
       gcTime: 5 * 60_000,
     }),
   canvases: (projectId: string) => queryOptions({ queryKey: keys.canvases(projectId), queryFn: () => client.listCanvases(projectId) }),
+  artifactsDrawing: (projectId: string) =>
+    queryOptions({ queryKey: keys.artifactsDrawing(projectId), queryFn: () => client.listArtifactsDrawing(projectId) }),
   canvas: (canvasId: string) => queryOptions({ queryKey: keys.canvas(canvasId), queryFn: () => client.getCanvas(canvasId) }),
   artifactsPlace: (projectId: string) =>
     queryOptions({ queryKey: keys.artifactsPlace(projectId), queryFn: () => client.getArtifactsPlace(projectId) }),

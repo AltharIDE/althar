@@ -322,10 +322,12 @@ describe('the project’s Artifacts view', () => {
     summary(CANVAS, 'sign-in-flow', version(3)),
     summary(OTHER, 'plan', version(1, { title: 'The plan', by: { role: 'coordinator', taskId: null, taskTitle: null } })),
   ]
+  const LEAD = { key: 'implement' as const, agentId: 'claude-code', model: 'opus', effort: null, skipped: false }
+  const ARTIFACT_DRAFT = `artifact:${CANVAS}`
 
-  it('lists the project’s canvases, opens one in its place at its latest, steps it, and closes back to the list', async () => {
+  it('opens one as itself, with its own chat beside it rather than a task, steps it, and goes back to the list', async () => {
     const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
-    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} />, client)
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'List' }))
     const table = await screen.findByRole('table', { name: 'The project’s artifacts' })
     expect(within(table).getByText('Coordinator')).toBeTruthy()
@@ -335,31 +337,53 @@ describe('the project’s Artifacts view', () => {
     await userEvent.click(within(table).getByRole('button', { name: 'Sign-in flow, take 3' }))
     const panel = await panelOf('Sign-in flow, take 3')
     expect(screen.queryByRole('table')).toBeNull()
+    // Its chat's top row is the artifact's: its name, which opens every artifact, and who made it; never a task's step.
+    const chat = screen.getByRole('region', { name: 'Its chat' })
+    expect(within(chat).getByRole('button', { name: /Sign-in flow, take 3/ })).toBeTruthy()
+    expect(within(chat).getByText('Lead of Redesign sign-in')).toBeTruthy()
+    // Nothing starts for an artifact only looked at.
+    expect(client.startTask).not.toHaveBeenCalled()
+
     await userEvent.click(within(panel).getByRole('button', { name: /Older version/ }))
     const older = await panelOf('Sign-in flow, take 2')
     expect(await within(older).findByRole('heading', { name: 'Take 2' })).toBeTruthy()
 
-    // A comment on it goes to the coordinator's conversation.
+    // A comment on it is the artifact's, kept for its chat, which starts as the person means to talk.
     await userEvent.click(within(older).getByRole('button', { name: 'Comment' }))
     await userEvent.type(within(older).getByRole('textbox'), 'Keep this one')
     await userEvent.click(within(older).getByRole('button', { name: 'Add to message' }))
-    expect(commentsOf(DRAFT).map((one) => (one.on.kind === 'canvas' ? one.on.version : null))).toEqual([2])
+    expect(commentsOf(ARTIFACT_DRAFT).map((one) => (one.on.kind === 'canvas' ? one.on.version : null))).toEqual([2])
+    await waitFor(() =>
+      expect(client.startTask).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: PROJECT, chat: true, artifact: { canvasId: CANVAS }, steps: [LEAD] }),
+      ),
+    )
 
-    await userEvent.click(within(older).getByRole('button', { name: 'Close the panel' }))
+    await userEvent.click(within(chat).getByRole('button', { name: 'Back to Artifacts' }))
     expect(await screen.findByRole('table', { name: 'The project’s artifacts' })).toBeTruthy()
   })
 
-  it('opens nothing where the project has no coordinator’s conversation yet', async () => {
-    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
-    withServices(<ArtifactsView projectId={PROJECT} threadId={null} draft={null} />, client)
+  it('starts an artifact’s chat once, as the person goes to its composer, and one that has a chat starts none', async () => {
+    const talked = { ...listed[1]!, chat: { taskId: 'task_chat', threadId: 'thr_chat' } }
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => [listed[0]!, talked]) })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
     const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
-    await userEvent.click(within(cards).getByRole('button', { name: /^The plan/ }))
-    expect(screen.getByRole('list', { name: 'The project’s artifacts' })).toBeTruthy()
-    expect(client.getCanvas).not.toHaveBeenCalled()
+    await userEvent.click(within(cards).getByRole('button', { name: /^Sign-in flow, take 3/ }))
+    const field = await screen.findByPlaceholderText('Ask about it, or say what to change')
+    await userEvent.click(field)
+    await userEvent.click(field)
+    await waitFor(() => expect(client.startTask).toHaveBeenCalledTimes(1))
+
+    // Another artifact, by its name: one that has a chat opens it, and starts nothing.
+    await userEvent.click(screen.getByRole('button', { name: /Sign-in flow, take 3/ }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'The plan' }))
+    await waitFor(() => expect(client.getCanvas).toHaveBeenCalledWith(OTHER))
+    await waitFor(() => expect(screen.queryByPlaceholderText('Ask about it, or say what to change')).toBeNull())
+    expect(client.startTask).toHaveBeenCalledTimes(1)
   })
 
-  it('show as cards, each with its facts and where it is saved, narrowed by Filter, and open beside the conversation that drew them', async () => {
+  it('show as cards, each with its facts and where it is saved, those still being drawn first, narrowed by Filter', async () => {
     const drawn = summary(
       CANVAS,
       'sign-in-flow',
@@ -381,28 +405,24 @@ describe('the project’s Artifacts view', () => {
         problem: null,
       },
     }
-    const { client } = canvasClient({ listCanvases: vi.fn(async () => [drawn, saved]) })
-    const onBeside = vi.fn()
-    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} onBeside={onBeside} />, client)
+    const drawing = { taskId: 'task_new', threadId: 'thr_new', projectId: PROJECT, title: 'Mood board', startedAt: NOW }
+    const { client } = canvasClient({
+      listCanvases: vi.fn(async () => [drawn, saved]),
+      listArtifactsDrawing: vi.fn(async () => [drawing]),
+    })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
     const cards = await screen.findByRole('list', { name: 'The project’s artifacts' })
     expect(within(cards).getByText('In git at kiln/design/plan/')).toBeTruthy()
     expect(within(cards).getByLabelText('2 open comments')).toBeTruthy()
+    expect(within(await within(cards).findByRole('button', { name: /^Mood board/ })).getByText('Drawing the first version')).toBeTruthy()
 
     // Filter keeps those saved to a repository; the count says how many of all show.
     await userEvent.click(screen.getByRole('button', { name: 'Filter' }))
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Saved to a repository' }))
     await userEvent.keyboard('{Escape}')
     expect(within(cards).queryByRole('button', { name: /^Sign-in flow/ })).toBeNull()
-    expect(screen.getByText('1 of 2')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Filter · 1' }))
-    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Saved to a repository' }))
-    await userEvent.keyboard('{Escape}')
-
-    // One drawn in a conversation opens beside it, by its thread and task.
-    await userEvent.click(within(cards).getByRole('button', { name: /^Sign-in flow, take 3/ }))
-    expect(onBeside).toHaveBeenCalledWith(CANVAS, 'thr_drew', 'task_1')
-    expect(screen.queryByRole('complementary')).toBeNull()
+    expect(screen.getByText('1 of 3')).toBeTruthy()
   })
 
   it('says why the list couldn’t be read', async () => {
@@ -411,7 +431,7 @@ describe('the project’s Artifacts view', () => {
         throw new ApiError({ reason: 'NotFound', message: 'No such project' })
       }),
     })
-    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} />, client)
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
     expect(await screen.findByText('No such project')).toBeTruthy()
     expect(screen.getByText('No artifacts yet')).toBeTruthy()
   })
