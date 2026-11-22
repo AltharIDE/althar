@@ -88,6 +88,16 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
   })
 
+  it('refreshes visible task folders when a project run ends', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.folders())
+    const stop = new QueryObserver(cache, read.folders()).subscribe(() => undefined)
+    emit({ _tag: 'Launches', projectId: 'p1', launches: [] })
+    await settle()
+    expect(client.getTaskFolders).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
   // Off screen, these used to be read again too, on every card an agent's edit moved: every board the window ever opened,
   // on the runtime's one thread. They are marked instead, and read as the person goes back (the test below this one).
   it('reads again what a change ends while it shows, gathered; marks what doesn’t, for its next visit; and nothing else', async () => {

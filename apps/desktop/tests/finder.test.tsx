@@ -90,7 +90,7 @@ const windowAt = (overrides: Partial<Client> = {}, initial = '/projects/p1') => 
   })
   const { client } = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 0, projects: [{ ...project, coordinatorThreadId: 'co1' }] })),
-    getSearchDocuments: vi.fn(async () => ({ documents, next: null })),
+    getSearchDocuments: vi.fn(async () => ({ documents, next: null, indexed: true })),
     ...overrides,
   })
   withServices(<RouterProvider router={router} />, client)
@@ -108,15 +108,16 @@ beforeEach(() => {
   RankWorker.pending = []
 })
 describe('search across Althar', () => {
-  it('searches without a runtime call per key, opens a result, and restores focus on Escape', async () => {
+  it('waits until the palette opens to read search, opens a result, and restores focus on Escape', async () => {
     const client = windowAt()
     const message = await screen.findByRole('textbox', { name: 'Message' })
+    expect(client.getSearchDocuments).not.toHaveBeenCalled()
     message.focus()
     const dialog = await open()
     const field = within(dialog).getByRole('combobox')
     await userEvent.type(field, 'retry')
     await within(dialog).findByRole('option', { name: /Retry checkout deliveries/ })
-    expect(client.getSearchDocuments).toHaveBeenCalledTimes(1)
+    expect(client.getSearchDocuments).toHaveBeenCalledWith(undefined, { text: 'retry' }, expect.any(AbortSignal))
     expect(client.searchTasks).not.toHaveBeenCalled()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -142,6 +143,26 @@ describe('search across Althar', () => {
     expect(field.getAttribute('placeholder')).toContain('Ask')
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(draftOf(draftKey.coordinator('p1')).text).toBe('why merge main?'))
+  })
+  it('asks the home for related passages when the palette switches to a question', async () => {
+    const pull = doc({ id: 'link:pull', kind: 'pull', title: 'Keep checkout receipts', ref: '845', url: 'https://example.com/pull/845' })
+    const getSearchDocuments = vi.fn(async (_after: string | undefined, search?: { text: string; matchAny?: boolean }) => ({
+      documents: search?.matchAny === true && search.text === 'receipts #845' ? [pull] : [],
+      next: null,
+      indexed: true,
+    }))
+    windowAt({ getSearchDocuments })
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    fireEvent.change(field, { target: { value: 'Where are the receipts for #845?' } })
+    await userEvent.keyboard('{Tab}')
+    expect(field.getAttribute('placeholder')).toContain('Ask')
+    await within(dialog).findByRole('option', { name: /Keep checkout receipts/ })
+    expect(getSearchDocuments).toHaveBeenLastCalledWith(
+      undefined,
+      { text: 'receipts #845', kinds: ['said', 'note', 'issue', 'pull', 'task'], matchAny: true },
+      expect.any(AbortSignal),
+    )
   })
   it('chooses the top hit once the results show, not a row of the list typed over', async () => {
     windowAt()
@@ -401,20 +422,17 @@ it('navigates to a saved project note even when recent-search storage contains o
   expect(used).toEqual({ 'note:n1': { n: 3, at: expect.any(Number) } })
 })
 
-it('refreshes an incomplete search catalog after a failed page read', async () => {
+it('refreshes an older home’s catalog after a failed read', async () => {
   const getSearchDocuments = vi
     .fn()
     .mockRejectedValueOnce(new Error('Catalog unavailable'))
     .mockResolvedValueOnce({ documents: [documents[0]], next: 'second' })
     .mockResolvedValueOnce({ documents: documents.slice(1), next: null })
   windowAt({ getSearchDocuments })
-  await waitFor(() => expect(getSearchDocuments).toHaveBeenCalledTimes(1))
   const dialog = await open()
-  // Opening the palette may already have retried the failed prefetch.
-  if (within(dialog).queryByRole('button', { name: 'Try again' }) !== null)
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Try again' }))
+  await userEvent.click(await within(dialog).findByRole('button', { name: 'Try again' }))
   await select(dialog, 'compact', /Compact the database/)
-  expect(getSearchDocuments).toHaveBeenCalledWith('second')
+  expect(getSearchDocuments).toHaveBeenCalledWith('second', undefined, expect.any(AbortSignal))
 })
 
 it('finds project names and returns all-home search results from Home', async () => {

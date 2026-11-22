@@ -15,6 +15,14 @@ describe('parseFrontmatter', () => {
     expect(parsed?.body).toBe('Body')
   })
 
+  it('keeps indented rules in multiline descriptions inside the YAML block', () => {
+    const text = '---\nname: my-skill\ndescription: |-\n  Use when testing.\n  ---\n  Also use when debugging.\n---\nSteps.'
+    expect(parseFrontmatter(text)).toEqual({
+      data: { name: 'my-skill', description: 'Use when testing.\n---\nAlso use when debugging.' },
+      body: 'Steps.',
+    })
+  })
+
   it.each(['no block', '---\nname: a\nno end', '---\n: : :\n  - [\n---\n', '---\n- a\n- b\n---\n', '---\njust text\n---\n'])(
     'refuses %j',
     (text) => {

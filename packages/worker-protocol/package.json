@@ -7,6 +7,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent-runs": "./src/agentRuns.ts",
     "./grpc": "./src/grpc.ts",
     "./relay": "./src/relayClient.ts"
   },
@@ -15,7 +16,7 @@
     "check": "buf lint && vp check",
     "test": "vp test run",
     "test:interop": "node --test --test-concurrency=1 integration/worker-handshake.ts integration/worker-grpc.ts",
-    "test:execution": "node --test --test-concurrency=1 integration/worker-run.ts integration/worker-relay.ts",
+    "test:execution": "node --test --test-concurrency=1 integration/worker-run.ts integration/worker-relay.ts integration/worker-agent.ts",
     "start:relay": "node relay/main.ts"
   },
   "dependencies": {

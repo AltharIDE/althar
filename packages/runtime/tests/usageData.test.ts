@@ -4,6 +4,7 @@ import { Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { Automations } from '../src/Automations'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -28,7 +29,7 @@ const withUsage = (more: Parameters<typeof runtime>[2] = {}) => UsageData.layer.
 const heard = Effect.gen(function* () {
   const usage = yield* UsageData
   const events: Array<UsageEvent> = []
-  const fiber = yield* Effect.forkChild(Stream.runForEach(usage.events, (event) => Effect.sync(() => void events.push(event))))
+  const fiber = yield* Effect.forkChild(Stream.runForEach(usage.events, ({ event }) => Effect.sync(() => void events.push(event))))
   // Listening before anything is recorded.
   yield* Effect.sleep(Duration.millis(50))
   return { events, stop: Fiber.interrupt(fiber) }
@@ -97,6 +98,14 @@ describe('usage data', () => {
       yield* started(project.projectId, 'Retry the checkout', (instance) => instance.personId, 'claude-opus-5')
       const mini = yield* started(project.projectId, 'Bump the lockfile', (instance) => instance.coordinatorId)
       yield* awaiting(events, (seen) => named(seen, 'task_started').length === 2)
+      assert.lengthOf(named(events, 'plan_proposed'), 2)
+      assert.deepStrictEqual(
+        named(events, 'plan_decided').map((event) => event.properties),
+        [
+          { outcome: 'accepted', by: 'person' },
+          { outcome: 'accepted', by: 'coordinator' },
+        ],
+      )
       assert.deepStrictEqual(named(events, 'task_started'), [
         { name: 'task_started', properties: { as: 'planned', agent: 'claude-code', family: 'opus' } },
         { name: 'task_started', properties: { as: 'mini', agent: 'claude-code', family: 'default' } },
@@ -154,6 +163,7 @@ describe('usage data', () => {
         )
       yield* say('Retry the checkout call')
       yield* awaiting(events, (seen) => named(seen, 'task_started').length === 1)
+      yield* awaiting(events, (seen) => named(seen, 'task_first_turn_finished').length === 1)
       yield* say('And log each retry')
       const sql = yield* SqlClient.SqlClient
       yield* until(
@@ -165,6 +175,75 @@ describe('usage data', () => {
         // The fake agent's models are no family Althar knows.
         { name: 'task_started', properties: { as: 'direct', agent: 'codex', family: 'other' } },
       ])
+      assert.deepStrictEqual(named(events, 'task_first_turn_finished'), [
+        { name: 'task_first_turn_finished', properties: { outcome: 'completed', agent: 'codex', family: 'other', took: 'under_10s' } },
+      ])
+      yield* stop
+    }).pipe(Effect.provide(withUsage())),
+  )
+
+  it.live('measures failed and interrupted first turns with bucketed time and a bounded failure category', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projectId = (yield* opened()).projectId as ProjectId
+      const projects = yield* Projects
+      const { systemId } = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const turns = [
+        { state: 'failed', model: 'gpt-6-exact-model', errorClass: 'auth_required', seconds: 15 },
+        { state: 'interrupted', model: null, errorClass: null, seconds: 90 },
+        { state: 'failed', model: 'private/exact-model', errorClass: null, seconds: 420 },
+      ]
+      for (const [index, turn] of turns.entries()) {
+        const { threadId } = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: `Private task ${index}`,
+        })
+        const key = String(index + 1).padStart(32, '0')
+        const providerSessionId = `sess_${key}`
+        const turnId = `turn_${key}`
+        const endedAt = yield* timestamp
+        const requestedAt = new Date(Date.parse(endedAt) - turn.seconds * 1_000).toISOString()
+        yield* sql`INSERT INTO provider_sessions ${sql.insert({
+          id: providerSessionId,
+          projectId,
+          threadId,
+          agentId: 'codex',
+          state: 'active',
+          startedAt: requestedAt,
+        })}`
+        yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+          id: turnId,
+          projectId,
+          threadId,
+          providerSessionId,
+          controllerGeneration: 1,
+          requestedAt,
+          endedAt,
+          state: turn.state,
+          errorClass: turn.errorClass,
+          model: turn.model,
+          prompt: 'Private prompt',
+        })}`
+        yield* fact({
+          projectId,
+          aggregateType: 'turn_delivery',
+          aggregateId: turnId,
+          revision: 1,
+          type: `turn_delivery.${turn.state}`,
+          actorId: systemId,
+        })
+      }
+      yield* awaiting(events, (seen) => named(seen, 'task_first_turn_finished').length === 3)
+      assert.deepStrictEqual(
+        named(events, 'task_first_turn_finished').map((event) => event.properties),
+        [
+          { outcome: 'failed', agent: 'codex', family: 'gpt', took: '10s_to_1m', failure: 'auth_required' },
+          { outcome: 'interrupted', agent: 'codex', family: 'default', took: '1m_to_5m' },
+          { outcome: 'failed', agent: 'codex', family: 'other', took: 'over_5m', failure: 'unknown' },
+        ],
+      )
       yield* stop
     }).pipe(Effect.provide(withUsage())),
   )
@@ -263,6 +342,13 @@ describe('usage data', () => {
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 2)
       yield* Effect.sleep(Duration.millis(800))
       assert.lengthOf(named(events, 'task_settled'), 2)
+      assert.deepStrictEqual(
+        named(events, 'task_merged').map((event) => event.properties),
+        [
+          { where: 'here', took: 'under_10m' },
+          { where: 'host', took: 'under_10m' },
+        ],
+      )
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: host.taskId })
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: host.taskId })
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 3)
@@ -291,7 +377,7 @@ describe('usage data', () => {
     }).pipe(Effect.provide(withUsage())),
   )
 
-  it.live('says an ask was answered, by the person or by the coordinator, but not one the rules settled', () =>
+  it.live('says an ask opened, how long the person took to answer, and when the coordinator answered a permission directly', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const project = yield* opened()
@@ -306,7 +392,7 @@ describe('usage data', () => {
         answer: { kind: 'abandon' },
       })
       const instance = yield* Instance
-      // One the rules settle was answered by no one.
+      // A system answer on a stuck request is not an answer by the permission rules.
       yield* fact({
         projectId: project.projectId as ProjectId,
         aggregateType: 'attention_request',
@@ -328,10 +414,14 @@ describe('usage data', () => {
         })
       yield* awaiting(events, (seen) => named(seen, 'ask_answered').length >= 2)
       yield* Effect.sleep(Duration.millis(800))
+      assert.includeDeepMembers(
+        named(events, 'ask_opened').map((event) => event.properties),
+        [{ ask: 'stuck' }],
+      )
       assert.deepStrictEqual(
         named(events, 'ask_answered').map((event) => event.properties),
         [
-          { ask: 'stuck', by: 'person' },
+          { ask: 'stuck', by: 'person', took: 'under_10m' },
           { ask: 'permission', by: 'coordinator' },
         ],
       )
@@ -367,6 +457,95 @@ describe('usage data', () => {
       assert.deepStrictEqual(
         named(events, 'usage_limit_hit').map((event) => event.properties),
         [{ agent: 'codex' }, { agent: 'claude-code' }, { agent: 'claude-code' }, { agent: 'opencode' }],
+      )
+      yield* stop
+    }).pipe(Effect.provide(withUsage())),
+  )
+
+  it.live('counts integration products, imports and automation outcomes without their private details', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projectId = (yield* opened()).projectId as ProjectId
+      const { personId, systemId } = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const automations = yield* Automations
+      const automationId = yield* automations.make({
+        projectId,
+        actorId: personId,
+        definition: {
+          name: 'Private review',
+          prompt: 'Check the private project',
+          schedule: { every: 'week', days: [1], at: '09:00' },
+          zone: 'UTC',
+          lead: { agentId: 'codex', model: null },
+          work: { kind: 'review' },
+          allowEverything: false,
+          minutes: 30,
+          late: 'skip',
+        },
+      })
+      for (const product of ['github', 'private-service']) {
+        yield* fact({
+          aggregateType: 'connection',
+          aggregateId: product,
+          revision: 1,
+          type: 'connection.added',
+          actorId: personId,
+          payload: { product, url: 'https://private.test' },
+        })
+      }
+      yield* fact({
+        projectId,
+        aggregateType: 'task',
+        aggregateId: 'private-import',
+        revision: 1,
+        type: 'task.brought_in',
+        actorId: personId,
+      })
+
+      const at = yield* timestamp
+      const runs = [
+        { cause: 'now', state: 'made', event: 'ended', reported: 'made', subject: '' },
+        { cause: 'schedule', state: 'missed', event: 'missed', reported: 'missed', subject: '' },
+        { cause: 'schedule', state: 'skipped', event: 'skipped', reported: 'skipped', subject: '' },
+        { cause: 'now', state: 'made', event: 'ended', reported: 'made', subject: 'private child review' },
+        { cause: 'now', state: 'failed', event: 'ended', reported: 'private error message', subject: '' },
+      ]
+      for (const [index, run] of runs.entries()) {
+        const id = `occ_${String(index).padStart(32, '0')}`
+        yield* sql`INSERT INTO automation_occurrences
+          (id, project_id, automation_id, definition, cause, slot, subject, state, due_at, fired_at, ended_at)
+          VALUES (${id}, ${projectId}, ${automationId}, 1, ${run.cause}, ${id}, ${run.subject}, ${run.state}, ${at}, ${at}, ${at})`
+        yield* fact({
+          projectId,
+          aggregateType: 'automation_occurrence',
+          aggregateId: id,
+          revision: 1,
+          type: `automation_occurrence.${run.event}`,
+          actorId: systemId,
+          payload: { state: run.reported },
+        })
+      }
+      yield* fact({
+        projectId,
+        aggregateType: 'automation',
+        aggregateId: automationId,
+        revision: 2,
+        type: 'automation.paused_itself',
+        actorId: systemId,
+      })
+      yield* awaiting(events, (seen) => named(seen, 'automation_paused_after_failures').length === 1)
+      assert.deepStrictEqual(
+        events.filter(({ name }) => name.startsWith('automation_') || name === 'integration_connected' || name === 'work_imported'),
+        [
+          { name: 'automation_created', properties: {} },
+          { name: 'integration_connected', properties: { product: 'github' } },
+          { name: 'work_imported', properties: {} },
+          { name: 'automation_run_finished', properties: { trigger: 'now', outcome: 'made' } },
+          { name: 'automation_run_finished', properties: { trigger: 'schedule', outcome: 'missed' } },
+          { name: 'automation_run_finished', properties: { trigger: 'schedule', outcome: 'skipped' } },
+          { name: 'automation_paused_after_failures', properties: {} },
+        ],
       )
       yield* stop
     }).pipe(Effect.provide(withUsage())),

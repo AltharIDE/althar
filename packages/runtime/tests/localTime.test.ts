@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { Coordinator } from '../src/Coordinator'
@@ -136,7 +136,7 @@ describe('a lead', () => {
     ),
   )
 
-  it.effect('is told the time again in the turn after a compaction, which may have left its brief out', () =>
+  it.effect('is told the time again before its refreshed brief in the turn after compaction', () =>
     fromInstant(
       Date.parse('2025-11-19T08:05:00Z'),
       Effect.gen(function* () {
@@ -152,7 +152,10 @@ describe('a lead', () => {
         assert.strictEqual(compacted, COMPACT)
         yield* say(created.threadId, 'carry on')
         const after = (yield* prompts(created.threadId, 3))[2] ?? ''
-        assert.strictEqual(after, "(It is now Wednesday 19 November 2025, 13:35, Asia/Kolkata on the person's computer.)\n\ncarry on")
+        const [first, ...rest] = after.split('\n\n')
+        assert.strictEqual(first, "(It is now Wednesday 19 November 2025, 13:35, Asia/Kolkata on the person's computer.)")
+        assert.include(after, "When you have done the task, call Althar's finish_step tool")
+        assert.strictEqual(rest.at(-1), 'carry on')
       }).pipe(Effect.provide(runtime(':memory:', {}, { zone: () => ZONE }))),
     ),
   )
@@ -185,7 +188,7 @@ describe('a lead', () => {
 })
 
 describe('the coordinator', () => {
-  it.effect('is told the local date, time and zone in its brief as the person first speaks, and again after a long gap', () =>
+  it.effect.each(['stays warm', 'sleeps'] as const)('is told the local time at first speech and after a long gap when it %s', (state) =>
     fromInstant(
       Date.parse('2025-11-19T08:05:00Z'),
       Effect.gen(function* () {
@@ -212,11 +215,33 @@ describe('the coordinator', () => {
         yield* speak('and now?')
         assert.notInclude((yield* prompts(threadId, 2))[1], 'It is now')
         yield* TestClock.adjust(Duration.hours(5))
+        const sessions = yield* Sessions
+        if (state === 'sleeps') yield* until(sessions.running(threadId), Option.isNone)
         yield* speak('good evening')
         const back = (yield* prompts(threadId, 3))[2] ?? ''
-        assert.isTrue(back.startsWith("(It is now Wednesday 19 November 2025, 19:05, Asia/Kolkata on the person's computer.)\n\n"))
+        if (state === 'sleeps') {
+          assert.match(back, /^You are the coordinator of the project /)
+          assert.include(back, "On the person's computer it is Wednesday 19 November 2025, 19:05, Asia/Kolkata")
+        } else {
+          assert.isTrue(back.startsWith("(It is now Wednesday 19 November 2025, 19:05, Asia/Kolkata on the person's computer.)\n\n"))
+        }
         assert.isTrue(back.endsWith('good evening'))
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { zone: () => ZONE }))))),
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(
+                ':memory:',
+                {},
+                {
+                  zone: () => ZONE,
+                  ...(state === 'stays warm' ? { idle: { coordinator: Duration.hours(6) } } : {}),
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
     ),
   )
 })

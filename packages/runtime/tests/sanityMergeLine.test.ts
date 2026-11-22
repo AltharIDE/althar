@@ -142,6 +142,36 @@ describe('sanity pass: the merge line and queue', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  // An optional check's failure holds nothing back (#1117): with `test` required and passed, a failed `test-1` merges; with
+  // `test-1` required too, it waits out of line as before.
+  it.live.each([
+    { required: ['test'], merges: true },
+    { required: ['test', 'test-1'], merges: false },
+  ])('with required checks $required, a pull request whose other check failed merges: $merges', ({ required, merges }) => {
+    const checks = new Map<string, ReadonlyArray<FakeCheck>>()
+    const service = makeFakeService({
+      checksFor: (_number, sha) => checks.get(sha) ?? [],
+      checksOn: () => [{ name: 'post-merge', state: 'passed' }],
+      rulesOf: () => ({ requiredChecks: required, needs: [] }),
+    })
+    service.addRepository(['meridian', 'api'])
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = service.addPullRequest({ path: ['meridian', 'api'], title: 'Retry refunds', author: 'you' }).number
+      checks.set(`head-${number}`, [
+        { name: 'test', state: 'passed' },
+        { name: 'test-1', state: 'failed' },
+      ])
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      assert.deepStrictEqual(
+        service.merged.map((one) => one.number),
+        merges ? [number] : [],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   // Finding (sanity pass): one that stepped out of line (its checks failed) comes back in ahead of the one whose merge is
   // already in flight, and is merged too: two merges in Althar's one slot at once, untested together. Flips to passing when fixed.
   it.live('one that comes back in after its checks pass waits for the merge already in flight behind it', () => {

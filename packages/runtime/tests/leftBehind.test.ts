@@ -1,10 +1,10 @@
 import { budget } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ActorId, ProjectId } from '@althar/domain'
+import { type ActorId, Ids, newId, now, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -18,9 +18,10 @@ import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
-import { doomedOf, forebearsOf } from '../src/LeftBehind'
-import { type Listed, listProcesses, marksOf, WORK } from '../src/machine'
+import { doomedOf, forebearsOf, LeftBehind } from '../src/LeftBehind'
+import { type Listed, listProcesses, marksOf, RUN, WORK, WORKER } from '../src/machine'
 import { Plans } from '../src/Plans'
+import { processes, treeOf } from '../src/ports'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -57,15 +58,24 @@ const markedFor = (taskId: string) =>
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      const state = stat.charAt(stat.lastIndexOf(')') + 2)
+      return state !== 'Z' && state !== 'X'
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT'
+    }
+  }
+  return true
 }
 
 /** A process of its own that runs until stopped, outside every tree, marked as `work` says, or not at all. */
-const loner = (work: string | null) => {
-  const env = { ...process.env }
+const loner = (work: string | null, owner: Record<string, string> = {}) => {
+  const env = { ...process.env, ...owner }
   delete env[WORK]
   // Started by a shell that exits at once, so launchd is its parent, as for what outlived an Althar that quit.
   const pid = execFileSync('/bin/sh', ['-c', `"${process.execPath}" -e "setInterval(() => {}, 1000)" >/dev/null 2>&1 & echo $!`], {
@@ -73,6 +83,11 @@ const loner = (work: string | null) => {
   })
   return Number(pid.toString().trim())
 }
+
+const killLoner = (pid: number) =>
+  Effect.sync(() => {
+    if (alive(pid)) process.kill(pid, 'SIGKILL')
+  })
 
 /** A command that runs until stopped, as a run of the project. */
 const SERVE = `"${process.execPath}" -e "setInterval(() => {}, 1000)"`
@@ -122,8 +137,8 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
   })
 
 /**
- * Waits until none of `pids` runs. One that was stopped loses its mark at once,
- * but answers to its pid until its parent has reaped it.
+ * Waits until none of `pids` runs. On Linux, an unreaped process can still
+ * answer to its pid after it has exited.
  */
 const stopped = (pids: ReadonlyArray<number>) =>
   until(
@@ -210,13 +225,19 @@ describe.skipIf(windows)('a command an agent left running', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  it.live('goes with everything it started when its agent stops', () =>
+  it.live('goes with everything it started when its agent stops, even without a reported output file', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
-      const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+      const { task } = yield* started('Serve it [lead:serve-apart-without-output] [lead:finish]', { quick: true, run: false })
+      const lead = Option.getOrUndefined(yield* sessions.running(task.threadId))?.pid
+      if (lead == null) return assert.fail('Expected a live lead process')
+      const tree = yield* until(
+        Effect.map(processes(), (parents) => [...treeOf(parents, [lead])]),
+        (pids) => pids.length >= 3,
+      )
       yield* sessions.stop(task.threadId)
       yield* nothingLeft(task.taskId)
-      yield* stopped(marked)
+      yield* stopped(tree)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
@@ -232,7 +253,7 @@ describe.skipIf(windows)('a task that settles', () => {
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance
       yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-      const { task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
+      const { project, task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
       // Its preview remains running before merge, but completed work reserves no agent place.
       yield* until(holdersOf(task.taskId), (holders) => holders.length === 0)
       github.mergeByHand(1)
@@ -241,13 +262,10 @@ describe.skipIf(windows)('a task that settles', () => {
       const took = yield* nothingLeft(task.taskId)
       assert.isBelow(took, 10_000)
       yield* stopped(marked)
+      // Process death is visible before the run's finalizers finish and remove its entry from Launches.
+      yield* until((yield* Launches).ofProject(project.projectId), (launches) => launches.length === 0, 'merged task runs')
+      yield* until((yield* LeftBehind).stopping, (stopping) => !stopping.has(task.taskId), 'merged task cleanup')
       assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-      assert.deepStrictEqual(
-        yield* (yield* Launches).ofProject(
-          (yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${task.taskId}`)[0]?.projectId ?? '',
-        ),
-        [],
-      )
       // Keeping a place no longer lists it.
       assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
     }).pipe(
@@ -322,6 +340,43 @@ describe.skipIf(windows)('a task opened again before settling has stopped it', (
 })
 
 describe.skipIf(windows)('what settled tasks left running that Althar lost track of', () => {
+  it.live('stops an escaped run and a closed lead’s background command while their project and task stay open', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const { projectId } = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const { taskId, threadId } = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'An open task',
+        draft: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const session = yield* newId(Ids.providerSession)
+      const run = yield* newId(Ids.process)
+      const at = yield* now
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: session, projectId, threadId, agentId: 'codex', state: 'completed', startedAt: at, endedAt: at })}`
+      yield* sql`INSERT INTO processes ${sql.insert({ id: run, projectId, deviceId: instance.deviceId, runtimeInstanceId: instance.id, purpose: 'run', executable: 'sh', state: 'unknown', launchedAt: at, endedAt: at })}`
+      const owned = [
+        yield* Effect.acquireRelease(
+          Effect.sync(() => loner(`task:${taskId}`, { [WORKER]: session })),
+          killLoner,
+        ),
+        yield* Effect.acquireRelease(
+          Effect.sync(() => loner(`run:${projectId}`, { [RUN]: run })),
+          killLoner,
+        ),
+      ]
+      const unknown = yield* Effect.acquireRelease(
+        Effect.sync(() => loner(null, { [WORKER]: 'sess_someone_elses' })),
+        killLoner,
+      )
+      yield* (yield* LeftBehind).sweep
+      yield* stopped(owned)
+      assert.isTrue(alive(unknown))
+    }).pipe(Effect.scoped, Effect.provide(runtime())),
+  )
+
   it.effect(
     'goes once Althar looks after it starts again, and nothing else does',
     () => {

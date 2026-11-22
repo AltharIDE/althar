@@ -18,7 +18,7 @@ import { knownModels } from './knownModels'
 
 /*
  * Every coordinator session starts from Althar's record of the project
- * (ADR-031), not only one handed a full context over: on opening the
+ * (ADR-031), including one recovering a lost session: on opening the
  * project, after a relaunch or on another agent, it knows the project, what
  * its repositories tell agents, its open tasks and those finished last, and
  * the conversation, its earlier part in short.

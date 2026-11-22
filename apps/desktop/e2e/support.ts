@@ -233,9 +233,11 @@ export const still = (page: Page) =>
 /** Reveal the current node without waiting on one that a streamed update can replace while it settles. */
 export const reveal = async (page: Page, what: Locator) => {
   await expect(what).toBeVisible()
-  await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
   await still(page)
-  await expect(what).toBeInViewport()
+  await expect(async () => {
+    await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }), undefined, { timeout: budget.small })
+    await expect(what).toBeInViewport({ timeout: budget.small })
+  }).toPass({ timeout: budget.medium })
 }
 
 /** Sizes Althar's window, and waits until its page is laid out at the new width. */
@@ -308,7 +310,7 @@ export const showPanes = async (page: Page, want: { conversation: boolean; board
     await openLayout(page)
     const item = layoutItem(page, name)
     if (((await item.getAttribute('aria-checked')) === 'true') !== on) {
-      await item.click()
+      await item.press('Enter')
       await expect(moreMenu(page)).toHaveCount(0)
     } else await closeLayout(page)
   }
@@ -369,12 +371,8 @@ export const planTask = (page: Page, title: string, lead = '[lead:finish]') => s
 /** Starts a task: asks the coordinator for it, and starts its plan at once rather than waiting out the countdown. */
 export const startTask = async (page: Page, title: string, lead = '[lead:finish]') => {
   await planTask(page, title, lead)
-  // Wait for this task's plan to be on show before pressing its Start now: before it is, the last one is another plan's,
-  // and pressing that starts nothing of this task's while leaving it to count down. Its title is exactly the task's; what
-  // the person said carries the markers too, so isn't.
-  await expect(shown(page, title, { exact: true }).last()).toBeVisible()
-  // The newest plan is the last in the conversation; any before it have started.
-  await page.getByRole('button', { name: 'Start now' }).last().click()
+  const plan = page.locator('[data-rhythm="card"]').filter({ has: page.getByText(title, { exact: true }), visible: true })
+  await plan.getByRole('button', { name: 'Start now', exact: true }).click()
 }
 
 /** A section of the project's settings: Settings, the last of its views in its header, then the section down the side. */

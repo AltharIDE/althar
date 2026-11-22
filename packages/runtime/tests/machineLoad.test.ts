@@ -3,7 +3,8 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Fiber } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -13,7 +14,7 @@ import { HISTORY, MachineLoad } from '../src/MachineLoad'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { repository, runtime, task } from './support'
+import { onTestClock, repository, runtime, task, until } from './support'
 
 /*
  * How hard this computer works, and Althar's part (MachineLoad.ts): read when
@@ -77,6 +78,63 @@ const runnable = () => {
 }
 
 describe('this computer’s load', () => {
+  it.live('seeds the counters as the meter turns on, so the first window read need not wait for its own interval', () => {
+    const stand = machine(() => [])
+    return Effect.gen(function* () {
+      const load = yield* MachineLoad
+      assert.strictEqual(stand.reads(), 0)
+      yield* load.meter(true)
+      assert.strictEqual(stand.reads(), 1)
+      const first = yield* load.now
+      assert.strictEqual(stand.reads(), 2)
+      assert.strictEqual(first.cpu, 0.25)
+      assert.lengthOf(first.history, 1)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, settle: Duration.hours(1) } })))
+  })
+
+  it.effect('waits for a usable CPU interval if the first two samples fall within the same system tick', () => {
+    const stand = machine(() => [])
+    const read = stand.read.pipe(
+      Effect.map((reading) => (stand.reads() === 2 ? { ...reading, cores: { ...reading.cores, busy: 3_000, total: 12_000 } } : reading)),
+    )
+    return onTestClock(
+      Effect.gen(function* () {
+        const load = yield* MachineLoad
+        yield* load.meter(true)
+        const first = yield* Effect.forkChild(load.now)
+        yield* until(
+          Effect.sync(() => stand.reads()),
+          (count) => count === 2,
+        )
+        assert.isUndefined(first.pollUnsafe())
+        yield* TestClock.adjust(Duration.seconds(1))
+        assert.strictEqual((yield* Fiber.join(first)).cpu, 0.25)
+      }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read, app: NO_APP, settle: Duration.seconds(1) } }))),
+    )
+  })
+
+  it.effect('returns CPU without inventing process shares when the system reader changes between samples', () => {
+    const stand = machine(() => [[123, { parent: 1, cpu: 100, memory: 10 * MB }]])
+    const read = stand.read.pipe(Effect.map((reading) => ({ ...reading, reaped: stand.reads() > 1 })))
+    return onTestClock(
+      Effect.gen(function* () {
+        const load = yield* MachineLoad
+        yield* load.meter(true)
+        const first = yield* load.now
+        assert.strictEqual(first.cpu, 0.25)
+        assert.isNull(first.shares)
+        assert.isNull(first.althar)
+        assert.deepStrictEqual(first.history, [])
+        yield* TestClock.adjust(Duration.seconds(3))
+        const next = yield* load.now
+        assert.isNotNull(next.shares)
+        assert.lengthOf(next.history, 1)
+      }).pipe(
+        Effect.provide(runtime(':memory:', {}, { load: { read, app: NO_APP, settle: Duration.hours(1), sample: Duration.hours(1) } })),
+      ),
+    )
+  })
+
   it.live('reads nothing until asked; then the whole of it, and each task’s, coordinator’s and run’s part, with what each started', () => {
     const world = { lead: 0, coordinator: 0, run: 0 }
     const stand = machine((n) => [

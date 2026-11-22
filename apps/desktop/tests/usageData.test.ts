@@ -67,13 +67,35 @@ describe('what usage data may carry', () => {
     ).toEqual({ name: 'project_made', properties: { repositories: 2 } })
     expect(
       usageEventOf({ name: 'task_started', properties: { as: 'Fix the login', agent: '/usr/local/bin/claude', family: 'Opus 5' } }),
-    ).toEqual({ name: 'task_started', properties: {} })
+    ).toEqual({ name: 'task_started', properties: { agent: 'other' } })
     expect(usageEventOf({ name: 'task_settled', properties: { as: 'abandoned', took: 4_200_000, steps: -1 } })).toEqual({
       name: 'task_settled',
       properties: { as: 'abandoned' },
     })
     expect(usageEventOf({ name: 'update_installed', properties: { from: '0.1.0; rm -rf' } })).toEqual({
       name: 'update_installed',
+      properties: {},
+    })
+    expect(
+      usageEventOf({
+        name: 'task_first_turn_finished',
+        properties: { agent: 'private-connection', family: 'private-model', failure: 'private-error', outcome: 'failed', text: 'secret' },
+      }),
+    ).toEqual({ name: 'task_first_turn_finished', properties: { agent: 'other', outcome: 'failed' } })
+  })
+
+  it('keeps connection outcomes without carrying home or worker details', () => {
+    expect(
+      usageEventOf({
+        name: 'home_connection',
+        properties: { transport: 'ssh', outcome: 'failed', address: 'me@private.test', problem: 'bad key', homeId: 'private-home' },
+      }),
+    ).toEqual({ name: 'home_connection', properties: { transport: 'ssh', outcome: 'failed' } })
+    expect(
+      usageEventOf({ name: 'worker_connection', properties: { outcome: 'connected', workerId: 'private-worker', provider: 'codex' } }),
+    ).toEqual({ name: 'worker_connection', properties: { outcome: 'connected' } })
+    expect(usageEventOf({ name: 'home_pairing', properties: { outcome: 'expired token: private-code' } })).toEqual({
+      name: 'home_pairing',
       properties: {},
     })
   })
@@ -180,6 +202,24 @@ describe('sending', () => {
     expect(failing).toHaveBeenCalledTimes(1)
   })
 
+  it('drops retries from an earlier switch state and timestamps the new event when it happened', async () => {
+    const { requests, fetch } = posthog()
+    let generation = 0
+    const retrying = vi.fn<UsageDataOptions['fetch']>(async (url, options) => {
+      if (generation === 0) return { status: 503, text: async () => '', json: async () => ({}), headers: { get: () => null } }
+      return fetch(url, options)
+    })
+    const usage = sender(() => true, retrying, 'phc_test', { generation: () => generation, retryDelay: 100 })
+    usage.record({ name: 'app_opened' })
+    await vi.waitFor(() => expect(retrying).toHaveBeenCalledTimes(1), { interval: 5 })
+    generation += 2
+    const at = Date.now() - 500
+    usage.record({ name: 'app_window_opened' }, at)
+    await usage.stop()
+    expect(retrying).toHaveBeenCalledTimes(2)
+    expect(sent(requests)).toMatchObject([{ event: 'app_window_opened', timestamp: new Date(at).toISOString() }])
+  })
+
   it('never fails, even when PostHog can’t be reached', async () => {
     const fetch = vi.fn<UsageDataOptions['fetch']>(async () => {
       throw new Error('offline')
@@ -196,8 +236,9 @@ describe('the install', () => {
     const at = profile()
     const first = await installOf(at, '0.1.0')
     expect(first.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(first.first).toBe(true)
     expect(first.updatedFrom).toBeNull()
-    expect(await installOf(at, '0.1.0')).toEqual({ id: first.id, updatedFrom: null })
+    expect(await installOf(at, '0.1.0')).toEqual({ id: first.id, first: false, updatedFrom: null })
     await expect(installOf(profile(), '0.1.0')).resolves.not.toMatchObject({ id: first.id })
     expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toEqual({ usage: { id: first.id, version: '0.1.0' } })
   })

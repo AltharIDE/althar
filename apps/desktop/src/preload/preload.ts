@@ -14,7 +14,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
-import type { WindowAction } from '../renderer/data/services'
+import type { WelcomeMilestone, WindowAction } from '../renderer/data/services'
 import type { PageKey, PageState } from '../main/browser/page'
 
 /*
@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('althar', {
     list: () => ipcRenderer.invoke('althar:homes-list'),
     pairingInfo: (code: string) => ipcRenderer.invoke('althar:homes-pairing-info', code),
     pair: (code: string, name: string) => ipcRenderer.invoke('althar:homes-pair', code, name),
+    answerPermission: (answer: unknown) => ipcRenderer.invoke('althar:homes-answer-permission', answer),
+    enrollApprovalKey: () => ipcRenderer.invoke('althar:homes-enroll-approval-key'),
     overview: () => ipcRenderer.invoke('althar:homes-overview'),
     inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
     connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
@@ -223,6 +225,7 @@ contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
+  welcomeUsage: (...milestone: WelcomeMilestone): void => ipcRenderer.send('althar:welcome-usage', ...milestone),
   onStartupStage: (listener: (stage: StartupStage) => void): (() => void) => {
     startupStages.add(listener)
     listener(startupStage)
@@ -269,6 +272,8 @@ contextBridge.exposeInMainWorld('althar', {
   preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),
   setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
+  saveWorkerSnapshot: (request: { readonly projectId: string; readonly taskId: string }): Promise<void> =>
+    ipcRenderer.invoke('althar:save-worker-snapshot', request),
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
   clonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:clone-place'),

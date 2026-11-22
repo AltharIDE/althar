@@ -151,7 +151,6 @@ test('runs the default branch from the project’s front, leaves its card in the
     await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
     await page.mouse.down()
     await page.mouse.move(grip.x + grip.width / 2, top.y + top.height / 2, { steps: 12 })
-    await page.screenshot({ path: 'test-results/run-list-dragging.png', animations: 'disabled' })
     await page.mouse.up()
     const first = whole.getByRole('listitem').first()
     await expect(first).toContainText('Storybook')

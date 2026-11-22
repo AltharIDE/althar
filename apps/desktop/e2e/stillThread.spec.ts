@@ -142,7 +142,9 @@ test('a still coordinator thread stays still for a minute', async () => {
       await say(page, `Question number ${i} about the project?`)
       await expect(shown(page, `Question number ${i} about the project?`).first()).toBeVisible()
     }
-    await expect(page.getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'Question number 12' }).last()).toBeVisible()
+    const lastReply = page.getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'Question number 12' }).last()
+    await expect(lastReply).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Conversation' })).not.toHaveAttribute('aria-busy')
     // Settled: the replies are in, the first task has finished, and nothing is still moving in.
     await expect(page.locator('article[data-task="tidy-the-readme"]')).toContainText('Did the task.')
     await still(page)
@@ -153,7 +155,13 @@ test('a still coordinator thread stays still for a minute', async () => {
     const card = page.locator('article[data-task="keep-working-on-the-docs"]')
     await expect(card).toHaveClass(/running/)
     // Above the view, while what is in view is the person's last questions and their answers.
-    const above = () => card.evaluate((one) => one.getBoundingClientRect().bottom < 0)
+    await lastReply.evaluate((element) => element.scrollIntoView({ block: 'end', behavior: 'instant' }))
+    const above = () =>
+      card.evaluate((one) => {
+        let scroller = one.parentElement
+        while (scroller !== null && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+        return scroller !== null && one.getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top
+      })
     await expect.poll(above).toBe(true)
     await still(page)
     await listen(page, 'article[data-task="keep-working-on-the-docs"]')

@@ -461,6 +461,16 @@ describe('the API', () => {
         const handlers = apiLayer(
           Effect.succeed(
             Api.of({
+              ListProjectWorkers: () => Effect.succeed([]),
+              ReadLaunchPreview: () => Effect.die('unused'),
+              OpenLaunchPreviewSocket: () => Effect.die('unused'),
+              ReadLaunchPreviewSocket: () => Stream.die('unused'),
+              WriteLaunchPreviewSocket: () => Effect.die('unused'),
+              CloseLaunchPreviewSocket: () => Effect.die('unused'),
+              PrepareWorkerSnapshot: () => Effect.die('unused'),
+              ReadWorkerFile: () => Effect.die('unused'),
+              ReadWorkerSnapshotChunk: () => Effect.die('unused'),
+              ReleaseWorkerSnapshot: () => Effect.die('unused'),
               GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
               SaveAcpConnection: () => Effect.succeed(1),
               CheckAcpConnection: () => Effect.succeed(1),
@@ -673,6 +683,7 @@ describe('the API', () => {
               TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
+              SetThreadGoal: () => Effect.die('unused'),
               Send: ({ body, images }) =>
                 images === undefined
                   ? Effect.void

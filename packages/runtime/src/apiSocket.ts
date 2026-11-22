@@ -61,7 +61,10 @@ const accept = (port: SocketPort, secret: string) =>
   })
 
 /** A fresh private socket per launch; the descriptor is published only after the server is listening. No network interface is opened. */
-export const listenLocalApi = (profile: string): Effect.Effect<LocalApiEndpoint, ApiError, ConnectionServices | Scope.Scope> =>
+export const listenLocalApi = (
+  profile: string,
+  networkFingerprint?: string,
+): Effect.Effect<LocalApiEndpoint, ApiError, ConnectionServices | Scope.Scope> =>
   Effect.gen(function* () {
     const instance = yield* Instance
     const context = yield* Effect.context<ConnectionServices>()
@@ -126,7 +129,14 @@ export const listenLocalApi = (profile: string): Effect.Effect<LocalApiEndpoint,
       for (const socket of sockets) socket.destroy()
     })
     if (process.platform !== 'win32') yield* Effect.tryPromise({ try: () => fs.chmod(address, 0o600), catch: unavailable })
-    const endpoint: LocalApiEndpoint = { protocol: 1, homeId: instance.homeId, apiVersion: API_VERSION, address, secret }
+    const endpoint: LocalApiEndpoint = {
+      protocol: 1,
+      homeId: instance.homeId,
+      apiVersion: API_VERSION,
+      address,
+      secret,
+      ...(networkFingerprint === undefined ? {} : { networkFingerprint }),
+    }
     const descriptor = join(directory, 'endpoint.json')
     const temporary = join(directory, `endpoint-${randomBytes(8).toString('hex')}.tmp`)
     yield* Effect.addFinalizer(() =>

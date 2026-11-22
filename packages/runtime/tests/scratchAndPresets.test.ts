@@ -27,9 +27,19 @@ import { knownModels } from './knownModels'
  * and the coordinator offers one once the person sets up the same parts twice.
  */
 
-const runtimeWith = (github: FakeService) =>
+const runtimeWith = (github: FakeService, countdown?: Duration.Duration) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+    Layer.provideMerge(
+      runtime(
+        ':memory:',
+        {},
+        {
+          connectors: fakeConnectors({ github }),
+          listenEvery: Duration.hours(1),
+          ...(countdown === undefined ? {} : { countdown }),
+        },
+      ),
+    ),
   )
 
 const cards = (projectId: string) =>
@@ -337,7 +347,7 @@ describe('presets', () => {
       yield* (yield* Plans).change(row?.id ?? '', led, instance.personId, 'draft')
       yield* until(cards(projectId), (all) => all[0]?.plan?.end === 'draft')
       assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Change')
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, Duration.hours(1))))
   })
 
   it.live('keep on its card the plan a task was discarded with, held before it began, naming its preset', () => {

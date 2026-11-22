@@ -14,13 +14,22 @@ import { change, fact, timestamp } from './records'
  *
  * A process is stopped only when it is provably the one that was started: its
  * pid is alive and the OS gives the start time recorded when it was launched.
- * A pid alone may have been reused.
+ * A pid alone may have been reused. A leaderless Unix group can still run.
  */
 
 interface StaleProcess {
   readonly id: string
   readonly pid: number | null
   readonly osStartedAt: string | null
+}
+
+const gone = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
 }
 
 export interface Reconciled {
@@ -42,7 +51,7 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
 
   const processes = yield* sql<StaleProcess>`
     SELECT id, pid, os_started_at FROM processes
-    WHERE state IN ('launching', 'running') AND runtime_instance_id <> ${instance.id}`
+    WHERE state IN ('launching', 'running') AND device_id = ${instance.deviceId} AND runtime_instance_id <> ${instance.id}`
   let processesStopped = 0
   for (const stale of processes) {
     let stop: StopReport | undefined
@@ -51,8 +60,13 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
       // Ours when the leader is the process recorded; or, on Unix, when the leader has gone but its group lives on, since a
       // pid isn't reused while a group with that id exists. Then what the agent left running, such as a dev server, is stopped too.
       // On Windows the tree went with its keeper, the leader recorded, and a pid without its start is another process's.
-      const ours = leaderStarted === undefined ? platformTrees().outlivesRoot : leaderStarted === stale.osStartedAt
+      // A failed lookup is also undefined. In that case, never assume a live PID is the process we recorded.
+      const ours = leaderStarted === undefined ? platformTrees().outlivesRoot && gone(stale.pid) : leaderStarted === stale.osStartedAt
       if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2))
+    }
+    if (stop?.survivors === true) {
+      yield* Effect.logWarning('A process group from an earlier launch would not stop', { id: stale.id, pid: stale.pid })
+      continue
     }
     const stopped = stop !== undefined && stop.signal !== 'none'
     if (stopped) processesStopped += 1

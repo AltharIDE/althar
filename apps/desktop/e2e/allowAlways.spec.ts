@@ -65,11 +65,12 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await page.getByRole('option', { name: 'commands starting “git status”' }).click()
     if (shots) await page.screenshot({ path: join(shots, 'app-allow-always-card.png') })
     await page.getByRole('button', { name: /^Allow(?! all)/ }).click()
-    await expect(page.getByText('chosen=allow_once')).toHaveCount(1)
+    const allowedResults = shown(page, 'chosen=allow_once', { exact: true })
+    await expect(allowedResults).toHaveCount(1)
 
     // The next is let through by the rule, and the thread says so.
     await say(page, 'run git status --short')
-    await expect(page.getByText('chosen=allow_once')).toHaveCount(2)
+    await expect(allowedResults).toHaveCount(2)
     await expect(page.getByText('Needs your permission')).toHaveCount(0)
     const receipt = page.getByRole('button', { name: /Allowed 1 request/ })
     await expect(receipt).toBeVisible()

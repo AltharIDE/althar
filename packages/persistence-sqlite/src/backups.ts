@@ -104,7 +104,14 @@ export const backUpBeforeMigrating = (folder: string, migrations: ReadonlyArray<
       }
       return new BackupFailed({ folder, reason: reasonOf(error) })
     }
-    yield* Effect.try({ try: () => mkdirSync(folder, { recursive: true }), catch: failed })
+    yield* Effect.try({
+      try: () => {
+        mkdirSync(folder, { recursive: true })
+        // A restart in the same second can reuse the name of an interrupted copy.
+        rmSync(partial, { force: true })
+      },
+      catch: failed,
+    })
     yield* client.backup(partial).pipe(Effect.mapError(failed))
     yield* Effect.try({ try: () => renameSync(partial, path), catch: failed })
     yield* prune(folder)
