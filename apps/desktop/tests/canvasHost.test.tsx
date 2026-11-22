@@ -150,8 +150,24 @@ describe('the comments sent on a canvas', () => {
       ],
     )
     expect(commentsShown(held)).toEqual([
-      { id: 'cc_2', version: 2, body: 'Say Sign in', place: '“Continue”', answered: false, answer: null },
-      { id: 'cc_1', version: 1, body: 'Make it shorter', place: 'Whole canvas', answered: true, answer: 'Cut it to one screen' },
+      {
+        id: 'cc_2',
+        version: 2,
+        body: 'Say Sign in',
+        place: '“Continue”',
+        answered: false,
+        answer: null,
+        anchor: { kind: 'passage', text: 'Continue', heading: 'Sign in' },
+      },
+      {
+        id: 'cc_1',
+        version: 1,
+        body: 'Make it shorter',
+        place: 'Whole canvas',
+        answered: true,
+        answer: 'Cut it to one screen',
+        anchor: { kind: 'whole' },
+      },
     ])
   })
 })
@@ -470,5 +486,152 @@ describe('a page canvas', () => {
     show(client)
     await waitFor(() => expect(document.querySelector(`[data-canvas-page="${CANVAS}"]`)).not.toBeNull())
     expect(screen.queryByRole('button', { name: /Load again/ })).toBeNull()
+  })
+})
+
+describe('a canvas of boards', () => {
+  const box = (x: number, y: number, width: number, height: number) =>
+    ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect
+  const BOARDS = JSON.stringify({
+    pages: [
+      {
+        name: 'Checkout',
+        boards: [
+          { name: 'Desktop', file: 'desktop.html', width: 1440, height: 900 },
+          { name: 'Phone', file: 'phone.html', width: 390, height: 844 },
+        ],
+      },
+      { name: 'Receipt', boards: [{ name: 'Desktop', file: 'receipt.html', width: 1440, height: 900 }] },
+    ],
+  })
+  const held = (comments: ReadonlyArray<CanvasCommentFacts> = []) =>
+    detail([version(1, { kind: 'boards', title: 'Checkout', entry: 'canvas.json' })], comments)
+
+  afterEach(() => {
+    for (const left of document.body.querySelectorAll(':scope > [role="dialog"], :scope > [role="menu"]')) left.remove()
+    vi.restoreAllMocks()
+  })
+
+  /** A canvases host whose ground says what a test has it say. */
+  const views = () => {
+    let listen:
+      | ((
+          threadId: string,
+          news: Parameters<NonNullable<CanvasesHost['onGround']>>[0] extends (t: string, n: infer N) => void ? N : never,
+        ) => void)
+      | null = null
+    const canvases: CanvasesHost = {
+      show: vi.fn(),
+      close: vi.fn(),
+      reload: vi.fn(),
+      still: vi.fn(async () => null),
+      cover: vi.fn(async () => {}),
+      ground: vi.fn(),
+      pins: vi.fn(async () => []),
+      find: vi.fn(async () => null),
+      clear: vi.fn(),
+      onGround: (listener) => {
+        listen = listener as never
+        return () => (listen = null)
+      },
+    }
+    return { canvases, say: (news: unknown) => act(() => listen?.(THREAD, news as never)) }
+  }
+
+  it('is drawn on Althar’s ground, with its pages, every board or one at a time, its tools and its zoom along the bottom', async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
+    const { canvases, say } = views()
+    const { client } = canvasClient(held(), BOARDS)
+    show(client, { canvases })
+    const target = { projectId: PROJECT, canvasId: CANVAS, version: 1, manifest: '1'.repeat(64), boards: true }
+    await waitFor(() => expect(canvases.show).toHaveBeenLastCalledWith(THREAD, target, { x: 640, y: 120, width: 640, height: 700 }))
+    expect(screen.getByRole('toolbar', { name: 'Tools' })).not.toBeNull()
+
+    // One board at a time shows at once, before the ground says so, and the ground is asked.
+    await userEvent.click(screen.getByRole('radio', { name: 'One board at a time' }))
+    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { view: 'one' })
+    expect(screen.getByText('1 of 3')).not.toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Next board' }))
+    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { step: 1 })
+    expect(screen.getByText('2 of 3')).not.toBeNull()
+    expect(screen.getByText('Phone')).not.toBeNull()
+
+    // The ground's word stands: its zoom, and the board it shows.
+    say({ kind: 'state', state: { view: 'one', page: 1, board: { page: 1, board: 0 }, zoom: 0.42, tool: 'hand' } })
+    expect(screen.getByRole('button', { name: 'Zoom: 42%' })).not.toBeNull()
+    expect(screen.getByText('3 of 3')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Move around' }).getAttribute('aria-pressed')).toBe('true')
+    await userEvent.click(screen.getByRole('button', { name: 'Point at a part' }))
+    expect(canvases.ground).toHaveBeenLastCalledWith(THREAD, { tool: 'point' })
+    measured.mockRestore()
+  })
+
+  it('takes a part pointed at as a comment in the draft, on its board, with its pin', async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => box(640, 120, 640, 700))
+    const { canvases, say } = views()
+    const sent: CanvasCommentFacts = {
+      id: 'cc_1',
+      version: 1,
+      anchor: { kind: 'element', selector: 'h1', label: 'h1', text: 'Pay', page: 'Checkout', board: 'Desktop' },
+      body: 'Bigger',
+      at: '2026-09-29T11:00:00.000Z',
+      resolved: null,
+    }
+    const { client } = canvasClient(held([sent]), BOARDS)
+    show(client, { canvases })
+    await waitFor(() =>
+      expect(canvases.pins).toHaveBeenLastCalledWith(THREAD, [
+        { n: 1, page: 'Checkout', board: 'Desktop', selector: 'h1', answered: false, draft: false },
+      ]),
+    )
+    expect(screen.getByRole('button', { name: 'Pin 1' })).not.toBeNull()
+
+    const picked = {
+      selector: 'button.go',
+      label: 'button.go',
+      text: 'Send the gift',
+      rect: { x: 10, y: 20, width: 120, height: 40 },
+      font: '14px · 500 · Inter',
+      colour: '#ffffff',
+      background: '#c2552d',
+      page: { width: 390, height: 844 },
+    }
+    say({
+      kind: 'pointed',
+      pointed: {
+        page: 'Checkout',
+        board: 'Phone',
+        picked,
+        crop: null,
+        cropSize: null,
+        still: 'data:image/jpeg;base64,CCCC',
+        at: { x: 40, y: 60, width: 60, height: 20 },
+      },
+    })
+    const field = await screen.findByRole('textbox', { name: 'Comment on button.go' })
+    // The view steps aside for the picture taken as it was pointed at.
+    fireEvent.load(document.querySelector<HTMLImageElement>('img[src="data:image/jpeg;base64,CCCC"]') as HTMLImageElement)
+    expect(canvases.cover).toHaveBeenCalledWith(THREAD, true)
+    await userEvent.type(field, 'Say Send it{Enter}')
+    expect(commentsOf(DRAFT)).toMatchObject([
+      {
+        note: 'Say Send it',
+        on: {
+          kind: 'canvas',
+          canvasId: CANVAS,
+          version: 1,
+          anchor: { kind: 'element', selector: 'button.go', label: 'button.go', text: 'Send the gift', page: 'Checkout', board: 'Phone' },
+        },
+      },
+    ])
+    expect(canvases.clear).toHaveBeenCalledWith(THREAD)
+    await waitFor(() =>
+      expect(canvases.pins).toHaveBeenLastCalledWith(THREAD, [
+        { n: 1, page: 'Checkout', board: 'Desktop', selector: 'h1', answered: false, draft: false },
+        { n: 2, page: 'Checkout', board: 'Phone', selector: 'button.go', answered: false, draft: true },
+      ]),
+    )
+    // A version step pressed in the canvas steps the panel's.
+    measured.mockRestore()
   })
 })

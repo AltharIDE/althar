@@ -8,6 +8,8 @@ import type { WatchEvent } from '@althar/contracts'
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
 import type { PageKey, PageMove, PagePin, PageState, Pointed } from '../../main/browser/page'
+import type { CanvasGroundNews, CanvasPointed } from '../../main/canvases/boards'
+import type { GroundChange, GroundPin } from '../../overlay/ground'
 import type { DesktopChrome } from '../../main/desktop'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
@@ -310,7 +312,14 @@ export interface CanvasesHost {
   /** Lays a version over the window where it keeps its place, in the window's pixels; null takes it off. */
   readonly show: (
     threadId: string,
-    target: { readonly projectId: string; readonly canvasId: string; readonly version: number; readonly manifest: string },
+    target: {
+      readonly projectId: string
+      readonly canvasId: string
+      readonly version: number
+      readonly manifest: string
+      /** A canvas of boards, drawn on Althar's ground. */
+      readonly boards?: boolean
+    },
     panel: { x: number; y: number; width: number; height: number } | null,
   ) => void
   /** Takes the thread's canvas view away. */
@@ -321,6 +330,16 @@ export interface CanvasesHost {
   readonly still: (threadId: string) => Promise<string | null>
   /** Hides the view while something of the window's is over it (ADR-100), and shows it again after. */
   readonly cover: (threadId: string, covered: boolean) => Promise<void>
+  /** A canvas of boards: changes how it shows (its view, page, board, zoom or tool). */
+  readonly ground?: (threadId: string, change: GroundChange) => void
+  /** Draws the comments' pins on their parts; the numbers of those found, or null where it isn't shown. */
+  readonly pins?: (threadId: string, pins: ReadonlyArray<GroundPin>) => Promise<ReadonlyArray<number> | null>
+  /** A part found again, outlined, with a picture to write its comment over; null where it isn't there. */
+  readonly find?: (threadId: string, part: { page: string; board: string; selector: string }) => Promise<CanvasPointed | null>
+  /** Takes the outline off a part pointed at. */
+  readonly clear?: (threadId: string) => void
+  /** Hears what a canvas of boards' ground says, for every thread's; returns how to stop. */
+  readonly onGround?: (listener: (threadId: string, news: CanvasGroundNews) => void) => () => void
 }
 
 /**

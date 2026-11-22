@@ -16,6 +16,8 @@ import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
 import type { WindowAction } from '../renderer/data/services'
 import type { PageKey, PageState } from '../main/browser/page'
+import type { CanvasGroundNews, CanvasPointed } from '../main/canvases/boards'
+import type { GroundChange, GroundPin } from '../overlay/ground'
 
 /*
  * The window's bridge to the main process, and nothing more: the port to the
@@ -129,6 +131,11 @@ ipcRenderer.on('althar:page-key', (_event, owner: string, key: PageKey) => {
 const pagesClosed = new Set<(owner: string) => void>()
 ipcRenderer.on('althar:page-closed', (_event, owner: string) => {
   for (const listener of pagesClosed) listener(owner)
+})
+/* What a canvas of boards' ground said: how it stands, a part pointed at, a pin or a key pressed (ADR-104). */
+const canvasGround = new Set<(threadId: string, news: CanvasGroundNews) => void>()
+ipcRenderer.on('althar:canvas-ground', (_event, threadId: string, news: CanvasGroundNews) => {
+  for (const listener of canvasGround) listener(threadId, news)
 })
 /* A page a lead opened (or woke) that no window shows yet: the window places it beside the conversation. */
 const pagesOpened = new Set<(owner: string) => void>()
@@ -386,13 +393,23 @@ contextBridge.exposeInMainWorld('althar', {
   canvases: {
     show: (
       threadId: string,
-      target: { projectId: string; canvasId: string; version: number; manifest: string },
+      target: { projectId: string; canvasId: string; version: number; manifest: string; boards?: boolean },
       panel: { x: number; y: number; width: number; height: number } | null,
     ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
     close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
     reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
     still: (threadId: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-still', threadId),
     cover: (threadId: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:canvas-cover', threadId, covered),
+    ground: (threadId: string, change: GroundChange): void => ipcRenderer.send('althar:canvas-ground', threadId, change),
+    pins: (threadId: string, pins: ReadonlyArray<GroundPin>): Promise<ReadonlyArray<number> | null> =>
+      ipcRenderer.invoke('althar:canvas-pins', threadId, pins),
+    find: (threadId: string, part: { page: string; board: string; selector: string }): Promise<CanvasPointed | null> =>
+      ipcRenderer.invoke('althar:canvas-find', threadId, part),
+    clear: (threadId: string): void => ipcRenderer.send('althar:canvas-clear', threadId),
+    onGround: (listener: (threadId: string, news: CanvasGroundNews) => void): (() => void) => {
+      canvasGround.add(listener)
+      return () => void canvasGround.delete(listener)
+    },
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

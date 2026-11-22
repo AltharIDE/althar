@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 
-import { canvasAddressOf, CanvasManifest } from '@althar/contracts'
+import { BOARDS_GROUND, canvasAddressOf, CanvasManifest } from '@althar/contracts'
 import { artifactPath, isDigest } from '@althar/runtime/artifacts'
 import { Schema } from 'effect'
 
@@ -33,10 +33,18 @@ const decode = Schema.decodeUnknownSync(Schema.fromJsonString(CanvasManifest))
 
 const missing = () => new Response(null, { status: 404 })
 
+/**
+ * The ground of a canvas of boards, Althar's own empty page: what the ground's
+ * script (src/overlay/ground.ts) builds the boards on, at the version's own
+ * origin so it reaches into them. It has no script of its own.
+ */
+export const GROUND_PAGE =
+  '<!doctype html><html><head><meta charset="utf-8"><title></title><link rel="stylesheet" href="tokens.css"></head><body></body></html>'
+
 /** The manifests read so far, by digest: a digest's bytes never change. */
 const manifests = new Map<string, CanvasManifest>()
 
-const manifestAt = async (root: string, digest: string): Promise<CanvasManifest | null> => {
+export const manifestAt = async (root: string, digest: string): Promise<CanvasManifest | null> => {
   const known = manifests.get(digest)
   if (known !== undefined) return known
   const bytes = await readFile(artifactPath(root, digest)).catch(() => null)
@@ -75,6 +83,10 @@ export const serveCanvas =
     if (digest === null || !isDigest(digest)) return missing()
     if (asked.path === '.althar/tokens.css')
       return new Response(tokens(), { headers: { ...CANVAS_HEADERS, 'content-type': 'text/css; charset=utf-8' } })
+    if (asked.path === BOARDS_GROUND)
+      return new Response(request.method === 'HEAD' ? null : GROUND_PAGE, {
+        headers: { ...CANVAS_HEADERS, 'content-type': 'text/html; charset=utf-8' },
+      })
     const manifest = await manifestAt(root, digest)
     if (manifest === null) return missing()
     const file = fileIn(manifest, asked.path)

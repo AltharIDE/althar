@@ -27,8 +27,9 @@ vi.mock('electron', () => ({
   WebContentsView: class {},
 }))
 
-const { CANVAS_HEADERS, fileIn, forgetManifests, serveCanvas } = await import('../src/main/canvases/serve')
-const { canvasNavigation, reachesAlthar } = await import('../src/main/canvases/views')
+const { CANVAS_HEADERS, fileIn, forgetManifests, GROUND_PAGE, serveCanvas } = await import('../src/main/canvases/serve')
+const { canvasNavigation, loadAddress, reachesAlthar } = await import('../src/main/canvases/views')
+const { boardsAt, groundChangeOf, groundPartOf, groundPinsOf } = await import('../src/main/canvases/boards')
 const { handleCanvases, keyOf, targetOf } = await import('../src/main/canvases/ipc')
 const { canvasTokens } = await import('../src/main/canvases/tokens')
 
@@ -174,8 +175,23 @@ describe('the window’s calls about canvases', () => {
     const mine = { name: 'Althar’s window' }
     const picture = vi.fn(async () => 'data:image/jpeg;base64,AAAA')
     const covered = vi.fn()
+    const changed = vi.fn()
+    const pinned = vi.fn(async () => [1])
+    const found = vi.fn(async () => null)
+    const cleared = vi.fn()
     handleCanvases(
-      { show: shown, close: closed, reload: reloaded, still: picture, cover: covered, opened: () => null },
+      {
+        show: shown,
+        close: closed,
+        reload: reloaded,
+        still: picture,
+        cover: covered,
+        opened: () => null,
+        change: changed,
+        pins: pinned,
+        find: found,
+        clear: cleared,
+      },
       (contents) => contents === (mine as never),
     )
     const call = (channel: string, sender: unknown, ...args: Array<unknown>) => channels.listened.get(channel)?.({ sender }, ...args)
@@ -200,6 +216,71 @@ describe('the window’s calls about canvases', () => {
     expect(covered).toHaveBeenCalledTimes(2)
     expect(() => call('althar:canvas-cover', { name: 'a canvas' }, THREAD, true)).toThrow('Only Althar’s own windows')
     expect(() => call('althar:canvas-close', { name: 'a canvas' }, THREAD)).toThrow('Only Althar’s own windows')
+
+    // A canvas of boards: what the window asks of its ground is checked too.
+    call('althar:canvas-ground', mine, THREAD, { view: 'one', board: { page: 0, board: 2 }, zoom: 'fit' })
+    expect(changed).toHaveBeenLastCalledWith(THREAD, { view: 'one', board: { page: 0, board: 2 }, zoom: 'fit' })
+    call('althar:canvas-ground', mine, THREAD, { view: 'sideways' })
+    call('althar:canvas-ground', mine, 'nope', { view: 'one' })
+    expect(changed).toHaveBeenCalledTimes(1)
+    const pin = { n: 1, page: 'Checkout', board: 'Desktop', selector: 'button.go', answered: false, draft: true }
+    expect(await call('althar:canvas-pins', mine, THREAD, [pin])).toEqual([1])
+    expect(pinned).toHaveBeenLastCalledWith(THREAD, [pin])
+    expect(await call('althar:canvas-pins', mine, THREAD, [{ ...pin, n: 0 }])).toBeNull()
+    expect(await call('althar:canvas-find', mine, THREAD, { page: 'Checkout', board: 'Desktop', selector: 'h1' })).toBeNull()
+    expect(found).toHaveBeenCalledWith(THREAD, { page: 'Checkout', board: 'Desktop', selector: 'h1' })
+    call('althar:canvas-clear', mine, THREAD)
+    expect(cleared).toHaveBeenCalledWith(THREAD)
+    expect(() => call('althar:canvas-ground', { name: 'a canvas' }, THREAD, { view: 'one' })).toThrow('Only Althar’s own windows')
+    expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: true })?.boards).toBe(true)
+    expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64), boards: 'yes' })).toBeNull()
+  })
+})
+
+describe('a canvas of boards', () => {
+  beforeEach(() => forgetManifests())
+
+  it('loads Althar’s own empty page at its version, with no script of its own, and reads its boards from canvas.json', async () => {
+    const target = { projectId: PROJECT, canvasId: CANVAS, version: 3, manifest: 'f'.repeat(64) }
+    expect(loadAddress(target)).toBe(canvasAddress(CANVAS, 3, ''))
+    expect(loadAddress({ ...target, boards: true })).toBe(canvasAddress(CANVAS, 3, '.althar/boards.html'))
+    expect(GROUND_PAGE).not.toContain('<script')
+
+    const { root, put } = store()
+    const boards = JSON.stringify({
+      pages: [{ name: 'Sign in', boards: [{ name: 'Desktop', file: 'index.html', width: 1440, height: 900 }] }],
+    })
+    const files = [
+      { path: 'canvas.json', sha256: put(boards), size: boards.length, type: 'application/json; charset=utf-8' },
+      { path: 'index.html', sha256: digest('<h1>Sign in</h1>'), size: 16, type: 'text/html; charset=utf-8' },
+    ]
+    const manifest = put(manifestBytes({ entry: 'canvas.json', files }))
+    expect(await boardsAt(root, manifest)).toEqual({
+      pages: [{ name: 'Sign in', boards: [{ name: 'Desktop', file: 'index.html', width: 1440, height: 900 }] }],
+    })
+    const serve = serveCanvas(
+      root,
+      () => manifest,
+      () => ':root{}',
+    )
+    const ground = await serve(get(canvasAddress(CANVAS, 3, '.althar/boards.html')))
+    expect(ground.status).toBe(200)
+    expect(await ground.text()).toBe(GROUND_PAGE)
+    // A version whose entry isn't canvas.json has no boards.
+    expect(await boardsAt(root, store().manifest)).toBeNull()
+  })
+
+  it('takes from the window only a change, pins and a part that are what they should be', () => {
+    expect(groundChangeOf({ page: -1, step: 1, tool: 'hand', zoom: 0.5 })).toEqual({ page: -1, step: 1, tool: 'hand', zoom: 0.5 })
+    for (const bad of [null, { tool: 'pen' }, { page: -2 }, { step: 2 }, { zoom: 0 }, { zoom: 'max' }, { board: { page: 1 } }])
+      expect(groundChangeOf(bad)).toBeNull()
+    expect(groundPinsOf([{ n: 2, page: 'A', board: 'B', selector: 'p' }])).toEqual([
+      { n: 2, page: 'A', board: 'B', selector: 'p', answered: false, draft: false },
+    ])
+    for (const bad of ['x', [{ n: 1, page: '', board: 'B', selector: 'p' }], [{ n: 1, page: 'A', board: 'B', selector: '' }]])
+      expect(groundPinsOf(bad)).toBeNull()
+    expect(groundPartOf({ page: 'A', board: 'B', selector: 'p' })).toEqual({ page: 'A', board: 'B', selector: 'p' })
+    expect(groundPartOf({ page: 'A', board: 'B' })).toBeNull()
   })
 })
 

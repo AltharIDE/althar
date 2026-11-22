@@ -1262,9 +1262,15 @@ void ready.then(() => {
   })
   handlePages(pages, mineLocal)
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
+  // The ground a canvas of boards is drawn on, read once it is first wanted.
+  let groundScript: string | null = null
   canvases = startCanvases({
     root: join(locations().profile, 'artifacts'),
     tokens: () => canvasTokens(),
+    ground: () => (groundScript ??= readFileSync(join(here, '../overlay/ground.js'), 'utf8')),
+    tell: (window, key, news) => {
+      if (!window.isDestroyed()) window.webContents.send('althar:canvas-ground', key, news)
+    },
     listening: () => listening,
     outside: (address) => {
       const out = outsideOf(address)

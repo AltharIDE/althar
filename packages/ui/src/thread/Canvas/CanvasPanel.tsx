@@ -21,7 +21,10 @@ import s from './Canvas.module.css'
  * page does; and the comments already sent on it. What is on it (a
  * document, a diagram, a picture or a page) is the host's to draw, as wide
  * as the panel. A version the person reads stays while a newer one is
- * published: the bar says so, with Show.
+ * published: the bar says so, with Show. Its host adds what the artifact
+ * offers beside Comment (saving it to a repository, downloading it), a bar of
+ * its own under what is on it (a canvas of boards'), and a way back to where
+ * it was opened from.
  */
 
 export interface CanvasPanelText extends SidePanelText {
@@ -39,6 +42,8 @@ export interface CanvasPanelText extends SidePanelText {
   add: string
   sent: (n: number) => string
   answered: string
+  /** A comment's pin on a board, by its number. */
+  pin: (n: number) => string
   onVersion: (n: number) => string
   reload: string
   kinds: Readonly<Record<CanvasKind, string>>
@@ -61,6 +66,7 @@ export const canvasPanelText: CanvasPanelText = {
   add: 'Add to message',
   sent: (n) => (n === 1 ? '1 comment' : `${n} comments`),
   answered: 'Answered',
+  pin: (n) => `Pin ${n}`,
   onVersion: (n) => `on v${n}`,
   reload: 'Load again',
   kinds: canvasKindWords,
@@ -77,6 +83,8 @@ export interface CanvasPanelComment {
   readonly answered: boolean
   /** What the agent that answered it said, where it said something. */
   readonly answer?: string | null
+  /** Its pin's number, where it is pinned to a part of a board. */
+  readonly n?: number | null
 }
 
 export interface CanvasPanelProps {
@@ -107,6 +115,14 @@ export interface CanvasPanelProps {
   comments?: ReadonlyArray<CanvasPanelComment>
   /** Loads the page again, for a page canvas. */
   onReload?: () => void
+  /** What else the artifact offers, before Comment: saving it to a repository, downloading it. */
+  extra?: ReactNode
+  /** A bar of its own under what is on it: a canvas of boards' pages, view, tools and zoom. */
+  bar?: ReactNode
+  /** Back to where it was opened from, such as every artifact of the project. */
+  onBack?: () => void
+  /** A comment in the list pressed: its pin shows on its part. */
+  onCommentPick?: (id: string) => void
   onClose: () => void
   /** What is on it: the host draws it, as wide as the panel. */
   children?: ReactNode
@@ -131,6 +147,10 @@ export function CanvasPanel({
   selected = null,
   comments = [],
   onReload,
+  extra,
+  bar,
+  onBack,
+  onCommentPick,
   onClose,
   children,
   fill = false,
@@ -148,6 +168,7 @@ export function CanvasPanel({
     <SidePanel
       label={title}
       onClose={onClose}
+      {...(onBack === undefined ? {} : { onBack })}
       text={t}
       className={s.panel}
       head={
@@ -171,6 +192,7 @@ export function CanvasPanel({
             </span>
           )}
           {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
+          {extra}
           {onComment !== undefined && error === undefined && (
             <ActionButton
               icon="comment"
@@ -214,6 +236,7 @@ export function CanvasPanel({
           children
         )}
       </div>
+      {bar}
       {(writing || comments.length > 0) && (
         <div className={s.foot}>
           {writing && onComment !== undefined && error === undefined && (
@@ -230,7 +253,21 @@ export function CanvasPanel({
           {comments.length > 0 && (
             <ol className={s.comments} aria-label={t.sent(comments.length)}>
               {comments.map((comment) => (
-                <li key={comment.id} className={cx(s.comment, comment.answered && s.answered)}>
+                <li
+                  key={comment.id}
+                  data-comment={comment.id}
+                  className={cx(s.comment, comment.answered && s.answered, comment.n != null && s.pinned)}
+                >
+                  {comment.n != null &&
+                    (onCommentPick === undefined ? (
+                      <span className={s.pinMark} aria-label={t.pin(comment.n)}>
+                        {comment.n}
+                      </span>
+                    ) : (
+                      <button type="button" className={s.pinMark} aria-label={t.pin(comment.n)} onClick={() => onCommentPick(comment.id)}>
+                        {comment.n}
+                      </button>
+                    ))}
                   <span className={s.commentBody}>{comment.body}</span>
                   <span className={s.commentFacts}>
                     {comment.place} · {t.onVersion(comment.version)}
@@ -264,16 +301,20 @@ export function CanvasPagePlace({
   canvas,
   still = null,
   onStill,
+  children,
 }: {
   ref?: Ref<HTMLDivElement>
   canvas: string
   /** A picture of the canvas, drawn in its place while its view is aside for something over it. */
   still?: string | null
   onStill?: () => void
+  /** What the host draws over it, such as a comment being written on a part of it. */
+  children?: ReactNode
 }) {
   return (
     <div ref={ref} className={s.page} data-canvas-page={canvas}>
       {still !== null && <img className={s.pageStill} src={still} alt="" draggable={false} onLoad={onStill} />}
+      {children}
     </div>
   )
 }
