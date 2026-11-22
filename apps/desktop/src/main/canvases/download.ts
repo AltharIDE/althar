@@ -1,7 +1,7 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { constants } from 'node:fs'
 import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
 
 import { app, BrowserWindow, dialog, type WebContents } from 'electron'
 
@@ -218,6 +218,9 @@ const draw = async <T>(
     contents.on('will-navigate', steer)
     contents.on('will-redirect', steer)
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    // A page first: Electron's main process crashes on a debugger command sent to a window that has loaded nothing yet. The
+    // size set on it holds for the pages it loads after.
+    await contents.loadURL('about:blank')
     return await Promise.race([
       render(contents),
       delay(DRAW_TIME, undefined, { signal: waiting.signal }).then(() => {

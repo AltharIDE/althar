@@ -1190,7 +1190,7 @@ const playRole = async (
           said.push(`${name}: ${answer}`)
           return answer
         }
-        const draw = (name: string, files: Readonly<Record<string, string>>) => {
+        const draw = (name: string, files: Readonly<Record<string, string | Uint8Array>>) => {
           for (const [path, words] of Object.entries(files)) {
             mkdirSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/').slice(0, -1)), { recursive: true })
             writeFileSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/')), words)
@@ -2859,7 +2859,7 @@ const board = (body: string, phone = false) =>
 const AMOUNTS = '<div class="amounts" data-part="amounts"><span>£45</span><span class="on">£80</span><span>£120</span></div>'
 const CLASSES =
   '<div class="classes"><div class="class"><i></i>Wheel throwing for beginners</div><div class="class"><i></i>Glazing a set of bowls</div><div class="class"><i></i>Hand-building a planter</div></div>'
-const CANVAS_BOARDS: Readonly<Record<string, string>> = {
+const CANVAS_BOARDS: Readonly<Record<string, string | Uint8Array>> = {
   'canvas.json': JSON.stringify(
     {
       pages: [
@@ -2877,6 +2877,8 @@ const CANVAS_BOARDS: Readonly<Record<string, string>> = {
           boards: [
             { name: 'Desktop', file: 'receipt/desktop.html', width: 1440, height: 900 },
             { name: 'Email', file: 'receipt/email.html', width: 600, height: 900 },
+            // A picture beside the pages, at its own size: a canvas of boards holds both.
+            { name: 'Stamp', file: 'receipt/stamp.png', width: 480, height: 300 },
           ],
         },
       ],
@@ -2885,6 +2887,7 @@ const CANVAS_BOARDS: Readonly<Record<string, string>> = {
     2,
   ),
   'kiln.css': BOARD_CSS,
+  'receipt/stamp.png': Buffer.from(SCREENSHOT_PNG, 'base64'),
   'directions/present.html': board(
     `<div class="hero"><div><h1 data-part="title">An evening on the wheel, wrapped</h1><p>Give someone a class at kiln. They pick the date.</p></div><div class="card" data-part="card"><h2>A gift for Ana</h2>Two hours at the wheel, clay and firing included.</div></div>${AMOUNTS}<button class="go" data-part="go">Send the gift</button>`,
   ),

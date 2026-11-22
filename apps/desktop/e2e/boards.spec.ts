@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -32,6 +32,22 @@ const partOf = (electronApp: ElectronApplication, part: string, board = 0) =>
       return { x: outer.left + (inner.left + inner.width / 2) * scale, y: outer.top + (inner.top + inner.height / 2) * scale }
     })()`,
   )
+
+/** The PNGs under a folder, by their paths, in order. */
+const pngsIn = (folder: string): ReadonlyArray<string> =>
+  readdirSync(folder, { recursive: true, encoding: 'utf8' })
+    .filter((one) => one.endsWith('.png'))
+    .map((one) => join(folder, one))
+    .toSorted()
+
+/** A PNG's size, from its header. */
+const sizeOf = (path: string) => {
+  const bytes = readFileSync(path)
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
+
+/** How many pages a PDF has: its page objects, not its page tree. */
+const pagesOf = (bytes: Buffer) => (bytes.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length
 
 const frames = (electronApp: ElectronApplication) => inCanvas<number>(electronApp, 'document.querySelectorAll("iframe").length')
 
@@ -106,10 +122,10 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
 
     // One board at a time, stepped through.
     await pressControl(electronApp, '^One board at a time')
-    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 6')
+    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 7')
     await expect.poll(() => frames(electronApp)).toBe(1)
     await pressControl(electronApp, '^Next board')
-    await expect.poll(() => controlsSay(electronApp)).toContain('2 of 6')
+    await expect.poll(() => controlsSay(electronApp)).toContain('2 of 7')
     await expect.poll(() => controlsSay(electronApp)).toContain('The card leads')
     // The keys still step it, from the canvas.
     await expect.poll(() => inCanvas<boolean>(electronApp, `document.activeElement === document.body`)).toBe(true)
@@ -193,6 +209,38 @@ test('a lead lays out boards; the person sees every board, one at a time and eve
     await page.keyboard.press('Escape')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
 
+    // The files themselves, where the person picks (the system's dialogs answered here): a PNG a board, page by page, each at
+    // its board's size, pages and pictures alike; and a PDF, a page a board.
+    const into = mkdtempSync(join(tmpdir(), 'althar-download-'))
+    await electronApp.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [folder] })) as never
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: `${folder}/gift-a-class.pdf` })) as never
+    }, into)
+    await page.getByRole('button', { name: 'Download' }).click()
+    await page.getByRole('menuitem', { name: /PNG, a board each/ }).click()
+    await expect.poll(() => pngsIn(into).length, { timeout: 60_000 }).toBe(7)
+    const pngs = pngsIn(into)
+    expect(pngs.map((one) => one.split('/').slice(-2).join('/'))).toEqual([
+      'Directions/A present first.png',
+      'Directions/Phone.png',
+      'Directions/Pick the class.png',
+      'Directions/The card leads.png',
+      'Receipt/Desktop.png',
+      'Receipt/Email.png',
+      'Receipt/Stamp.png',
+    ])
+    const sizes = Object.fromEntries(pngs.map((one) => [one.split('/').slice(-2).join('/'), sizeOf(one)]))
+    expect(sizes['Directions/A present first.png']).toEqual({ width: 1440, height: 900 })
+    expect(sizes['Directions/Phone.png']).toEqual({ width: 390, height: 844 })
+    expect(sizes['Receipt/Email.png']).toEqual({ width: 600, height: 900 })
+    expect(sizes['Receipt/Stamp.png']).toEqual({ width: 480, height: 300 })
+    await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await page.getByRole('button', { name: 'Download' }).click()
+    await page.getByRole('menuitem', { name: /PDF, a page a board/ }).click()
+    const pdf = join(into, 'gift-a-class.pdf')
+    await expect.poll(() => existsSync(pdf), { timeout: 60_000 }).toBe(true)
+    expect(pagesOf(readFileSync(pdf))).toBe(7)
+
     // Back to every artifact: it is a card, with a picture of it as it was drawn.
     await page.getByRole('button', { name: 'Back to Artifacts' }).click()
     const cards = page.getByRole('list', { name: 'The project’s artifacts' })
@@ -215,7 +263,7 @@ test('a canvas of boards in dark, and in a narrow window', async () => {
     await expect.poll(() => controlsSay(electronApp)).toMatch(/Directions/)
     await shoot(page, electronApp, page, 'test-results/boards-dark.png')
     await pressControl(electronApp, '^One board at a time')
-    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 6')
+    await expect.poll(() => controlsSay(electronApp)).toContain('1 of 7')
     await expect.poll(() => canvasView(electronApp)).not.toBeNull()
     await expect.poll(() => frames(electronApp)).toBe(1)
     await page.waitForTimeout(1_500)
