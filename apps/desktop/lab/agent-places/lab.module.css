@@ -49,11 +49,28 @@
   gap: 8px;
 }
 
+/* what a press would do, over the bar for a moment */
+.said {
+  position: fixed;
+  bottom: 50px;
+  left: 50%;
+  z-index: 1001;
+  max-width: 80vw;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: var(--ink-fill);
+  color: var(--on-ink);
+  font-size: 12px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
 .bar {
   position: relative;
   z-index: 1000;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
   gap: 2px;
   padding: 6px 10px;

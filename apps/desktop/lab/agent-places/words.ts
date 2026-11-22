@@ -2,11 +2,9 @@ import { percent } from '../../../../packages/ui/src/chrome/LoadMeter/load'
 import { isLowered, type Places, type Why, type Worker } from './data'
 
 /*
- * What the lab says, as little as each place needs. On screen an agent place
- * is an agent, as the slider already counts them ("Agents at once"); a
- * computer the home runs work on is a worker, as the person calls it and the
- * plan card's Run on already says ("Linux worker"); the home is where the
- * projects live, as the Homes chip already says.
+ * What the lab says, as little as each place needs. An agent place is an
+ * agent, as the slider already counts them ("Agents at once"). The home and
+ * the computers it runs work on are computers: This Mac, studio, build-box.
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
@@ -16,11 +14,10 @@ const UNTIL: Record<Why, string> = { memory: 'until memory frees up', cpu: 'unti
 
 export const words = {
   agents: 'Agents',
-  workers: 'Workers',
-  otherWorkers: 'Other workers',
+  computers: 'Computers',
+  otherComputers: 'Other computers',
   runningOn: (name: string) => `Running on ${name}`,
   atOnce: 'Agents at once',
-  offline: 'Offline',
   home: 'Home',
 
   /** How many work, of the number. */
@@ -29,10 +26,10 @@ export const words = {
   /** The number lowered for now, and until when; null while it isn't. */
   lowered: (places: Places) => (isLowered(places) && places.why !== null ? `${places.atOnce} at a time ${UNTIL[places.why]}` : null),
 
-  /** What waits for an agent, on any worker. */
+  /** What waits for an agent, on any computer. */
   waiting: (n: number) => `${plural(n, 'task')} waiting`,
 
-  /** A worker out of reach, and what waits for it. */
+  /** A computer out of reach, and what waits for it. */
   away: (worker: Worker) => (worker.offline === null ? '' : `Offline for ${worker.offline.for}`),
   holding: (worker: Worker) =>
     worker.offline === null ? '' : `${plural(worker.offline.holding, 'task')} ${worker.offline.holding === 1 ? 'waits' : 'wait'} for it`,
@@ -40,31 +37,31 @@ export const words = {
   /** How hard it works, in a line. */
   load: (worker: Worker) => `CPU ${percent(worker.cpu)}% · Memory ${percent(worker.memory)}%`,
 
-  /** A worker's line, problems first: out of reach, lowered for now, or how many of its agents work. */
-  line: (worker: Worker) => {
-    if (worker.offline !== null) return `${words.away(worker)} · ${words.holding(worker)}`
-    return words.lowered(worker) ?? (worker.agents.length === 0 ? 'No agents at work' : `${words.of(worker)} agents at work`)
+  /** Where a computer stands, in a few words, problems first: for a tile, a module, a row. */
+  state: (worker: Worker, taking: boolean) => {
+    if (worker.offline !== null) return `Offline · ${worker.offline.for}`
+    if (!taking) return worker.agents.length === 0 ? 'Paused' : `Paused · finishing ${worker.agents.length}`
+    if (isLowered(worker)) return `${worker.atOnce} at a time for now`
+    return worker.agents.length === 0 ? 'Idle' : `${words.of(worker)} agents`
   },
 
-  /** The default's mark on a worker's slider, by its name. */
+  /** The default's mark on a computer's slider. */
   mark: (worker: Worker) => `${worker.machine.count} · default`,
 
   /* ---- Settings ---- */
 
   /** What the computer is. */
   computer: (worker: Worker) => `${worker.system} · ${worker.machine.cores} cores · ${worker.machine.memory} GB`,
-  /** Taking no new tasks: what runs there finishes. */
-  notTaking: 'Takes no new tasks',
   takeTitle: 'Take new tasks',
   takeNote: 'Off, what runs there finishes and nothing new starts.',
-  add: 'Add a worker',
-  addTitle: (home: string) => `Add a worker to ${home}`,
+  add: 'Add a computer',
+  addTitle: (home: string) => `Add a computer to ${home}`,
   addNote: 'Run this on the computer you’re adding.',
   addWaiting: 'Waiting for it to join…',
-  remove: 'Remove this worker',
-  /** This Mac lent to a home it isn't: one of its workers too. */
+  remove: (name: string) => `Remove ${name}`,
+  /** This Mac lent to a home it isn't. */
   lend: (home: string) => `Run ${home}’s tasks on This Mac`,
-  lendNote: 'This Mac’s agents at once are shared with this computer’s own projects.',
+  lendNote: 'Its agents at once are shared with your own projects.',
   update: (version: string) => `Update to ${version}`,
   facts: {
     computer: 'Computer',
@@ -74,8 +71,5 @@ export const words = {
     devices: 'Opened from',
   },
   /** The devices a home on a server is opened from. */
-  devices: 'This Mac · iPhone, 2 days ago',
-  /** The home, in a line: what it keeps. */
-  homeNote: (home: Worker) =>
-    home.here ? 'Keeps your projects and runs the coordinator' : `Keeps these projects and runs the coordinator`,
+  devices: 'This Mac, and an iPhone 2 days ago',
 }

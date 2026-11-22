@@ -18,9 +18,9 @@ import { card } from '../../tests/fixtures'
 export type Pov = 'local' | 'remote'
 
 export const SCENES = [
-  { key: 'memory', label: 'The home lowered' },
+  { key: 'memory', label: 'Lowered' },
   { key: 'full', label: 'All at work' },
-  { key: 'down', label: 'A worker offline' },
+  { key: 'down', label: 'One offline' },
   { key: 'calm', label: 'Room to spare' },
 ] as const
 export type Scene = (typeof SCENES)[number]['key']
@@ -425,7 +425,7 @@ const permission: BoardCall = {
   taskSlug: 'ship-the-billing-fix',
 }
 
-/** Meridian's board: what runs there on any worker, what waits in Up next for an agent, a plan, a call and something settled. */
+/** Meridian's board: what runs there on any computer, what waits in Up next for an agent, a call and something settled. */
 export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[]): Lanes => {
   const here = workers[0]!
   const queued = { busy: here.agents.length, atOnce: here.atOnce }
@@ -455,15 +455,6 @@ export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[])
         place: i + 1,
       }),
     )
-  const planned = task({
-    taskId: 'tour',
-    threadId: 'th-tour',
-    title: 'Prototype the onboarding tour',
-    slug: 'onboarding-tour',
-    phase: 'planned',
-    kind: 'plain',
-    plan: { ...card().plan!, startsAt: '2026-11-21T19:15:00.000Z' },
-  })
   const settled = task({
     taskId: 'done-1',
     threadId: 'th-done-1',
@@ -476,7 +467,7 @@ export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[])
   const ship = task({ taskId: 'ship', threadId: 'th-ship', title: 'Ship the billing fix', slug: 'ship-the-billing-fix', phase: 'waiting' })
   const snapshot = {
     cursor: 1,
-    tasks: [...running, ...line, planned, ship, settled],
+    tasks: [...running, ...line, ship, settled],
     calls: [permission],
     settledTotal: 1,
   } as BoardSnapshot

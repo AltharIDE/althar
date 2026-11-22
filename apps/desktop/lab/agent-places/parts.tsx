@@ -330,7 +330,7 @@ export function Slider({
   short?: string
 }) {
   const lowered = words.lowered(worker)
-  const said = note ?? lowered
+  const said = note === undefined ? lowered : note
   return (
     <AgentsAtOnce
       compact={compact}

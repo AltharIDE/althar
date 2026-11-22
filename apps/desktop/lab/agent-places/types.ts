@@ -36,9 +36,9 @@ export interface Ctx {
   peek: { open: boolean; set: (open: boolean) => void }
   /** The quick settings. */
   quick: { open: boolean; set: (open: boolean) => void }
-  /** Opens Settings, on a worker where one is given. */
+  /** Opens Settings, on a computer where one is given. */
   settings: (worker?: string) => void
-  /** Opens Add a worker. */
+  /** Opens Add a computer. */
   add: () => void
 }
 
@@ -63,7 +63,8 @@ export interface Take {
   idea: string
   /** Where Settings opens on a worker, or with none. */
   at: (ctx: Ctx, worker: string | null) => Place
-  side: (ctx: Ctx, place: Place, go: (place: Place) => void) => ReactNode
+  /** The side, with the quick cards where the take puts them. */
+  side: (ctx: Ctx, place: Place, go: (place: Place) => void, cards: ReactNode) => ReactNode
   /** The section open; null for one the lab doesn't draw. */
   page: (ctx: Ctx, place: Place, go: (place: Place) => void) => Page | null
 }

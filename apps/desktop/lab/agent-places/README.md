@@ -1,47 +1,42 @@
 # Agent places lab
 
-Where the home's workers and their agents live, once the board's banner over Up next ("2 of 5 agent places in use ·
-Temporarily limited to 1") goes. Drawn on the app's own board, the kit's own window bar and its own Settings, with
-made-up workers and no runtime. Lab only: nothing here ships.
+Where the home's computers and their agents live: the home's popover from
+the bar's CPU and MEM meter, the quick settings' Agents at once, and Settings
+for the home and the computers it runs work on. Drawn on the app's own
+screens and the kit's own components, with made-up computers.
 
-Run it from `apps/desktop`: `../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts`, then open
-<http://localhost:6161>.
+Run it from `apps/desktop`:
 
-## The base, as picked
+```sh
+../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts
+```
 
-From the last round, A + C:
+It answers at http://localhost:6161.
 
-- The bar's CPU and MEM meter opens the home's popover: its load, its Agents beside CPU and Memory, and the other
-  workers under its readings, each with the bar's own meters, opening in place to what runs there.
-- The quick settings: the home's Agents at once, saying what is so now, and a line a worker under it.
+## What it shows
 
-Up next keeps nothing.
+The base is what was picked (A + C of the workers round): the home's popover
+lists the other computers under its readings, a row each in the popover's
+own form; the quick settings' slider has the same rows under it. Up next
+keeps nothing beyond its cards' own "Next in line".
 
-## This round: Settings for the home and its workers
+The takes are Settings › Computers. A computer opens out in place, the same
+sheet in all three: its readings beside what it is, its Agents at once, and
+removing it at the foot. Work on this Mac keeps this Mac's own.
 
-Work on this Mac holds this Mac only. Each take shows Settings from this computer's own home, and from studio, a home
-on a server the window is connected to (H).
-
-- **A · Workers section.** One new section: the home first, then each worker, a row with its health at the end that
-  opens in place to what it is (computer, address, agents signed in, Althar's version) and its settings (Agents at
-  once, Take new tasks, Remove). On studio, studio's row has its update and the devices it's opened from, and This
-  Mac can be lent to it.
-- **B · A page each.** The side lists the computers, the home first and This Mac last; each is a page with its
-  readings beside what it is, then its settings. Work on this Mac becomes This Mac's page.
-- **C · Home and This Mac.** The side splits in two: the home's settings (Agents, MCP servers, Skills, Code hosts,
-  Tasks, Pull requests, Workers) under its name, and This Mac's own (This Mac, Notifications, Appearance, Editor and
-  browser) under it. Connected to studio, what's under studio's name is studio's.
+- **A · Tiles:** a tile per computer, three across, as MCP servers are. Its
+  round switch takes new tasks or not; its name opens it.
+- **B · Modules:** as the quick settings are, each as large as it matters:
+  the home wide with its trace, CPU, Memory and Agents; the others under it
+  with their agents, CPU and memory.
+- **C · Home first:** the home is a card at the top of Settings' side and a
+  page of its own; Computers lists the others as rows. On studio, This Mac's
+  own sit apart under its name.
 
 ## Keys
 
-A B C the take · H the window on studio · Q W E R the scene (the home lowered, all at work, a worker offline, room to
-spare) · K crowded · M the home alone · N narrow · S the board · D dark · G the quick settings · P the home's popover.
+A B C the take · H the window on studio · Q W E R the scene (lowered, all at
+work, one offline, room to spare) · K crowded · M the home alone · N narrow ·
+S the board · D dark · G the quick settings · P the home's popover.
 
-The address keeps where you are (`?d=b&h=1&sec=w:studio`); `open=peek`, `open=quick` or `open=add` opens one as the
-page loads, and `shot=1` stills motion for a screenshot.
-
-## Made up
-
-Workers' names, systems, addresses, load and versions; studio; a worker taking no new tasks; lending This Mac to
-another home; the line that adds a worker; why a number is lowered. The runtime knows this Mac's agents and load, and
-only a worker's id, the agents it can run and whether it is busy.
+Pictures go in `shots/`, which git ignores.

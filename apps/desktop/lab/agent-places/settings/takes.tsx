@@ -1,49 +1,49 @@
-import { Icon, SettingsNav, type SettingsSection } from '@althar/ui'
+import type { ReactNode } from 'react'
+import { ControlGrid, ControlModule, ControlToggle, Icon, SettingsNav, type SettingsSection } from '@althar/ui'
 
+import { AddTile, TileGrid, TileLine } from '../../../../../packages/ui/src/setup/ToolTiles/ToolParts'
+import tt from '../../../../../packages/ui/src/setup/ToolTiles/ToolTiles.module.css'
+import { percent } from '../../../../../packages/ui/src/chrome/LoadMeter/load'
 import { sectionText } from '../../../src/renderer/features/settings/sections'
+import type { Worker } from '../data'
+import { Readings, SplitBar } from '../parts'
 import type { Ctx, Page, Place, Take } from '../types'
 import { words } from '../words'
-import { MacList, WorkerPage, WorkersList } from './pieces'
+import { ComputerBody, ComputerSheet, computersOf, iconOf, MacSection, setTakingOf, stateOf, takingOf } from './pieces'
 import x from './settings.module.css'
 
 /*
- * Three takes on Settings once the home has workers, from this computer's
- * own home or from one the window is connected to (studio). Work on this Mac
- * holds this Mac only, in all three.
+ * Three takes on Settings for the home and the computers it runs work on,
+ * each made of what Settings already draws, and each the same from studio, a
+ * home the window is connected to (H). A computer opens out in place, the
+ * same sheet in all three. Work on this Mac holds this Mac's own.
  *
- * A · one section, Workers: the home first, then each worker, a row with its
- *     health that opens in place to what it is and its settings.
- * B · a page each: the side lists the computers, the home first and This Mac
- *     last, each a page of its readings, what it is and its settings; Work on
- *     this Mac becomes This Mac's page.
- * C · two sides: the side splits into the home's settings, Workers among
- *     them, and This Mac's own, so what a remote home changes is what's under
- *     its name.
+ * A · Tiles: Computers as MCP servers are, a tile each, three across; its
+ *     round switch takes new tasks or not, its name opens it.
+ * B · Modules: Computers as the quick settings are, each as large as it
+ *     matters: the home wide, with its trace, the others under it.
+ * C · Home first: Settings under the home's name, a page of its own at the
+ *     top of the side; on studio, This Mac's own apart under its name.
  */
 
 type Id = string
 const section = (id: keyof typeof sectionText): SettingsSection<Id> => ({ id, ...sectionText[id] })
-const WORKERS: SettingsSection<Id> = { id: 'workers', title: words.workers, icon: 'computer' }
-
-/** Where a press on the side goes: a section drawn here, or a line in the lab's bar on what it is. */
-const goTo = (ctx: Ctx, go: (place: Place) => void, drawn: readonly Id[], home: readonly Id[]) => (id: Id) => {
-  if (drawn.includes(id)) return go({ section: id, worker: null })
-  const title = sectionText[id as keyof typeof sectionText]?.title ?? id
-  ctx.say(ctx.pov === 'remote' && home.includes(id) ? `${title}, as it is: studio’s, kept on studio` : `${title}, as it is`)
-}
+const COMPUTERS: SettingsSection<Id> = { id: 'computers', title: words.computers, icon: 'computer' }
 
 /** The home's sections: what it keeps, wherever the window is. */
-const HOME_SECTIONS: readonly Id[] = ['agents', 'mcp-servers', 'skills', 'code-hosts', 'tasks', 'pull-requests', 'workers']
+const HOME_SECTIONS: readonly Id[] = ['agents', 'mcp-servers', 'skills', 'code-hosts', 'tasks', 'pull-requests']
 
-/* A · one section ---------------------------------------------------------------------------------------- */
+/** Where a press on the side goes: a section drawn here, or a line in the lab's bar on what it is. */
+const goTo = (ctx: Ctx, go: (place: Place) => void, drawn: readonly Id[]) => (id: Id) => {
+  if (drawn.includes(id)) return go({ section: id, worker: null })
+  const title = sectionText[id as keyof typeof sectionText]?.title ?? id
+  ctx.say(ctx.pov === 'remote' && HOME_SECTIONS.includes(id) ? `${title}: studio’s, kept on studio` : `${title}, as it is`)
+}
 
-export const A: Take = {
-  key: 'a',
-  kbd: 'a',
-  label: 'Workers section',
-  idea: 'A · Workers: the home first, then each worker, a row with its health, opening in place to what it is and its settings',
-  at: (_ctx, worker) => ({ section: 'workers', worker }),
-  side: (ctx, place, go) => (
+/** The side as it is, Computers after Pull requests. */
+const asItIs = (ctx: Ctx, place: Place, go: (place: Place) => void, cards: ReactNode) => (
+  <>
+    {cards}
     <SettingsNav
       label="Settings"
       groups={[
@@ -51,8 +51,8 @@ export const A: Take = {
         [
           section('tasks'),
           section('pull-requests'),
+          COMPUTERS,
           section('this-mac'),
-          WORKERS,
           section('notifications'),
           section('appearance'),
           section('editor-and-browser'),
@@ -60,139 +60,317 @@ export const A: Take = {
         [section('about')],
       ]}
       value={place.section}
-      onChange={goTo(ctx, go, ['workers', 'this-mac'], HOME_SECTIONS)}
+      onChange={goTo(ctx, go, ['computers', 'this-mac'])}
     />
-  ),
-  page: (ctx, place, go): Page | null => {
-    if (place.section === 'this-mac')
-      return { title: sectionText['this-mac'].title, body: <MacList ctx={ctx} pauseAll={ctx.pov === 'local'} lend={false} /> }
-    if (place.section !== 'workers') return null
-    return {
-      title: words.workers,
-      ...(ctx.pov === 'remote' ? { lede: `${ctx.home.name}, the home this window is on, and the computers that run its tasks.` } : {}),
-      body: (
-        <WorkersList
-          ctx={ctx}
-          opened={place.worker}
-          onOpen={(worker) => go({ section: 'workers', worker })}
-          pauseAll={ctx.pov === 'remote'}
-        />
+  </>
+)
+
+/** On studio, Computers is studio's. */
+const lede = (ctx: Ctx) => (ctx.pov === 'remote' ? `Where ${ctx.home.name}’s agents run.` : undefined)
+
+const page = (title: string, body: ReactNode, line?: string): Page => ({ title, ...(line === undefined ? {} : { lede: line }), body })
+
+/** Work on this Mac, in every take. */
+const macPage = (ctx: Ctx) => page(sectionText['this-mac'].title, <MacSection ctx={ctx} />)
+
+/** The computer a place opens, where it is one. */
+const openedOf = (ctx: Ctx, place: Place) => computersOf(ctx).find((one) => one.id === place.worker)
+
+/* A · Tiles ---------------------------------------------------------------------------------------------- */
+
+function Tiles({ ctx, open }: { ctx: Ctx; open: (id: string) => void }) {
+  return (
+    <div className={tt.section}>
+      <TileGrid label={words.computers}>
+        {computersOf(ctx).map((one) => (
+          <div key={one.id} id={`worker-${one.id}`} className={tt.cell}>
+            <ControlToggle
+              className={tt.tile}
+              title={one.name}
+              line={<TileLine tone={one.offline !== null ? 'failed' : undefined}>{stateOf(ctx, one)}</TileLine>}
+              on={takingOf(ctx, one)}
+              onChange={setTakingOf(ctx, one)}
+              glyph={<Icon name={iconOf(one)} size={16} />}
+              onOpen={() => open(one.id)}
+            />
+          </div>
+        ))}
+        <AddTile onClick={ctx.add}>{words.add}</AddTile>
+      </TileGrid>
+    </div>
+  )
+}
+
+export const A: Take = {
+  key: 'a',
+  kbd: 'a',
+  label: 'Tiles',
+  idea: 'A · Computers as MCP servers are: a tile each, its round switch takes new tasks, its name opens it out',
+  at: (_ctx, worker) => ({ section: 'computers', worker }),
+  side: asItIs,
+  page: (ctx, place, go) => {
+    if (place.section === 'this-mac') return macPage(ctx)
+    if (place.section !== 'computers') return null
+    const opened = openedOf(ctx, place)
+    const back = () => go({ section: 'computers', worker: null })
+    return page(
+      words.computers,
+      opened === undefined ? (
+        <Tiles ctx={ctx} open={(id) => go({ section: 'computers', worker: id })} />
+      ) : (
+        <ComputerSheet ctx={ctx} worker={opened} onBack={back} taking={false} />
       ),
-    }
+      lede(ctx),
+    )
   },
 }
 
-/* B · a page each ---------------------------------------------------------------------------------------- */
+/* B · Modules -------------------------------------------------------------------------------------------- */
 
-/** The computers, the home first, This Mac last where it isn't the home, then Add a worker. */
-const computers = (ctx: Ctx): SettingsSection<Id>[] => {
-  const listed = ctx.workers.some((one) => one.here) ? ctx.workers : [...ctx.workers, ctx.mac]
-  const ordered = [...listed.filter((one) => !one.here || one.home), ...listed.filter((one) => one.here && !one.home)]
-  return [
-    ...ordered.map((one) => ({
-      id: `w:${one.id}`,
-      title: one.name,
-      icon: one.home && !one.here ? ('home' as const) : one.offline !== null ? ('unlinked' as const) : ('computer' as const),
-    })),
-    { id: 'add', title: words.add, icon: 'plus' as const },
-  ]
+/** A share as a short meter: its name, the kit's thin bar, the figure. */
+function Meter({ name, share }: { name: string; share: number }) {
+  return (
+    <span className={x.meter}>
+      <span className={x.meterName}>{name}</span>
+      <SplitBar total={share} ours={0} />
+      <span className={x.meterFigure}>{percent(share)}%</span>
+    </span>
+  )
+}
+
+/** A computer at a glance: how many of its agents work, what is off, how hard it works. */
+function Glance({ ctx, worker }: { ctx: Ctx; worker: Worker }) {
+  const taking = takingOf(ctx, worker)
+  if (worker.offline !== null)
+    return (
+      <span className={x.glanceBody}>
+        <span className={`${x.count} ${x.danger}`}>Offline</span>
+        <span className={x.glanceLine}>
+          {worker.offline.for} · {words.holding(worker)}
+        </span>
+      </span>
+    )
+  const said = taking ? words.lowered(worker) : stateOf(ctx, worker)
+  return (
+    <span className={x.glanceBody}>
+      <span className={x.countRow}>
+        <span className={x.count}>{worker.agents.length}</span>
+        <span className={x.of}>of {worker.configured} agents</span>
+      </span>
+      <span className={x.glanceLine}>{said ?? ' '}</span>
+      <span className={x.meters}>
+        <Meter name="CPU" share={worker.cpu} />
+        <Meter name="Memory" share={worker.memory} />
+      </span>
+    </span>
+  )
+}
+
+/** The home, wide: its trace beside CPU, Memory and Agents, as its popover draws them. */
+function HomeGlance({ ctx, home }: { ctx: Ctx; home: Worker }) {
+  return (
+    <span className={x.hero}>
+      <Readings worker={home} load={ctx.loadOf(home)} waiting={ctx.waiting.length} width={280} />
+    </span>
+  )
+}
+
+function Modules({ ctx, open }: { ctx: Ctx; open: (id: string) => void }) {
+  const [home, ...rest] = computersOf(ctx)
+  return (
+    <ControlGrid columns={6} className={x.modules}>
+      <ControlModule title={home!.name} aside={words.home} className={x.module} onClick={() => open(home!.id)}>
+        <HomeGlance ctx={ctx} home={home!} />
+      </ControlModule>
+      {rest.map((one) => (
+        <ControlModule
+          key={one.id}
+          id={`worker-${one.id}`}
+          title={one.name}
+          className={`${x.module} ${x.third}`}
+          onClick={() => open(one.id)}
+        >
+          <Glance ctx={ctx} worker={one} />
+        </ControlModule>
+      ))}
+      <AddTile onClick={ctx.add} className={x.addModule}>
+        {words.add}
+      </AddTile>
+    </ControlGrid>
+  )
 }
 
 export const B: Take = {
   key: 'b',
   kbd: 'b',
-  label: 'A page each',
-  idea: 'B · The side lists the computers, the home first and This Mac last; each a page of its readings, what it is and its settings',
-  at: (ctx, worker) => ({ section: `w:${worker ?? ctx.home.id}`, worker: null }),
-  side: (ctx, place, go) => (
-    <SettingsNav
-      label="Settings"
-      groups={[
-        [section('agents'), section('mcp-servers'), section('skills'), section('code-hosts')],
-        [section('tasks'), section('pull-requests'), section('notifications'), section('appearance'), section('editor-and-browser')],
-        computers(ctx),
-        [section('about')],
-      ]}
-      value={place.section}
-      onChange={(id) => {
-        if (id === 'add') return ctx.add()
-        if (id.startsWith('w:')) return go({ section: id, worker: null })
-        goTo(ctx, go, [], HOME_SECTIONS)(id)
-      }}
-    />
-  ),
-  page: (ctx, place): Page | null => {
-    if (!place.section.startsWith('w:')) return null
-    const id = place.section.slice(2)
-    const worker = [...ctx.workers, ctx.mac].find((one) => one.id === id)
-    if (worker === undefined) return null
-    const lede = worker.home
-      ? `${words.home} · ${worker.here ? 'keeps your projects and runs the coordinator' : `${worker.address}`}`
-      : worker.here
-        ? 'This window'
-        : undefined
-    return { title: worker.name, ...(lede === undefined ? {} : { lede }), body: <WorkerPage ctx={ctx} worker={worker} /> }
+  label: 'Modules',
+  idea: 'B · Computers as the quick settings are, each as large as it matters: the home wide with its trace, the others under it',
+  at: (_ctx, worker) => ({ section: 'computers', worker }),
+  side: asItIs,
+  page: (ctx, place, go) => {
+    if (place.section === 'this-mac') return macPage(ctx)
+    if (place.section !== 'computers') return null
+    const opened = openedOf(ctx, place)
+    return page(
+      words.computers,
+      opened === undefined ? (
+        <Modules ctx={ctx} open={(id) => go({ section: 'computers', worker: id })} />
+      ) : (
+        <ComputerSheet ctx={ctx} worker={opened} onBack={() => go({ section: 'computers', worker: null })} />
+      ),
+      lede(ctx),
+    )
   },
 }
 
-/* C · two sides ------------------------------------------------------------------------------------------ */
+/* C · Home first ----------------------------------------------------------------------------------------- */
+
+/** The home at the top of the side, as a card: its name, and where it is; pressed, its own page. */
+function HomeCard({ ctx, place, go }: { ctx: Ctx; place: Place; go: (place: Place) => void }) {
+  const home = ctx.home
+  return (
+    <button
+      type="button"
+      className={x.homeCard}
+      aria-current={place.section === 'home' ? 'page' : undefined}
+      onClick={() => go({ section: 'home', worker: null })}
+    >
+      <span className={x.homeGlyph}>
+        <Icon name={home.here ? 'computer' : 'home'} size={16} />
+      </span>
+      <span className={x.homeWords}>
+        <span className={x.homeName}>{home.name}</span>
+        <span className={x.homeLine}>{home.here ? words.home : home.address}</span>
+      </span>
+    </button>
+  )
+}
+
+/** A computer as a row: its picture, its name and where it stands, how many of its agents work. */
+function Row({ ctx, worker, open }: { ctx: Ctx; worker: Worker; open: () => void }) {
+  const taking = takingOf(ctx, worker)
+  const line =
+    worker.offline !== null ? (
+      <span className={x.danger}>
+        {words.away(worker)} · {words.holding(worker)}
+      </span>
+    ) : !taking ? (
+      stateOf(ctx, worker)
+    ) : (
+      (words.lowered(worker) ?? words.load(worker))
+    )
+  return (
+    <button type="button" id={`worker-${worker.id}`} className={x.row} onClick={open}>
+      <span className={`${x.rowIcon} ${worker.offline === null ? '' : x.danger}`}>
+        <Icon name={iconOf(worker)} size={15} />
+      </span>
+      <span className={x.rowWords}>
+        <span className={x.rowName}>{worker.name}</span>
+        <span className={x.rowLine}>{line}</span>
+      </span>
+      <span className={x.rowFigure}>{worker.offline === null && taking ? words.of(worker) : ''}</span>
+      <Icon name="chevron" size={12} className={x.rowChevron} />
+    </button>
+  )
+}
+
+function Rows({ ctx, open }: { ctx: Ctx; open: (id: string) => void }) {
+  const rest = computersOf(ctx).filter((one) => !one.home)
+  return (
+    <div className={`${tt.sheet} ${x.rows}`}>
+      {rest.map((one) => (
+        <Row key={one.id} ctx={ctx} worker={one} open={() => open(one.id)} />
+      ))}
+      <button type="button" className={`${x.row} ${x.addRow}`} onClick={ctx.add}>
+        <span className={x.rowIcon}>
+          <Icon name="plus" size={15} />
+        </span>
+        <span className={x.rowName}>{words.add}</span>
+      </button>
+    </div>
+  )
+}
 
 export const C: Take = {
   key: 'c',
   kbd: 'c',
-  label: 'Home and This Mac',
-  idea: 'C · The side in two: the home’s settings, Workers among them, under its name; This Mac’s own under it',
-  at: (_ctx, worker) => ({ section: 'workers', worker }),
-  side: (ctx, place, go) => {
-    const onChange = goTo(ctx, go, ['workers', 'this-mac'], HOME_SECTIONS)
-    return (
-      <div className={x.split}>
-        <div className={x.part}>
-          <span className={x.partHead}>
-            <Icon name="home" size={12} />
-            <span className={x.partName}>{ctx.pov === 'local' ? 'This computer' : ctx.home.name}</span>
-            {ctx.pov === 'remote' && <span className={x.partQuiet}>Home</span>}
-          </span>
+  label: 'Home first',
+  idea: 'C · Settings under the home: its own page at the top of the side; on studio, This Mac’s own apart under its name',
+  at: (ctx, worker) =>
+    worker === null || worker === ctx.home.id
+      ? { section: worker === null ? 'computers' : 'home', worker: null }
+      : { section: 'computers', worker },
+  side: (ctx, place, go, cards) => {
+    const onChange = goTo(ctx, go, ['computers', 'this-mac'])
+    if (ctx.pov === 'local')
+      return (
+        <>
+          <HomeCard ctx={ctx} place={place} go={go} />
+          {cards}
           <SettingsNav
-            label={`${ctx.home.name}’s settings`}
+            label="Settings"
             groups={[
-              [section('agents'), section('mcp-servers'), section('skills'), section('code-hosts')],
-              [section('tasks'), section('pull-requests'), WORKERS],
-            ]}
-            value={place.section}
-            onChange={onChange}
-          />
-        </div>
-        <div className={x.part}>
-          <span className={x.partHead}>
-            <Icon name="computer" size={12} />
-            <span className={x.partName}>This Mac</span>
-          </span>
-          <SettingsNav
-            label="This Mac’s settings"
-            groups={[
+              [COMPUTERS, section('agents'), section('mcp-servers'), section('skills'), section('code-hosts')],
               [
-                { ...section('this-mac'), title: 'This Mac' },
+                section('tasks'),
+                section('pull-requests'),
+                section('this-mac'),
                 section('notifications'),
                 section('appearance'),
                 section('editor-and-browser'),
               ],
+              [section('about')],
             ]}
             value={place.section}
             onChange={onChange}
           />
-        </div>
-        <SettingsNav label="About" groups={[[section('about')]]} value={place.section} onChange={onChange} />
-      </div>
+        </>
+      )
+    return (
+      <>
+        <HomeCard ctx={ctx} place={place} go={go} />
+        <SettingsNav
+          label={`${ctx.home.name}’s settings`}
+          groups={[
+            [COMPUTERS, section('agents'), section('mcp-servers'), section('skills'), section('code-hosts')],
+            [section('tasks'), section('pull-requests')],
+          ]}
+          value={place.section}
+          onChange={onChange}
+        />
+        <span className={x.partHead}>
+          <Icon name="computer" size={12} />
+          This Mac
+        </span>
+        {cards}
+        <SettingsNav
+          label="This Mac’s settings"
+          groups={[
+            [section('this-mac'), section('notifications'), section('appearance'), section('editor-and-browser')],
+            [section('about')],
+          ]}
+          value={place.section}
+          onChange={onChange}
+        />
+      </>
     )
   },
-  page: (ctx, place, go): Page | null => {
-    if (place.section === 'this-mac') return { title: 'This Mac', body: <MacList ctx={ctx} pauseAll={false} lend={false} /> }
-    if (place.section !== 'workers') return null
-    return {
-      title: words.workers,
-      body: <WorkersList ctx={ctx} opened={place.worker} onOpen={(worker) => go({ section: 'workers', worker })} pauseAll />,
-    }
+  page: (ctx, place, go) => {
+    if (place.section === 'this-mac') return macPage(ctx)
+    if (place.section === 'home') return page(ctx.home.name, <ComputerBody ctx={ctx} worker={ctx.home} />, words.home)
+    if (place.section !== 'computers') return null
+    const opened = openedOf(ctx, place)
+    return page(
+      words.computers,
+      opened === undefined ? (
+        <Rows ctx={ctx} open={(id) => go({ section: 'computers', worker: id })} />
+      ) : (
+        <ComputerSheet ctx={ctx} worker={opened} onBack={() => go({ section: 'computers', worker: null })} />
+      ),
+      ctx.pov === 'remote'
+        ? `Where ${ctx.home.name}’s agents run, besides ${ctx.home.name} itself.`
+        : 'Where your agents run, besides This Mac.',
+    )
   },
 }
 

@@ -3,47 +3,31 @@
   color: var(--danger);
 }
 
-/* ---- the other workers under the home, in its popover ---- */
-.worker {
-  align-items: start;
+/* ---- the other computers under the home, in its popover ---- */
+
+/* the computer's picture, level with its name as a task's mark is */
+.icon {
+  color: var(--t-3);
 }
-/* the bar's own CPU and MEM, under the name, a step apart as they are in the bar */
-.gauges {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  height: 15px;
-}
-.problem {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--t-2);
-  text-wrap: pretty;
-}
-/* opened in place: what runs there, and its number */
+/* opened in place: what runs there, and its number, set in under its name */
 .opened {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin: 0 0 6px 21px;
-  padding: 2px 0 2px 6px;
-  border-left: 1px solid var(--line);
+  margin: 0 0 8px 20px;
 }
 .task {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 7px;
+  column-gap: 8px;
   padding: 4px 6px;
-  border-radius: 5px;
+  border-radius: 6px;
   text-align: left;
   transition: background var(--fast) var(--ease);
 }
 .task:hover {
   background: var(--hover-paper);
-}
-.task :global(svg) {
-  margin-top: 0;
 }
 .taskTitle {
   min-width: 0;
@@ -62,7 +46,7 @@
   color: var(--t-3);
 }
 
-/* ---- each worker under the home's slider, in the quick settings ---- */
+/* ---- the other computers under the home's slider, in the quick settings ---- */
 .atSlider {
   display: flex;
   flex-direction: column;
@@ -70,7 +54,4 @@
   margin: 10px -6px 0;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-}
-.line {
-  align-items: center;
 }

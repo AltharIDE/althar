@@ -1,107 +1,324 @@
-/* what is off, in the danger colour, as the chip says a dropped home */
+/* what is off, in the danger colour */
 .danger {
   color: var(--danger);
 }
-
-/* a worker's row: brought into view when Settings opens on it */
-.rowWrap {
-  scroll-margin: 80px;
-}
-.rowWrap + .rowWrap,
-.rowWrap + * {
-  border-top: 1px solid var(--line);
-}
-/* the bar's own CPU and MEM, at the row's end, a step apart as they are in the bar */
-.gauges {
+.inline {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+}
+
+/* ---- a computer opened out: the same sheet in every take ---- */
+
+.body {
+  container-type: inline-size;
+  display: grid;
   gap: 12px;
-  height: 22px;
-  margin-right: 4px;
+  min-width: 0;
 }
-
-/* opened in place: what it is, then its settings, set in under its words */
-.well {
-  display: grid;
-  gap: 4px;
-  padding: 10px 14px 2px;
-  border-radius: 10px;
-  background: var(--hover-paper);
-}
-.facts {
-  font-size: 12px;
-}
-.version {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-/* a worker's page: its readings beside what it is */
-.top {
-  display: grid;
-  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
-  gap: 32px;
+/* its readings, as its popover draws them, beside what it is */
+.glance.glance {
+  grid-template-columns: 268px minmax(0, 1fr);
+  column-gap: 36px;
   align-items: start;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
+  padding: 18px 20px 14px;
+}
+@container (width < 600px) {
+  .glance.glance {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 18px;
+  }
 }
 .readings {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
 }
-/* taking it out, apart at the foot */
-.foot {
-  margin-top: 28px;
-  border-top: 1px solid var(--line);
+/* the trace as wide as its column, stacked on a narrow page too */
+.readings svg:first-child {
+  width: 100%;
+  height: auto;
+}
+/* the first fact level with the trace's top */
+.facts {
+  margin-top: -10px;
+  min-width: 0;
+}
+.address {
+  justify-self: start;
+  max-width: 100%;
+  font-size: 11.5px;
+}
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.settings.settings {
+  padding: 2px 20px;
 }
 
-/* C: the side in two, the home's and This Mac's, each under its name */
-.split {
-  display: grid;
-  gap: 18px;
+/* ---- B: modules, each as large as it matters ---- */
+
+.modules {
+  gap: 12px;
 }
-.part {
+/* on the page's paper, as the tiles are, rather than the panel's frost */
+.module.module {
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.module.module:hover {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+.third.third {
+  grid-column: span 2;
+}
+.addModule.addModule {
+  grid-column: span 2;
+  align-self: stretch;
+  min-height: 140px;
+  justify-content: center;
+}
+
+/* the home, wide: the trace, then CPU, Memory and Agents side by side */
+.hero {
   display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  column-gap: 32px;
+  align-items: start;
+}
+.hero > :last-child {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 24px;
+  align-items: start;
+}
+@container (width < 760px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 14px;
+  }
+}
+
+/* another computer: how many of its agents work, what is off, how hard it works */
+.glanceBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.countRow {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
+}
+.count {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.count.danger {
+  color: var(--danger);
+}
+.of {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.glanceLine {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meters {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+.meter {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+.meter > :nth-child(2) {
+  grid-column: auto;
+  margin: 0;
+}
+.meterFigure {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+
+/* ---- C: the home at the top of the side, and the computers as rows ---- */
+
+.homeCard {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 62px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font: inherit;
+  color: var(--t-1);
+  text-align: left;
+  cursor: pointer;
+}
+.homeCard[aria-current='page'] {
+  box-shadow:
+    0 0 0 1.5px var(--t-2),
+    var(--lift-card);
+}
+.homeGlyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 99px;
+  background: var(--ink-fill);
+  color: var(--on-ink);
+}
+.homeWords {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.homeName {
+  font-size: 13px;
+  font-weight: 600;
+}
+.homeLine {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .partHead {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  padding: 0 10px;
+  margin: 10px 0 0 12px;
   font-size: 11.5px;
-  font-weight: 560;
-  color: var(--t-2);
-}
-.partHead svg {
-  flex-shrink: 0;
+  font-weight: 600;
   color: var(--t-3);
 }
-.partName {
+
+.rows.rows {
+  gap: 0;
+  padding: 4px 6px;
+}
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 12px;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 58px;
+  padding: 8px 12px 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  color: var(--t-1);
+  text-align: left;
+  cursor: pointer;
+  scroll-margin: 80px;
+}
+.row:hover {
+  background: var(--hover-paper);
+}
+/* a hairline between rows, from the words on */
+.row + .row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 52px;
+  right: 12px;
+  height: 1px;
+  background: var(--line);
+}
+.row:hover::before,
+.row:hover + .row::before {
+  opacity: 0;
+}
+.rowIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  background: var(--sunk);
+  color: var(--t-2);
+}
+.rowWords {
+  display: grid;
+  gap: 2px;
   min-width: 0;
+}
+.rowName {
   overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.partQuiet {
-  flex-shrink: 0;
-  margin-left: auto;
-  font-weight: 400;
+.rowLine {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowFigure {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+.rowChevron {
   color: var(--t-4);
 }
+.addRow {
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-height: 52px;
+}
+.addRow .rowName {
+  font-weight: 500;
+  color: var(--t-2);
+}
 
-/* Add a worker: the line to run, to copy, and the wait */
+/* ---- Add a computer ---- */
+
 .command {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  padding: 8px 8px 8px 12px;
-  border-radius: 8px;
-  background: var(--hover-paper);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 10px;
+  background: var(--sunk);
 }
 .line {
   flex: 1;
@@ -111,11 +328,11 @@
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.waiting {
-  display: flex;
+.joining {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
   font-size: 12px;
   color: var(--t-3);
 }

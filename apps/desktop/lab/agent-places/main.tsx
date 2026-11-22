@@ -29,15 +29,15 @@ import { agents, fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { bar, quick } from './base'
 import { boardOf, loadOf, NOW, PROJECTS, type Scene, SCENES, waitingOf, type Worker, workersOf } from './data'
-import { AddWorker } from './settings/pieces'
+import { AddComputer } from './settings/pieces'
 import { TAKES } from './settings/takes'
 import type { Ctx, Place, Take } from './types'
 import s from './lab.module.css'
 
 /*
- * The agent places lab (README.md), its third round: Settings once the home
- * has workers. The base is what was picked (the home's popover with the
- * other workers under it, the quick settings' slider with a line a worker);
+ * The agent places lab (README.md): Settings for the home and the computers
+ * it runs work on. The base is what was picked (the home's popover with the
+ * other computers under it, the quick settings' slider with a line for each);
  * the takes are Settings, from this computer's own home or from studio, a
  * home the window is connected to. The bar along the bottom, or its keys,
  * swaps in place: the take (A B C), the window on studio (H), the scene
@@ -110,12 +110,7 @@ function SettingsScreen({ ctx, take, place, go }: { ctx: Ctx; take: Take; place:
       section={place.section}
       title={page.title}
       {...(page.lede === undefined ? {} : { lede: page.lede })}
-      side={
-        <>
-          <QuickCards side preferences={preferences} sounds={[]} onSection={() => undefined} />
-          {take.side(ctx, place, go)}
-        </>
-      }
+      side={take.side(ctx, place, go, <QuickCards side preferences={preferences} sounds={[]} onSection={() => undefined} />)}
     >
       {page.body}
     </SettingsLayout>
@@ -303,7 +298,8 @@ function Lab() {
             </div>
           </div>
         </div>
-        {adding && <AddWorker ctx={ctx} onClose={() => setAdding(false)} />}
+        {adding && <AddComputer ctx={ctx} onClose={() => setAdding(false)} />}
+        {said !== null && <output className={s.said}>{said}</output>}
         <div className={s.bar} role="toolbar" aria-label="Takes">
           {TAKES.map((one) => (
             <button
@@ -319,7 +315,7 @@ function Lab() {
           ))}
           <span className={s.rule} />
           <button type="button" aria-pressed={state.h} onClick={() => set({ h: !state.h, sec: null, w: null })}>
-            <kbd>H</kbd>Window on studio
+            <kbd>H</kbd>On studio
           </button>
           <span className={s.rule} />
           {SCENES.map((one, i) => (
@@ -329,29 +325,20 @@ function Lab() {
             </button>
           ))}
           <span className={s.rule} />
-          <button type="button" aria-pressed={state.k} onClick={() => set({ k: !state.k })}>
-            <kbd>K</kbd>Crowded
-          </button>
-          <button type="button" aria-pressed={state.m} onClick={() => set({ m: !state.m })}>
-            <kbd>M</kbd>Home alone
-          </button>
-          <button type="button" aria-pressed={state.n} onClick={() => set({ n: !state.n })}>
-            <kbd>N</kbd>Narrow
-          </button>
-          <button
-            type="button"
-            aria-pressed={state.screen === 'board'}
-            onClick={() => set({ screen: state.screen === 'board' ? 'settings' : 'board' })}
-          >
-            <kbd>S</kbd>Board
-          </button>
-          <button type="button" aria-pressed={state.dark} onClick={() => set({ dark: !state.dark })}>
-            <kbd>D</kbd>Dark
-          </button>
-          <span className={s.gap} />
-          <span className={s.idea} title={take.idea}>
-            {said ?? take.idea}
-          </span>
+          {(
+            [
+              ['K', 'Crowded', state.k, () => set({ k: !state.k })],
+              ['M', 'Alone', state.m, () => set({ m: !state.m })],
+              ['N', 'Narrow', state.n, () => set({ n: !state.n })],
+              ['S', 'Board', state.screen === 'board', () => set({ screen: state.screen === 'board' ? 'settings' : 'board' })],
+              ['D', 'Dark', state.dark, () => set({ dark: !state.dark })],
+            ] as const
+          ).map(([key, label, on, press]) => (
+            <button key={key} type="button" aria-pressed={on} onClick={press}>
+              <kbd>{key}</kbd>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
     </ServicesProvider>
