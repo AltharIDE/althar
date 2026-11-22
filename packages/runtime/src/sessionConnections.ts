@@ -818,8 +818,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           title: `${definition.name} started without its skills.`,
           // On a worker, an agent that takes its skills from an environment variable has none, whatever the worker's version.
           description:
-            setUp.failed ??
-            `${definition.name} can’t load skills on a worker. To give it its skills, run it on the home, or choose another lead.`,
+            setUp.failed ?? 'It can’t load skills on a worker. To give it its skills, run it on the home, or choose another lead.',
         })
       }
       // A skill this agent can't use is shown as a difference from the others, not hidden.
