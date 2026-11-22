@@ -18,7 +18,7 @@ import { fakeHost } from '../../tests/fixtures'
 import { GIFT_TASK_ID, GIFT_THREAD, KILN, makeClient, TABS } from './data'
 import { live } from './live'
 import { momentOf, seed } from './moments'
-import { GIT, NOTES, PICK } from './notes'
+import { GIT, NOTES, PICK, PICKER_NOTES } from './notes'
 import { Shared } from './Shared'
 import { DIRECTIONS, directionOf, lab, useLab } from './state'
 import s from './lab.module.css'
@@ -123,7 +123,7 @@ function Bar({ note, onNote }: { note: boolean; onNote: (open: boolean) => void 
 }
 
 function Note({ onClose }: { onClose: () => void }) {
-  const { d } = useLab()
+  const { d, k } = useLab()
   const note = NOTES[d]
   return (
     <aside className={s.note} aria-label="What this direction is for">
@@ -136,6 +136,12 @@ function Note({ onClose }: { onClose: () => void }) {
       </div>
       <h3>What it’s for</h3>
       <p>{note.for}</p>
+      {d === 'e' && (
+        <>
+          <h3>{PICKER_NOTES[k].label}</h3>
+          <p>{PICKER_NOTES[k].for}</p>
+        </>
+      )}
       <h3>What it would take</h3>
       <p>{note.build}</p>
       <p className={s.noteSize}>{note.size}</p>

@@ -98,12 +98,12 @@ export function ChatEnd({ artifact, talk, room = false }: { artifact: Artifact; 
   // A moment opens its popover on the artifact it opens with.
   const here = room ? moment.open === artifact.id : true
   const [sharing, setSharing] = useOpenSoon(moment.share === true && here)
-  const [keeping, setKeeping] = useOpenSoon(moment.keep !== undefined && here)
+  const [keeping, setKeeping] = useOpenSoon(moment.keep === true && here)
   return (
     <div className={s.end}>
       <Facts artifact={artifact} talk={talk} />
       <span className={s.rule} aria-hidden />
-      <Keep artifact={artifact} open={keeping} onOpenChange={setKeeping} {...(moment.keep === undefined ? {} : { start: moment.keep })} />
+      <Keep artifact={artifact} open={keeping} onOpenChange={setKeeping} />
       <Share artifact={artifact} tone="head" open={sharing} onOpenChange={setSharing} />
       <span className={s.rule} aria-hidden />
       <IconButton

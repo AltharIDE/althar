@@ -100,8 +100,8 @@ export interface Moment {
   readonly open?: string | null
   /** The page as someone it was shared with sees it (D). */
   readonly guest?: boolean
-  /** Where it lives open in the head, a repository chosen. */
-  readonly keep?: 'althar' | 'repo'
+  /** Save to repo open in the top row. */
+  readonly keep?: boolean
 }
 
 export const momentOf = (d: Direction, m: number): Moment => {
@@ -115,10 +115,12 @@ export const momentOf = (d: Direction, m: number): Moment => {
         : m === 3
           ? { opening: every, share: true }
           : m === 4
-            ? { opening: every, keep: 'repo' }
+            ? { opening: every, keep: true }
             : { opening: every }
   if (d === 'b') return m === 0 ? { opening: every, open: null } : { opening: every, open: GIFT, share: m === 2 }
   // A lot of work in one artifact: every page at once, a row each, beside the conversation or in its room.
+  // Save to repo, open on Gift a class beside its conversation, with the moment's picker.
+  if (d === 'e') return { opening: every, keep: true }
   if (d === 'c') return { opening: { page: EVERY_PAGE, view: 'every' }, open: m === 1 ? GIFT : null }
   return m === 1 ? { opening: { ...one, pin: 'pin-sam' } } : m === 2 ? { opening: one, guest: true } : { opening: one }
 }

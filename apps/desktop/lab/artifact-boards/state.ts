@@ -12,14 +12,22 @@ export const DIRECTIONS = [
   { key: 'b', kbd: 'B', label: 'A room of its own', moments: ['Artifacts', 'In its room', 'Share'] },
   { key: 'c', kbd: 'C', label: 'A lot of work', moments: ['Every page', 'In its room'] },
   { key: 'd', kbd: 'D', label: 'Talk on the board', moments: ['Pins', 'A pin open', 'Shared'] },
+  { key: 'e', kbd: 'E', label: 'Save to repo', moments: ['Path', 'Tree', 'Columns', 'Suggested'] },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
+
+/** How Save to repo picks the folder: E's moments, one each; every direction uses the one seen last. */
+export const PICKERS = ['path', 'tree', 'columns', 'suggested'] as const
+export type Picker = (typeof PICKERS)[number]
+const pickerOf = (asked: string | null): Picker => PICKERS.find((one) => one === asked) ?? 'suggested'
 
 export interface LabState {
   readonly d: Direction
   /** Which moment of the direction, from 0. */
   readonly m: number
   readonly dark: boolean
+  /** The folder picker in Save to repo. */
+  readonly k: Picker
 }
 
 const params = new URLSearchParams(window.location.search)
@@ -28,7 +36,9 @@ let state: LabState = {
   d: DIRECTIONS.find((one) => one.key === asked)?.key ?? 'a',
   m: Number(params.get('m') ?? '0') || 0,
   dark: params.get('theme') === 'dark',
+  k: pickerOf(params.get('k')),
 }
+if (state.d === 'e') state = { ...state, k: PICKERS[state.m] ?? state.k }
 const listeners = new Set<() => void>()
 
 export const directionOf = (key: Direction) => DIRECTIONS.find((one) => one.key === key) ?? DIRECTIONS[0]
@@ -43,12 +53,14 @@ export const lab = {
     const next = { ...state, ...change }
     if (change.d !== undefined && change.d !== state.d && change.m === undefined) next.m = 0
     next.m = Math.max(0, Math.min(next.m, directionOf(next.d).moments.length - 1))
+    if (next.d === 'e') next.k = PICKERS[next.m] ?? next.k
     // The same moment chosen again starts it again.
     if (change.dark === undefined) round += 1
     state = next
     const url = new URL(window.location.href)
     url.searchParams.set('d', state.d)
     url.searchParams.set('m', String(state.m))
+    url.searchParams.set('k', state.k)
     if (state.dark) url.searchParams.set('theme', 'dark')
     else url.searchParams.delete('theme')
     window.history.replaceState(window.history.state, '', url)

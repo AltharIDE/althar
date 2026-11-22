@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 
 const out = join(import.meta.dirname, 'shots')
-mkdirSync(out, { recursive: true })
+mkdirSync(join(out, 'crops'), { recursive: true })
 const LAB = 'http://localhost:6196'
 const size = { width: 1440, height: 860 }
 
@@ -148,6 +148,71 @@ const shots = [
     },
   ],
   ['note-a', 'd=a&m=0&note=1'],
+  ['e1-path', 'd=e&m=0'],
+  ['e2-tree', 'd=e&m=1'],
+  [
+    'e2-tree-deep',
+    'd=e&m=1',
+    async (page) => {
+      await page
+        .getByRole('treeitem', { name: 'gift/' })
+        .first()
+        .click({ timeout: 4000 })
+        .catch(async () => {
+          await page.getByRole('button', { name: 'Open apps' }).click()
+          await page.getByRole('button', { name: 'Open web' }).click()
+          await page.getByRole('button', { name: 'Open src' }).click()
+          await page.getByRole('button', { name: 'Open features' }).click()
+          await page.getByRole('treeitem', { name: 'gift/' }).click()
+        })
+      await page.waitForTimeout(400)
+    },
+  ],
+  ['e3-columns', 'd=e&m=2'],
+  [
+    'e3-columns-deep',
+    'd=e&m=2',
+    async (page) => {
+      await page.getByRole('option', { name: 'apps' }).click()
+      await page.getByRole('option', { name: 'web' }).click()
+      await page.getByRole('option', { name: 'src' }).click()
+      await page.waitForTimeout(500)
+    },
+  ],
+  ['e4-suggested', 'd=e&m=3'],
+  [
+    'e4-find',
+    'd=e&m=3',
+    async (page) => {
+      await page.getByRole('radio', { name: /Somewhere else/ }).click()
+      await page.keyboard.type('flo')
+      await page.waitForTimeout(300)
+    },
+  ],
+  [
+    'e-kept',
+    'd=e&m=1',
+    async (page) => {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+      await page
+        .getByRole('button', { name: /^Gift a class/ })
+        .first()
+        .click()
+      await page
+        .getByRole('button', { name: /^A calmer checkout/ })
+        .first()
+        .click()
+      await page.waitForTimeout(600)
+      await page
+        .getByRole('button', { name: /calmer-checkout\// })
+        .first()
+        .click()
+      await page.waitForTimeout(400)
+    },
+  ],
+  ['dark-e2', 'd=e&m=1&theme=dark'],
+  ['dark-e4', 'd=e&m=3&theme=dark'],
   ['dark-a2', 'd=a&m=1&theme=dark'],
   ['dark-a5', 'd=a&m=4&theme=dark'],
   ['dark-b1', 'd=b&m=0&theme=dark'],
@@ -169,6 +234,16 @@ for (const [name, query, act] of shots) {
     await settled(page)
   }
   await page.screenshot({ path: join(out, `${String(name)}.png`) })
+  // Save to repo's popover, close up, with a little of the window around it.
+  const pop = (await page.locator('[data-picker]').count()) > 0 ? await page.locator('[data-picker]').boundingBox() : null
+  if (pop !== null) {
+    const x = Math.max(0, pop.x - 24)
+    const y = Math.max(0, pop.y - 64)
+    await page.screenshot({
+      path: join(out, 'crops', `${String(name)}-pop.png`),
+      clip: { x, y, width: Math.min(size.width - x, pop.width + 48), height: Math.min(size.height - y, pop.height + 88) },
+    })
+  }
   process.stdout.write(`${String(name)}\n`)
   await page.close()
 }

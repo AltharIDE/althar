@@ -1,47 +1,39 @@
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
-import { Button, Popover, Segmented, Switch } from '@althar/ui'
+import { Button, Menu, MenuRadioGroup, MenuRadioItem, Popover } from '@althar/ui'
 
-import { type Artifact, boardCount, type Kept, REPOS } from '../artifacts'
+import { type Artifact, type Kept, REPOS } from '../artifacts'
 import { commitOf, live, useLive } from '../live'
+import { nameFor, pathOf, type Place, placeOfPath, suggestionsFor } from '../repos'
+import { type Picker, useLab } from '../state'
 import { Glyph } from './Glyph'
+import k from './keep.module.css'
 import s from './parts.module.css'
+import { Columns, PathPicker, type PickerProps, Suggested, Tree } from './Pickers'
 
 /*
- * Where an artifact lives: in Althar only, as it starts, or saved to a
- * folder in a repository (the project's own, or one the team keeps for
- * designs), so it's in git with everything else, reviewed in a pull request
- * and read by people who never open Althar. Saving is shown at once; its
- * commit follows. Comments and pins stay in Althar either way.
+ * Save to repo: where an artifact lives in git. In Althar only, as it
+ * starts, or in a folder of a repository (the project's own, or one the team
+ * keeps for designs), so it's reviewed in a pull request and read by people
+ * who never open Althar. The lab tries four ways to pick the folder (E):
+ * a path whose every part is a menu, the repository as a tree, its folders
+ * in columns, and Althar's suggestions with a find for anywhere else. Around
+ * each, the same: how it goes in, when it's committed, and Save. Saving is
+ * shown at once; its commit follows. Comments and pins stay in Althar.
  */
 
-const FILE: Readonly<Record<Artifact['kind'], string>> = { design: '', document: '.md', diagram: '.mmd', chart: '.svg' }
-
-/** Where an artifact goes in a repository unless the person says otherwise. */
-const pathIn = (artifact: Artifact, repo: string) => {
-  const folder = REPOS.find((one) => one.name === repo)?.folder ?? ''
-  if (artifact.kind === 'design') return `${folder}${artifact.name}/`
-  return `${repo === 'kiln' ? 'docs/' : ''}${artifact.name}${FILE[artifact.kind]}`
-}
-
 type How = Kept['how']
-const howsFor = (artifact: Artifact, repo: string): ReadonlyArray<{ value: How; label: string }> =>
-  repo === 'kiln'
-    ? artifact.task !== null
-      ? [
-          { value: 'task', label: 'With the task’s change' },
-          { value: 'pr', label: 'A pull request of its own' },
-        ]
-      : [
-          { value: 'pr', label: 'A pull request of its own' },
-          { value: 'main', label: 'Straight to main' },
-        ]
-    : [
-        { value: 'main', label: 'Straight to main' },
-        { value: 'pr', label: 'A pull request of its own' },
-      ]
+const HOW: Readonly<Record<How, { readonly short: string; readonly label: string }>> = {
+  task: { short: 'With the task', label: 'With the task’s change' },
+  pr: { short: 'Own pull request', label: 'A pull request of its own' },
+  main: { short: 'Straight to main', label: 'Straight to main' },
+}
+const howsFor = (artifact: Artifact, repo: string): ReadonlyArray<How> =>
+  repo === 'kiln' ? (artifact.task !== null ? ['task', 'pr'] : ['pr', 'main']) : ['main', 'pr']
 
 const branchOf = (artifact: Artifact) => `althar/${(artifact.task ?? artifact.name).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+
+const WIDTH: Readonly<Record<Picker, number>> = { path: 420, tree: 420, columns: 800, suggested: 420 }
 
 /** Where it is, in a list's line: `design/gift-a-class/` in the project's own repository, `kiln-design/class-page/` in another. */
 export function Where({ artifact, className }: { artifact: Artifact; className?: string }) {
@@ -56,19 +48,9 @@ export function Where({ artifact, className }: { artifact: Artifact; className?:
   )
 }
 
-export function Keep({
-  artifact,
-  open,
-  onOpenChange,
-  start,
-}: {
-  artifact: Artifact
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-  /** Where the popover starts, for a moment that opens it with a repository chosen. */
-  start?: 'althar' | 'repo'
-}) {
+export function Keep({ artifact, open, onOpenChange }: { artifact: Artifact; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const world = useLive()
+  const { k: picker } = useLab()
   const kept = live.keptOf(artifact)
   const version = live.version(artifact)
   const committing = world.committing.includes(artifact.id)
@@ -76,8 +58,10 @@ export function Keep({
   return (
     <Popover
       label={`Where ${artifact.title} lives`}
-      width={380}
+      width={WIDTH[picker]}
       align="end"
+      padded={false}
+      initialFocus="panel"
       {...(open === undefined ? {} : { open })}
       {...(onOpenChange === undefined ? {} : { onOpenChange })}
       trigger={
@@ -98,149 +82,135 @@ export function Keep({
         </button>
       }
     >
-      <KeepForm artifact={artifact} kept={kept} version={version} start={start} onDone={() => onOpenChange?.(false)} />
+      {/* Keyed on the picker: another one starts from where the artifact is, or Althar's first suggestion. */}
+      <KeepForm key={picker} picker={picker} artifact={artifact} kept={kept} version={version} onDone={() => onOpenChange?.(false)} />
     </Popover>
   )
 }
 
+/** Where a new one goes unless the person says otherwise: Althar's first suggestion. */
+const placeFor = (artifact: Artifact, kept: Kept | null): Place => {
+  if (kept !== null) return placeOfPath(kept.repo, kept.path)
+  const first = suggestionsFor(artifact)[0]
+  return { repo: first?.repo ?? 'kiln', folder: first?.folder ?? '', name: nameFor(artifact) }
+}
+
 function KeepForm({
+  picker,
   artifact,
   kept,
   version,
-  start,
   onDone,
 }: {
+  picker: Picker
   artifact: Artifact
   kept: Kept | null
   version: number
-  start?: 'althar' | 'repo'
   onDone: () => void
 }) {
-  const [where, setWhere] = useState<'althar' | 'repo'>(kept !== null ? 'repo' : (start ?? 'althar'))
-  const [repo, setRepo] = useState(kept?.repo ?? 'kiln')
-  const [path, setPath] = useState(kept?.path ?? pathIn(artifact, repo))
-  const [how, setHow] = useState<How>(kept?.how ?? howsFor(artifact, repo)[0]?.value ?? 'pr')
+  const [place, setPlace] = useState<Place>(() => placeFor(artifact, kept))
+  const [how, setHow] = useState<How>(kept?.how ?? howsFor(artifact, place.repo)[0] ?? 'pr')
   const [follow, setFollow] = useState(kept?.follow ?? true)
-  const hows = howsFor(artifact, repo)
-  const main = REPOS.find((one) => one.name === repo)?.main ?? 'main'
-  const design = artifact.kind === 'design'
-  const changed = kept === null || kept.repo !== repo || kept.path !== path || kept.how !== how || kept.follow !== follow
+  const path = pathOf(place, artifact)
+  const hows = howsFor(artifact, place.repo)
+  const main = REPOS.find((one) => one.name === place.repo)?.main ?? 'main'
+  const changed = kept === null || kept.repo !== place.repo || kept.path !== path || kept.how !== how || kept.follow !== follow
+  const onPlace = (next: Place) => {
+    // Another repository takes its own ways in: what fits it first, unless the one chosen fits it too.
+    if (next.repo !== place.repo && !howsFor(artifact, next.repo).includes(how)) setHow(howsFor(artifact, next.repo)[0] ?? 'pr')
+    setPlace(next)
+  }
   const save = () => {
-    live.save(artifact, { repo, path, how, follow, version })
+    live.save(artifact, { repo: place.repo, path, how, follow, version })
     onDone()
   }
-  const pickRepo = (next: string) => {
-    // A path still as Althar chose it follows the repository; one the person wrote stays.
-    if (path === pathIn(artifact, repo)) setPath(pathIn(artifact, next))
-    if (!howsFor(artifact, next).some((one) => one.value === how)) setHow(howsFor(artifact, next)[0]?.value ?? 'pr')
-    setRepo(next)
-  }
+  const Picked: (props: PickerProps) => ReactNode = { path: PathPicker, tree: Tree, columns: Columns, suggested: Suggested }[picker]
+  const saved = kept === null ? null : placeOfPath(kept.repo, kept.path)
   return (
-    <div className={s.share}>
-      <div className={s.shareTitle}>Where {artifact.title} lives</div>
-      <Segmented
-        label="Where it lives"
-        value={where}
-        onChange={setWhere}
-        options={[
-          { value: 'althar', label: 'Only in Althar' },
-          { value: 'repo', label: 'In a repository' },
-        ]}
-      />
-      {where === 'althar' ? (
-        <>
-          <p className={s.shareLine}>
-            {kept === null
-              ? 'Its versions stay with the task. People see it when you share it; nobody gets it from git.'
-              : `What’s in ${kept.repo} stays in its history. New versions stay in Althar.`}
-          </p>
+    <div className={k.keep} data-picker={picker}>
+      <div className={k.head}>
+        <span className={k.headWords}>
+          <span className={k.title}>{kept === null ? `Save ${artifact.title} to a repo` : `${artifact.title} in git`}</span>
           {kept !== null && (
-            <div className={s.keepEnd}>
-              <Button
-                size="small"
-                onClick={() => {
-                  live.save(artifact, null)
-                  onDone()
-                }}
-              >
-                Stop saving to {kept.repo}
-              </Button>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          {kept !== null && (
-            <div className={s.keptNow}>
-              <Glyph name="commit" size={13} />
-              <span>
-                v{kept.version} is in {kept.repo} at <code>{commitOf(artifact.id, kept.version)}</code>
-              </span>
-            </div>
-          )}
-          <div className={s.keepField}>
-            <span className={s.keepLabel}>Repository</span>
-            <Segmented
-              label="Repository"
-              value={repo}
-              onChange={pickRepo}
-              options={REPOS.map((one) => ({ value: one.name, label: one.name, tooltip: { label: one.what } }))}
-            />
-          </div>
-          <label className={s.keepField}>
-            <span className={s.keepLabel}>{design ? 'Folder' : 'File'}</span>
-            <input className={s.keepInput} value={path} spellCheck={false} onChange={(event) => setPath(event.target.value)} />
-          </label>
-          {design && (
-            <ul className={s.keepFiles} aria-label="What goes in it">
-              <li>
-                <code>canvas.json</code>
-                <span>
-                  {artifact.pages.length} pages, {boardCount(artifact)} boards, their sizes
-                </span>
-              </li>
-              <li>
-                <code>boards/</code>
-                <span>each board’s page</span>
-              </li>
-              <li>
-                <code>README.md</code>
-                <span>every board as a picture</span>
-              </li>
-            </ul>
-          )}
-          <div className={s.keepField}>
-            <span className={s.keepLabel}>How it goes in</span>
-            <Segmented label="How it goes in" value={how} onChange={setHow} options={hows} />
-          </div>
-          <p className={s.shareLine}>
-            {how === 'task'
-              ? `Committed on ${branchOf(artifact)}, so it’s reviewed and merged with the task.`
-              : how === 'pr'
-                ? `On a branch of its own, with a pull request on ${repo}.`
-                : `Committed to ${main} on ${repo}.`}
-          </p>
-          <div className={s.shareRow}>
-            <span className={s.shareRowWords}>
-              <span id="keep-follow">Commit each new version</span>
-              <span className={s.keepSub}>{follow ? 'As the lead makes it' : 'Only when you save'}</span>
+            <span className={k.now}>
+              <Glyph name="commit" size={12} />v{kept.version} in {kept.repo} at <code>{commitOf(artifact.id, kept.version)}</code>
             </span>
-            <Switch checked={follow} onChange={setFollow} labelledBy="keep-follow" />
-          </div>
-          <p className={s.keepAside}>Comments and pins stay in Althar.</p>
-          <div className={s.keepEnd}>
-            {kept !== null && !changed && kept.version < version ? (
-              <Button variant="ink" size="small" onClick={save}>
-                Commit v{version}
-              </Button>
-            ) : (
-              <Button variant="ink" size="small" disabled={!changed || path.trim() === ''} onClick={save}>
-                {kept === null ? `Save to ${repo}` : 'Save changes'}
-              </Button>
-            )}
-          </div>
-        </>
-      )}
+          )}
+        </span>
+        {kept !== null && (
+          <button
+            type="button"
+            className={k.stop}
+            onClick={() => {
+              live.save(artifact, null)
+              onDone()
+            }}
+          >
+            Stop saving
+          </button>
+        )}
+      </div>
+      <Picked artifact={artifact} place={place} onPlace={onPlace} saved={saved} />
+      <div className={k.foot}>
+        <Menu
+          label="How it goes in"
+          width={300}
+          trigger={
+            <button type="button" className={k.footMenu}>
+              <Glyph name="commit" size={13} />
+              {HOW[how].short}
+              <Glyph name="down" size={10} />
+            </button>
+          }
+        >
+          <MenuRadioGroup label="How it goes in" value={how} onChange={(value) => setHow(value as How)}>
+            {hows.map((one) => (
+              <MenuRadioItem
+                key={one}
+                value={one}
+                description={
+                  one === 'task'
+                    ? `Committed on ${branchOf(artifact)}, reviewed and merged with the task`
+                    : one === 'pr'
+                      ? `On a branch of its own, with a pull request on ${place.repo}`
+                      : `Committed to ${main} on ${place.repo}`
+                }
+              >
+                {HOW[one].label}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </Menu>
+        <Menu
+          label="When it’s committed"
+          width={260}
+          trigger={
+            <button type="button" className={k.footMenu}>
+              {follow ? 'Every version' : 'When you save'}
+              <Glyph name="down" size={10} />
+            </button>
+          }
+        >
+          <MenuRadioGroup label="When it’s committed" value={follow ? 'each' : 'save'} onChange={(value) => setFollow(value === 'each')}>
+            <MenuRadioItem value="each" description="As the lead makes each one">
+              Every version
+            </MenuRadioItem>
+            <MenuRadioItem value="save" description="Only the version you save">
+              When you save
+            </MenuRadioItem>
+          </MenuRadioGroup>
+        </Menu>
+        <span className={k.footGap} />
+        {kept !== null && !changed && kept.version < version ? (
+          <Button variant="ink" size="small" onClick={save}>
+            Commit v{version}
+          </Button>
+        ) : (
+          <Button variant="ink" size="small" disabled={!changed || place.name.trim() === ''} onClick={save}>
+            {kept === null ? `Save to ${place.repo}` : kept.repo !== place.repo || kept.path !== path ? 'Move it' : 'Save changes'}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
