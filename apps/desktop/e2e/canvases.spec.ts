@@ -75,15 +75,37 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await shoot(page, electronApp, page, 'test-results/canvas-page-beside.png')
     await shoot(page, electronApp, panel, 'test-results/canvas-page-panel.png')
 
-    // The page rewrites its document and lays something of its own over all of it: its chip is still there, over it all,
-    // and its close still closes the canvas.
+    // The page rewrites its document and lays its own over all of it: an overlay, then a popover in the top layer, then a
+    // modal dialog, which makes all outside it inert. Its chip is still there, over it all and inside the modal, and its
+    // close still closes the canvas.
     await inCanvas(
       electronApp,
-      `document.documentElement.innerHTML = '<body><div style="position:fixed;inset:0;z-index:2147483647;background:#0003"></div><p>Rewritten</p></body>'`,
+      `(() => {
+        document.documentElement.innerHTML = '<body><div style="position:fixed;inset:0;z-index:2147483647;background:#0003"></div>' +
+          '<div id="tip" popover="manual" style="inset:0;width:100vw;height:100vh;margin:0;border:0;background:#0002">A popover of its own</div>' +
+          '<dialog id="modal" style="width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0">A modal of its own</dialog>' +
+          '<p>Rewritten</p></body>'
+        document.getElementById('tip').showPopover()
+        document.getElementById('modal').showModal()
+      })()`,
     )
     await expect
-      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('althar-chip')?.isConnected === true`).catch(() => false))
+      .poll(() =>
+        inCanvas<boolean>(electronApp, `document.querySelector('#modal > althar-chip')?.matches(':popover-open') === true`).catch(
+          () => false,
+        ),
+      )
       .toBe(true)
+    await shoot(page, electronApp, panel, 'test-results/canvas-page-modal.png')
+    // The modal closed, the chip comes back out over the page's popover; opened again, back in it.
+    const chipIn = (where: string) =>
+      expect
+        .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('${where} > althar-chip') !== null`).catch(() => false))
+        .toBe(true)
+    await inCanvas(electronApp, `document.getElementById('modal').close()`)
+    await chipIn('html')
+    await inCanvas(electronApp, `document.getElementById('modal').showModal()`)
+    await chipIn('#modal')
     const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
       electronApp,
       `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,

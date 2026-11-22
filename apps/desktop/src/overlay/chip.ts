@@ -4,8 +4,10 @@
  * conversation's header. Its name opens the artifact itself; Comment, where
  * the conversation has a draft, writes a comment on the whole of it there;
  * its × closes the canvas. It sits in the page's top layer, over anything
- * the page draws, and goes back where the page takes it away; the main
- * process shows it again whenever things are quiet, in case. Nothing of
+ * the page draws, popovers and dialogs it opens later included; inside the
+ * page's modal dialog while one is open, since all else is inert then; and
+ * goes back where the page takes it away. The main process shows it again
+ * whenever things are quiet, in case. Nothing of
  * Althar's window can be drawn over the page's own
  * view, so the main process runs this in an isolated world of the page, as
  * it runs the ground in a canvas of boards': it draws in a closed shadow root
@@ -125,18 +127,51 @@ const install = (): Chip => {
   host.addEventListener('pointerdown', (pressed) => pressed.stopPropagation())
 
   let wanted = false
-  /** In the page, over anything it draws: its top layer, where the page's own z-index can't reach above it. */
-  const place = () => {
+  /** The page's modal dialogs open, in the order they opened: the topmost last. */
+  let modals: Array<Element> = []
+  const topmostModal = () => {
+    let open: Array<Element> = []
+    try {
+      open = [...document.querySelectorAll(':modal')].filter((one) => one !== host)
+    } catch {
+      // A page engine without `:modal` has none to go inside.
+    }
+    modals = [...modals.filter((one) => open.includes(one)), ...open.filter((one) => !modals.includes(one))]
+    return modals.at(-1) ?? null
+  }
+  /**
+   * In the page, over anything it draws: its top layer, where the page's own z-index can't reach above it, and above what
+   * the page puts there after it (`raise`). While a modal of the page's is open everything outside it is inert, so the chip
+   * goes inside the topmost one, and comes back out as it closes: it can be pressed whatever the page shows.
+   */
+  const place = (raise = false) => {
     if (!wanted) return
-    if (!host.isConnected) document.documentElement.append(host)
+    const parent = topmostModal() ?? document.documentElement
+    if (host.parentNode !== parent) parent.append(host)
     if (typeof host.showPopover !== 'function') return
-    if (!host.matches(':popover-open')) host.showPopover()
+    if (host.matches(':popover-open')) {
+      if (!raise) return
+      // Shown again, it is the top layer's last: over the page's popovers and dialogs opened since.
+      host.hidePopover()
+    }
+    host.showPopover()
   }
   host.setAttribute('popover', 'manual')
-  // A page that rewrites its document, or takes the chip out, has it put back at once.
-  new MutationObserver(() => {
-    if (wanted && !host.isConnected) place()
-  }).observe(document, { childList: true, subtree: true })
+  // A page that rewrites its document, or takes the chip out, has it put back at once; one that opens or closes a dialog
+  // has it go over the dialog, or inside it where it is modal, or back out.
+  new MutationObserver((records) => {
+    if (!wanted) return
+    const dialogs = records.some((one) => one.type === 'attributes' && one.target !== host)
+    if (dialogs || !host.isConnected) place(dialogs)
+  }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] })
+  // A popover the page opens goes over the chip: it goes back over it.
+  document.addEventListener(
+    'toggle',
+    (event) => {
+      if (event.target !== host && (event as Event & { readonly newState?: string }).newState === 'open') place(true)
+    },
+    true,
+  )
 
   return {
     show: (shown) => {
@@ -147,7 +182,8 @@ const install = (): Chip => {
       name.setAttribute('aria-label', shown === null ? '' : `Open ${shown.title}`)
       comment.hidden = shown?.comment !== true
       if (shown === null && typeof host.hidePopover === 'function' && host.isConnected && host.matches(':popover-open')) host.hidePopover()
-      place()
+      // Shown again whenever things are quiet: over anything the page has put over it since, in a way not heard of.
+      place(true)
       return { seq }
     },
     next: (after) =>
