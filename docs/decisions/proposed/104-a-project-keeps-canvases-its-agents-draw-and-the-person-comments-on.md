@@ -601,9 +601,21 @@ columns, which sort it, narrow it; it is sorted by when each was last
 updated unless the person says. Narrow, what it is, its comments and when
 stay.
 
-One opened takes the view, and its Close comes back to the table. Not built
-yet: a picture of each version, a group's directions together with its
-latest pick, and archived canvases a press away.
+**One opened is the artifact itself, with its own chat beside it,** never
+the task or the conversation that drew it: the person who opens an
+artifact wants to look at it and talk to it, not to step into someone
+else's work. The view becomes its room: its chat in a column (see
+"Talking to an artifact"), under a top row that is the artifact's, the way
+back, its name (which opens every artifact on the project, to go to
+another) and who made it; never a task's step or state. The canvas fills
+the rest with its own head. Escape, or the way back, comes back to the
+cards. An artifact no one has talked to has no chat yet: its composer is
+there at once, and the chat starts as the person goes to it or points at a
+part, as an aside starts on +, so it is ready by the time they send; what
+they wrote and pointed at is kept by the artifact until then. One still
+drawing its first version in its own chat is a card too, and opens the same
+way. Not built yet: a group's directions together with its latest pick,
+and archived canvases a press away.
 
 #### In the thread and Outputs
 
@@ -1039,7 +1051,7 @@ The second slice, on 22 November 2026, for design work:
 | Part | Built |
 |---|---|
 | Boards | The `boards` kind from `canvas.json`, checked at publish; the ground in the canvas's view; every board, every page and one at a time, with the panel's bar; pointing at a part to comment, with its crop; numbered pins; the brief and the publish tool say when and how |
-| The Artifacts view | Cards with a picture of each (a page's and a canvas of boards' as last drawn), or the table; Filter by saved and by open comments; one opened beside the conversation that drew it, with a way back |
+| The Artifacts view | Cards with a picture of each (a page's and a canvas of boards' as last drawn), or the table; Filter by saved and by open comments; one opened as itself with its own chat beside it, under the artifact's top row; those still drawing their first version among them |
 | Saving to a repository | The project's place for artifacts, as a setting the first save makes; Save to repo with the tree for somewhere else; commits in a pull request of its own or to the default branch, each version or the one saved; stopping |
 | Downloads | Source, files, PNG, PDF and a diagram's SVG |
 | Proof | `apps/desktop/e2e/boards.spec.ts`, which lays out boards, shows them every way, and comments on a part, light and dark |
