@@ -304,19 +304,19 @@ characters and all of them at 20,000, with where the rest is.
 ### Compaction and recovery
 
 Althar uses ACP usage updates to decide when the coordinator reaches 80%
-of its window. The delivery loop can send a supported agent its own Compact
-command as soon as the ordinary turn ends, and a late usage update wakes the
-loop if the coordinator is already idle. The command carries no user input.
+of its window. The idle sweep wakes the delivery loop once a full session
+has had an hour of inactivity. The loop sends the agent's own Compact
+command as a separate turn when the input queue is empty.
 The first ordinary turn after compaction includes the coordinator's role and
 current project records alongside the queued messages.
 See [ADR-031](../decisions/coordinator.md#compaction-and-session-recovery).
 
 ```mermaid
 flowchart TD
-  A[Turn ends or idle usage update arrives] --> B{Session available?}
+  A[Message or idle sweep wakes the session] --> B{Session available?}
   B -->|Lost| C[Start a fresh session with Althar's recovery brief]
-  B -->|Available and full| D[Ask the agent to compact between turns]
-  B -->|Available| E[Read the next turn]
+  B -->|Available, full, idle for an hour| D[Compact if the queue is empty]
+  B -->|Message queued| E[Read the next turn]
   D --> F[Keep the session and restore role and project records on the next turn]
   F --> E
   C --> E
@@ -339,10 +339,8 @@ with its record; a removed one keeps its row.
 
 ### The compaction seam
 
-Althar hands the coordinator over before its agent compacts, and a brief
-uses the records, the notes, the last messages, the earlier ones in short and
-the tools. The short part is cut from the record, not written by a model:
-Althar writes no summaries yet.
+The agent writes its own compaction summary. For recovery after session loss,
+Althar builds the brief from the records, notes and bounded transcript.
 
 Continuous compaction will write summaries as records:
 

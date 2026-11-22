@@ -27,7 +27,7 @@ import {
   lagLogged,
   watchLag,
 } from '@althar/runtime'
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
 import { keepCompiledNow } from '../compileCache'
@@ -273,6 +273,7 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
         }
       : undefined
+  const fakeCompactionIdle = Number(process.env.ALTHAR_FAKE_COMPACTION_IDLE_MS)
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
@@ -295,6 +296,7 @@ const program = Effect.gen(function* () {
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
+          ...(fakeCompactionIdle > 0 ? { idle: { compaction: Duration.millis(fakeCompactionIdle) } } : {}),
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },

@@ -1,6 +1,7 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -11,9 +12,11 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { notices, repository, runtime, until } from './support'
+import { notices, onTestClock, repository, runtime, until } from './support'
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
+
+const cacheExpired = TestClock.adjust(Duration.minutes(61))
 
 const opened = Effect.gen(function* () {
   const projects = yield* Projects
@@ -115,54 +118,70 @@ describe('compacting a full lead', () => {
     assert.isFalse(contextFull({ used: 500_000, size: 0 }, true))
   })
 
-  it.live('compacts before the next turn and restores the task brief and current project notes in the same session', () =>
-    Effect.gen(function* () {
-      const projectId = yield* opened
-      const task = yield* started(projectId, 'Do it. [lead:finish]')
-      yield* finished(task.threadId)
-      yield* say(task.threadId, 'Look again. [context:25/1000000]')
-      yield* answered(task.threadId, 2)
-      const [first] = yield* sessionsOn(task.threadId)
-      yield* keepNote({ envelope: yield* Runtime.envelope('note.keep', {}), projectId, body: 'Ship on Thursdays.' })
-      yield* say(task.threadId, 'And now? [context:80/200000]')
-      yield* answered(task.threadId, 4)
-      yield* say(task.threadId, 'What next?')
-      yield* answered(task.threadId, 6)
-      const turns = yield* prompts(task.threadId)
-      assert.deepStrictEqual(
-        turns.flatMap((turn, index) => (turn.prompt === COMPACT ? [index] : [])),
-        [2, 4],
-      )
-      assert.isTrue(turns.every((turn) => turn.providerSessionId === first?.id))
-      assert.include(turns[3]?.prompt, 'Task: Lead\n\nDo it. [lead:finish]')
-      assert.include(turns[3]?.prompt, "When you have done the task, call Althar's finish_step tool")
-      assert.include(turns[3]?.prompt, 'Ship on Thursdays.')
-      assert.include(turns[3]?.prompt, 'Open errands concerning this task')
-      assert.match(turns[3]?.prompt ?? '', /\n\nAnd now\? \[context:80\/200000\]$/)
-      assert.notInclude(turns[5]?.prompt, 'The thread so far')
-      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
-      assert.notInclude(yield* titles(task.threadId), AFRESH)
-    }).pipe(Effect.provide(withQueries())),
+  it.effect.each(['claude-code', 'codex', 'opencode'])(
+    '%s answers a full lead promptly, then compacts while idle in the same session',
+    (agentId) =>
+      onTestClock(
+        Effect.gen(function* () {
+          const projectId = yield* opened
+          const task = yield* started(projectId, 'Do it. [lead:finish]', agentId)
+          yield* finished(task.threadId)
+          yield* say(task.threadId, 'Look again. [context:25/1000000]')
+          yield* answered(task.threadId, 2)
+          const [first] = yield* sessionsOn(task.threadId)
+          yield* TestClock.adjust(Duration.minutes(30))
+          assert.lengthOf(yield* prompts(task.threadId), 2)
+          yield* keepNote({ envelope: yield* Runtime.envelope('note.keep', {}), projectId, body: 'Ship on Thursdays.' })
+          yield* say(task.threadId, 'And now?')
+          yield* answered(task.threadId, 3)
+          // The previous turn warmed the cache again.
+          yield* TestClock.adjust(Duration.minutes(40))
+          assert.lengthOf(yield* prompts(task.threadId), 3)
+          yield* TestClock.adjust(Duration.minutes(21))
+          yield* answered(task.threadId, 4)
+          yield* say(task.threadId, 'What next?')
+          yield* answered(task.threadId, 5)
+
+          const turns = yield* prompts(task.threadId)
+          assert.match(turns[2]?.prompt ?? '', /And now\?$/)
+          assert.strictEqual(turns[3]?.prompt, COMPACT)
+          assert.isTrue(turns.every((turn) => turn.providerSessionId === first?.id))
+          const next = turns[4]?.prompt ?? ''
+          assert.include(next, 'Task: Lead\n\nDo it. [lead:finish]')
+          assert.include(next, "When you have done the task, call Althar's finish_step tool")
+          assert.include(next, 'Ship on Thursdays.')
+          assert.include(next, 'Open errands concerning this task')
+          assert.notInclude(next, 'The thread so far')
+          assert.match(next, /What next\?$/)
+          assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+          assert.notInclude(yield* titles(task.threadId), AFRESH)
+        }).pipe(Effect.provide(withQueries())),
+      ),
   )
 
-  it.live('keeps taking messages after a failed compaction without retrying it on every turn', () =>
-    Effect.gen(function* () {
-      const projectId = yield* opened
-      const task = yield* started(projectId, 'Do it. [lead:finish] [lead:compact-fails]')
-      yield* finished(task.threadId)
-      yield* say(task.threadId, 'Look again. [context:85]')
-      yield* answered(task.threadId, 2)
-      yield* say(task.threadId, 'And now?')
-      yield* answered(task.threadId, 4)
-      yield* say(task.threadId, 'One more question.')
-      yield* answered(task.threadId, 5)
-      const turns = yield* prompts(task.threadId)
-      assert.strictEqual(turns[2]?.prompt, COMPACT)
-      assert.match(turns[3]?.prompt ?? '', /And now\?$/)
-      assert.match(turns[4]?.prompt ?? '', /One more question\.$/)
-      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
-      assert.include(yield* titles(task.threadId), "Fake codex couldn't compact its context.")
-    }).pipe(Effect.provide(withQueries())),
+  it.effect('keeps taking messages after a failed compaction without retrying it on every turn', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const projectId = yield* opened
+        const task = yield* started(projectId, 'Do it. [lead:finish] [lead:compact-fails]')
+        yield* finished(task.threadId)
+        yield* say(task.threadId, 'Look again. [context:85]')
+        yield* answered(task.threadId, 2)
+        yield* cacheExpired
+        yield* answered(task.threadId, 3)
+        yield* say(task.threadId, 'And now?')
+        yield* answered(task.threadId, 4)
+        yield* cacheExpired
+        yield* say(task.threadId, 'One more question.')
+        yield* answered(task.threadId, 5)
+        const turns = yield* prompts(task.threadId)
+        assert.strictEqual(turns[2]?.prompt, COMPACT)
+        assert.match(turns[3]?.prompt ?? '', /And now\?$/)
+        assert.match(turns[4]?.prompt ?? '', /One more question\.$/)
+        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+        assert.include(yield* titles(task.threadId), "Fake codex couldn't compact its context.")
+      }).pipe(Effect.provide(withQueries())),
+    ),
   )
 
   it.live('carries the conversation on across a break, at any size under its mark', () =>
@@ -192,49 +211,73 @@ describe('compacting a full lead', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('compacts while a background command keeps running on the same session', () =>
+  it.effect('compacts while a background command keeps running on the same session', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const projectId = yield* opened
+        const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+        yield* finished(task.threadId)
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
+          (left) => left.length === 1,
+        )
+        yield* say(task.threadId, 'Look again. [context:25/1000000]')
+        yield* answered(task.threadId, 2)
+        yield* cacheExpired
+        yield* answered(task.threadId, 3)
+        assert.strictEqual((yield* prompts(task.threadId))[2]?.prompt, COMPACT)
+        const live = Option.getOrUndefined(yield* sessions.running(task.threadId))
+        assert.lengthOf(live?.background ?? [], 1)
+        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+        assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
+      }).pipe(Effect.provide(withQueries())),
+    ),
+  )
+})
+
+it.effect.each(['completed', 'failed'] as const)('delivers a message queued during idle compaction once it has %s', (state) => {
+  let asked = false
+  let release = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const compactionAsked = Effect.sync(() => asked)
+  const promptAsked = (prompt: string) => {
+    if (prompt !== COMPACT) return
+    asked = true
+    return held
+  }
+  return onTestClock(
     Effect.gen(function* () {
-      const sessions = yield* Sessions
+      yield* Effect.addFinalizer(() => Effect.sync(release))
       const projectId = yield* opened
-      const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+      const task = yield* started(projectId, state === 'failed' ? 'Do it. [lead:finish] [lead:compact-lost]' : 'Do it. [lead:finish]')
       yield* finished(task.threadId)
-      yield* until(
-        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
-      yield* say(task.threadId, 'Look again. [context:25/1000000]')
+      yield* say(task.threadId, 'Look again. [context:85]')
       yield* answered(task.threadId, 2)
-      yield* say(task.threadId, 'And now?')
+      yield* cacheExpired
+      yield* until(compactionAsked, Boolean)
+      yield* say(task.threadId, 'What next?')
+      assert.lengthOf(yield* prompts(task.threadId), 3)
+      release()
       yield* answered(task.threadId, 4)
-      assert.strictEqual((yield* prompts(task.threadId))[2]?.prompt, COMPACT)
-      const live = Option.getOrUndefined(yield* sessions.running(task.threadId))
-      assert.lengthOf(live?.background ?? [], 1)
-      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
-      assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
-    }).pipe(Effect.provide(withQueries())),
+      const [old, fresh] = yield* sessionsOn(task.threadId)
+      const [, , compact, next] = yield* prompts(task.threadId)
+      assert.deepStrictEqual([compact?.prompt, compact?.providerSessionId, compact?.state], [COMPACT, old?.id, state])
+      assert.strictEqual(next?.providerSessionId, state === 'failed' ? fresh?.id : old?.id)
+      if (state === 'failed') {
+        assert.include(yield* titles(task.threadId), 'Fake codex had lost this conversation. Started it afresh.')
+      } else {
+        assert.isUndefined(fresh)
+      }
+      assert.match(next?.prompt ?? '', /\n\nWhat next\?$/)
+      assert.strictEqual((next?.prompt ?? '').split('What next?').length, 2)
+    }).pipe(Effect.provide(withQueries(':memory:', { promptAsked }))),
   )
 })
 
 describe('a session its agent has lost', () => {
-  it.live('keeps the queued message when compacting discovers a lost session', () =>
-    Effect.gen(function* () {
-      const projectId = yield* opened
-      const task = yield* started(projectId, 'Do it. [lead:finish] [lead:compact-lost]')
-      yield* finished(task.threadId)
-      yield* say(task.threadId, 'Look again. [context:85]')
-      yield* answered(task.threadId, 2)
-      yield* say(task.threadId, 'What next?')
-      yield* answered(task.threadId, 4)
-      const [old, fresh] = yield* sessionsOn(task.threadId)
-      const [, , compact, next] = yield* prompts(task.threadId)
-      assert.deepStrictEqual(compact, { prompt: COMPACT, providerSessionId: old?.id, state: 'failed' })
-      assert.strictEqual(next?.providerSessionId, fresh?.id)
-      assert.match(next?.prompt ?? '', /\n\nWhat next\?$/)
-      assert.strictEqual((next?.prompt ?? '').split('What next?').length, 2)
-      assert.include(yield* titles(task.threadId), 'Fake codex had lost this conversation. Started it afresh.')
-    }).pipe(Effect.provide(withQueries())),
-  )
-
   // Claude Code's adapter drops a session whose process died (a `pkill -f` matched it, on 2 November 2026), and answers its
   // next prompt with "Resource not found": the turn is given to a fresh session, briefed from the task, not failed.
   it.live('starts the lead afresh with what the person said, rather than fail the turn', () =>

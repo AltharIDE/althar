@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { COMPACT, contextFull } from '../src/compact'
@@ -17,7 +18,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { piecesOf } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, until } from './support'
+import { callTool, notices, onTestClock, repository, runtime, until } from './support'
 import { knownModels } from './knownModels'
 
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
@@ -151,73 +152,82 @@ describe('compacting the coordinator', () => {
     assert.isFalse(contextFull({ used: 250_000, size: 1_000_000 }, false))
   })
 
-  it.live('compacts repeatedly on the same session, model and effort, and refreshes current records', () =>
-    Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const errands = yield* Errands
-      const sql = yield* SqlClient.SqlClient
-      const { access, threadId } = yield* opened
-      yield* say(threadId, 'hello')
-      const first = yield* answered(threadId, 1)
-      yield* sessions.setModel({ threadId, model: 'large' })
-      yield* sessions.setEffort({ threadId, effort: 'high' })
+  it.effect('compacts repeatedly on the same session, model and effort, and refreshes current records', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const errands = yield* Errands
+        const sql = yield* SqlClient.SqlClient
+        const { access, threadId } = yield* opened
+        yield* say(threadId, 'hello')
+        const first = yield* answered(threadId, 1)
+        yield* sessions.setModel({ threadId, model: 'large' })
+        yield* sessions.setEffort({ threadId, effort: 'high' })
 
-      // Keep the turn open while the errand is recorded against the person's actual delivery.
-      yield* say(threadId, 'slow [context:85]')
-      yield* until(
-        Effect.map(
-          sessions.running(threadId),
-          (running) => Option.isSome(running) && running.value.turnRunning && contextFull(running.value.context, false),
-        ),
-        Boolean,
-      )
-      const current = { ...access, sessionId: first }
-      const [message] = yield* until(
-        Effect.map(errands.turn(current), (turn) => turn.messages),
-        (messages) => messages.length === 1,
-      )
-      const errand = yield* errands.keep(current, message!, [
-        { key: 'after-checks', tool: 'test_asked', target: 'repo/#17', request: {}, waits: [{ kind: 'checks', target: 'head-a' }] },
-      ])
-      yield* sessions.interrupt(threadId)
-      yield* answered(threadId, 3)
-      yield* callTool(access, 'keep_note', { note: 'Ship on Thursdays.' })
-      yield* say(threadId, 'And now? [context:95]')
-      yield* answered(threadId, 5)
-      yield* say(threadId, 'Go on.')
-      yield* answered(threadId, 6)
+        // Keep the turn open while the errand is recorded against the person's actual delivery.
+        yield* say(threadId, 'slow [context:85]')
+        yield* until(
+          Effect.map(
+            sessions.running(threadId),
+            (running) => Option.isSome(running) && running.value.turnRunning && contextFull(running.value.context, false),
+          ),
+          Boolean,
+        )
+        const current = { ...access, sessionId: first }
+        const [message] = yield* until(
+          Effect.map(errands.turn(current), (turn) => turn.messages),
+          (messages) => messages.length === 1,
+        )
+        const errand = yield* errands.keep(current, message!, [
+          { key: 'after-checks', tool: 'test_asked', target: 'repo/#17', request: {}, waits: [{ kind: 'checks', target: 'head-a' }] },
+        ])
+        yield* sessions.interrupt(threadId)
+        yield* answered(threadId, 2)
+        yield* TestClock.adjust(Duration.minutes(31))
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(threadId)).sessionId, first)
+        assert.lengthOf(yield* prompts(threadId), 2)
+        yield* TestClock.adjust(Duration.minutes(30))
+        yield* answered(threadId, 3)
+        yield* callTool(access, 'keep_note', { note: 'Ship on Thursdays.' })
+        yield* say(threadId, 'And now? [context:95]')
+        yield* answered(threadId, 4)
+        yield* TestClock.adjust(Duration.minutes(61))
+        yield* answered(threadId, 5)
+        yield* say(threadId, 'Go on.')
+        yield* answered(threadId, 6)
 
-      const turns = yield* prompts(threadId)
-      assert.deepStrictEqual(
-        turns.flatMap((turn, index) => (turn.prompt === COMPACT ? [index] : [])),
-        [2, 4],
-      )
-      const maintenance = yield* sql<{ origin: string; inputs: number }>`
+        const turns = yield* prompts(threadId)
+        assert.deepStrictEqual(
+          turns.flatMap((turn, index) => (turn.prompt === COMPACT ? [index] : [])),
+          [2, 4],
+        )
+        const maintenance = yield* sql<{ origin: string; inputs: number }>`
         SELECT d.origin, (SELECT count(*) FROM turn_delivery_inputs i WHERE i.delivery_id = d.id) AS inputs
         FROM turn_deliveries d WHERE d.thread_id = ${threadId} AND d.prompt = ${COMPACT}`
-      assert.deepStrictEqual(maintenance, [
-        { origin: 'system', inputs: 0 },
-        { origin: 'system', inputs: 0 },
-      ])
-      assert.include(turns[3]?.prompt, 'Ship on Thursdays.')
-      const next = turns[5]?.prompt ?? ''
-      assert.include(next, 'You are the coordinator of the project')
-      assert.include(next, 'Ship on Thursdays.')
-      assert.include(next, errand)
-      assert.include(next, 'Open errands (only their recorded next steps may act in a news turn)')
-      assert.notInclude(next, 'The last messages of the conversation')
-      assert.match(next, /\n\nGo on\.$/)
-      assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
-      const rows = yield* sessionsOn(threadId)
-      assert.deepStrictEqual(
-        rows.map((session) => [session.id, session.model, session.effort, session.state]),
-        [[first, 'large', 'high', 'active']],
-      )
-      assert.isFalse((yield* notices(threadId)).some((notice) => /afresh|fresh session/.test(String(notice.title))))
-    }).pipe(Effect.provide(withQueries())),
+        assert.deepStrictEqual(maintenance, [
+          { origin: 'system', inputs: 0 },
+          { origin: 'system', inputs: 0 },
+        ])
+        assert.include(turns[3]?.prompt, 'Ship on Thursdays.')
+        const next = turns[5]?.prompt ?? ''
+        assert.include(next, 'You are the coordinator of the project')
+        assert.include(next, 'Ship on Thursdays.')
+        assert.include(next, errand)
+        assert.include(next, 'Open errands (only their recorded next steps may act in a news turn)')
+        assert.notInclude(next, 'The last messages of the conversation')
+        assert.match(next, /\n\nGo on\.$/)
+        assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
+        const rows = yield* sessionsOn(threadId)
+        assert.deepStrictEqual(
+          rows.map((session) => [session.id, session.model, session.effort, session.state]),
+          [[first, 'large', 'high', 'active']],
+        )
+        assert.isFalse((yield* notices(threadId)).some((notice) => /afresh|fresh session/.test(String(notice.title))))
+      }).pipe(Effect.provide(withQueries())),
+    ),
   )
 
-  it.live('waits for an interrupted turn to end and then compacts before the queued message', () =>
+  it.live('gives a queued message the next turn after an interrupted full coordinator turn', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const { threadId } = yield* opened
@@ -233,37 +243,44 @@ describe('compacting the coordinator', () => {
       yield* say(threadId, 'Meanwhile, one more thing.')
       assert.lengthOf(yield* prompts(threadId), 2)
       yield* sessions.interrupt(threadId)
-      yield* answered(threadId, 4)
+      yield* answered(threadId, 3)
       const turns = yield* prompts(threadId)
       assert.strictEqual(turns[1]?.state, 'interrupted')
-      assert.strictEqual(turns[2]?.prompt, COMPACT)
-      assert.match(turns[3]?.prompt ?? '', /\n\nMeanwhile, one more thing\.$/)
-      assert.strictEqual((turns[3]?.prompt ?? '').split('Meanwhile, one more thing.').length - 1, 1)
+      assert.strictEqual(turns[2]?.prompt, 'Meanwhile, one more thing.')
+      assert.strictEqual((turns[2]?.prompt ?? '').split('Meanwhile, one more thing.').length - 1, 1)
       assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('uses late usage and lets an agent’s own compaction satisfy the threshold', () =>
-    Effect.gen(function* () {
-      const { threadId } = yield* opened
-      yield* say(threadId, 'Fill up. [context-later:95]')
-      const first = yield* answered(threadId, 2)
-      assert.strictEqual((yield* prompts(threadId))[1]?.prompt, COMPACT)
-      yield* say(threadId, 'To the next subject. [context:85]')
-      yield* answered(threadId, 4)
-      yield* say(threadId, 'Go on.')
-      yield* answered(threadId, 5)
-      yield* say(threadId, 'Agent summarizes on its own. [context-compacted] [context:95]')
-      yield* answered(threadId, 6)
-      yield* say(threadId, 'What now?')
-      yield* answered(threadId, 7)
-      const turns = yield* prompts(threadId)
-      assert.strictEqual(turns[1]?.prompt, COMPACT)
-      assert.strictEqual(turns[3]?.prompt, COMPACT)
-      assert.include(turns[6]?.prompt, 'Current Althar records after compaction.')
-      assert.include(turns[6]?.prompt, 'You are the coordinator of the project')
-      assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
-    }).pipe(Effect.provide(withQueries())),
+  it.effect('uses late usage and lets an agent’s own compaction satisfy the threshold', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const { threadId } = yield* opened
+        yield* say(threadId, 'Fill up. [context-later:95]')
+        const first = yield* answered(threadId, 1)
+        yield* TestClock.adjust(Duration.minutes(61))
+        yield* answered(threadId, 2)
+        assert.strictEqual((yield* prompts(threadId))[1]?.prompt, COMPACT)
+        yield* say(threadId, 'To the next subject. [context:85]')
+        yield* answered(threadId, 3)
+        yield* TestClock.adjust(Duration.minutes(61))
+        yield* answered(threadId, 4)
+        yield* say(threadId, 'Go on.')
+        yield* answered(threadId, 5)
+        yield* say(threadId, 'Agent summarizes on its own. [context-compacted] [context:95]')
+        yield* answered(threadId, 6)
+        yield* TestClock.adjust(Duration.minutes(61))
+        assert.lengthOf(yield* prompts(threadId), 6)
+        yield* say(threadId, 'What now?')
+        yield* answered(threadId, 7)
+        const turns = yield* prompts(threadId)
+        assert.strictEqual(turns[1]?.prompt, COMPACT)
+        assert.strictEqual(turns[3]?.prompt, COMPACT)
+        assert.include(turns[6]?.prompt, 'Current Althar records after compaction.')
+        assert.include(turns[6]?.prompt, 'You are the coordinator of the project')
+        assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
+      }).pipe(Effect.provide(withQueries(':memory:', {}, { idle: { coordinator: Duration.hours(2) } }))),
+    ),
   )
 })
 

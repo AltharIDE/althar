@@ -86,6 +86,9 @@ import {
   type TaskThread,
   type ThreadContext,
   accountOf,
+  canCompactWhileIdle,
+  idleCompactionDue,
+  idleSince,
   modelNamed,
   optionValue,
   passedOnOf,
@@ -553,6 +556,9 @@ export class Sessions extends Context.Service<
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       const coordinatorIdle = Duration.toMillis(runtimeConfig.idle?.coordinator ?? Duration.minutes(30))
+      // ACP reports context size, but not the provider's prompt-cache lifetime.
+      const compactionIdle = Duration.toMillis(runtimeConfig.idle?.compaction ?? Duration.hours(1))
+      const idleSweep = Duration.millis(Math.max(1, Math.min(coordinatorIdle, compactionIdle, 60_000)))
       const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
       // The zone the person's local time is told in: the computer's, as its clock says now (localTime.ts).
       const zoneOf = runtimeConfig.zone ?? localZone
@@ -1432,6 +1438,7 @@ export class Sessions extends Context.Service<
         },
         betweenAgents,
         changeHeads,
+        compactionIdle,
         get afterCompaction(): SessionTurnsDependencies['afterCompaction'] {
           return afterCompaction
         },
@@ -2348,7 +2355,7 @@ export class Sessions extends Context.Service<
               threads.get(threadId) !== running ||
               running.thread.role !== 'coordinator' ||
               running.stopping ||
-              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              now - idleSince(running) < coordinatorIdle ||
               running.leadHeld ||
               running.settingLead ||
               handingOver() ||
@@ -2366,7 +2373,7 @@ export class Sessions extends Context.Service<
               running.settingLead ||
               handingOver() ||
               running.deliveryHeld !== null ||
-              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              now - idleSince(running) < coordinatorIdle ||
               running.callsOpen.size > 0 ||
               [...running.background.values()].some((left) => left.ended === null)
             )
@@ -2383,7 +2390,7 @@ export class Sessions extends Context.Service<
               running.settingLead ||
               handingOver() ||
               running.deliveryHeld !== null ||
-              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              now - idleSince(running) < coordinatorIdle ||
               running.callsOpen.size > 0 ||
               [...running.background.values()].some((left) => left.ended === null) ||
               (yield* busyNow(threadId))
@@ -2399,13 +2406,26 @@ export class Sessions extends Context.Service<
         )
       yield* Effect.forkIn(
         Effect.forever(
-          Effect.sleep(Duration.millis(Math.max(1, Math.min(coordinatorIdle, Duration.toMillis(Duration.minutes(1)))))).pipe(
+          Effect.sleep(idleSweep).pipe(
             Effect.andThen(
-              Effect.suspend(() =>
+              Effect.flatMap(Clock.currentTimeMillis, (now) =>
                 Effect.forEach(
-                  [...threads.values()].filter((one) => one.thread.role === 'coordinator'),
+                  [...threads.values()],
                   (one) =>
-                    run(retire(one)).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not retire an idle coordinator', cause))),
+                    run(
+                      Effect.gen(function* () {
+                        if (one.turnRunning || one.leadHeld) return
+                        if (canCompactWhileIdle(one)) {
+                          // A full coordinator stays awake through the cache window so it can compact before retiring.
+                          if (!idleCompactionDue(one, now, compactionIdle)) return
+                          if (one.thread.role !== 'coordinator' || Option.isNone(yield* limits.outAccount(one.account.id))) {
+                            yield* Queue.offer(one.wake, undefined)
+                            return
+                          }
+                        }
+                        if (one.thread.role === 'coordinator') yield* retire(one)
+                      }),
+                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not check an idle session', cause))),
                   { concurrency: 'unbounded', discard: true },
                 ),
               ),
