@@ -4,6 +4,7 @@ import {
   AltharLine,
   Checked,
   LinkButton,
+  logLines,
   Gallery,
   type GalleryShot,
   Markdown,
@@ -35,7 +36,7 @@ import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type 
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
-import { CanvasLines, logLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { FailedTurn } from '../../shared/WayOut'
 import { holdsItem, stopOf } from '../../shared/virtual'
 import { PublishedReport, reportText, ReviewReport } from './Reports'

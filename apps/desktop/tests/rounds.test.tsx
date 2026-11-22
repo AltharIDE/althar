@@ -252,6 +252,13 @@ describe('a task’s thread in rounds', () => {
       links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
       details: '{\n  "status": 200\n}',
     })
+    // A merge-queue send-back's failed jobs' logs reach its line too, to fold under it; its words stay one short line.
+    const logs = [{ name: 'test', url: 'https://ci/1', log: 'FAIL limit.test.ts', missing: null }]
+    const taken = items.notice({ source: 'runtime', title: 'The merge queue took PR #1 out: test failed.', logs }, null)
+    expect(asked([...answered, items.step(), when(taken, 50)]).find((block) => block.kind === 'althar')).toMatchObject({
+      text: 'The merge queue took PR #1 out: test failed.',
+      logs,
+    })
     // What the coordinator passed on is waited on as well, after a report too.
     const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
     expect(asked([...answered, items.step(), when(passed, 50)]).map((block) => block.kind)).toEqual(['you', 'round', 'relayed', 'waiting'])
