@@ -617,6 +617,76 @@ latest pick, and archived canvases a press away.
 - **On the coordinator's side,** a canvas it published reads the same in its
   thread.
 
+### A canvas of boards, for design work
+
+Added on 22 November 2026, for design engineers: a design is several
+screens, states, sizes and directions, compared side by side, the way a
+design tool lays out frames.
+
+- **A canvas of boards is a kind of its own, `boards`.** Its entry is
+  `canvas.json`: its pages in order, each a name and its boards, each board
+  a name, a file of the canvas (a page or a picture) and the width and
+  height it is drawn at. One page may be written as its boards alone.
+  Publishing refuses one whose boards' files aren't in the canvas, or whose
+  sizes are out of bounds, and says which.
+- **It is drawn on Althar's ground,** in the canvas's own view, as a page
+  canvas is. The view loads Althar's own empty page at the version's
+  `.althar/boards.html`, and the ground (`src/overlay/ground.ts`) runs in an
+  isolated world of it, as Point and comment's overlay does in a page's: it
+  builds each board as a frame of the canvas's own file, at the canvas's
+  own origin, so it reaches into each to point at a part, while the
+  boards' scripts never see it. It moves and scales them as one: scrolling
+  moves it, pinching zooms it. The view stays the only process the canvas
+  runs in; nothing of it is in Althar's window.
+- **It shows every board of a page, every page at once, or one board at a
+  time.** A page's boards wrap into as many lines as shows them largest in
+  the view. The panel's bar along the bottom (the kit's `BoardsBar`) holds
+  the page, every board or one at a time with a step through every page's
+  boards, the tools and the zoom. A press shows at once and the ground
+  confirms it. There is no viewport switch: the boards are the sizes.
+- **Pointing at a part is how the person says what to change.** The point
+  tool outlines and names the part under the pointer (a part the design
+  names with `data-part` first). A press takes it: the view steps aside for
+  a picture of the canvas, and the comment is written in Althar's window
+  over it. The comment's anchor is the element's, with its page and board,
+  and a crop goes with it as a picture. It waits in the draft, as every
+  comment does. Comments on parts are numbered pins on the boards, a draft's
+  drawn as one, matching the numbers in the panel's list, where an agent's
+  answer shows under its comment. The other tools are moving around and
+  using the boards as the pages they are.
+
+### Saving one to a repository
+
+A canvas lives in Althar until someone saves it to a folder in one of the
+project's repositories. Then it is in git with everything else, for people
+who never open Althar.
+
+- **The project keeps one place for artifacts:** a folder in one of its
+  repositories, how they go in (a pull request of their own, or straight to
+  the default branch), and whether each new version is committed. It is a
+  setting under Code and issues. The first save makes it: Althar's pick
+  is the first repository's design folder, with why.
+- **Save to repo, in the canvas's head, opens on that place** with the
+  canvas's own folder named in place, and Save. Somewhere else opens the
+  repository's folders as a tree, read at the default branch's head, and
+  can make the folder picked the place from now on. Saved, it says where
+  and at which commit, with its pull request. The newest version can be
+  committed, the folder moved, or saving stopped (what was committed
+  stays).
+- **Saving answers at once:** the canvas says it is saving. The runtime
+  writes the version's files in a worktree of its own, commits, and pushes
+  a branch with a pull request or the default branch. The canvas then says
+  how it went, with what to do where it failed. With each version
+  committed, a publish commits again. Comments stay in Althar.
+
+### Downloading one
+
+A canvas downloads as its own source (the Markdown, the diagram's words,
+the drawing, the picture), as its files in a folder, or as drawn: a PNG (one
+a board, for a canvas of boards), a PDF (a page a board), or a diagram's
+SVG. The main process draws what it needs in a hidden view in the canvas's
+partition, and writes where the person picks.
+
 ### A person's word back: comments and picks
 
 **Comments on a canvas are Point and comment's,** gathered by the same code
@@ -964,6 +1034,16 @@ need to draw, see, comment and draw again, across the project.
 | Briefs | The lead's and the coordinator's say when to draw one |
 | Proof | Runtime, main, window and kit tests, and `apps/desktop/e2e/canvases.spec.ts`, which draws, comments and draws again in the built app |
 
+The second slice, on 22 November 2026, for design work:
+
+| Part | Built |
+|---|---|
+| Boards | The `boards` kind from `canvas.json`, checked at publish; the ground in the canvas's view; every board, every page and one at a time, with the panel's bar; pointing at a part to comment, with its crop; numbered pins; the brief and the publish tool say when and how |
+| The Artifacts view | Cards with a picture of each (a page's and a canvas of boards' as last drawn), or the table; Filter by saved and by open comments; one opened beside the conversation that drew it, with a way back |
+| Saving to a repository | The project's place for artifacts, as a setting the first save makes; Save to repo with the tree for somewhere else; commits in a pull request of its own or to the default branch, each version or the one saved; stopping |
+| Downloads | Source, files, PNG, PDF and a diagram's SVG |
+| Proof | `apps/desktop/e2e/boards.spec.ts`, which lays out boards, shows them every way, and comments on a part, light and dark |
+
 **Not built yet:**
 
 - `canvas_look`, and the offscreen drawing with a snapshot bridge it
@@ -973,12 +1053,15 @@ need to draw, see, comment and draw again, across the project.
   view's debugger.
 - Picks: `group` is kept and listed, but directions don't show side by side
   with Choose.
-- Comments on an area of a picture and on an element of a page: those take
-  whole-canvas comments for now.
+- Comments on an area of a picture, and on an element of a page canvas
+  (a canvas of boards takes them): those take whole-canvas comments for
+  now.
 - Refusing hosts under the person's Never in the canvas partition: only
   Althar's own listeners are refused today.
-- The list's pictures, Save files, a task's Outputs' canvases, and
-  deleting a canvas.
+- A picture of a canvas no window has shown yet, a task's Outputs'
+  canvases, and deleting a canvas.
+- Boards that are an address in the task's running copy, rather than a file
+  of the canvas, and far boards drawn as pictures until they come near.
 
 ## Not now
 
@@ -994,10 +1077,9 @@ need to draw, see, comment and draw again, across the project.
     could also edit in their own tools.
   - Each can be loaded by an HTML canvas today.
 - **An infinite whiteboard** (tldraw, Excalidraw) as the canvas itself.
-- **Sharing a canvas off the computer**, as a link or a file to send.
-  Saving its files is the way for now.
-- **Copying a canvas into the repository** as a press. A lead can copy its
-  files there itself, as a change.
+- **Sharing a canvas off the computer** as a link. A canvas is shared by
+  saving it to a repository, or by downloading it; a link needs a service
+  Althar doesn't have, and people signed in to it.
 - **Drawing the person's MCP servers' views** (MCP Apps), above.
 
 ## Risks and open questions
