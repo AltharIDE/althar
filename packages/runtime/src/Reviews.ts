@@ -1811,6 +1811,8 @@ export class Reviews extends Context.Service<
                 said: `${name} runs ${copy.trust === 'full' ? 'as trusted' : 'safely'} already.`,
               } as const
             let said: string
+            // What the install printed is the lead's to read; the person's line says how it went, with the output folded under it.
+            let shown: { readonly title: string; readonly description: string; readonly details: string } | undefined
             if (asked === 'safe') {
               const installed = yield* installSafely(copy.path, review.baseCommit)
               // Its lockfile's packages from a git host or a tarball that didn't install, each by name and where it comes from.
@@ -1829,6 +1831,12 @@ export class Reviews extends Context.Service<
                   : installed.ok
                     ? `Runs ${name} safely: installed with \`${installed.command}\`, install scripts off, from the registries its base branch names. Its commands run offline in the sandbox.${missed}`
                     : `Runs ${name} safely, but not everything installed with its install scripts off (\`${installed.command}\`):\n${installed.printed}${missed}\nTrust fully runs them as the team's code does.`
+              if (installed.command !== null && !installed.ok)
+                shown = {
+                  title: `Runs ${name} safely, but not everything installed with its install scripts off.`,
+                  description: `${missed.trim()} Trust fully runs them as the team's code does.`.trim(),
+                  details: [`$ ${installed.command}`, ...(installed.printed === '' ? [] : [installed.printed])].join('\n'),
+                }
             } else
               said = review.outside
                 ? `Trusts ${name} fully: it is set up and runs as the team's code does, with its install scripts and the network.`
@@ -1847,12 +1855,20 @@ export class Reviews extends Context.Service<
                 })
               }),
             )
-            yield* addItem({ projectId: copy.projectId, threadId: copy.threadId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title: said.split('\n')[0] ?? said,
-              ...(said.includes('\n') ? { description: said.split('\n').slice(1).join('\n') } : {}),
-            })
+            // Where not everything installed: a line saying so, what's missing and what Trust fully does after it, and the
+            // install's command and output folded under it, never pasted into it.
+            yield* addItem(
+              { projectId: copy.projectId, threadId: copy.threadId },
+              'notice',
+              shown === undefined
+                ? {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: said.split('\n')[0] ?? said,
+                    ...(said.includes('\n') ? { description: said.split('\n').slice(1).join(' ') } : {}),
+                  }
+                : { source: 'runtime', severity: 'info', ...shown },
+            )
             // Its lead starts afresh to run it, in the role its trust gives it, told so.
             yield* sessions.moved(copy.threadId)
             yield* sessions
