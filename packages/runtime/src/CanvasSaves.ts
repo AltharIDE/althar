@@ -45,6 +45,7 @@ const Published = Schema.Struct({
 })
 const decodePublished = Schema.decodeUnknownEffect(Schema.fromJsonString(Published))
 const decodeChange = Schema.decodeUnknownOption(ChangeRequest)
+const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ title: Schema.String })))
 const suggestions = ['design/', 'designs/', 'docs/design/']
 const FOLDER_LIMIT = 5000
 
@@ -225,6 +226,32 @@ const make = Effect.gen(function* () {
       pullRequest,
     })} WHERE canvas_id = ${canvas.id} AND tracking = ${row.tracking}`.pipe(Effect.asVoid)
 
+  /** The key of asking the host to open the pull request for a save's commit: the same commit asks the same. */
+  const openKey = (canvas: CanvasRow, row: SaveRow, commit: string) => `open_change:canvas:${canvas.id}:${row.repositoryId}:${commit}`
+
+  /**
+   * Whether an open pull request no save recorded is the one Althar asked to open from `commit` and never heard back about:
+   * the asking's answer was lost (or the app stopped while asking), and the pull request is the account's, with the title
+   * asked. Where the host said no, or nothing was asked, or it is anyone else's, it isn't.
+   */
+  const openedLost = (
+    canvas: CanvasRow,
+    row: SaveRow,
+    commit: string,
+    open: ChangeRequest,
+    host: { readonly account: Effect.Effect<{ readonly login: string }, unknown> },
+  ) =>
+    Effect.gen(function* () {
+      const [asked] = yield* sql<{ request: string }>`SELECT request FROM mutation_receipts
+        WHERE project_id = ${canvas.projectId} AND idempotency_key = ${openKey(canvas, row, commit)}
+          AND state IN ('uncertain', 'intended') ORDER BY created_at DESC, rowid DESC LIMIT 1`
+      if (asked === undefined) return false
+      const title = Option.getOrUndefined(decodeAsked(asked.request))?.title
+      if (title !== open.title || open.author === null) return false
+      const account = yield* Effect.option(host.account)
+      return Option.isSome(account) && account.value.login.toLowerCase() === open.author.login.toLowerCase()
+    })
+
   const write = (canvas: CanvasRow, row: SaveRow, checkout: string, version: Version) =>
     Effect.gen(function* () {
       yield* stillWanted(canvas, row)
@@ -262,8 +289,14 @@ const make = Effect.gen(function* () {
           : yield* fetchedInto(checkout, remote.target, branch, `refs/althar/artifacts/${canvas.id}`).pipe(fault('fetch'))
       const knownBranch = head !== null && previous?.how === 'pr' && previous.commit === head
       // An open pull request is this artifact's only where it is the one its last save recorded, or, before one was
-      // recorded, where its branch's tip is that save's commit. Anything else is someone else's, never continued.
-      const ours = open === null || (previous?.pullRequest != null ? previous.pullRequest.number === open.number : knownBranch)
+      // recorded, where its last save's own asking to open it lost its answer, so the host may have opened it, and it is
+      // that one: from that save's commit, by the account Althar asked with, with the title it asked for. Anything else
+      // is someone else's, never continued, even from the commit Althar pushed.
+      const ours =
+        open === null ||
+        (previous?.pullRequest != null
+          ? previous.pullRequest.number === open.number
+          : knownBranch && head !== null && pr !== null && (yield* openedLost(canvas, row, head, open, pr.host)))
       if (!ours)
         return yield* refuse(
           `${row.repository} has a pull request open from ${branch} that Althar didn’t open for this artifact. Close it or rename its branch, then try again.`,
@@ -310,7 +343,7 @@ const make = Effect.gen(function* () {
         subject: { type: 'canvas', id: canvas.id },
         target: `${pr.host.product}:${pr.repository.path.join('/')}`,
         operation: 'open_change',
-        key: `open_change:canvas:${canvas.id}:${row.repositoryId}:${commit}`,
+        key: openKey(canvas, row, commit),
         request,
         retryable: true,
         stands: stillWanted(canvas, row),
