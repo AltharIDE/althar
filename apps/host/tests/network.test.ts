@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 
@@ -169,6 +169,18 @@ describe('opt-in HTTPS home configuration', () => {
       assert.deepStrictEqual(saved, options.network)
       yield* disableNetwork(options.profile)
       assert.isUndefined(yield* readNetworkConfiguration(options.profile))
+    }),
+  )
+
+  it.live('reports damaged settings and refuses to configure without HTTPS options', () =>
+    Effect.gen(function* () {
+      const { options } = fixture()
+      assert.strictEqual((yield* Effect.flip(configureNetwork({ ...options, network: undefined }))).code, 'InvalidConfig')
+      const path = join(options.profile, 'network.json')
+      writeFileSync(path, '{damaged', { mode: 0o600 })
+      assert.strictEqual((yield* Effect.flip(readNetworkConfiguration(options.profile))).code, 'InvalidConfig')
+      chmodSync(path, 0o644)
+      assert.include((yield* Effect.flip(readNetworkConfiguration(options.profile))).message, 'private')
     }),
   )
 

@@ -20,6 +20,20 @@ const pkg = (root: string, name: string, dependencies: Record<string, string> = 
 }
 
 describe('locked host dependency bundles', () => {
+  it('accepts a single-file build but refuses to overwrite a verifier in the destination', async () => {
+    const root = temporary()
+    const entry = join(root, 'althar-host.js')
+    const destination = temporary()
+    await copyHostAssets(entry, destination)
+    expect(existsSync(join(destination, 'assets'))).toBe(false)
+    mkdirSync(join(root, 'assets'))
+    writeFileSync(join(root, 'assets/verifier.js'), 'new verifier')
+    mkdirSync(join(destination, 'assets'))
+    writeFileSync(join(destination, 'assets/verifier.js'), 'existing verifier')
+    await expect(copyHostAssets(entry, destination)).rejects.toThrow()
+    expect(readFileSync(join(destination, 'assets/verifier.js'), 'utf8')).toBe('existing verifier')
+  })
+
   it('runs the relocated built entry and encodes a picture with its copied native dependencies', async () => {
     const destination = temporary()
     const entry = fileURLToPath(new URL('../dist/althar-host.js', import.meta.url))
