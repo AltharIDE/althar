@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  BOARDS_ENTRY,
   CANVAS_LIMITS,
   CANVASES_FOLDER,
   type CanvasAnchor,
@@ -15,6 +16,7 @@ import {
   type CanvasVersionFacts,
   isCanvasName,
   manifestBytes,
+  readBoards,
   type SentCanvasComment,
 } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
@@ -50,7 +52,7 @@ import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolRole, ToolServe
 
 /** What a lead's and the coordinator's brief says of canvases: when to draw one, and to look before saying it's done. */
 export const CANVAS_BRIEF =
-  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css).'
+  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css). Designs to compare side by side (screens, states, sizes, directions) go on one canvas of boards, its entry canvas.json, each board a page of the canvas at its own size; when the person points at a part of a board and says what to change, change that board and publish again.'
 
 type Input = Readonly<Record<string, unknown>>
 
@@ -107,7 +109,7 @@ export const entryAmong = (files: ReadonlyArray<CopyFile>, latest: string | null
   const paths = files.map((file) => file.path)
   if (latest !== null && paths.includes(latest)) return latest
   if (paths.length === 1) return paths[0] ?? null
-  for (const usual of ['index.html', 'index.htm', 'index.md', 'README.md', 'index.mmd', 'index.svg'])
+  for (const usual of [BOARDS_ENTRY, 'index.html', 'index.htm', 'index.md', 'README.md', 'index.mmd', 'index.svg'])
     if (paths.includes(usual)) return usual
   return null
 }
@@ -539,7 +541,15 @@ export class Canvases extends Context.Service<
           if (!read.files.some((file) => file.path === entry)) return yield* refuse(`${entry} isn’t in ${CANVASES_FOLDER}/${from}/.`)
           const kind = canvasKindOf(entry)
           if (kind === null)
-            return yield* refuse(`${entry} can’t be drawn: a canvas starts from a .md, .mmd, .svg, .png, .jpg, .gif, .webp or .html file.`)
+            return yield* refuse(
+              `${entry} can’t be drawn: a canvas starts from a .md, .mmd, .svg, .png, .jpg, .gif, .webp or .html file, or from ${BOARDS_ENTRY} for boards.`,
+            )
+          if (kind === 'boards') {
+            const words = read.files.find((file) => file.path === entry)
+            const paths = new Set(read.files.map((file) => file.path))
+            const boards = readBoards(new TextDecoder().decode(words?.bytes ?? new Uint8Array()), (path) => paths.has(path))
+            if (!boards.ok) return yield* refuse(`${CANVASES_FOLDER}/${from}/${entry} can’t be drawn: ${boards.why} Nothing was published.`)
+          }
           // The version it was made on: the agent's word, else the copy's record.
           const record = yield* copyOf(folder, from)
           const base = wholeIn(input, 'base') ?? (canvas !== null && record?.canvasId === canvas.id ? record.version : null)
@@ -650,7 +660,7 @@ export class Canvases extends Context.Service<
               case 'area':
                 return `on an area ${Math.round(anchor.x * 100)}% across and ${Math.round(anchor.y * 100)}% down, ${Math.round(anchor.width * 100)}% by ${Math.round(anchor.height * 100)}% of it`
               case 'element':
-                return `on ${anchor.label} (${anchor.selector})${anchor.text === '' ? '' : `: “${anchor.text}”`}`
+                return `on ${anchor.label} (${anchor.selector})${anchor.text === '' ? '' : `: “${anchor.text}”`}${anchor.board === undefined ? '' : ` on the board ${anchor.board}${anchor.page === undefined ? '' : ` of the page ${anchor.page}`}`}`
             }
           }
           const open = comments.filter((one) => one.resolved === null)
@@ -777,7 +787,7 @@ export class Canvases extends Context.Service<
         },
         {
           name: 'canvas_publish',
-          description: `Publishes a canvas from its files in your folder, ${CANVASES_FOLDER}/<name>/ (or from, a copy set aside), as a new version every lead, the coordinator and the person can see. Draw a canvas for what the person will look at again, iterate on, compare or pass on: a mockup, directions to choose between (the same group), a chart, a diagram to come back to, a page that explains a flow. What they read once belongs in your reply, and a diagram that only explains it in a mermaid block there. entry is the file drawn first: .md (Markdown, with mermaid blocks drawn), .mmd (Mermaid), .svg, a picture, or .html (a page of its own, which may load from the web or run against localhost; link its files relatively, style.css, never /style.css). A canvas that is already one is published on the version your copy came from, which Althar knows: if someone published since, nothing is published and their version is set aside beside yours to bring your change onto.`,
+          description: `Publishes a canvas from its files in your folder, ${CANVASES_FOLDER}/<name>/ (or from, a copy set aside), as a new version every lead, the coordinator and the person can see. Draw a canvas for what the person will look at again, iterate on, compare or pass on: a mockup, directions to choose between (the same group), a chart, a diagram to come back to, a page that explains a flow. What they read once belongs in your reply, and a diagram that only explains it in a mermaid block there. entry is the file drawn first: .md (Markdown, with mermaid blocks drawn), .mmd (Mermaid), .svg, a picture, or .html (a page of its own, which may load from the web or run against localhost; link its files relatively, style.css, never /style.css). For designs to lay side by side, as a design tool lays out frames (screens, states, sizes, directions), the entry is ${BOARDS_ENTRY}, a canvas of boards: {"pages":[{"name":"Checkout","boards":[{"name":"Desktop","file":"checkout/desktop.html","width":1440,"height":900},{"name":"Phone","file":"checkout/phone.html","width":390,"height":844}]}]}. Each board is a file of the canvas, a page or a picture, drawn at its width and height; a board’s name is its own on its page. The person points at a part of a board to say what to change, and that comes to you as a comment on its selector, board and page. A canvas that is already one is published on the version your copy came from, which Althar knows: if someone published since, nothing is published and their version is set aside beside yours to bring your change onto.`,
           input: {
             type: 'object',
             properties: {

@@ -84,6 +84,7 @@ const GLYPHS: Readonly<Record<CanvasKind, IconName>> = {
   svg: 'canvas',
   picture: 'image',
   html: 'globe',
+  boards: 'boards',
 }
 
 /* ——— None yet: what agents draw, small and faint, a wall of them ——— */
@@ -146,7 +147,7 @@ const DRAWINGS = [Mockup, Diagram, Chart, Document, Picture, Sequence]
 const WALL = Array.from({ length: 18 }, (_, i) => DRAWINGS[(i * 5 + Math.floor(i / 6) * 2) % DRAWINGS.length]!)
 
 /** The order the kinds are offered in, where the project has them. */
-const KINDS: ReadonlyArray<CanvasKind> = ['markdown', 'mermaid', 'svg', 'picture', 'html']
+const KINDS: ReadonlyArray<CanvasKind> = ['boards', 'html', 'markdown', 'mermaid', 'svg', 'picture']
 
 /** Numbers and times start newest or largest first; words start at A. */
 const FIRST_DESCENDING: ReadonlySet<SortKey> = new Set(['versions', 'comments', 'updated'])

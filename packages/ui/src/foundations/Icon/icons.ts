@@ -14,11 +14,13 @@ import {
   Clock,
   ClockRotateRight,
   CoffeeCup,
+  CursorPointer,
   Community,
   Compress,
   Cookie,
   Copy,
   Download,
+  DragHandGesture,
   Edit,
   EditPencil,
   Expand,
@@ -26,6 +28,7 @@ import {
   Frame,
   InfoCircle,
   GitBranch,
+  GitCommit,
   GitCompare,
   GitMerge,
   GitPullRequest,
@@ -39,6 +42,7 @@ import {
   Lock,
   LongArrowDownLeft,
   MediaImage,
+  MouseButtonLeft,
   Microphone,
   NavArrowDown,
   NavArrowLeft,
@@ -68,6 +72,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  ViewGrid,
   WarningCircle,
   WifiOff,
   Xmark,
@@ -206,6 +211,18 @@ export const ICONS = {
   cookie: Cookie,
   /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
   canvas: Palette,
+  /** A canvas of boards: designs laid side by side, every board of a page at once. */
+  boards: ViewGrid,
+  /** One board at a time, on a canvas of boards. */
+  board: Frame,
+  /** Pointing at a part of a board, to say something about it. */
+  point: CursorPointer,
+  /** Moving around a canvas by dragging it. */
+  hand: DragHandGesture,
+  /** Using a board as the page it is: its links and buttons take the press. */
+  use: MouseButtonLeft,
+  /** A commit, as git keeps what was saved to a repository. */
+  commit: GitCommit,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
   /** Something failed: the mark before the words that say what, in the danger colour. */

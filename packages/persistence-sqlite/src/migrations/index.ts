@@ -100,6 +100,7 @@ import { statements as sessionsByAgent } from './0095_sessions_by_agent'
 import { statements as homeEvents } from './0096_home_events'
 import { statements as finderIndex } from './0097_finder_index'
 import { statements as threadGoals } from './0098_thread_goals'
+import { statements as canvasBoards } from './0099_canvas_boards'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -217,6 +218,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0096_home_events', statements: homeEvents },
   { key: '0097_finder_index', statements: finderIndex },
   { key: '0098_thread_goals', statements: threadGoals },
+  { key: '0099_canvas_boards', statements: canvasBoards },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -10,8 +10,8 @@ import { Schema } from 'effect'
  * and addresses rather than restating them.
  */
 
-/** How a canvas is drawn, told by its entry's extension. */
-export const CanvasKind = Schema.Literals(['markdown', 'mermaid', 'svg', 'picture', 'html'])
+/** How a canvas is drawn, told by its entry's extension; a canvas of boards by its entry, `canvas.json`. */
+export const CanvasKind = Schema.Literals(['markdown', 'mermaid', 'svg', 'picture', 'html', 'boards'])
 export type CanvasKind = typeof CanvasKind.Type
 
 /** What one version may hold: as many files and bytes as one message's folder (MESSAGE_FILES), and a text the window reads whole. */
@@ -34,6 +34,9 @@ export const CANVAS_LIMITS = {
 /** A canvas's name, and a group's: lowercase words and hyphens, as an agent and the person can say it (`login-flow`). */
 export const isCanvasName = (name: string) => name.length <= CANVAS_LIMITS.name && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)
 
+/** The path under a version's address where Althar's own ground for a canvas of boards is served. */
+export const BOARDS_GROUND = '.althar/boards.html'
+
 /** Where an agent's working copies are, in the folder it starts from. */
 export const CANVASES_FOLDER = '.althar/canvases'
 
@@ -46,6 +49,7 @@ const extensionOf = (path: string) => EXTENSION.exec(path.toLowerCase())?.[1] ??
 
 /** How a canvas whose entry is at `path` is drawn; null for an entry Althar can't draw. */
 export const canvasKindOf = (path: string): CanvasKind | null => {
+  if (path === BOARDS_ENTRY) return 'boards'
   switch (extensionOf(path)) {
     case 'md':
     case 'markdown':
@@ -101,6 +105,125 @@ const TYPES: Readonly<Record<string, string>> = {
   webm: 'video/webm',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
+}
+
+/*
+ * A canvas of boards: designs laid side by side on pages, as a design tool
+ * lays out frames, each board a file of the canvas (a page or a picture)
+ * drawn at the size its agent gave it. Its entry, `canvas.json`, says which
+ * pages it has and which boards are on each; the boards are the canvas's own
+ * files, so pointing at a part of one reaches it. One page may be written
+ * as its boards alone.
+ */
+
+/** The entry of a canvas of boards. */
+export const BOARDS_ENTRY = 'canvas.json'
+
+export const BOARDS_LIMITS = {
+  pages: 40,
+  /** Boards in all of a canvas's pages. */
+  boards: 120,
+  /** A page's and a board's name, in characters. */
+  name: 80,
+  /** A board's width and height, in CSS pixels. */
+  smallest: 120,
+  largest: 10_000,
+} as const
+
+/** What a board can be: a page of its own, or a picture. */
+const BOARD_FILE = /\.(html?|svg|png|jpe?g|gif|webp|avif)$/i
+
+/** A board: its name, the file of the canvas drawn on it, and the size it is drawn at. */
+export const CanvasBoard = Schema.Struct({ name: Schema.String, file: Schema.String, width: Schema.Number, height: Schema.Number })
+export type CanvasBoard = typeof CanvasBoard.Type
+
+export const CanvasBoardsPage = Schema.Struct({ name: Schema.String, boards: Schema.Array(CanvasBoard) })
+export type CanvasBoardsPage = typeof CanvasBoardsPage.Type
+
+/** A canvas of boards, its pages in order. */
+export const CanvasBoards = Schema.Struct({ pages: Schema.Array(CanvasBoardsPage) })
+export type CanvasBoards = typeof CanvasBoards.Type
+
+export type ReadBoards = { readonly ok: true; readonly boards: CanvasBoards } | { readonly ok: false; readonly why: string }
+
+const isRecordOf = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * A canvas of boards read from its entry's words, checked against the files
+ * it holds (`has`): each page named, each board named once on its page, its
+ * file one of the canvas's pages or pictures, and its size whole pixels in
+ * bounds. What is wrong is said for the agent that wrote it.
+ */
+export const readBoards = (words: string, has: (path: string) => boolean): ReadBoards => {
+  let said: unknown
+  try {
+    said = JSON.parse(words)
+  } catch {
+    return { ok: false, why: `${BOARDS_ENTRY} isn’t JSON.` }
+  }
+  if (!isRecordOf(said)) return { ok: false, why: `${BOARDS_ENTRY} is an object with pages, or with the boards of its one page.` }
+  const listed = Array.isArray(said.pages)
+    ? said.pages
+    : Array.isArray(said.boards)
+      ? [{ name: typeof said.name === 'string' && said.name.trim() !== '' ? said.name : 'Page 1', boards: said.boards }]
+      : null
+  if (listed === null || listed.length === 0)
+    return {
+      ok: false,
+      why: `${BOARDS_ENTRY} has no pages: give it pages, each with a name and its boards, or the boards of its one page.`,
+    }
+  if (listed.length > BOARDS_LIMITS.pages)
+    return { ok: false, why: `It has ${listed.length} pages; a canvas can have at most ${BOARDS_LIMITS.pages}.` }
+  const pages: Array<CanvasBoardsPage> = []
+  const pageNames = new Set<string>()
+  let count = 0
+  for (const [at, page] of listed.entries()) {
+    if (!isRecordOf(page) || !Array.isArray(page.boards))
+      return { ok: false, why: `Page ${at + 1} is an object with a name and its boards.` }
+    const name = typeof page.name === 'string' ? page.name.trim() : ''
+    if (name === '' || name.length > BOARDS_LIMITS.name)
+      return { ok: false, why: `Page ${at + 1} needs a name of 1 to ${BOARDS_LIMITS.name} characters.` }
+    if (pageNames.has(name)) return { ok: false, why: `Two pages are called ${name}; each page’s name is its own.` }
+    pageNames.add(name)
+    if (page.boards.length === 0) return { ok: false, why: `${name} has no boards.` }
+    const boards: Array<CanvasBoard> = []
+    const boardNames = new Set<string>()
+    for (const [place, board] of page.boards.entries()) {
+      const where = `Board ${place + 1} of ${name}`
+      if (!isRecordOf(board)) return { ok: false, why: `${where} is an object with a name, a file, a width and a height.` }
+      const title = typeof board.name === 'string' ? board.name.trim() : ''
+      if (title === '' || title.length > BOARDS_LIMITS.name)
+        return { ok: false, why: `${where} needs a name of 1 to ${BOARDS_LIMITS.name} characters.` }
+      if (boardNames.has(title))
+        return { ok: false, why: `Two boards on ${name} are called ${title}; each board’s name on a page is its own.` }
+      boardNames.add(title)
+      const file = typeof board.file === 'string' ? board.file.replace(/^\.\//, '') : ''
+      if (file === '' || !BOARD_FILE.test(file))
+        return {
+          ok: false,
+          why: `${title} on ${name} needs a file: a page (.html) or a picture (.svg, .png, .jpg, .gif, .webp) of the canvas.`,
+        }
+      if (!has(file)) return { ok: false, why: `${title} on ${name} is drawn from ${file}, which isn’t in the canvas.` }
+      const size = (value: unknown) =>
+        typeof value === 'number' && Number.isInteger(value) && value >= BOARDS_LIMITS.smallest && value <= BOARDS_LIMITS.largest
+          ? value
+          : null
+      const width = size(board.width)
+      const height = size(board.height)
+      if (width === null || height === null)
+        return {
+          ok: false,
+          why: `${title} on ${name} needs a width and a height in whole pixels, from ${BOARDS_LIMITS.smallest} to ${BOARDS_LIMITS.largest.toLocaleString('en')}, such as 1440 by 900 or 390 by 844.`,
+        }
+      boards.push({ name: title, file, width, height })
+    }
+    count += boards.length
+    if (count > BOARDS_LIMITS.boards)
+      return { ok: false, why: `It has more than ${BOARDS_LIMITS.boards} boards; a canvas can have at most that many.` }
+    pages.push({ name, boards })
+  }
+  return { ok: true, boards: { pages } }
 }
 
 /** The type a file of a canvas is served as, by its extension; anything else as bytes. */
@@ -181,6 +304,9 @@ export const CanvasAnchor = Schema.Union([
     selector: Schema.String,
     label: Schema.String,
     text: Schema.String,
+    /** On a canvas of boards, the page and the board it is on, by their names. */
+    page: Schema.optional(Schema.String),
+    board: Schema.optional(Schema.String),
   }),
 ])
 export type CanvasAnchor = typeof CanvasAnchor.Type

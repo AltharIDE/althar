@@ -310,6 +310,45 @@ describe('a project’s canvases', () => {
     ),
   )
 
+  it.live('draw a canvas of boards from its canvas.json, and refuse one whose boards aren’t all there', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected
+        const { first } = yield* project(setup)
+        const publish = (args: Record<string, unknown>) => ask(setup, first.access, 'canvas_publish', args)
+        const boards = (pages: unknown) => JSON.stringify({ pages })
+        const page = '<!doctype html><title>Checkout</title>'
+        draw(first.folder, 'checkout', {
+          'canvas.json': boards([{ name: 'Checkout', boards: [{ name: 'Desktop', file: 'desktop.html', width: 1440, height: 900 }] }]),
+          'desktop.html': page,
+          'phone.html': page,
+        })
+        // canvas.json is drawn first where the agent names no entry, before an index.
+        assert.include(yield* publish({ name: 'checkout' }), 'drawn from canvas.json (boards)')
+
+        writeFileSync(
+          join(first.folder, CANVASES_FOLDER, 'checkout', 'canvas.json'),
+          boards([{ name: 'Checkout', boards: [{ name: 'Phone', file: 'gone.html', width: 390, height: 844 }] }]),
+        )
+        assert.include(yield* publish({ name: 'checkout' }), 'Phone on Checkout is drawn from gone.html, which isn’t in the canvas.')
+        writeFileSync(
+          join(first.folder, CANVASES_FOLDER, 'checkout', 'canvas.json'),
+          boards([{ name: 'Checkout', boards: [{ name: 'Phone', file: 'phone.html', width: 39, height: 844 }] }]),
+        )
+        assert.include(yield* publish({ name: 'checkout' }), 'needs a width and a height in whole pixels')
+        writeFileSync(join(first.folder, CANVASES_FOLDER, 'checkout', 'canvas.json'), '{ not json')
+        assert.include(yield* publish({ name: 'checkout' }), 'canvas.json isn’t JSON. Nothing was published.')
+
+        // One page may be written as its boards alone.
+        writeFileSync(
+          join(first.folder, CANVASES_FOLDER, 'checkout', 'canvas.json'),
+          JSON.stringify({ boards: [{ name: 'Phone', file: './phone.html', width: 390, height: 844 }] }),
+        )
+        assert.include(yield* publish({ name: 'checkout', note: 'A phone' }), 'Published checkout v2 on v1')
+      }),
+    ),
+  )
+
   it.live('are given to every lead and the coordinator whole, and to reviewers only to read', () =>
     Effect.scoped(
       Effect.gen(function* () {
