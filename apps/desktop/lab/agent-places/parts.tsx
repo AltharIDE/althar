@@ -20,7 +20,8 @@ import m from '../../../../packages/ui/src/chrome/LoadMeter/LoadMeter.module.css
 import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
 import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../packages/ui/src/fixtures/plan'
 import h from '../../src/renderer/features/homes/Homes.module.css'
-import { SLOTS, type Worker } from './data'
+import { freeOf, SLOTS, type Worker } from './data'
+import { Glyph } from './glyph'
 import type { Ctx } from './types'
 import { words } from './words'
 import s from './parts.module.css'
@@ -57,14 +58,14 @@ export function Gauges({ load }: { load: LoadGlance }) {
   )
 }
 
-/** The Homes chip as built: Homes on this computer's own home; the home's name where the window is connected to one. */
+/** The Homes chip as built: Homes on this computer's own home; the home's name where the window is connected to one, a cloud for one hosted. */
 function HomesChip({ ctx }: { ctx: Ctx }) {
   const open = () => ctx.say('Opens the homes menu, as it is')
   if (ctx.pov === 'local') return <ChromeButton icon="plug" label="Homes" compact onClick={open} />
   return (
     <span className={h.chipRow}>
-      <button type="button" className={h.chip} title={ctx.home.address ?? ''} onClick={open}>
-        <Icon name="home" size={13} />
+      <button type="button" className={h.chip} title={ctx.home.address ?? ctx.home.model} onClick={open}>
+        {ctx.pov === 'cloud' ? <Glyph kind="cloud" size={13} /> : <Icon name="home" size={13} />}
         <span className={h.chipName}>{ctx.home.name}</span>
       </button>
     </span>
@@ -141,6 +142,72 @@ function Figure({ name, figure, total, ours }: { name: string; figure: string; t
         </span>
       )}
     </div>
+  )
+}
+
+/** A reading in the popover's form: its name and figure, a bar, and a line under it. */
+export function Reading({
+  name,
+  figure,
+  share,
+  ours = 0,
+  note,
+}: {
+  name: string
+  figure: string
+  share: number
+  ours?: number
+  note?: ReactNode
+}) {
+  return (
+    <div className={lp.row}>
+      <span className={lp.name}>{name}</span>
+      <span className={lp.figure}>{figure}</span>
+      <SplitBar total={share} ours={ours} />
+      {note !== undefined && note !== null && <span className={lp.work}>{note}</span>}
+    </div>
+  )
+}
+
+/** Agents at work across the home's computers and runners, of as many as could work; the hosted home runs none itself. */
+export const across = (ctx: Ctx) => {
+  const reached = ctx.workers.filter((one) => one.offline === null && !one.home)
+  const runners = ctx.runners
+  const atWork = reached.reduce((n, one) => n + one.agents.length, 0) + (runners?.running.length ?? 0)
+  const most = reached.reduce((n, one) => n + one.atOnce, 0) + (runners?.atOnce ?? 0)
+  const free = reached.reduce((n, one) => n + freeOf(one), 0) + Math.max(0, (runners?.atOnce ?? 0) - (runners?.running.length ?? 0))
+  return { atWork, most, free }
+}
+
+/** A home hosted in Althar Cloud, in its readings' place: always on, where, its agents across its computers, its storage. */
+export function HostedReadings({ ctx, worker, region = true }: { ctx: Ctx; worker: Worker; region?: boolean }) {
+  const hosted = worker.hosted!
+  const { atWork, most, free } = across(ctx)
+  return (
+    <>
+      <div className={s.status}>
+        <span className={s.statusLine}>
+          <i className={s.ok} aria-hidden="true" />
+          {words.alwaysOn}
+        </span>
+        <span className={s.statusNote}>{region ? `${hosted.region} · Althar ${worker.version}` : `Althar ${worker.version}`}</span>
+      </div>
+      <div className={lp.machine}>
+        <Reading
+          name={words.agents}
+          figure={words.atWork(atWork)}
+          share={atWork / Math.max(1, most)}
+          ours={atWork / Math.max(1, most)}
+          note={ctx.waiting.length > 0 ? words.waiting(ctx.waiting.length) : free > 0 ? words.room(free) : undefined}
+        />
+        <Reading
+          name={words.storage}
+          figure={words.storageFigure(hosted.storage, hosted.room)}
+          share={hosted.storage / hosted.room}
+          note={words.projects(hosted.projects)}
+        />
+      </div>
+    </>
   )
 }
 
@@ -303,9 +370,9 @@ export function Peek({
         <h2 className={lp.heading}>{worker.name}</h2>
         {side !== undefined && <span className={s.side}>{side}</span>}
       </span>
-      <Readings worker={worker} load={load} waiting={waiting} />
+      {worker.hosted !== null ? <HostedReadings ctx={ctx} worker={worker} /> : <Readings worker={worker} load={load} waiting={waiting} />}
       {between}
-      {worker.offline === null && <Running ctx={ctx} load={load} close={close} title={running} />}
+      {worker.offline === null && worker.hosted === null && <Running ctx={ctx} load={load} close={close} title={running} />}
       {after}
       {foot}
     </div>
@@ -344,6 +411,29 @@ export function Slider({
         ...(worker.here ? {} : { mark: () => words.mark(worker), value: (n: number) => String(n) }),
         note: (n, machine) => (n === worker.configured && said !== null ? said : agentsAtOnceText.note(n, machine)),
         short: short ?? lowered ?? agentsAtOnceText.short,
+      }}
+    />
+  )
+}
+
+/** Runners at once, on the kit's own slider: the home's number of cloud runners, Althar's suggestion marked. */
+export function RunnersSlider({ ctx, compact, short }: { ctx: Ctx; compact: boolean; short?: string }) {
+  const runners = ctx.runners!
+  return (
+    <AgentsAtOnce
+      compact={compact}
+      count={runners.atOnce}
+      own={runners.atOnce !== runners.suggested}
+      machine={{ count: runners.suggested, memory: 16, cores: 4 }}
+      most={ctx.most}
+      onChange={(n) => ctx.setRunners(n)}
+      text={{
+        title: words.runnersAtOnce,
+        mark: () => `${runners.suggested} · suggested`,
+        value: (n: number) => String(n),
+        note: (n) => (n === runners.suggested ? 'Each runs one task, then stops' : `${words.dollars(n * 0.42)} an hour with all at work`),
+        short: short ?? words.runnersNow(runners),
+        reset: 'Use the suggestion',
       }}
     />
   )

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { LoadGlance } from '@althar/ui'
 
-import type { Pov, Waiting, Worker } from './data'
+import type { Pov, Runners, Waiting, Worker } from './data'
 
 /** What the window, the bar and Settings draw from, and what they can do in the lab. */
 export interface Ctx {
@@ -25,9 +25,15 @@ export interface Ctx {
   /** Whether a worker takes new tasks. */
   taking: (worker: string) => boolean
   setTaking: (worker: string, on: boolean) => void
-  /** On studio: This Mac runs its tasks too. */
+  /** On studio or in the cloud: This Mac runs the home's tasks too. */
   lent: boolean
   setLent: (on: boolean) => void
+  /** The home's cloud runners, where it uses them. */
+  runners: Runners | null
+  /** Their number; null goes back to the suggestion. */
+  setRunners: (n: number | null) => void
+  setAuto: (on: boolean) => void
+  setLimit: (limit: number | null) => void
   /** Opens a task, from a row. */
   onOpen: (id: string) => void
   /** Says in the lab's bar what a press would do. */
@@ -55,16 +61,14 @@ export interface Place {
   worker: string | null
 }
 
-/** A take on Settings: its side, its sections, and where a worker opens. */
+/** How a take tells the computers apart: a word over each name, headings over groups, or a picture of each. */
+export type Label = 'words' | 'sections' | 'pictures'
+
+/** A take on Computers: B's modules, each told apart its own way. */
 export interface Take {
   key: string
   kbd: string
   label: string
   idea: string
-  /** Where Settings opens on a worker, or with none. */
-  at: (ctx: Ctx, worker: string | null) => Place
-  /** The side, with the quick cards where the take puts them. */
-  side: (ctx: Ctx, place: Place, go: (place: Place) => void, cards: ReactNode) => ReactNode
-  /** The section open; null for one the lab doesn't draw. */
-  page: (ctx: Ctx, place: Place, go: (place: Place) => void) => Page | null
+  style: Label
 }

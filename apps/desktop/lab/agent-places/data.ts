@@ -6,22 +6,24 @@ import { card } from '../../tests/fixtures'
 
 /*
  * What the lab draws from: the window's home and its workers, the home first.
- * The home is this Mac, or a home the window is connected to (studio), and is
- * a worker too. Each worker has its agents (the runtime's `WorkPlaces`: how
+ * The home is this Mac, a home the window is connected to (studio), or a home
+ * hosted in Althar Cloud; the first two are workers too, the hosted one runs
+ * no agents of its own. Any home may also start cloud runners, a runner a
+ * task, while tasks would wait (ADR-103). Each worker has its agents (the runtime's `WorkPlaces`: how
  * many work, its number, a number lowered for now and each agent's task), how
  * hard it works (`GetLoad`), whether it can be reached, and what it is. Made
  * up, and the same on every load: the runtime knows this Mac's agents and
  * load, and only a worker's id, its agents and whether it is busy (#1120).
  */
 
-/** Where the window is: on this computer's own home, or connected to studio. */
-export type Pov = 'local' | 'remote'
+/** Where the window is: on this computer's own home, connected to studio, or to a home hosted in Althar Cloud. */
+export type Pov = 'local' | 'remote' | 'cloud'
 
 export const SCENES = [
   { key: 'memory', label: 'Lowered' },
-  { key: 'full', label: 'All at work' },
-  { key: 'down', label: 'One offline' },
-  { key: 'calm', label: 'Room to spare' },
+  { key: 'full', label: 'Busy' },
+  { key: 'down', label: 'Offline' },
+  { key: 'calm', label: 'Calm' },
 ] as const
 export type Scene = (typeof SCENES)[number]['key']
 
@@ -64,6 +66,17 @@ export interface Places {
 
 export type Provider = 'Claude Code' | 'Codex'
 
+/** What a computer is, as its picture draws it. */
+export type Kind = 'laptop' | 'desktop' | 'server' | 'gpu' | 'cloud'
+
+/** A home hosted in Althar Cloud: where, and how much of its room its projects take. */
+export interface Hosted {
+  readonly region: string
+  readonly storage: number
+  readonly room: number
+  readonly projects: number
+}
+
 /** A computer the home runs work on: the home itself, this Mac, or one enrolled. */
 export interface Worker extends Places {
   readonly id: string
@@ -73,6 +86,11 @@ export interface Worker extends Places {
   /** The window's home: it keeps the projects and runs the coordinator. */
   readonly home: boolean
   readonly system: 'macOS' | 'Linux'
+  readonly kind: Kind
+  /** What it is, in a word or two: MacBook Pro, Linux server. */
+  readonly model: string
+  /** Hosted in Althar Cloud, where it is; null for a computer of the person's own. */
+  readonly hosted: Hosted | null
   /** Where the home reaches it; this Mac has none of its own. */
   readonly address: string | null
   /** The agents signed in on it, which it can run. */
@@ -166,6 +184,30 @@ const TASKS = {
     project: 'Tessera',
     ...claude,
   },
+  flaky: {
+    title: 'Fix the flaky checkout test',
+    long: 'Fix the flaky checkout test that times out when the payment sandbox is slow',
+    project: 'Meridian',
+    ...claude,
+  },
+  docs: {
+    title: 'Write the API reference',
+    long: 'Write the API reference from the OpenAPI file and check every example runs',
+    project: 'Halyard',
+    ...codex,
+  },
+  icons: {
+    title: 'Swap the icon set',
+    long: 'Swap the icon set for Iconoir and check every screen at both sizes',
+    project: 'Tessera',
+    ...claude,
+  },
+  seed: {
+    title: 'Seed the staging database',
+    long: 'Seed the staging database with a month of anonymised orders',
+    project: 'Meridian',
+    ...codex,
+  },
 } as const
 type TaskKey = keyof typeof TASKS
 
@@ -192,6 +234,9 @@ interface Draft {
   here?: boolean
   home?: boolean
   system?: Worker['system']
+  kind?: Kind
+  model?: string
+  hosted?: Hosted
   address?: string
   providers?: Provider[]
   version?: string
@@ -209,6 +254,9 @@ const worker = (draft: Draft): Worker => ({
   here: draft.here ?? false,
   home: draft.home ?? false,
   system: draft.system ?? 'Linux',
+  kind: draft.kind ?? 'server',
+  model: draft.model ?? 'Linux server',
+  hosted: draft.hosted ?? null,
   address: draft.address ?? null,
   providers: draft.providers ?? ['Claude Code', 'Codex'],
   version: draft.version ?? '0.9.4',
@@ -236,6 +284,8 @@ const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
       here: true,
       home: true,
       system: 'macOS',
+      kind: 'laptop',
+      model: 'MacBook Pro',
       machine: mac,
       agents,
       cpu,
@@ -249,6 +299,8 @@ const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
       id: 'mac-mini',
       name: 'mac-mini',
       system: 'macOS',
+      kind: 'desktop',
+      model: 'Mac mini',
       address: 'mac-mini.tail9c2e.ts.net',
       providers: ['Claude Code'],
       machine: mini,
@@ -264,6 +316,8 @@ const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
           worker({
             id: 'gpu',
             name: 'gpu-box',
+            kind: 'gpu',
+            model: 'GPU server',
             address: 'gpu-box.tail9c2e.ts.net',
             providers: ['Codex'],
             machine: { count: 6, memory: 128, cores: 32 },
@@ -347,29 +401,97 @@ const localOf = (scene: Scene, crowded: boolean, alone: boolean): Worker[] => {
 /** studio, a home on a server the window is connected to, a worker too: in this Mac's place, its agents and load. */
 export const STUDIO = { name: 'studio', address: 'studio.tail9c2e.ts.net', version: '0.9.3', latest: '0.9.4' } as const
 
+/** A home hosted in Althar Cloud. */
+export const CLOUD = { name: 'Althar Cloud', region: 'Frankfurt' } as const
+
 /**
  * The window's home and its workers, the home first, and This Mac, among them or not. On studio, the server takes
  * this Mac's place, and the mac-mini serves this computer only; this Mac is one of studio's workers only where it
- * is lent.
+ * is lent. Hosted in Althar Cloud, the home runs no agents: its runners and the computers that joined it do.
  */
 export const workersOf = (scene: Scene, crowded: boolean, alone: boolean, pov: Pov, lent: boolean): { workers: Worker[]; mac: Worker } => {
   const local = localOf(scene, crowded, alone)
   if (pov === 'local') return { workers: local, mac: local[0]! }
   const [mac, ...rest] = local
+  const lentMac: Worker = { ...mac!, home: false, agents: [], cpu: 0.14, memory: 0.46, atOnce: mac!.configured, why: null }
+  const others = [...rest.filter((one) => one.id !== 'mac-mini'), ...(lent ? [lentMac] : [])]
+  if (pov === 'cloud') {
+    const hosted = worker({
+      id: 'cloud',
+      name: CLOUD.name,
+      home: true,
+      kind: 'cloud',
+      model: `Hosted in ${CLOUD.region}`,
+      hosted: { region: CLOUD.region, storage: 4.2, room: 20, projects: 3 },
+      machine: { count: 0, memory: 8, cores: 2 },
+      agents: [],
+      cpu: 0.12,
+      memory: 0.34,
+    })
+    return { workers: [hosted, ...others], mac: lentMac }
+  }
   const studio: Worker = {
     ...mac!,
     id: 'studio',
     name: STUDIO.name,
     here: false,
     system: 'Linux',
+    kind: 'server',
+    model: 'Linux server',
     address: STUDIO.address,
     version: STUDIO.version,
     machine: { count: 6, memory: 32, cores: 8 },
     configured: 6,
     atOnce: mac!.why === null ? 6 : mac!.atOnce,
   }
-  const lentMac: Worker = { ...mac!, home: false, agents: [], cpu: 0.14, memory: 0.46, atOnce: mac!.configured, why: null }
-  return { workers: [studio, ...rest.filter((one) => one.id !== 'mac-mini'), ...(lent ? [lentMac] : [])], mac: lentMac }
+  return { workers: [studio, ...others], mac: lentMac }
+}
+
+/* ---- cloud runners ----------------------------------------------------------------------------------------- */
+
+/** A runner at work: Althar Cloud starts one for a task and retires it once the task's turn is done. */
+export interface Run {
+  readonly taskId: string
+  readonly title: string
+  readonly project: string
+  readonly agent: Provider
+  readonly mark: Brand
+  /** How long it has run. */
+  readonly for: string
+}
+
+/** The home's cloud runners: how many at once, those at work, and this month's spend against its limit. */
+export interface Runners {
+  readonly atOnce: number
+  /** Althar's suggestion, for the slider's mark. */
+  readonly suggested: number
+  readonly running: readonly Run[]
+  /** Dollars this month. */
+  readonly spent: number
+  readonly limit: number | null
+  /** Starts one when a task would wait; else only a task's Run in cloud does. */
+  readonly auto: boolean
+  readonly region: string
+  /** Each runner's size. */
+  readonly size: string
+}
+
+const run = (key: TaskKey, time: string, crowded: boolean): Run => {
+  const task = TASKS[key]
+  return { taskId: key, title: crowded ? task.long : task.title, project: task.project, agent: task.agent, mark: task.mark, for: time }
+}
+
+/** The runners as a scene has them, before the person's own number, switch and limit. */
+export const runnersOf = (scene: Scene, crowded: boolean): Omit<Runners, 'atOnce' | 'auto' | 'limit'> => {
+  const r = (key: TaskKey, time: string) => run(key, time, crowded)
+  const running = {
+    memory: [r('flaky', '14 min'), r('docs', '6 min')],
+    full: [r('flaky', '31 min'), r('docs', '22 min'), r('icons', '9 min'), r('seed', '2 min')],
+    down: [r('flaky', '8 min')],
+    calm: [],
+  }[scene]
+  const spent = { memory: 12.4, full: 36.8, down: 8.1, calm: 3.2 }[scene]
+  return { suggested: crowded ? 6 : 4, running, spent, region: CLOUD.region, size: '4 cores · 16 GB' }
 }
 
 /* ---- what waits for an agent ----------------------------------------------------------- */
@@ -381,9 +503,10 @@ export interface Waiting {
   readonly project: string
 }
 
-/** What waits, on every board: nothing while a worker that can be reached could start one more. */
-export const waitingOf = (workers: readonly Worker[], crowded: boolean): Waiting[] => {
+/** What waits, on every board: nothing while a worker that can be reached, or a runner, could start one more. */
+export const waitingOf = (workers: readonly Worker[], runners: Runners | null, crowded: boolean): Waiting[] => {
   if (workers.some((one) => one.offline === null && freeOf(one) > 0)) return []
+  if (runners !== null && runners.auto && runners.running.length < runners.atOnce) return []
   return [
     { taskId: 'line-0', title: 'Dark mode for Settings', project: 'Meridian' },
     { taskId: 'else-0', title: 'Bump Node to 24 in CI', project: 'Halyard' },
@@ -426,10 +549,10 @@ const permission: BoardCall = {
 }
 
 /** Meridian's board: what runs there on any computer, what waits in Up next for an agent, a call and something settled. */
-export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[]): Lanes => {
+export const boardOf = (workers: readonly Worker[], runners: Runners | null, waiting: readonly Waiting[]): Lanes => {
   const here = workers[0]!
   const queued = { busy: here.agents.length, atOnce: here.atOnce }
-  const mine = workers.flatMap((one) => one.agents).filter((one) => one.project === 'Meridian')
+  const mine = [...workers.flatMap((one) => one.agents), ...(runners?.running ?? [])].filter((one) => one.project === 'Meridian')
   const running = [...new Map(mine.map((one) => [one.taskId, one])).values()].map((one) =>
     task({
       taskId: one.taskId,
@@ -437,7 +560,7 @@ export const boardOf = (workers: readonly Worker[], waiting: readonly Waiting[])
       title: one.title,
       slug: one.taskId,
       phase: 'running',
-      step: one.role === 'reviewer' ? 'review' : 'implement',
+      step: 'role' in one && one.role === 'reviewer' ? 'review' : 'implement',
       startedAt: '2026-11-21T18:31:00.000Z',
     }),
   )
@@ -513,6 +636,10 @@ const SHARE: Record<TaskKey, { cpu: number; memory: number }> = {
   cache: { cpu: 0.14, memory: 1.1 },
   emails: { cpu: 0.06, memory: 0.8 },
   export: { cpu: 0.07, memory: 1.3 },
+  flaky: { cpu: 0.1, memory: 1.2 },
+  docs: { cpu: 0.06, memory: 0.9 },
+  icons: { cpu: 0.08, memory: 1.1 },
+  seed: { cpu: 0.12, memory: 1.5 },
 }
 
 /** A worker's reading as the load meter draws it: its work by task, most CPU first; this Mac's with Althar's own. */

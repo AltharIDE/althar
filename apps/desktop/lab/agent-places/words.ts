@@ -1,5 +1,5 @@
 import { percent } from '../../../../packages/ui/src/chrome/LoadMeter/load'
-import { isLowered, type Places, type Why, type Worker } from './data'
+import { isLowered, type Places, type Runners, type Why, type Worker } from './data'
 
 /*
  * What the lab says, as little as each place needs. An agent place is an
@@ -8,6 +8,8 @@ import { isLowered, type Places, type Why, type Worker } from './data'
  */
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+const dollars = (n: number) => `$${n % 1 === 0 ? n : n.toFixed(2)}`
 
 /** Until when the number stays lowered: it comes back by itself. */
 const UNTIL: Record<Why, string> = { memory: 'until memory frees up', cpu: 'until the CPU frees up' }
@@ -72,4 +74,48 @@ export const words = {
   },
   /** The devices a home on a server is opened from. */
   devices: 'This Mac, and an iPhone 2 days ago',
+
+  /* ---- what each is, and where ---- */
+
+  /** The groups of Computers, where the take heads them. */
+  yours: 'Your computers',
+  cloud: 'Althar Cloud',
+
+  /* ---- a home hosted in Althar Cloud ---- */
+
+  alwaysOn: 'Always on',
+  storage: 'Storage',
+  storageFigure: (used: number, room: number) => `${used} GB of ${room} GB`,
+  projects: (n: number) => plural(n, 'project'),
+  region: 'Region',
+  /** Agents at work across the home's runners and computers, and what waits or how many more could start. */
+  atWork: (n: number) => `${n} at work`,
+  room: (n: number) => `Room for ${n} more`,
+
+  /* ---- cloud runners ---- */
+
+  runners: 'Cloud runners',
+  runnersAtOnce: 'Runners at once',
+  /** The runners' count, beside the big figure. */
+  runnersOf: (runners: Runners) => `of ${runners.atOnce} runners`,
+  runnersFigure: (runners: Runners) => `${runners.running.length} of ${runners.atOnce}`,
+  runnersNow: (runners: Runners) => (runners.running.length === 0 ? 'None running' : `${runners.running.length} running`),
+  autoTitle: 'Start one when a task would wait',
+  autoNote: 'Off, a runner starts only from a task’s Run in cloud.',
+  /** How a runner starts, at a glance. */
+  starts: (runners: Runners) => (runners.auto ? 'Starts when a task would wait' : 'Starts from Run in cloud'),
+  thisMonth: 'This month',
+  spend: (runners: Runners) => (runners.limit === null ? dollars(runners.spent) : `${dollars(runners.spent)} of ${dollars(runners.limit)}`),
+  resets: 'Resets on 1 December',
+  limitTitle: 'Monthly limit',
+  limitNote: 'At the limit no runner starts; those at work finish.',
+  noLimit: 'No limit',
+  dollars,
+  each: 'Each runner',
+  signedIn: 'With the home’s sign-ins',
+  more: (n: number) => `and ${n} more`,
+  running: 'Running',
+  stopRunners: 'Stop using cloud runners',
+  /** A runner's line: its project and how long it has run. */
+  run: (project: string, time: string) => `${project} · ${time}`,
 }
