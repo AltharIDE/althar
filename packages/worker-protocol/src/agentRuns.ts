@@ -475,15 +475,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         () => run?.id === id && ownsRun(run),
         send,
         (message) => fail(status.INVALID_ARGUMENT, message),
-        (providerId, withSkills, withCheckout) =>
-          slot?.capabilities.some(
-            (cap) =>
-              cap.projectId === placement.projectId &&
-              cap.providerId === providerId &&
-              cap.helperAgents &&
-              (!withSkills || cap.helperSkillFiles) &&
-              (!withCheckout || cap.helperCheckouts),
-          ) === true,
+        (providerId, withSkills, withCheckout) => {
+          const cap = slot?.capabilities.find((each) => each.projectId === placement.projectId && each.providerId === providerId)
+          if (cap === undefined) return 'agent'
+          // What it lacks is what a newer worker reports it can do.
+          return cap.helperAgents && (!withSkills || cap.helperSkillFiles) && (!withCheckout || cap.helperCheckouts) ? undefined : 'update'
+        },
         capability?.managedPreview === true
           ? {
               open: (commandId, port, active, signal) =>

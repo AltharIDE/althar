@@ -590,10 +590,10 @@ void test('managed output and stop stay attached to the selected task lease', { 
       received.push(Buffer.from(bytes).toString())
     },
   }
-  await rejects(agent.startHelper({ ...options, providerId: 'different' }), /cannot start the selected helper/i)
+  await rejects(agent.startHelper({ ...options, providerId: 'different' }), /doesn’t have the helper’s agent/i)
   await rejects(
     agent.startHelper({ ...options, providerId, skills: [{ path: 'SKILL.md', data: Buffer.from('Helper'), executable: false }] }),
-    /cannot start the selected helper/i,
+    /Update this worker to start this helper/i,
   )
   const waitingHelper = agent.startHelper({ ...options, providerId })
   const helperStart = await worker.read()

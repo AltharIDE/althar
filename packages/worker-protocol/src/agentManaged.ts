@@ -66,7 +66,8 @@ export const makeManagedCommands = (
   ownsRun: () => boolean,
   send: (payload: HomePayload) => Promise<void>,
   invalid: (message: string) => void,
-  helperAvailable: (providerId: string, withSkills: boolean, withCheckout: boolean) => boolean,
+  /** Why the worker can't start a helper of this agent, with skills or a checkout: it hasn't the agent, or is too old; none where it can. */
+  helperUnfit: (providerId: string, withSkills: boolean, withCheckout: boolean) => 'agent' | 'update' | undefined,
   previews?: {
     readonly open: (commandId: string, port: number, active: () => boolean, signal?: AbortSignal) => Promise<Duplex>
     readonly close: (commandId: string) => void
@@ -83,10 +84,10 @@ export const makeManagedCommands = (
     if (!ownsRun()) return Promise.reject(new Error('The worker no longer owns this checkout.'))
     const helper = 'providerId' in input
     const checkout = helper ? input.checkout : undefined
-    if (helper ? !helperAvailable(input.providerId, input.skills !== undefined, checkout !== undefined) : !available)
-      return Promise.reject(
-        new Error(helper ? 'Update this worker to start helpers on it.' : 'Update this worker to start project commands.'),
-      )
+    const unfit = helper ? helperUnfit(input.providerId, input.skills !== undefined, checkout !== undefined) : undefined
+    if (unfit === 'agent') return Promise.reject(new Error('This worker doesn’t have the helper’s agent for this project.'))
+    if (unfit === 'update') return Promise.reject(new Error('Update this worker to start this helper on it.'))
+    if (!helper && !available) return Promise.reject(new Error('Update this worker to start project commands.'))
     if (active.size >= MAX_COMMANDS || active.has(input.id)) return Promise.reject(new Error('This worker checkout has too many commands.'))
     if (
       !validWorkerProtocolId(input.id, 'proc_') ||

@@ -585,7 +585,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                     catch: () => refuse('Althar couldn’t read the skills chosen for it.'),
                   })
             if (thread.helper !== undefined) {
-              if (platform.openHelper === undefined) return yield* refuse(`Update ${workerNameOf(selectedWorker)} to start helpers on it.`)
+              if (platform.openHelper === undefined) return yield* refuse('This home can’t start helpers on a worker.')
               const directory = relative(thread.worktree, agentCwd).split(sep).join('/')
               remote = yield* platform.openHelper({
                 workerId: selectedWorker,
@@ -816,7 +816,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           source: 'runtime',
           severity: 'warning',
           title: `${definition.name} started without its skills.`,
-          description: setUp.failed ?? `Update ${workerNameOf(selectedWorker ?? '')} to load skills.`,
+          // On a worker, an agent that takes its skills from an environment variable has none, whatever the worker's version.
+          description:
+            setUp.failed ??
+            `${definition.name} can’t load skills on a worker. To give it its skills, run it on the home, or choose another lead.`,
         })
       }
       // A skill this agent can't use is shown as a difference from the others, not hidden.
