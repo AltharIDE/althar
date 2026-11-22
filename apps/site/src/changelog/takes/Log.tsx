@@ -1,6 +1,17 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 
-import { type Change, KIND_WORD, type Kind, type Release, releaseUrl, RELEASES, ROADMAP, STAGE_WORD, STAGES } from '../../content/changelog'
+import {
+  type Change,
+  CURRENT,
+  KIND_WORD,
+  type Kind,
+  type Release,
+  releaseUrl,
+  RELEASES,
+  ROADMAP,
+  STAGE_WORD,
+  STAGES,
+} from '../../content/changelog'
 import { LINKS } from '../../content/facts'
 import { cx } from '../../lib/cx'
 import { useDownload } from '../../lib/download'
@@ -36,8 +47,6 @@ const LATEST = RELEASES[0]!
 const FIRST = RELEASES[RELEASES.length - 1]!
 /** The launch: when the first build was published. */
 const LAUNCH = Date.parse(PUBLISHED[FIRST.version] ?? `${FIRST.date}T00:00:00Z`)
-/** The newest release that is out: its publish time from GitHub is recorded. The newest entry may be written before it goes out. */
-const CURRENT = RELEASES.find((release) => release.version in PUBLISHED) ?? FIRST
 
 /** A day as the log writes it: 20 Oct 2026, or 20 Oct. */
 const dated = (iso: string, year = true) => {

@@ -1,4 +1,4 @@
-import { RELEASES } from '../content/changelog'
+import { CURRENT } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
 import { Nav } from '../shared/Nav'
@@ -19,7 +19,7 @@ const WAYS = [
 ]
 
 export function Docs() {
-  const latest = RELEASES[0]
+  const latest = CURRENT
   return (
     <div className={s.page}>
       <Nav />

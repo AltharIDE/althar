@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { RELEASES, releaseUrl } from '../src/content/changelog'
+import { CURRENT, isOut, RELEASES, releaseUrl } from '../src/content/changelog'
 import { LINKS } from '../src/content/facts'
 import { PAGE_META, type PagePath } from '../src/content/pages'
 import { SHIFTS } from '../src/content/shifts'
@@ -52,8 +52,22 @@ describe('what crawlers are given', () => {
     const md = changelogMd(ORIGIN)
     for (const release of RELEASES) {
       expect(md).toContain(`## ${release.version} · ${release.title}`)
-      expect(md).toContain(`Released ${release.date}. [Release notes](${releaseUrl(release.version)})`)
+      if (isOut(release)) expect(md).toContain(`Released ${release.date}. [Release notes](${releaseUrl(release.version)})`)
+      else expect(md).not.toContain(releaseUrl(release.version))
       for (const change of release.changes) expect(md).toContain(`- ${change.text}`)
+    }
+  })
+
+  it('dates, links and calls current only a release that is out', () => {
+    const llms = llmsTxt(ORIGIN)
+    const json = JSON.stringify(structuredData('/changelog', ORIGIN))
+    expect(isOut(CURRENT)).toBe(true)
+    expect(llms).toContain(`${CURRENT.version}, ${CURRENT.date}:`)
+    for (const release of RELEASES.filter((release) => !isOut(release))) {
+      expect(changelogMd(ORIGIN)).toContain(`## ${release.version} · ${release.title}\n\nNot released yet.`)
+      expect(llms).not.toContain(releaseUrl(release.version))
+      expect(json).not.toContain(releaseUrl(release.version))
+      expect(llms).not.toContain(`${release.version}, ${release.date}`)
     }
   })
 

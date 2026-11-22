@@ -1,4 +1,4 @@
-import { RELEASES, releaseUrl } from '../content/changelog'
+import { CURRENT, isOut, RELEASES, releaseUrl } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { PAGE_META, type PagePath } from '../content/pages'
 import { SHIFTS } from '../content/shifts'
@@ -126,7 +126,7 @@ function changelog(origin: string): object[] {
       name: page.name,
       description: page.description,
       image: urlOf(origin, page.image),
-      dateModified: RELEASES[0]?.date,
+      dateModified: CURRENT.date,
       about: { '@id': ids(origin).app },
       isPartOf: { '@id': ids(origin).site },
       mainEntity: {
@@ -142,8 +142,8 @@ function changelog(origin: string): object[] {
             url: `${url}#v${release.version}`,
             name: `${release.version}: ${release.title}`,
             version: release.version,
-            datePublished: release.date,
-            sameAs: releaseUrl(release.version),
+            // A release not out yet has no day it went out, and no GitHub release to point at.
+            ...(isOut(release) ? { datePublished: release.date, sameAs: releaseUrl(release.version) } : {}),
           },
         })),
       },

@@ -5,6 +5,8 @@
  * no internal labels.
  */
 
+import { PUBLISHED } from './published'
+
 export type Kind = 'new' | 'improved' | 'fixed'
 
 export const KIND_WORD: Record<Kind, string> = { new: 'New', improved: 'Improved', fixed: 'Fixed' }
@@ -43,7 +45,7 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Set one up from Althar: Connect a home installs the host on your server over SSH, step by step, and carries on with the dialog closed. Or pair with a one-time code over HTTPS.',
+        text: 'Connect to a home over SSH, or pair with a one-time code over HTTPS. Connect a home can also set one up over SSH, step by step, once the host’s first signed release is out.',
       },
       {
         kind: 'new',
@@ -67,7 +69,7 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'A task can send up to eight repositories to its worker, its helpers can join it there, and its skills and MCP servers come along. Save a local copy brings the work to your computer.',
+        text: 'Where the worker’s agent supports it, a task sends up to eight repositories, and its helpers join it there. Codex and Claude leads keep their skills, and HTTP MCP servers connect through the home; a command-based one is registered on the worker. Save a local copy brings the work to your computer.',
       },
       {
         kind: 'new',
@@ -79,7 +81,7 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Workers run on Linux for now, and you enroll them from the home’s command line. Reviews run on the home.',
+        text: 'Workers run on Linux for now, and you enroll them from the home’s command line. A task runs on one when it has a worktree of its own and the worker has its lead’s agent; reviews run on the home.',
       },
       {
         kind: 'new',
@@ -189,6 +191,10 @@ export const RELEASES: readonly Release[] = [
       { kind: 'improved', text: 'GitLab reviews post their summary and line comments together.' },
       { kind: 'improved', text: 'Comments you haven’t sent stay in the composer across restarts.' },
       { kind: 'improved', text: 'Asides start in a project of several repositories.' },
+      {
+        kind: 'improved',
+        text: 'The coordinator’s errands carry on once a task’s review settles, its checks pass or its lead finishes, even where that happened first, and a merge-then-tag errand tags only after the merge.',
+      },
       { kind: 'improved', text: 'When git fails, its own error says why, and a worktree whose link broke is repaired.' },
       { kind: 'improved', text: 'The conversation bar lists recent conversations, with a search.' },
       { kind: 'improved', text: 'Merge shows the queue at once, and lands with a burst.' },
@@ -201,6 +207,7 @@ export const RELEASES: readonly Release[] = [
       { kind: 'fixed', text: 'Gemini takes Althar’s tools.' },
       { kind: 'fixed', text: 'Screenshots reach a pull request on GitHub again.' },
       { kind: 'fixed', text: 'Ship shows for commits held before a task’s first pull request.' },
+      { kind: 'fixed', text: 'Ship releases only this computer’s holds; work held on another stays held.' },
       { kind: 'fixed', text: 'A fork is recognised whatever its remotes are called.' },
       { kind: 'fixed', text: 'Run servers nothing owns any more stop.' },
       { kind: 'fixed', text: 'Board cards stay in their column while you move the divider.' },
@@ -595,6 +602,12 @@ export const RELEASES: readonly Release[] = [
     ],
   },
 ]
+
+/** Whether a release is out: its publish time is recorded. The newest entry may be written before it goes out. */
+export const isOut = (release: Release): boolean => release.version in PUBLISHED
+
+/** The newest release that is out: what every page calls the current version. */
+export const CURRENT: Release = RELEASES.find(isOut) ?? RELEASES[RELEASES.length - 1]!
 
 export type Stage = 'now' | 'next' | 'later'
 
