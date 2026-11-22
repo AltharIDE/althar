@@ -1,0 +1,236 @@
+/* Pairing a phone: the QR on its tile, and beside it (or under it) what to check and the code to paste. */
+
+.frame {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.pairing {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+  min-width: 0;
+}
+.pairing[data-layout='narrow'] {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+/* a wide panel with no room beside the code: what to check goes under it */
+@container (width < 580px) {
+  .pairing[data-layout='wide'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
+.qrColumn {
+  display: grid;
+  gap: 10px;
+  justify-items: stretch;
+}
+.pairing[data-layout='wide'] .qrColumn {
+  width: 256px;
+}
+
+/* the QR's tile: light in either appearance, as a camera reads a code best */
+.tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 256px;
+  height: 256px;
+  border-radius: var(--r-lg);
+  background: #fbf9f4;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.pairing[data-layout='narrow'] .tile {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+/* paired, or nothing to show yet: the page's own paper */
+.tile[data-paired],
+.tile[data-empty] {
+  background: var(--paper);
+}
+.tile[data-empty] {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  background: transparent;
+}
+/* nothing to scan yet: in a popover, a short placeholder rather than a square */
+.pairing[data-layout='narrow'] .tile[data-empty] {
+  aspect-ratio: auto;
+  height: 96px;
+}
+/* dark: the code's tile a little dimmer, still light enough for a camera */
+:global([data-theme='dark']) .tile:not([data-paired], [data-empty]) {
+  background: #e8e4da;
+}
+
+.qr {
+  display: block;
+  fill: #141417;
+  transition: opacity var(--enter) var(--ease-out);
+}
+.tile[data-expired] .qr {
+  opacity: 0.08;
+}
+.again {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.under {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 18px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* waiting: a slow beat, as the running arc's point beats */
+.beat {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+  animation: beat 1.6s var(--ease) infinite alternate;
+}
+@keyframes beat {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .beat {
+    animation: none;
+  }
+}
+.left {
+  min-width: 4ch;
+  font: 500 12px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--t-2);
+}
+
+.side {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.pairing[data-layout='narrow'] .side {
+  padding-top: 0;
+}
+.lead {
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--t-1);
+}
+.note {
+  max-width: 46ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+/* the print the phone shows, to check against */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--well);
+}
+.checkWords {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.words {
+  font: 500 12px/1.3 var(--mono);
+  color: var(--t-1);
+}
+
+.or {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.command {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.command[data-off] {
+  opacity: 0.4;
+}
+.commandLine {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unreached {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--well);
+  color: var(--t-3);
+}
+
+.print {
+  display: block;
+  flex: none;
+  fill: var(--t-1);
+}
+.point,
+.halo {
+  fill: var(--live);
+  opacity: 0;
+  transform-origin: 30px 30px;
+  transform: scale(0.4);
+  transition:
+    opacity var(--enter) var(--ease-out),
+    transform var(--enter) var(--ease-out);
+}
+.point[data-lit] {
+  opacity: 1;
+  transform: scale(1);
+}
+.halo[data-lit] {
+  opacity: 0.28;
+  transform: scale(1);
+}
