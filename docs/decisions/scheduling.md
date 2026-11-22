@@ -118,8 +118,10 @@ the same order. A waiting task can be stopped, and resumed it waits again.
 While its first step waits, its plan can still be changed. Its card and view
 say what it waits for, such as "Waiting: 4 of 4 agents busy on this Mac". A
 waiting task is left out of its own count, so it never waits behind itself.
-Up next shows the machine-wide count and any temporary limit from host pressure,
-and lists each occupied place while work waits.
+Up next keeps no line of the computer's places: the load meter's popover shows
+Agents beside CPU and memory, how many are at work of the number and how many
+tasks wait, and it and the Agents at once slider say when host pressure lets
+fewer work for now, and whether memory or the CPU is why.
 
 ## The quick lane
 
