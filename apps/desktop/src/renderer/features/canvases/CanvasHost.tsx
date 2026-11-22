@@ -14,6 +14,7 @@ import { type CanvasSpot, canvasPlace, drop, gather, savePageComment, useComment
 import { ago } from '../../shared/time'
 import { useCovered } from '../browser/cover'
 import { boardsOfText, pinsOf, useGround } from './boards'
+import { DownloadCanvas } from './DownloadCanvas'
 import { SaveCanvas } from './SaveCanvas'
 
 /*
@@ -245,7 +246,22 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack }
       {...(onBack === undefined ? {} : { onBack })}
       {...(summary === undefined || version === null || error !== undefined
         ? {}
-        : { extra: <SaveCanvas summary={summary} version={latest} /> })}
+        : {
+            extra: (
+              <>
+                <SaveCanvas summary={summary} version={latest} />
+                <DownloadCanvas
+                  projectId={summary.projectId}
+                  canvasId={summary.id}
+                  name={summary.name}
+                  kind={kind}
+                  version={version.number}
+                  manifest={version.manifest}
+                  body={body}
+                />
+              </>
+            ),
+          })}
       fill={fill}
       loading={loading}
       {...(comment === undefined ? {} : { onComment: comment })}
