@@ -175,7 +175,8 @@ describe('opt-in HTTPS home configuration', () => {
   it.live('reports damaged settings and refuses to configure without HTTPS options', () =>
     Effect.gen(function* () {
       const { options } = fixture()
-      assert.strictEqual((yield* Effect.flip(configureNetwork({ ...options, network: undefined }))).code, 'InvalidConfig')
+      const { network: _network, ...withoutNetwork } = options
+      assert.strictEqual((yield* Effect.flip(configureNetwork(withoutNetwork))).code, 'InvalidConfig')
       const path = join(options.profile, 'network.json')
       writeFileSync(path, '{damaged', { mode: 0o600 })
       assert.strictEqual((yield* Effect.flip(readNetworkConfiguration(options.profile))).code, 'InvalidConfig')
