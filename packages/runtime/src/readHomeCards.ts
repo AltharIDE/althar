@@ -11,7 +11,7 @@ export const readHomeCards = <A, B, E, R>(rows: ReadonlyArray<A>, size: number, 
   })
 
 /** Check the small board history window before working out any settled cards. */
-export const homeTaskRows = (projectId: string, deviceId: string, settledShown: number, cached = false) =>
+const homeTaskRows = (projectId: string, deviceId: string, settledShown: number, cached: boolean) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     // Keep the preflight in step with the done-task branches of Queries.standingFor. Live sessions
@@ -57,4 +57,12 @@ export const homeTaskRows = (projectId: string, deviceId: string, settledShown: 
       ) k WHERE k.state = 'done') found
       ${cached ? sql`LEFT JOIN board_card_views v ON v.task_id = found.id` : sql``}`
     return yield* cached ? (yield* Database.ReadLane).read(read) : read
+  })
+
+export const homeRows = (deviceId: string, settledShown: number, cached: boolean, concurrency: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const projects = yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`
+    const groups = yield* readHomeCards(projects, concurrency, ({ id }) => homeTaskRows(id, deviceId, settledShown, cached))
+    return groups.flat().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
   })

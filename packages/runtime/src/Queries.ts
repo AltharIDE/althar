@@ -3,6 +3,7 @@ import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -73,7 +74,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Database, Ledger } from '@althar/persistence-sqlite'
 import { type BoardRow, boardProjections, boardRows, committedAt, putProjection } from './boardProjections'
-import { homeTaskRows, readHomeCards } from './readHomeCards'
+import { homeRows, readHomeCards } from './readHomeCards'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
@@ -3047,6 +3048,9 @@ export class Queries extends Context.Service<
                 : {
                     id: task.planId,
                     steps: teamSteps,
+                    ...(task.planState === 'proposed' && config.workers !== undefined
+                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
@@ -3691,13 +3695,10 @@ export class Queries extends Context.Service<
        */
       const homeTasks = (cached = false) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const changes = yield* Changes
-          const projects = yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`
-          const groups = yield* readHomeCards(projects, AT_ONCE, ({ id }) => homeTaskRows(id, instance.deviceId, SETTLED_SHOWN, cached))
+          const rows = yield* homeRows(instance.deviceId, SETTLED_SHOWN, cached, AT_ONCE)
           const active = new Set((yield* sessions.onTasks).map((one) => one.taskId))
-          const rows = groups.flat().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
           // Give other calls a turn between cards. Keep the original history window for pruning worktree facts.
           const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
             Effect.gen(function* () {
