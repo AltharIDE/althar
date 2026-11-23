@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 
 import type { ComputerPicture } from '@althar/runtime/computerBridge'
@@ -14,7 +15,16 @@ import {
 
 import sharp from 'sharp'
 
-import { keyChord, type NativeApp, type NativeCall, type NativeResult, type NativeTarget, type NativeWindow } from './protocol'
+import {
+  isSystemPrompt,
+  keyChord,
+  launchArguments,
+  type NativeApp,
+  type NativeCall,
+  type NativeResult,
+  type NativeTarget,
+  type NativeWindow,
+} from './protocol'
 
 const IMAGE_LIMIT = 16_000_000
 const MAX_IMAGE_DIMENSION = 1700
@@ -39,8 +49,18 @@ const windowOf = (one: WindowInfo): NativeWindow | null => {
 }
 
 /** The driver’s reason for a refusal, where it gave one as a code: never its text, which can carry what is on screen. */
-const codeOf = (result: { readonly errorCode?: string | undefined }) =>
-  result.errorCode !== undefined && /^[a-z0-9_]{1,64}$/.test(result.errorCode) ? ` (${result.errorCode})` : ''
+const codeOf = (result: { readonly errorCode?: string | undefined; readonly structuredJson?: string | undefined }) => {
+  const structured = (() => {
+    try {
+      return (JSON.parse(result.structuredJson ?? '{}') as { readonly error?: unknown }).error
+    } catch {
+      return undefined
+    }
+  })()
+  // A refused tool says it as errorCode; a launch that found no app, in its structured result (APP_NOT_INSTALLED).
+  const code = result.errorCode || (typeof structured === 'string' ? structured : undefined)
+  return code !== undefined && /^[A-Za-z0-9_]{1,64}$/.test(code) ? ` (${code})` : ''
+}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -102,36 +122,45 @@ export const nativeComputer = () => {
     }
   }
 
-  /** Its windows, once it shows one: an app just opened, or brought back from the menu bar, takes a moment to draw it. */
+  /**
+   * Its windows, once one shows: an app just opened, or brought back from the menu bar, takes a moment to draw it. Shown is
+   * one on screen and not minimized; a hidden or minimized one is still listed, but isn't one a person could see.
+   */
   const windowsOf = async (pid: number, until: number) => {
     for (;;) {
       const listed = await driver.listWindows({ pid })
       const windows = listed.windows.flatMap((one) => windowOf(one) ?? [])
-      if (windows.length > 0 || Date.now() >= until) return windows
+      const shown = listed.windows.some((one) => windowOf(one) !== null && one.isOnScreen && one.minimized !== true)
+      if (shown || Date.now() >= until) return { windows, shown }
       await wait(250)
     }
   }
 
+  /** What a Dock click sends an app already running: reopen, which brings back its window, or makes one where it closed them all. */
+  const reopen = (app: NativeApp, bundleId: string | undefined) =>
+    new Promise<void>((done) => {
+      const id = app.bundleId ?? bundleId
+      execFile('/usr/bin/open', id !== undefined ? ['-b', id] : ['-a', app.path ?? app.name], { timeout: 5_000 }, () => done())
+    })
+
   const launch = async (app: NativeApp): Promise<NativeResult> => {
     const started = Date.now()
-    const result = await driver.callTool(
-      'launch_app',
-      JSON.stringify(app.bundleId !== undefined ? { bundle_id: app.bundleId } : { name: app.path ?? app.name }),
-    )
+    const result = await driver.callTool('launch_app', JSON.stringify(launchArguments(app, process.platform)))
     if (result.isError)
       throw new ComputerProblem(
         `${app.name} didn’t open${codeOf(result)}. Check its name against the apps that status lists, or open it from Spotlight: key ["cmd","space"] to "desktop", then type its name and key ["return"].`,
       )
-    const info = JSON.parse(result.structuredJson ?? '{}') as { readonly pid?: unknown }
+    const info = JSON.parse(result.structuredJson ?? '{}') as { readonly pid?: unknown; readonly bundle_id?: unknown }
     if (typeof info.pid !== 'number' || !Number.isSafeInteger(info.pid) || info.pid < 1) return { kind: 'launched', windows: [] }
     const pid = info.pid
-    let windows = await windowsOf(pid, started + LAUNCH_WAIT / 2)
-    // Running with no window, as an app closed to the menu bar is: bring it forward, as a person clicking it in the Dock does.
-    if (windows.length === 0) {
-      await driver.callTool('bring_to_front', JSON.stringify({ pid })).catch(() => undefined)
-      windows = await windowsOf(pid, started + LAUNCH_WAIT)
+    let found = await windowsOf(pid, started + LAUNCH_WAIT / 2)
+    // Running with no window shown (closed to the menu bar, minimized or hidden): reopen it, as a click on it in the Dock does.
+    if (!found.shown) {
+      if (process.platform === 'darwin') await reopen(app, typeof info.bundle_id === 'string' ? info.bundle_id : undefined)
+      else await driver.callTool('bring_to_front', JSON.stringify({ pid })).catch(() => undefined)
+      found = await windowsOf(pid, started + LAUNCH_WAIT)
     }
-    return { kind: 'launched', windows }
+    return { kind: 'launched', windows: found.windows }
   }
 
   const observe = async (target: NativeTarget, screenshot: boolean): Promise<NativeResult> => {
@@ -211,6 +240,15 @@ export const nativeComputer = () => {
     if (call.op === 'launch') return launch(call.app)
 
     const { target, action, foreground } = call
+    if (target !== 'desktop' && isSystemPrompt(target.app))
+      throw new ComputerProblem(`${target.app} is the system’s own security prompt: answering it is the person’s. Tell them it is waiting.`)
+    if (target === 'desktop') {
+      const prompt = (await driver.listWindows({})).windows.find((one) => one.isOnScreen && isSystemPrompt(one.appName))
+      if (prompt !== undefined)
+        throw new ComputerProblem(
+          `A system security prompt (${prompt.appName.slice(0, 80)}) is on screen: answering it is the person’s, so input to "desktop" waits until it’s gone. Tell them it is waiting.`,
+        )
+    }
     const live = await current(target)
     const key = target === 'desktop' ? target : target.handle
     const seen = observations.get(key)

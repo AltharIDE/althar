@@ -38,3 +38,16 @@ it('keeps keys and typing off Althar while it is in front, but for Spotlight and
   expect(displayInputProblem(key('return'), FRAME, DISPLAY, [WINDOW], false)).toBeUndefined()
   expect(displayInputProblem(type, FRAME, DISPLAY, [WINDOW], false)).toBeUndefined()
 })
+
+it('keeps the menu bar the person’s: Althar’s menu and the system’s are there', () => {
+  const menuBar = { x: -1200, y: 50, width: 1200, height: 24 }
+  const at = (x: number, y: number) => ({ ...BASE, op: 'click' as const, at: { x, y } })
+  expect(displayInputProblem(at(20, 5), FRAME, DISPLAY, [WINDOW], false, menuBar)).toMatch(/on the menu bar/)
+  expect(displayInputProblem(at(580, 5), FRAME, DISPLAY, [WINDOW], false, menuBar)).toMatch(/on the menu bar/)
+  // Just under it, and the Dock along the bottom, stay reachable.
+  expect(displayInputProblem(at(580, 20), FRAME, DISPLAY, [WINDOW], false, menuBar)).toBeUndefined()
+  expect(displayInputProblem(at(300, 395), FRAME, DISPLAY, [WINDOW], true, menuBar)).toBeUndefined()
+  expect(
+    displayInputProblem({ ...BASE, op: 'drag', from: { x: 500, y: 200 }, to: { x: 500, y: 2 } }, FRAME, DISPLAY, [], false, menuBar),
+  ).toMatch(/on the menu bar/)
+})

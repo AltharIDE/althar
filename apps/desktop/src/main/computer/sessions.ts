@@ -449,7 +449,8 @@ export const computerSessions = (options: {
       if (foreground === active) foreground = undefined
       active.busy = false
       signal.removeEventListener('abort', cancel)
-      if (still() && active.action.startsWith('Using ')) {
+      // What it was doing, once it is done or failed: a launch that failed leaves no "Opening…" behind.
+      if (still() && (active.action.startsWith('Using ') || active.action.startsWith('Opening '))) {
         active.action = 'Waiting for the task’s next action.'
         changed(active)
       }

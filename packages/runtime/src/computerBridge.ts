@@ -99,7 +99,7 @@ export const computerCallProblem = (value: unknown): string => {
   const known = Object.keys(ops).join(', ')
   const op = typeof value === 'object' && value !== null && 'op' in value ? (value as { readonly op: unknown }).op : undefined
   if (op === undefined) return `Give op, one of: ${known}. Start with {"op":"status"}.`
-  if (typeof op !== 'string' || !(op in ops)) return `"${String(op)}" isn't a computer operation. op is one of: ${known}.`
+  if (typeof op !== 'string' || !Object.hasOwn(ops, op)) return `"${String(op)}" isn't a computer operation. op is one of: ${known}.`
   const [schema, example] = ops[op as keyof typeof ops]
   const decoded = Schema.decodeUnknownResult(schema as Schema.Codec<unknown>, { onExcessProperty: 'error', errors: 'all' })(value)
   const issue = Result.isFailure(decoded) ? decoded.failure.issue : undefined

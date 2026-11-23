@@ -644,7 +644,10 @@ const computers = computerSessions({
       .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
       .map((window) => window.getBounds())
     const inFront = focused !== null && mine(focused.webContents)
-    return displayInputProblem(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows, inFront)
+    const { bounds, workArea } = screen.getPrimaryDisplay()
+    // macOS keeps the menu bar above the work area; elsewhere a top panel there is the system’s too.
+    const menuBar = { x: bounds.x, y: bounds.y, width: bounds.width, height: Math.max(0, workArea.y - bounds.y) }
+    return displayInputProblem(action, frame, bounds, protectedWindows, inFront, menuBar)
   },
   changed: (state) => {
     for (const window of localWindows()) window.webContents.send('althar:computer-state', state)

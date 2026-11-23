@@ -96,13 +96,15 @@ describe('desktop access for a task', () => {
   })
 
   it('says what was wrong with a launch or a target, so the task can correct it', async () => {
-    const { sessions, allowed } = setup()
+    const { sessions, states, allowed } = setup()
     const windows = await allowed()
     const status = await sessions.call(OWNER, { op: 'status' }, signal())
     const { apps } = JSON.parse('value' in status ? status.value.text : '{}') as { apps: Array<{ id: string; app: string }> }
     expect(await sessions.call(OWNER, { op: 'launch', app: 'Plan' }, signal())).toEqual({
       error: 'Plan didn’t open (app_not_found). Installed apps with a name like it: Planner.',
     })
+    // The card doesn't keep saying it is opening an app that didn't open.
+    expect(states.at(-1)?.action).toBe('Waiting for the task’s next action.')
     expect(await sessions.call(OWNER, { op: 'launch', app: 'Planer' }, signal())).toEqual({
       error: 'Planer didn’t open (app_not_found). Installed apps with a name like it: Planner.',
     })

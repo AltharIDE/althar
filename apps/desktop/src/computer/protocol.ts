@@ -13,6 +13,36 @@ export interface NativeApp {
   readonly running?: boolean | undefined
 }
 
+/**
+ * What the driver's launch_app takes on each system: macOS a bundle id, or a name or `.app` path; Linux and Windows the
+ * path the list gave (launch_path), or a name. Linux lists every app with an XDG id as its bundle id, which its launch ignores.
+ */
+export const launchArguments = (app: NativeApp, platform: NodeJS.Platform): Record<string, string> => {
+  if (platform === 'darwin') return app.bundleId !== undefined ? { bundle_id: app.bundleId } : { name: app.path ?? app.name }
+  if (app.path !== undefined) return { launch_path: app.path }
+  // A packaged Windows app is known by its user model id.
+  if (platform === 'win32' && app.bundleId !== undefined) return { bundle_id: app.bundleId }
+  return { name: app.name }
+}
+
+/**
+ * The processes that show the system's own security prompts: granting an app a permission, an administrator's password,
+ * Touch ID, opening an app from the internet. Answering one is the person's alone, beyond what a turn's approval covers.
+ */
+const SYSTEM_PROMPTS = new Set([
+  'SecurityAgent',
+  'UserNotificationCenter',
+  'universalAccessAuthWarn',
+  'CoreServicesUIAgent',
+  'coreautha',
+  'LocalAuthenticationRemoteService',
+  'AuthenticationServicesAgent',
+  'tccd',
+  'consent.exe',
+  'CredentialUIBroker.exe',
+])
+export const isSystemPrompt = (app: string) => SYSTEM_PROMPTS.has(app)
+
 const MODIFIERS = new Set(['cmd', 'shift', 'option', 'ctrl', 'fn'])
 const ALIASES: Readonly<Record<string, string>> = {
   command: 'cmd',

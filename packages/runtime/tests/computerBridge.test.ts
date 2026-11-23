@@ -19,6 +19,9 @@ describe('a computer call', () => {
       'Give op, one of: status, request, launch, observe, click, type, key, scroll, drag, evidence, release. Start with {"op":"status"}.',
     )
     expect(computerCallProblem({ op: 'open', app: 'Akiflow' })).toMatch(/^"open" isn't a computer operation\. op is one of: status, /)
+    // Names every object has aren't operations either.
+    for (const op of ['toString', 'constructor', '__proto__'])
+      expect(computerCallProblem({ op })).toMatch(new RegExp(`^"${op}" isn't a computer operation\\.`))
   })
 
   it('names each field that is wrong, what it needs, and gives an example', () => {
