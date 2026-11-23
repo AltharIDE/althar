@@ -209,7 +209,8 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
 /// - `agents.conf`, its agents for any project (`*`), and `signed-in`, those signed in, a provider ID a line;
 /// - `release`, the Althar release it runs; `journal`, where it keeps what it did.
 ///
-/// It tries each address in turn, and keeps to the one that answered until it stops answering.
+/// It tries each address in turn, and keeps to the one that answered until it stops answering; `reached` keeps it for
+/// the next start.
 #[cfg(target_os = "linux")]
 async fn serve(
     folder: &std::path::Path,
@@ -266,13 +267,25 @@ async fn serve(
     let journal = DiagnosticJournal::open(&folder.join("journal"), &enrollment)?;
     let mut stop = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
+    // The address that answered last time first: a restart doesn't wait on one that never answers.
+    let reached = folder.join("reached");
+    let mut at = fs::read_to_string(&reached)
+        .ok()
+        .and_then(|last| addresses.iter().position(|address| *address == last.trim()))
+        .unwrap_or(0);
     let work = async {
-        let mut at = 0usize;
         let mut failures = 0u32;
+        let mut kept = at;
         loop {
             let address = &addresses[at % addresses.len()];
             match watch_agent_slot(address, &enrollment, None, &config, &journal).await {
-                Ok(()) => failures = 0,
+                Ok(()) => {
+                    failures = 0;
+                    if kept != at % addresses.len() {
+                        kept = at % addresses.len();
+                        let _ = fs::write(&reached, address);
+                    }
+                }
                 Err(error) => {
                     if failures == 0 {
                         eprintln!("Couldn't reach the home at {address}: {error}. Trying again.");

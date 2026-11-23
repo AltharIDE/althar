@@ -1,6 +1,7 @@
 import { X509Certificate } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { request } from 'node:https'
+import { createServer } from 'node:net'
 import { join } from 'node:path'
 
 import { assert, it } from '@effect/vitest'
@@ -13,7 +14,7 @@ import { testAgentWorker } from '../../worker-protocol/integration/worker-agent-
 import { SERVER_NAME } from '../src/workerHome/authority'
 import { workerCodeOf, type WorkerGrant } from '../src/workerHome/codes'
 import { workerExecution } from '../src/workerHome/execution'
-import { openWorkers, type WorkerListener } from '../src/workerHome/network'
+import { openWorkers, WORKER_PORT, type WorkerListener } from '../src/workerHome/network'
 import { workerTestDirectory } from './workerTestFiles'
 
 /*
@@ -185,6 +186,55 @@ it.live('enrolls a machine without SSH with a one-time code, once, and again for
       assert.strictEqual(other.status, 403)
       assert.strictEqual(other.body.message, 'This code was used by another worker.')
       assert.isUndefined(workerCodeOf('althar-pairing1.abc'))
+    }),
+  ),
+)
+
+it.live('says it adds workers itself only where it is their authority, or takes none yet', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = workerTestDirectory()
+      const paths = { profile: join(root, 'profile'), worktrees: join(root, 'worktrees') }
+      mkdirSync(paths.profile, { mode: 0o700 })
+      let listener: WorkerListener | undefined
+      const scope = yield* Effect.scope
+      const home = workerExecution(
+        () => listener?.agentWorkers,
+        () => listener,
+        () =>
+          openWorkers(paths, homeId).pipe(
+            Effect.tap((opened) => Effect.sync(() => (listener = opened))),
+            Scope.provide(scope),
+            Effect.mapError((error) => error.message),
+          ),
+      )
+      assert.isTrue(home.adds?.())
+      yield* home.admin!.code('laptop')
+      assert.isTrue(home.adds?.())
+      // An operator's own listener: it enrolls by command, and says so.
+      const { managed: _managed, ...operators } = listener!
+      listener = operators
+      assert.isFalse(home.adds?.())
+      assert.strictEqual(yield* Effect.flip(home.admin!.code('laptop')), 'This home takes workers by its operator’s certificates.')
+    }),
+  ),
+)
+
+it.live('takes another port where its own is taken, and keeps it for next time', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = workerTestDirectory()
+      const paths = { profile: join(root, 'profile'), worktrees: join(root, 'worktrees') }
+      mkdirSync(paths.profile, { mode: 0o700 })
+      // Its own port held by something else, where nothing holds it already.
+      const holder = createServer()
+      yield* Effect.promise(
+        () => new Promise<void>((resolve) => holder.once('error', () => resolve()).listen(WORKER_PORT, '::', () => resolve())),
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => holder.close()))
+      const listener = yield* openWorkers(paths, homeId)
+      assert.notStrictEqual(listener.port, WORKER_PORT)
+      assert.deepStrictEqual(JSON.parse(readFileSync(join(paths.profile, 'workers.json'), 'utf8')), { version: 2, port: listener.port })
     }),
   ),
 )

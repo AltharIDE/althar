@@ -35,6 +35,7 @@ if (process.argv[2] === 'worker') {
           ...controls,
           updateLocked,
           releaseSigningKey,
+          workerBinary,
         }).pipe(Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatJson)]))),
         { signal: stop.signal },
       )

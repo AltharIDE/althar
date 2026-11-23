@@ -253,6 +253,10 @@ export const enroll = async (raw: unknown, out: (text: string) => void, first: R
   if (!certificate.checkIssued(new X509Certificate(grant.authority)) || !certificate.checkPrivateKey(createPrivateKey(key)))
     throw failed('WrongKey', 'The home signed another key than this worker’s.')
   say(out, { step: 'start', state: 'started' })
+  // Enrolled before, with another home or as another worker: what it kept of that one's runs stays apart, under its name.
+  const before = (await readPrivate(join(folder, 'enrollment'), 16384))?.toString('utf8').split('\n')
+  if (before !== undefined && (before[0] !== grant.homeId || before[1] !== grant.workerId))
+    await fs.rename(join(folder, 'journal'), join(folder, `journal-${before[1] ?? 'before'}`)).catch(() => undefined)
   await writePrivate(join(folder, 'home-ca.pem'), grant.authority, true)
   await writePrivate(join(folder, 'worker.pem'), grant.certificate, true)
   const addresses = [...new Set([...first, ...grant.addresses])]

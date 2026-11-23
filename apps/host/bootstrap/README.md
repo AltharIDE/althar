@@ -56,3 +56,18 @@ Events have `protocol: 1`, `step`, and `state`. The steps are `reach`, `look`, `
 | `InvalidRequest`, `InvalidLogin`, `UnsafeState`, `SetupNotFound` | Check the operation, login, or setup state before retrying. |
 
 Once setup returns the home identity, use the SSH connection to open that home. The default launcher is `${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher`.
+
+## Workers
+
+A worker installs from the same signed release a home does, with the same script, through operations named `worker-…`. Its program goes in `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` and its own files in `…/althar-worker`, beside any home on the same login. The desktop runs these in order from **Settings › Computers › Add a worker** (`apps/desktop/src/main/homes/workerSetup.ts`):
+
+1. `probe`, and `root-login <public-key>` for a root login, exactly as for a home.
+2. `worker-install download|upload …`, with the same arguments as `install` (and `worker-prepare-upload` before an upload). Once the release is staged and checked, it points `current` at it and runs `althar-host worker install`, which makes the worker's own P-256 key where it has none and reports `key done` with `publicKey` (SPKI DER, base64url) and `release`.
+3. The desktop's window has its home sign that key (`AddWorker`) and gets the worker's grant: its ID, the home's ID, the home's authority certificate, the worker's certificate, the name the home's certificate carries, its port and the addresses it may be reached at.
+4. `worker-enroll <grant-base64url> <here>`. `here` is `1` where the window's home is the computer running SSH, so the address the login came from goes first. It writes the grant, the agents (from the release, for any project the home grants), and the `althar-worker.service` and `althar-worker-update.timer` user units, starts them, and reports `start done` with `agents`, each with `signedIn`.
+
+Later, `worker-agents` checks which agents are signed in again, and `worker-sign-in <agent> browser|device` runs an agent's own sign-in. Its steps come as JSON lines (`kind`: `browser`, `device`, `open`, `refused`, `done`, `failed`); a code the browser's page shows goes back on stdin as `{"paste":"…"}`, and `{"cancel":true}` stops it. The desktop sends the script as the SSH command for this one, so stdin stays free.
+
+**Without SSH**, the release publishes this script as `althar-worker.sh` and the release's public key as `althar-host-release.pub`. `sh -s -- join <code>` takes the newest release for the machine's architecture from beside the script, checks the archive's size and digest against its manifest, installs it as `worker-install download` would and enrolls with the code (`althar-host worker join`). Set `ALTHAR_RELEASE_BASE` to take them from elsewhere.
+
+Further failure codes: `NoWorker` (the release carries no worker), `WorkerNotInstalled`, `InvalidCode`, `NoKey`, `WrongKey` (the home signed another key), `Expired`, `Refused` and `Unreachable` (a code's home refused or couldn't be reached).

@@ -238,11 +238,10 @@ const startListener = async (
           store.close()
         },
       }
-    } catch (error) {
+    } catch {
       codes?.close()
       listener?.close()
       store.close()
-      if (error instanceof Error && 'code' in error && error.code === 'EADDRINUSE') throw error
       throw new WorkerHomeError('HostUnavailable', 'Could not start the worker listener. Check its certificate files, address and port.')
     }
   } finally {
@@ -281,8 +280,9 @@ export const openWorkers = (options: WorkerHomePaths, homeId: string, connection
           try {
             listening = await startListener(options, homeId, { version: 2, port: WORKER_PORT }, now, connectionChanged)
           } catch (error) {
-            if (!(error instanceof Error && 'code' in error && error.code === 'EADDRINUSE')) throw error
-            // Taken by something else: the port the system picks, kept, so a worker finds it there again after a restart.
+            // Taken by something else (gRPC says only that it couldn't bind): the port the system picks, kept, so a worker
+            // finds it there again after a restart.
+            if (!(error instanceof WorkerHomeError) || error.code !== 'HostUnavailable') throw error
             listening = await startListener(options, homeId, { version: 2, port: 0 }, now, connectionChanged)
           }
           await writePrivate(configurationPath(options.profile), JSON.stringify({ version: 2, port: listening.port }), true)

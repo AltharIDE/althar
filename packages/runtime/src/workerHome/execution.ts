@@ -90,6 +90,10 @@ export const workerExecution = (
         }
   return {
     ...(admin === undefined ? {} : { admin }),
+    adds: () => {
+      const listening = ledger?.()
+      return admin !== undefined && (listening === undefined || listening.managed !== undefined)
+    },
     list: (projectId) => {
       const names = named()
       return (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {

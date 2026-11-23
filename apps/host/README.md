@@ -2,7 +2,7 @@
 
 An Althar **home** is where your projects, task history and running sessions live. Put a home on a Linux machine if you want your work to keep going when you close the desktop window. You can come back to it from the desktop or the command line.
 
-A **worker** is a Linux machine that can do work for a home. Use the bundled command demo to check the connection, or configure an agent on the worker and pick it when you start a task. The home keeps the conversation and handles permission requests.
+A **worker** is a Linux machine that runs a home's tasks, one at a time. Add one from **Settings › Computers › Add a worker** with its SSH address, or with a one-time code on a machine you can't reach over SSH. The home keeps the conversation and handles permission requests. [Add a worker](#add-a-worker)
 
 ## Try the host and worker preview
 
@@ -122,7 +122,55 @@ Use an HTTPS home at a DNS name with a certificate your browser trusts. Pair the
 
 When a permission is waiting in the desktop, choose **Allow** or **Reject** and confirm the exact decision in the browser. The agent continues as soon as the home accepts it.
 
-## Native worker diagnostic
+## Add a worker
+
+A worker can be any 64-bit Linux machine (x64 or arm64) with systemd 254 or later and a user service manager. Git is useful for projects' setup. It works for whichever home added it: This Mac, or a Linux home of its own.
+
+**Over SSH.** In the home's window, open **Settings › Computers › Add a worker**, type its SSH address as you would after `ssh` (a name from your SSH config, or `user@host`), and choose **Add worker**. Althar uses your own OpenSSH, its keys and your known hosts, and asks you to trust the machine's key the first time.
+
+1. It looks the machine over. Logged in as root, it makes a user of its own, `althar`, with the SSH key you logged in with, and lingering on, as setting up a home does.
+2. It installs the same signed release a home installs, which carries the worker, Node, both agents' ACP adapters and the agents' own programs. The machine downloads it, or Althar sends it from your computer. Its signature is checked against Althar's release key before anything runs.
+3. The release makes the worker's own key. Your window asks the home to sign it, and the home enrolls the worker by that key under the name you gave.
+4. Althar writes what the home gave onto the worker and starts `althar-worker.service`, a systemd user service that restarts if it stops, and a timer that updates it.
+
+It shows in **Settings › Computers** once it connects. Pick the projects it works on there, and sign its agents in: Codex with a one-time code you enter on your computer or phone, Claude Code in your browser, with the code its page shows pasted back. A worker takes no task until it has a project.
+
+For a login without lingering, Althar shows the line for the machine's administrator: `sudo loginctl enable-linger -- <user>`. Without it, the worker stops when that user logs out.
+
+**With a code.** Choose **With a code** in the same dialog and run the line it shows on the machine. It installs the newest release from Althar's releases page and enrolls the worker with the code. The code works once, for ten minutes or until the home restarts. The window can't reach such a machine to sign its agents in, so sign them in there, as the worker's user. This says Codex's one-time code, and the worker says it's signed in once it ends:
+
+```sh
+program="${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program/current"
+"$program/node/bin/node" "$program/dist/althar-host.js" worker sign-in --agent codex --way device
+```
+
+To take a worker out, open it in **Settings › Computers** and choose **Remove**. The home no longer accepts its key and gives it no more work. Add it again to make it a new worker.
+
+### How a worker and its home trust each other
+
+- **The home is its own authority.** The first time a worker is added, the home makes a certificate authority of its own and a certificate for its worker port, kept in `<profile>/workers/authority.json` and readable only by the home's user. It opens its worker port, 6770 where that is free, without a restart. Nobody makes or copies certificates.
+- **A worker is its key.** The worker makes its P-256 key and keeps it. The home signs it as a client certificate and enrolls the worker by that key. A connection must present a certificate the home's authority signed, for a key the home enrolled. Removing the worker refuses its key.
+- **The worker trusts only its home.** It keeps the home's authority certificate, and checks that the home's certificate names `home.althar.invalid`, whichever address it reaches the home at. It tries each address the home gave in turn, with the address the SSH setup came from first where the home is that computer.
+- **Who may add, change and remove workers.** The person's own window, or a window on a Linux home over SSH, which reaches it as its operator, as `althar-host` does. A window on a device paired over the network may not. Adding a worker gives it no say in the person's word: it runs what the home sends it, for the projects picked for it, and returns changes for the home to review and publish.
+- **Codes.** A code carries the home's ID, the addresses it may be reached at, its authority's certificate and a random token. The home keeps only the token's SHA-256, in memory, and opens the port codes enroll on, beside the worker port, only while one waits. A worker that lost the reply may ask again with the same key; another key can't use the code.
+- **Releases.** Over SSH, your computer checks the release against Althar's pinned release key, and the worker keeps that key for its updates. With a code, the machine takes the release and its key from Althar's releases page over HTTPS, and checks the archive against its manifest; every later update must be signed by that key.
+
+### Where a worker keeps its files
+
+| What | Where |
+| --- | --- |
+| Its key, its certificate, the home's authority and addresses, its journal and task checkouts | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker` |
+| The release it runs, as `current`, and the one before | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` |
+| Its services | `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/althar-worker.service`, `althar-worker-update.timer` |
+
+The timer checks hourly for a newer release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. `journalctl --user -u althar-worker.service` shows what the worker did.
+
+## Set a worker up by hand
+
+A home that takes workers by its operator's own certificates, configured with `configure-workers`, keeps them: Add a worker shows the commands for it, and the home doesn't make its own authority. The rest of this section covers that way, a diagnostic run and a project command. Most people don't need it.
+
+<details>
+<summary>The native worker diagnostic</summary>
 
 Before running one of your own commands, ask the worker to identify its operating system. It runs `uname -s`, so the expected output is `Linux`. This is a quick way to check the certificates, the connection and the worker's enrollment.
 
@@ -195,7 +243,9 @@ For a worker on another machine, use a reachable private bind address on the hom
 
 Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate. Add `--project-id "$PROJECT_ID"` to remove the grant for agent execution on that project. When the grant ends, the home refuses new agent runs and checkpoints and asks the enrolled worker to stop its active run. The home keeps the reservation until the worker confirms stop. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
 
-## Run a project command on a Linux worker
+</details>
+
+### Run a project command on a Linux worker
 
 Once the diagnostic works, pick a quick command from a trusted checkout. The worker needs cgroup v2 and systemd 254 or later with a user service manager. The command runs as the worker's OS user and has that user's file access. A separate user service tracks all the command's processes so cancellation can stop even a detached child.
 
@@ -231,18 +281,17 @@ Once the diagnostic works, pick a quick command from a trusted checkout. The wor
 
 The preview runs one configured command per worker with a one-minute budget. The home keeps up to 64 KiB of combined stdout and stderr in up to 1,024 chunks. To read new output only, use `worker-log --json` and pass its `nextOffset` back as `--offset` on the next call. A run becomes `cancelled` after the worker confirms systemd has stopped all of its processes. After a disconnect or crash, the worker's permission to run expires and systemd stops the command. Reconnect with the same journal to settle the result.
 
-## Run an Althar task on a separate worker
+## Run an Althar task on a worker
 
-Use a Linux worker with Git, systemd 254 or later, and a working systemd user manager. Set it up under a dedicated account for your own trusted projects. The agent uses the provider account you sign into on that machine.
+Use a host, worker and desktop from the same release. A task with up to eight Git repositories can run on a worker; reviews run on the home. In the project, prepare a task and hold its plan. Use **Runs on** to pick the worker, or **Any free worker**, then start it. The home rechecks the lead and repositories at Start. It prefers workers with a current report, then more available memory, disk space and CPU cores.
 
-Use a host, worker and Desktop built from the same revision for this flow. It supports the lead of a task with one Git repository and its own worktree. Enrollment uses the host console. Use an Althar client with approval authority if a task needs a protected permission decision.
+Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
 
-1. On the home, [configure the worker listener and enroll the worker certificate](#native-worker-diagnostic). For a separate machine, bind to a private address the worker can reach, and include the home’s worker-facing DNS name in the home certificate. Record the **home ID** and **project ID**. Once the host is running, assign the worker to that project with the command below. Give the worker its own client certificate and key, plus the public CA certificate. Save the **worker ID** the command prints.
+<details>
+<summary>A worker set up by hand: its agents and how it starts</summary>
 
-   ~~~sh
-   althar-host enroll-worker --worker-certificate "$tls/client.pem" --project-id "$PROJECT_ID" --json
-   ~~~
-2. On the worker, sign in with the provider’s supported command. Install its compatible ACP adapter there. Run the following as the worker user, substituting the project ID and the adapter executable. Use an absolute path. Put any fixed executable arguments after it, with one tab per argument.
+1. On the home, [enroll the worker certificate](#set-a-worker-up-by-hand) with `--project-id "$PROJECT_ID"`.
+2. On the worker, sign in with the provider’s supported command. Install its compatible ACP adapter there. Run the following as the worker user, substituting the project ID and the adapter executable. Use an absolute path, or `*` in place of the project ID for any project the home grants. Put any fixed executable arguments after it, with one tab per argument.
 
    ```sh
    umask 077
@@ -261,8 +310,7 @@ Use a host, worker and Desktop built from the same revision for this flow. It su
      "$worker_data/journal" --agent-config "$worker_data/agents.conf" --watch
    ```
 
-4. In Desktop, open the home and its project. Prepare a task with one repository and an Implement lead that matches the worker’s provider. **Hold** the plan. Use **Run on** to pick the Linux worker, then start the task. The **Best available worker** option chooses among workers assigned to the project. The home rechecks the lead and repositories at Start. It prefers workers with a current report, then more available memory, disk space and CPU cores.
-5. Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. Try a follow-up and stop a task while the agent is working. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
+</details>
 
 Althar runs the saved project setup in the worker’s task checkout and keeps the result in the thread. While that checkout is active, use the task’s **Run** menu to run a saved build, test or dev server there. The run has its own output and **Stop** button.
 

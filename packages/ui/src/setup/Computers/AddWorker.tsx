@@ -70,7 +70,7 @@ export interface AddWorkerText {
   started: string
   firstTime: string
   isThisKey: (name: string) => string
-  keyWhere: string
+  keyWhere: { before: string; command: string; after: string }
   trust: string
   again: string
   stop: string
@@ -100,7 +100,7 @@ export const addWorkerText: AddWorkerText = {
   started: 'Starts with the machine, updates itself',
   firstTime: 'First time on this machine',
   isThisKey: (name) => `Is this ${name}’s key?`,
-  keyWhere: 'On the machine, ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub prints it.',
+  keyWhere: { before: 'On the machine, ', command: 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub', after: ' prints it.' },
   trust: 'Trust and go on',
   again: 'Try again',
   stop: 'Stop',
@@ -298,7 +298,11 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
                       <code>{setup.hostKey.fingerprint}</code>
                       <CopyButton value={setup.hostKey.fingerprint} ghost />
                     </span>
-                    <span className={s.addressHint}>{t.keyWhere}</span>
+                    <span className={s.addressHint}>
+                      {t.keyWhere.before}
+                      <Code>{t.keyWhere.command}</Code>
+                      {t.keyWhere.after}
+                    </span>
                   </AskCard>
                 )}
                 {state === 'failed' && setup.problem !== undefined && (

@@ -67,6 +67,8 @@ export const workersForProfile = (
     const delegating: WorkerExecutionPlatform = {
       list: (projectId) => execution?.list(projectId) ?? [],
       enrolled: () => execution?.enrolled?.() ?? null,
+      // Not loaded: the profile keeps no worker configuration, so the home adds them itself.
+      adds: () => execution?.adds?.() ?? true,
       revoke: (workerId) => (execution?.revoke === undefined ? Effect.fail('This home takes no workers.') : execution.revoke(workerId)),
       admin: {
         add: (input) => Effect.flatMap(load, (loading) => platform(loading).admin!.add(input)),

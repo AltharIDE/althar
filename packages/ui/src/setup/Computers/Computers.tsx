@@ -181,7 +181,7 @@ export const computersText: ComputersText = {
   facts: { computer: 'Computer', agents: 'Agents', projects: 'Projects', id: 'Worker ID', memory: 'Memory', workers: 'Workers' },
   noAgents: 'None it has said',
   noProjects: 'None yet',
-  pickProjects: 'Pick the projects it works on. It takes their tasks once one is picked.',
+  pickProjects: 'Pick the projects it works on. It takes no tasks until one is picked.',
   signedIn: 'Signed in',
   notSignedIn: 'Not signed in',
   signIn: 'Sign in',

@@ -19,7 +19,7 @@ export const homeWorkers = (platform: WorkerExecutionPlatform | undefined) =>
   Effect.gen(function* () {
     const enrolled = platform?.enrolled?.() ?? null
     // A home that is its own authority adds workers itself, listening or not yet.
-    const adds = platform?.admin === undefined ? {} : { adds: true }
+    const adds = platform?.admin === undefined || platform.adds?.() === false ? {} : { adds: true }
     if (enrolled === null) return { enabled: false, workers: [], ...adds } satisfies HomeWorkers
     if (enrolled.length === 0) return { enabled: true, workers: [], ...adds } satisfies HomeWorkers
     const sql = yield* SqlClient.SqlClient

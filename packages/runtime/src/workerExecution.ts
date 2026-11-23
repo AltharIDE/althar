@@ -119,6 +119,8 @@ export interface WorkerExecutionPlatform {
   readonly revoke?: (workerId: string) => Effect.Effect<void, string>
   /** Adding workers, where the home does that itself; none where an operator enrolls them by command. */
   readonly admin?: WorkerAdmin
+  /** Whether it adds workers itself now: it listens as its own authority, or doesn't listen yet. */
+  readonly adds?: () => boolean
   readonly startCommand?: (input: AssignedCommand) => Effect.Effect<WorkerManagedProcess, AgentStartFailed, Scope.Scope>
   readonly readFile?: (
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'> & { readonly path: string },
