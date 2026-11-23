@@ -1,5 +1,6 @@
 import type { StartupStage } from '../../startup'
 import type { HomesHost } from '../../homes'
+import type { WorkersHost } from '../../workers'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
@@ -200,6 +201,8 @@ export interface Host {
     readonly subscribe: (listener: (state: ComputerState) => void) => () => void
   }
   readonly homes?: HomesHost
+  /** Adding workers over SSH, and signing their agents in; none where this build can't, as a browser's can't. */
+  readonly workers?: WorkersHost
   readonly saveWorkerSnapshot?: (request: { readonly projectId: string; readonly taskId: string }) => Promise<void>
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void

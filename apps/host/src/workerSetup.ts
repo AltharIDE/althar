@@ -463,13 +463,15 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
       case 'install':
         await install(flag('--program') ?? '', out)
         return 0
-      case 'enroll':
-        await enroll(
-          JSON.parse(Buffer.from(flag('--grant') ?? '', 'base64url').toString('utf8')),
-          out,
-          (flag('--first') ?? '').split(',').filter((one) => one !== ''),
-        )
+      case 'enroll': {
+        const grant: unknown = JSON.parse(Buffer.from(flag('--grant') ?? '', 'base64url').toString('utf8'))
+        // The computer this was set up from, where that is the home: first, on the home's worker port.
+        const host = flag('--first') ?? ''
+        const port = (grant as { port?: unknown }).port
+        const first = host === '' || typeof port !== 'number' ? [] : [`${host.includes(':') ? `[${host}]` : host}:${port}`]
+        await enroll(grant, out, first)
         return 0
+      }
       case 'join':
         await join_(flag('--code') ?? '', flag('--name') ?? '', out)
         return 0

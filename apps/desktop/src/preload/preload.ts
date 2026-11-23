@@ -11,6 +11,7 @@ import {
   type SetupAction,
 } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { isWorkerSetup, type WorkerSetup, type WorkerSetupAction, type WorkerSignInEvent, type WorkersHost } from '../workers'
 
 import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
 import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
@@ -163,6 +164,16 @@ const setups = new Set<(setup: HomeSetup | null) => void>()
 ipcRenderer.on('althar:home-setup', (_event, value: unknown) => {
   if (isHomeSetup(value)) for (const listener of setups) listener(value)
 })
+/* A worker being added over SSH, as it goes, and an agent's sign-in on one: for Settings › Computers. */
+const workerSetupListeners = new Set<(setup: WorkerSetup | null) => void>()
+ipcRenderer.on('althar:worker-setup', (_event, value: unknown) => {
+  if (isWorkerSetup(value)) for (const listener of workerSetupListeners) listener(value)
+})
+const workerSignIns = new Set<(event: WorkerSignInEvent) => void>()
+ipcRenderer.on('althar:worker-sign-in', (_event, value: unknown) => {
+  if (typeof value === 'object' && value !== null && 'kind' in value)
+    for (const listener of workerSignIns) listener(value as WorkerSignInEvent)
+})
 /* What main knows of every home, as it changes: for the chip's menu and Manage homes. */
 const overviews = new Set<(overview: HomesOverview) => void>()
 ipcRenderer.on('althar:homes-overview', (_event, value: unknown) => {
@@ -185,6 +196,26 @@ ipcRenderer.on('althar:homes-new-project', () => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
+  workers: {
+    setup: () => ipcRenderer.invoke('althar:workers-setup'),
+    setUp: (target: unknown, here: boolean) => ipcRenderer.invoke('althar:workers-set-up', target, here),
+    act: (action: WorkerSetupAction) => ipcRenderer.invoke('althar:workers-setup-act', action),
+    onSetup: (listener: (setup: WorkerSetup | null) => void) => {
+      workerSetupListeners.add(listener)
+      return () => {
+        workerSetupListeners.delete(listener)
+      }
+    },
+    agents: (ssh: string) => ipcRenderer.invoke('althar:workers-agents', ssh),
+    signIn: (ssh: string, agent: string, way: 'browser' | 'device') => ipcRenderer.invoke('althar:workers-sign-in', ssh, agent, way),
+    signInAct: (action: unknown) => ipcRenderer.invoke('althar:workers-sign-in-act', action),
+    onSignIn: (listener: (event: WorkerSignInEvent) => void) => {
+      workerSignIns.add(listener)
+      return () => {
+        workerSignIns.delete(listener)
+      }
+    },
+  } satisfies WorkersHost,
   homes: {
     state: () => ipcRenderer.invoke('althar:homes-state'),
     list: () => ipcRenderer.invoke('althar:homes-list'),

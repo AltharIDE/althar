@@ -124,11 +124,50 @@ if [ "$operation" = root-login ]; then
   exit
 fi
 
+# A worker installs from the same signed release a home does, into a program folder of its own; then the release's
+# own worker commands set it up (apps/host/src/workerSetup.ts).
+role=host
+case "$operation" in worker-*) role=worker; operation=${operation#worker-} ;; esac
+
 uid=$(id -u)
 [ "$uid" != 0 ] || fail setup DedicatedUserRequired
 case "${XDG_DATA_HOME:-$HOME/.local/share}" in /*) ;; *) fail setup InvalidRequest ;; esac
 root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program.setup-v1
+if [ "$role" = worker ]; then root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program; fi
 if printf '%s' "$root" | grep -q '[[:cntrl:]]' || [ "$(printf '%s' "$root" | wc -l)" != 0 ]; then fail setup InvalidRequest; fi
+
+worker_program() {
+  current=$root/current
+  [ -x "$current/node/bin/node" ] && [ -f "$current/dist/althar-host.js" ] || fail start WorkerNotInstalled
+}
+if [ "$role" = worker ]; then
+  case "$operation" in
+    enroll)
+      [ "$#" -eq 2 ] || fail start InvalidRequest
+      case "$1" in *[!A-Za-z0-9_-]*|'') fail start InvalidRequest ;; esac
+      [ "${#1}" -le 65536 ] || fail start InvalidRequest
+      worker_program
+      # Where the window's own home is this SSH client's computer, the address this login came from reaches it.
+      first=''
+      if [ "$2" = 1 ] && [ -n "${SSH_CONNECTION:-}" ]; then first=${SSH_CONNECTION%% *}; fi
+      case "$first" in *[!0-9a-fA-F.:]*) first='' ;; esac
+      exec "$current/node/bin/node" "$current/dist/althar-host.js" worker enroll --grant "$1" --first "$first"
+      ;;
+    agents)
+      [ "$#" -eq 0 ] || fail agents InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$current/dist/althar-host.js" worker agents
+      ;;
+    sign-in)
+      [ "$#" -eq 2 ] || fail sign-in InvalidRequest
+      case "$1" in *[!a-z0-9-]*|'') fail sign-in InvalidRequest ;; esac
+      case "$2" in browser|device) ;; *) fail sign-in InvalidRequest ;; esac
+      worker_program
+      exec "$current/node/bin/node" "$current/dist/althar-host.js" worker sign-in --agent "$1" --way "$2"
+      ;;
+    status|resume) fail setup InvalidRequest ;;
+  esac
+fi
 
 case "$operation" in
   status|resume)
@@ -229,5 +268,9 @@ private_dir "$root" || fail get UnsafeState
   printf '%s\n' "$release" > "$scratch/ready"
   mv -T -- "$scratch/ready" "$root/ready"
   event get done ",\"bytes\":$bytes,\"totalBytes\":$bytes"
-  "$bundle/node/bin/node" "$bundle/dist/althar-host.js" setup --manifest "$bundle/.manifest" --release-key "$bundle/.release-key" --json
+  if [ "$role" = worker ]; then
+    "$bundle/node/bin/node" "$bundle/dist/althar-host.js" worker install --program "$bundle"
+  else
+    "$bundle/node/bin/node" "$bundle/dist/althar-host.js" setup --manifest "$bundle/.manifest" --release-key "$bundle/.release-key" --json
+  fi
 ) 9>"$root/transfer.lock"

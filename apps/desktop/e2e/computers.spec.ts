@@ -138,6 +138,10 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
     const name = `Linux worker ${workerId.slice(-6)}`
     const hello: Parameters<ReturnType<typeof testAgentWorker>['hello']>[0] = {
       $typeName: 'althar.worker.v1.AgentWorkerHello',
+      anyProject: false,
+      reportsSignIn: false,
+      signedIn: [],
+      release: '',
       reserveBeforeTransfer: false,
       version: 1,
       workerId,

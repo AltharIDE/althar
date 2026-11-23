@@ -16,6 +16,7 @@ import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
+import { startWorkerSetups } from './workerMain'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -153,6 +154,12 @@ export const startHomeConnections = ({
         if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
     },
   )
+  // Workers added over SSH from Settings › Computers, from the same releases.
+  const workers = startWorkerSetups({
+    system: nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
+    tools: source.tools,
+    mine,
+  })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Home connections are available only in Althar’s own window.')
@@ -429,6 +436,7 @@ export const startHomeConnections = ({
     previewPort,
     stopAll: async () => {
       controller.stopping()
+      workers.stop()
       await setups.stop()
       await keyChanges
       for (const held of forgottenKeys.values()) clearTimeout(held.timer)
