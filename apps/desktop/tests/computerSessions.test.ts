@@ -98,6 +98,9 @@ describe('desktop access for a task', () => {
     expect(await sessions.call(OWNER, { op: 'launch', app: 'Plan' }, signal())).toEqual({
       error: 'Plan didn’t open (app_not_found). Installed apps with a name like it: Planner.',
     })
+    expect(await sessions.call(OWNER, { op: 'launch', app: 'Planer' }, signal())).toEqual({
+      error: 'Planer didn’t open (app_not_found). Installed apps with a name like it: Planner.',
+    })
     expect(await sessions.call(OWNER, { op: 'launch', app: windows.Writer! }, signal())).toEqual({
       error: `${windows.Writer} is a window’s id: observe it rather than launch it.`,
     })

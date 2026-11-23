@@ -68,6 +68,17 @@ const plain = (name: string) =>
     .trim()
     .toLowerCase()
     .replace(/\.app$/, '')
+/** How many letters to add, drop or change to turn one name into the other. */
+const edits = (one: string, other: string) => {
+  let row = Array.from({ length: other.length + 1 }, (_, index) => index)
+  for (let at = 1; at <= one.length; at++) {
+    const next = [at]
+    for (let to = 1; to <= other.length; to++)
+      next[to] = Math.min(row[to]! + 1, next[to - 1]! + 1, row[to - 1]! + (one[at - 1] === other[to - 1] ? 0 : 1))
+    row = next
+  }
+  return row[other.length]!
+}
 const baseName = (path: string) =>
   path
     .replace(/\/+$/, '')
@@ -219,12 +230,15 @@ export const computerSessions = (options: {
     if (named.trim().startsWith('/')) return { name: baseName(named.trim()), path: named.trim() }
     return { name: named.trim() }
   }
-  /** Apps whose names come close to one that didn’t open, to correct it by. */
+  /** Apps whose names come close to one that didn’t open, a typo or a part of it, to correct it by. */
   const near = (session: Session, named: string) => {
     const wanted = plain(named)
     return [...session.apps.values()]
       .map((one) => one.name)
-      .filter((one) => plain(one).includes(wanted) || (plain(one).length > 2 && wanted.includes(plain(one))))
+      .filter((one) => {
+        const name = plain(one)
+        return name.includes(wanted) || (name.length > 2 && wanted.includes(name)) || (wanted.length > 3 && edits(name, wanted) <= 2)
+      })
       .slice(0, 5)
   }
 
