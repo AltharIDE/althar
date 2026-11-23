@@ -126,6 +126,25 @@ test('adds a fresh Linux machine as a worker over SSH, picks its project and sig
         .first(),
     ).toBeVisible({ timeout: 5 * 60_000 })
     await shoot(page, '8-ran-on-worker')
+
+    // A machine without SSH from here: a one-time code, and the line its person runs there.
+    const withCode = process.env.ALTHAR_WORKER_LAB_CODE
+    if (withCode === undefined) return
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Computers' }).click()
+    const back = main.getByRole('button', { name: 'Computers', exact: true })
+    if ((await back.count()) > 0) await back.click()
+    await main.getByRole('button', { name: 'Add a worker', exact: true }).click()
+    const codeDialog = page.getByRole('dialog', { name: `Add a worker to ${THIS}` })
+    await codeDialog.getByRole('radio', { name: 'With a code' }).click()
+    const line = codeDialog.getByText(/althar-worker\.sh \| sh -s -- join/)
+    await expect(line).toBeVisible({ timeout: 60_000 })
+    await shoot(page, '9-with-a-code', codeDialog)
+    execFileSync(withCode, [(await line.textContent()) ?? ''], { stdio: 'inherit', timeout: 10 * 60_000 })
+    await codeDialog.getByRole('button', { name: 'Close' }).click()
+    await expect(main.getByRole('button', { name: /^laptop-box/ })).toBeVisible({ timeout: 120_000 })
+    await expect(main.getByRole('button', { name: /^laptop-box/ })).toContainText('Ready for a task')
+    await shoot(page, '10-two-workers')
   } finally {
     await electronApp.close()
   }

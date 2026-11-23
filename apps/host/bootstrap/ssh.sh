@@ -156,7 +156,11 @@ if [ "$operation" = join ]; then
   case "$base" in https://*|http://127.0.0.1*|http://localhost*) ;; *) fail get InvalidRequest ;; esac
   fetched=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 262144 -- "$base/althar-host-linux-$arch.json") || fail get NoRelease
   release_key=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 4096 -- "$base/althar-host-release.pub") || fail get NoRelease
-  payload=$(printf '%s' "$fetched" | sed -n 's/.*"payload":"\([A-Za-z0-9+/=_-]*\)".*/\1/p' | base64 -d 2>/dev/null) || fail get ReleaseRejected
+  # The manifest's payload is base64url without padding: as base64, padded, for base64 -d.
+  encoded=$(printf '%s' "$fetched" | sed -n 's/.*"payload":"\([A-Za-z0-9_-]*\)".*/\1/p' | tr '_-' '/+')
+  case $(( ${#encoded} % 4 )) in 2) encoded="$encoded==" ;; 3) encoded="$encoded=" ;; esac
+  payload=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail get ReleaseRejected
+  [ -n "$payload" ] || fail get ReleaseRejected
   field() { printf '%s' "$payload" | sed -n "s/.*\"$1\":\($2\).*/\1/p"; }
   set -- download "$(field sha256 '"[a-f0-9]*"' | tr -d '"')" "$(field bytes '[0-9]*')" "$(field unpackedBytes '[0-9]*')" \
     "$(field url '"https://[^"]*"' | tr -d '"')" "$(printf '%s' "$fetched" | base64 | tr -d '\n')" "$(printf '%s\n' "$release_key" | base64 | tr -d '\n')"
