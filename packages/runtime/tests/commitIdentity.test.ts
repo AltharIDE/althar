@@ -18,9 +18,15 @@ import { repository } from './support'
  */
 
 const some = (value: string, key = 'user.email', origin = '/home/you/.gitconfig') => ({ value, key, origin })
+/** One role as git resolves it from these sources, its name `Ada` where none is given. */
+const person = (name: ReturnType<typeof some> | null, email: ReturnType<typeof some> | null) => ({
+  resolved: { name: name?.value ?? 'Ada', email: email?.value ?? '' },
+  name,
+  email,
+})
 const both = (name: ReturnType<typeof some> | null, email: ReturnType<typeof some> | null): Identity => ({
-  author: { name, email },
-  committer: { name, email },
+  author: person(name, email),
+  committer: person(name, email),
 })
 
 describe('a test identity', () => {
@@ -44,8 +50,8 @@ describe('a test identity', () => {
 
   it('is told by its variable where Althar’s environment holds it', () => {
     const said = testIdentityWarning({
-      author: { name: null, email: { value: 't@t.test', key: 'GIT_AUTHOR_EMAIL', origin: 'the environment' } },
-      committer: { name: null, email: some('ada@pm.me') },
+      author: person(null, { value: 't@t.test', key: 'GIT_AUTHOR_EMAIL', origin: 'the environment' }),
+      committer: person(null, some('ada@pm.me')),
     })
     assert.include(said, '“t@t.test” from GIT_AUTHOR_EMAIL in Althar’s environment')
   })
@@ -159,6 +165,42 @@ describe('who a commit of Althar’s is written as', () => {
       const said = yield* committerIdentity(path, { ...process.env, ...environment })
       assert.isNotNull(said.warning)
       assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Bea <bea@pm.me>')
+    }),
+  )
+
+  it.effect('judges what git resolves, so a test address in angle brackets in the config is found', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'Ada', '<t@t.test>')
+      // Git itself reads it as t@t.test.
+      assert.strictEqual(committed(path, {}, {}), 'Ada <t@t.test> | Ada <t@t.test>')
+      const said = yield* committerIdentity(path)
+      assert.include(said.warning, `“<t@t.test>” (user.email) from ${join(path, '.git', 'config')}`)
+      assert.strictEqual(committed(path, {}, said.as), 'Althar <althar@localhost> | Althar <althar@localhost>')
+    }),
+  )
+
+  it.effect('writes the author as Althar where the environment empties its address, though the config is the person’s', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'Ada', 'ada@pm.me')
+      const environment = { GIT_AUTHOR_EMAIL: '' }
+      // Without the guard, the empty variable wins over the config: the author has no address.
+      assert.strictEqual(committed(path, environment, {}), 'Ada <> | Ada <ada@pm.me>')
+      const said = yield* committerIdentity(path, { ...process.env, ...environment })
+      assert.strictEqual(said.warning, null)
+      assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Ada <ada@pm.me>')
+    }),
+  )
+
+  it.effect('writes the author as Althar where the environment empties its name, which git would refuse', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'Ada', 'ada@pm.me')
+      const environment = { GIT_AUTHOR_NAME: '' }
+      assert.throws(() => committed(path, environment, {}))
+      const said = yield* committerIdentity(path, { ...process.env, ...environment })
+      assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Ada <ada@pm.me>')
     }),
   )
 })

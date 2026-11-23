@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join, resolve, sep } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 
 /**
  * Where a test's git may never look for a repository above: the temporary folder tests make theirs in. A folder a
@@ -28,19 +28,19 @@ export const isolateGit = (env: NodeJS.ProcessEnv = process.env): void => {
 const revParse = (folder: string, ...args: Array<string>) =>
   execFileSync('git', ['rev-parse', ...args], { cwd: folder, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 
-const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}${sep}`)
-
 /**
- * Whether the folder is the top level of a repository a test owns, and not a folder inside another. A linked
- * worktree's root is its own top level too, but its config is its main repository's (`--git-common-dir`), shared by
- * every worktree of it: such a folder counts only where that main repository is a test's, in the temporary folder.
+ * Whether the folder is the top level of a repository of its own, whose config is its own `.git/config`, and not a
+ * folder inside another. A linked worktree's root is its own top level too, but its config is its main repository's
+ * (`--git-common-dir`), shared by every worktree of it, such as a task's of the person's own repository: it never
+ * counts, wherever it is, so a test sets its config at the main repository it made.
  */
 export const isOwnRepository = (folder: string): boolean => {
   try {
     const real = realpathSync(folder)
     if (realpathSync(revParse(folder, '--show-toplevel')) !== real) return false
     const common = realpathSync(revParse(folder, '--path-format=absolute', '--git-common-dir'))
-    return common === join(real, '.git') || within(common, realpathSync(tmpdir()))
+    const own = realpathSync(revParse(folder, '--path-format=absolute', '--git-dir'))
+    return common === own && common === join(real, '.git')
   } catch {
     return false
   }

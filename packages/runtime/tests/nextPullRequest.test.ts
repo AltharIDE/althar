@@ -212,6 +212,38 @@ describe('a task’s next pull request, from its worktree as it is', () => {
   })
 })
 
+describe('a task’s next pull request, where git would write a test’s identity', () => {
+  it.live('picks the lead’s commits onto main as Althar, and says so once in the task’s thread with the file', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* merged(working, bare, github)
+      commitIn(task.path, 'slider.txt', 'Slider')
+      commitIn(task.path, 'slider.txt', 'Slider, warmer')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      // What a test left in the repository's own config, which every worktree of it shares.
+      identify(working, 'T', 't@t.test')
+      yield* (yield* Runs).publish(task.taskId)
+      yield* until(
+        Effect.sync(() => github.changes),
+        (all) => all.length === 2,
+      )
+      // Both commits picked onto main as it is now, on the next branch: written by Althar, authored as the lead wrote them.
+      assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
+      assert.strictEqual(
+        execFileSync('git', ['log', '-2', '--format=%s | %an | %cn <%ce>'], { cwd: task.path }).toString().trim(),
+        'Slider, warmer | Fake | Althar <althar@localhost>\nSlider | Fake | Althar <althar@localhost>',
+      )
+      const sql = yield* SqlClient.SqlClient
+      const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'task'`
+      const warnings = (yield* notices(thread?.id ?? '')).filter(
+        (notice) => notice.title?.startsWith('Git here would write commits as a test’s identity') === true,
+      )
+      assert.lengthOf(warnings, 1)
+      assert.include(warnings[0]?.title, `“t@t.test” (user.email) from ${join(realpathSync(working), '.git', 'config')}`)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('a settled task’s card, its worktree kept', () => {
   /**
    * Every git run, by the folder it runs in, counted by a git in front of the

@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 
 import { Effect } from 'effect'
 
-import { gitOutcome } from './git'
+import { gitOutcome, gitOutcomeWith } from './git'
 
 /*
  * Who a commit Althar makes for a task is written as. A repository's own config
@@ -30,8 +30,18 @@ export interface Source {
 
 export type Role = 'author' | 'committer'
 
-/** The name and email git would write one role of a commit as in a folder, where it has them. */
+/** What git itself writes one role of a commit as (`git var GIT_AUTHOR_IDENT`): null where it refuses to. */
+export interface Resolved {
+  readonly name: string
+  readonly email: string
+}
+
+/**
+ * One role of a commit in a folder: what git resolves it to, which is what is judged, and where each of its name and
+ * email came from, which is what is said.
+ */
 export interface Person {
+  readonly resolved: Resolved | null
   readonly name: Source | null
   readonly email: Source | null
 }
@@ -56,7 +66,8 @@ export const ALTHAR: Committer = { ...altharAs('author'), ...altharAs('committer
 const fromEnvironment = (env: NodeJS.ProcessEnv, role: Role, field: 'name' | 'email'): Source | null => {
   const key = `GIT_${role.toUpperCase()}_${field.toUpperCase()}`
   const value = env[key]
-  return value === undefined || value === '' ? null : { value, key, origin: 'the environment' }
+  // Set though empty, it is still git's word for the role, over any config: so it is here.
+  return value === undefined ? null : { value, key, origin: 'the environment' }
 }
 
 /**
@@ -85,26 +96,54 @@ const configured = (path: string) =>
     },
   )
 
-/** Who git would write a commit as in a folder, each role as git resolves it: the environment, the role's key, then `user.*`. */
+const IDENTITY_VARIABLES = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const
+
+/** `Name <email> 1700000000 +0100`, as `git var` writes an identity. */
+const IDENT = /^(.*?) <([^>]*)> \d+ [+-]\d{4}$/
+
+/** What git writes one role as here, with `env`'s identity words over Althar's own: null where it refuses (an empty name). */
+const resolvedIn = (path: string, role: Role, env: NodeJS.ProcessEnv) => {
+  const words = Object.fromEntries(IDENTITY_VARIABLES.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name] ?? '']])))
+  return Effect.map(gitOutcomeWith(words, path, 'var', `GIT_${role.toUpperCase()}_IDENT`), ({ code, stdout }): Resolved | null => {
+    const found = code === 0 ? IDENT.exec(stdout) : null
+    return found === null ? null : { name: found[1] ?? '', email: found[2] ?? '' }
+  })
+}
+
+/**
+ * Who git would write a commit as in a folder, each role as git itself resolves it, and where each value came from:
+ * the environment, the role's key, then `user.*`, as git reads them.
+ */
 export const identityIn = (path: string, env: NodeJS.ProcessEnv = process.env): Effect.Effect<Identity> =>
-  Effect.map(configured(path), (keys) => {
-    const field = (role: Role, name: 'name' | 'email') =>
-      fromEnvironment(env, role, name) ?? keys.get(`${role}.${name}`) ?? keys.get(`user.${name}`) ?? null
-    return {
-      author: { name: field('author', 'name'), email: field('author', 'email') },
-      committer: { name: field('committer', 'name'), email: field('committer', 'email') },
-    }
-  })
+  Effect.map(
+    Effect.all([configured(path), resolvedIn(path, 'author', env), resolvedIn(path, 'committer', env)], { concurrency: 3 }),
+    ([keys, author, committer]) => {
+      const field = (role: Role, name: 'name' | 'email') =>
+        fromEnvironment(env, role, name) ?? keys.get(`${role}.${name}`) ?? keys.get(`user.${name}`) ?? null
+      return {
+        author: { resolved: author, name: field('author', 'name'), email: field('author', 'email') },
+        committer: { resolved: committer, name: field('committer', 'name'), email: field('committer', 'email') },
+      }
+    },
+  )
 
-const isTest = (source: Source, field: 'name' | 'email') =>
-  field === 'name' ? source.value.trim() === 'T' : /@[^@\s]*\.test$/i.test(source.value.trim())
+const isTest = (value: string, field: 'name' | 'email') => (field === 'name' ? value.trim() === 'T' : /@[^@\s]*\.test$/i.test(value.trim()))
 
-/** What of one role is plainly a test's: the name `T`, or an address on a `.test` domain. */
+/**
+ * What of one role is plainly a test's, judged on what git resolves it to (`<t@t.test>` in a config is `t@t.test`):
+ * the name `T`, or an address on a `.test` domain. Each is said by where it came from.
+ */
 const testIn = (person: Person): ReadonlyArray<Source> =>
-  (['name', 'email'] as const).flatMap((field) => {
-    const source = person[field]
-    return source !== null && isTest(source, field) ? [source] : []
-  })
+  person.resolved === null
+    ? []
+    : (['name', 'email'] as const).flatMap((field) => {
+        const value = person.resolved?.[field] ?? ''
+        if (!isTest(value, field)) return []
+        return [person[field] ?? { value, key: `user.${field}`, origin: 'git’s own default' }]
+      })
+
+/** Whether git would write one role as no one Althar can stand behind: it refuses, or has no address for it. */
+const unnamed = (person: Person) => person.resolved === null || person.resolved.email === '' || person.email === null
 
 /** Whatever of an identity is plainly a test's, each value once, though both roles read it. */
 export const testIdentityIn = (identity: Identity): ReadonlyArray<Source> => {
@@ -142,7 +181,7 @@ export const committerIdentity = (
   Effect.map(identityIn(path, env), (identity) => {
     const as = Object.assign(
       {},
-      ...ROLES.map((role) => (identity[role].email === null || testIn(identity[role]).length > 0 ? altharAs(role) : {})),
+      ...ROLES.map((role) => (unnamed(identity[role]) || testIn(identity[role]).length > 0 ? altharAs(role) : {})),
     ) as Committer
     return { as, warning: testIdentityWarning(identity) }
   })

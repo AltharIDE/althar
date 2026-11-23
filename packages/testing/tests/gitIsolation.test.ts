@@ -101,15 +101,20 @@ describe('configuring a test repository', () => {
     expect(readFileSync(join(main, '.git', 'config'), 'utf8')).toBe(before)
   })
 
-  test('sets the identity at the root of a linked worktree of a test’s own repository', () => {
+  test('refuses the root of any linked worktree, though its repository sits in the temporary folder, and sets the main one', () => {
+    // A repository already there, as when the temporary folder is a parent of the person's projects.
     const own = join(sandbox, 'linked-own')
     mkdirSync(own)
     git(own, 'init', '-q', '-b', 'main')
     git(own, 'commit', '-q', '--allow-empty', '-m', 'Start')
     const linked = join(sandbox, 'linked-own-task')
     git(own, 'worktree', 'add', '-q', '-b', 'task', linked)
-    identify(linked, 'Fake', 'fake@althar.test')
-    expect(git(own, 'config', '--local', '--get', 'user.email')).toBe('fake@althar.test')
+    const before = readFileSync(join(own, '.git', 'config'), 'utf8')
+    expect(isOwnRepository(linked)).toBe(false)
+    expect(() => identify(linked, 'T', 't@t.test')).toThrow(/Refusing to set user\.name/)
+    expect(readFileSync(join(own, '.git', 'config'), 'utf8')).toBe(before)
+    identify(own, 'Fake', 'fake@althar.test')
+    expect(git(linked, 'config', '--local', '--get', 'user.email')).toBe('fake@althar.test')
   })
 
   test('keeps git above the temporary folder out of reach in every test', () => {
