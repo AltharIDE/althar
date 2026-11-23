@@ -18,16 +18,16 @@ import { TabsFrame } from './features/tabs/TabsFrame'
  * moves along a row of them, shows at once.
  */
 function Root() {
-  const { host, cache } = useServices()
+  const { host } = useServices()
   const navigate = useNavigate()
   useEffect(
     () =>
       host.onOpen((threadId, asked) => {
-        // A prompt an aside raised shows where the aside is: the window came forward, and stays where it was.
-        if (asked && staysInPlace(cache, threadId)) return
+        // A prompt an aside raised shows where the aside is open: the window came forward, and stays where it was.
+        if (asked && staysInPlace(threadId)) return
         void navigate({ to: '/threads/$threadId', params: { threadId } })
       }),
-    [host, cache, navigate],
+    [host, navigate],
   )
   return (
     <HoverCardProvider>

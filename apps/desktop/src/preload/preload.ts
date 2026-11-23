@@ -82,7 +82,7 @@ ipcRenderer.on('althar:chrome', (_event, next: unknown) => {
   for (const listener of chromes) listener(next)
 })
 
-/* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
+/* A thread to open, because the person clicked its notification or because it raised a prompt itself (`asked`): held until the page listens, as a window that just opened doesn't yet. */
 let pending: { threadId: string; asked: boolean } | undefined
 const opening = new Set<(threadId: string, asked: boolean) => void>()
 ipcRenderer.on('althar:open', (_event, threadId: unknown, asked: unknown) => {

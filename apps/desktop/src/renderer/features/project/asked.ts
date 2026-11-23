@@ -1,15 +1,15 @@
-import type { QueryClient } from '@tanstack/react-query'
-
-import type { BoardSnapshot } from '@althar/contracts'
-
-import { keys } from '../../data/reads'
-import { opensInPlace } from './Asides'
-
-/**
- * Whether a prompt a thread raised itself (a permission, a question) leaves the window where it is: the thread is an aside,
- * open over the coordinator's conversation or listed on Scratch, so its prompt shows there. Read from the boards the window holds.
+/*
+ * The asides' conversations the window shows right now: a prompt a thread raises itself (a computer-use permission, say)
+ * is drawn in the conversation that has it, so where that is already shown the window stays where it is, and anywhere else
+ * it goes to the thread, or the person would never see the prompt.
  */
-export const staysInPlace = (cache: QueryClient, threadId: string) =>
-  cache
-    .getQueriesData<BoardSnapshot>({ queryKey: keys.board('').slice(0, 1) })
-    .some(([, board]) => board?.tasks.some((task) => task.threadId === threadId && opensInPlace(task)) === true)
+const shown = new Set<string>()
+
+/** A project's conversation shows the aside on `threadId`, until the returned function is called. */
+export const showingAside = (threadId: string): (() => void) => {
+  shown.add(threadId)
+  return () => void shown.delete(threadId)
+}
+
+/** Whether the window already shows the thread's conversation, over a project's coordinator, so its prompt is in view. */
+export const staysInPlace = (threadId: string) => shown.has(threadId)
