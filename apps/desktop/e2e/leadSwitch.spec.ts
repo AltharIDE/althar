@@ -9,8 +9,9 @@ import { launch, openFirstProject, say, startTask, still } from './support'
 
 /*
  * A lead switched to another agent, and its effort picked while the new one starts, in a real window with the fake agents:
- * the composer's picker and the turn the new lead takes say the pick at once, and that turn runs on it. The thread says the
- * switch once, by the agents' names, never one agent to itself. Its screenshot (test-results/lead-switch.png) is this
+ * the composer's picker says the pick at once, on the agent taking over, and keeps it; the turn the new lead takes is headed by
+ * the model picked. An effort picked after what was said is sent is for the turn after, as any pick made after a send is, so
+ * that turn's own effort is not read here. The thread says the switch once, by the agents' names, never one agent to itself. Its screenshot (test-results/lead-switch.png) is this
  * change's own evidence.
  */
 

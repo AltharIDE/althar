@@ -135,7 +135,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
         return await start()
       } catch (error) {
         if (attempt === 5 || !String(error).includes('ConnectionRefused')) throw error
-        progress(`Native pairing: the host could not listen on ${port}, trying again`)
+        progress(`Native pairing: the host could not listen on ${port} (attempt ${attempt}: ${String(error).split('\n')[0]}), trying again`)
         if (paired) await new Promise((resolve) => setTimeout(resolve, 500))
         else port = await portNumber()
       }

@@ -592,7 +592,10 @@ export function TaskView({
   const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
-  // What was picked on the agent taking over while the switch to it was on its way: moved to as the switch lands.
+  // The agent picked to take over, from the moment what the person said to it is sent until the runtime has the switch: the picker keeps saying it
+  // rather than going back to the lead going out, and no second switch is asked for by what is said meanwhile.
+  const [switching, setSwitching] = useState<Choice | null>(null)
+  // What was picked on that agent meanwhile, the last of it: moved to as the switch lands. A pick made once it has landed supersedes it.
   const pickedMeanwhile = useRef<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
@@ -940,7 +943,7 @@ export function TaskView({
       ? taking === null
         ? chosen
         : ((moving !== null ? { ...moving, agentId: taking.agentId } : null) ?? taking)
-      : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
+      : (waiting ?? switching ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -995,9 +998,12 @@ export function TaskView({
     const batch = takeComments(kept)
     setDraft('')
     images.clear()
-    // Kept until the runtime has the switch, so the picker never goes back to the agent going out while it starts.
     const picked = waiting
-    pickedMeanwhile.current = null
+    if (picked !== null) {
+      setHandover(null)
+      setSwitching(picked)
+      pickedMeanwhile.current = null
+    }
     const gathered = batch.taken
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
     const lines = gathered.filter(isDiffDraft).map(toLineComment)
@@ -1013,7 +1019,12 @@ export function TaskView({
       batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      if (picked !== null) setHandover(picked)
+      if (picked !== null) {
+        // The switch didn't go: what was picked on the agent since is the pick given back, not the one sent.
+        setHandover(pickedMeanwhile.current ?? picked)
+        pickedMeanwhile.current = null
+        setSwitching(null)
+      }
     }
     void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
       if (!accepted) return restore()
@@ -1021,7 +1032,7 @@ export function TaskView({
         // What was picked on the agent taking over since is moved to as the switch lands, not lost with it.
         const later = pickedMeanwhile.current
         pickedMeanwhile.current = null
-        setHandover(null)
+        setSwitching(null)
         if (later !== null) move(later)
       }
       batch.finish(true)
@@ -1030,6 +1041,8 @@ export function TaskView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const move = (next: Choice) => {
+    // The last pick stands: one made on the agent before the switch landed is not moved to after this.
+    pickedMeanwhile.current = null
     setHandover(null)
     setMoving(next)
     // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
@@ -1038,12 +1051,17 @@ export function TaskView({
   }
   const choose = (next: Choice) => {
     // Another session taking over after the one going out let go is the lead as far as the runtime goes: a pick is moved to there too.
-    if (taking !== null) return move(next)
-    if (session === null || !session.held) return setPick(next)
-    if (next.agentId !== session.agentId) {
-      pickedMeanwhile.current = next
-      return setHandover(next)
+    if (taking !== null) {
+      setSwitching(null)
+      return move(next)
     }
+    // The switch to the agent is still on its way: a pick of its own waits for it, and is moved to as it lands.
+    if (switching !== null && next.agentId === switching.agentId) {
+      pickedMeanwhile.current = next
+      return setSwitching(next)
+    }
+    if (session === null || !session.held) return setPick(next)
+    if (next.agentId !== session.agentId) return setHandover(next)
     move(next)
   }
   // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
