@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { sshArguments, sshEnvironment, sshUpdateArguments } from '../src/sshArguments'
+import { sshProgram } from '../src/sshProcess'
 
 describe('SSH transport arguments', () => {
   it('uses strict host checking, existing SSH config, no forwarded agent/TTY, and a pinned home', () => {
@@ -23,6 +24,13 @@ describe('SSH transport arguments', () => {
     expect(args.slice(-3, -1)).toEqual(['--', 'person@my-vps'])
     expect(args.at(-1)).toContain('connect-stdio --home-id')
     expect(sshArguments({ target: 'my-vps' }).at(-1)).toContain('status --json')
+  })
+  it('reaches a home by one ssh for every use: one given, the Flatpak’s way out, or the system’s', () => {
+    expect(sshProgram('/tools/ssh', { FLATPAK_ID: 'dev.althar.Althar' }, 'linux')).toBe('/tools/ssh')
+    expect(sshProgram(undefined, { FLATPAK_ID: 'dev.althar.Althar' }, 'linux')).toBe('/app/bin/althar-host-ssh')
+    expect(sshProgram(undefined, {}, 'linux')).toBe('/usr/bin/ssh')
+    expect(sshProgram(undefined, {}, 'darwin')).toBe('/usr/bin/ssh')
+    expect(sshProgram(undefined, { SystemRoot: 'C:\\Windows' }, 'win32')).toMatch(/System32.OpenSSH.ssh\.exe$/)
   })
   it('runs the home’s own update by the same launcher, profile and strict options as its connection', () => {
     const args = sshUpdateArguments({ target: 'person@my-vps', port: 2222, launcher: '/private/launcher', profile: '/private/profile' })

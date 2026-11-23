@@ -745,7 +745,8 @@
     color var(--fast) var(--ease),
     background-color var(--fast) var(--ease);
 }
-.update[data-state='failed'] .updateTile {
+.update[data-state='failed'] .updateTile,
+.update[data-state='asking'] .updateTile {
   color: var(--danger);
   background: var(--danger-dim);
 }
@@ -779,6 +780,11 @@
 }
 .updateTrack {
   width: 140px;
+}
+.updateActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* the command, folded away under it, for running it on the home by hand */

@@ -204,6 +204,26 @@ describe('a home’s welcome, every time after', () => {
     expect(screen.getByRole('button', { name: 'Update it on runner-1 yourself' })).not.toBeNull()
   })
 
+  it('asks before an update that stops tasks running on the home', () => {
+    const onUpdate = vi.fn()
+    welcome({ toured: true, update: { command: 'sh launcher update', installed: 'known', run: { state: 'idle', busy: 1 } }, onUpdate })
+    expect(screen.getByText('1 task is running on runner-1. They stop while it restarts.')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(screen.getByText('Stop the running task?')).not.toBeNull()
+    expect(onUpdate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Update anyway' }))
+    expect(onUpdate).toHaveBeenCalledOnce()
+  })
+
+  it('offers Reconnect beside Try again where the window’s connection dropped on the way', () => {
+    const onCheckAgain = vi.fn()
+    const run = { state: 'failed' as const, problem: 'The new host did not become ready.', offline: true }
+    welcome({ toured: true, update: { command: 'sh launcher update', installed: 'known', run }, onCheckAgain })
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+    expect(onCheckAgain).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Try again' })).not.toBeNull()
+  })
+
   it('shows what the home has along its foot, with what one that isn’t ready takes', () => {
     const at = welcome({ toured: true })
     const strip = screen.getByRole('list', { name: 'On runner-1' })

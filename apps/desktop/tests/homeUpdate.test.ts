@@ -32,12 +32,13 @@ describe('a home updated from its window', () => {
   it('runs the home’s own update over the SSH its connection uses, once for each home however often it’s asked', async () => {
     let finish: (value: ReturnType<typeof ran>) => void = () => {}
     const run = vi.fn(() => new Promise<ReturnType<typeof ran>>((resolve) => (finish = resolve)))
-    const updates = homeUpdates(run, new AbortController().signal)
+    const updates = homeUpdates({ run, program: '/app/bin/althar-host-ssh', signal: new AbortController().signal })
     const first = updates.update(runner)
     const second = updates.update(runner)
     expect(run).toHaveBeenCalledOnce()
     const [program, args] = run.mock.calls[0] as unknown as [string, string[]]
-    expect(program).toBe('ssh')
+    // The ssh the window's connection runs, as given: here the Flatpak's.
+    expect(program).toBe('/app/bin/althar-host-ssh')
     expect(args.at(-1)).toContain('update --apply --wait --json')
     finish(ran(0, '{"state":"applied"}'))
     await expect(first).resolves.toEqual({ state: 'applied' })

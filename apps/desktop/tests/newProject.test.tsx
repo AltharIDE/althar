@@ -15,14 +15,14 @@ import {
 
 import { newProjectId } from '../src/renderer/data/client'
 import { makeQueryClient } from '../src/renderer/data/reads'
-import type { FoundRepositories } from '../src/renderer/data/services'
+import type { FoundRepositories, Host } from '../src/renderer/data/services'
 import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
 import { unsent } from '../src/renderer/features/elsewhere/unsent'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
-import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, project, remoteConnection } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, onLinuxHome, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
 import { USUAL_LAUNCHER } from '../src/renderer/features/homes/useHomes'
@@ -792,7 +792,11 @@ describe('a new project on a home on another computer', () => {
       throw new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' })
     })
   /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
-  const onHome = (overrides: Parameters<typeof fakeClient>[0] = {}, calls: ReadonlyArray<string> | null = SOCKET_CALLS) => {
+  const onHome = (
+    overrides: Parameters<typeof fakeClient>[0] = {},
+    calls: ReadonlyArray<string> | null = SOCKET_CALLS,
+    host: Host = fakeHost(),
+  ) => {
     const fake = fakeClient({
       connection: remoteConnection(calls),
       readFolder: vi.fn(async (grant: string) =>
@@ -804,7 +808,6 @@ describe('a new project on a home on another computer', () => {
       listContainers: refused(),
       ...overrides,
     })
-    const host = fakeHost()
     const onCreated = vi.fn()
     draftsOf(fake.client).start()
     withServices(<NewProject onCreated={onCreated} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
@@ -883,6 +886,31 @@ describe('a new project on a home on another computer', () => {
     const list = await screen.findByRole('list', { name: 'Repositories on this home' })
     expect(within(list).getByRole('checkbox', { name: /^site/ })).not.toBeNull()
     expect(at.client.findHomeFolders).toHaveBeenCalled()
+  })
+
+  it('asks before an update that stops tasks running on the home, and updates only once the person says so', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const update = vi.fn(async () => ({ state: 'applied' as const }))
+    const busy: Host['homes'] = {
+      ...homes,
+      update,
+      overview: vi.fn(async () => ({
+        homes: [],
+        windows: {},
+        projects: { [`home_${'6'.repeat(32)}`]: { live: true, list: [{ id: 'p1', name: 'Site', ink: 'teal', working: 2, yours: 0 }] } },
+        opened: {},
+      })),
+    }
+    onHome({}, null, fakeHost({ homes: busy }))
+    expect(await screen.findByText('2 tasks are running on runner-1. They stop while it restarts.')).not.toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(screen.getByText('Stop 2 running tasks?')).not.toBeNull()
+    expect(update).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update anyway' }))
+    expect(update).toHaveBeenCalledOnce()
+    await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
   })
 
   it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {

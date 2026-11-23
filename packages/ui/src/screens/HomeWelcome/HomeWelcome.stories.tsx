@@ -107,6 +107,24 @@ export const Older: Story = {
   args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'idle' } } },
 }
 
+/** Tasks running on the home: pressed, it asks first, since the restart stops them. */
+export const OlderBusy: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'idle', busy: 2 } } },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await fireEvent.click(await page.findByRole('button', { name: 'Update runner-1' }))
+    await expect(await page.findByText('Stop 2 running tasks?')).toBeVisible()
+  },
+}
+
+/** It couldn't, after the home dropped the window's connection: Reconnect beside Try again. */
+export const OlderFailedOffline: Story = {
+  args: {
+    ...OLDER,
+    update: { command: UPDATE, installed: 'known', run: { state: 'failed', problem: 'The new host did not become ready.', offline: true } },
+  },
+}
+
 /** Under way: the release coming down, where the press was. */
 export const OlderUpdating: Story = {
   args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'running', step: 'getting' } } },

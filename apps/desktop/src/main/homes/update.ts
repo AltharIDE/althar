@@ -55,17 +55,24 @@ export const updatedFrom = (ran: Ran, name: string): HomeUpdated => {
   throw new Error(lastWords(ran.stderr) ?? `${name} couldn’t update.`)
 }
 
-export const homeUpdates = (
-  run: (program: 'ssh', args: ReadonlyArray<string>, options: RunOptions) => Promise<Ran>,
-  signal: AbortSignal,
-) => {
+export const homeUpdates = ({
+  run,
+  program,
+  signal,
+}: {
+  /** Runs a program by its path. */
+  readonly run: (program: string, args: ReadonlyArray<string>, options: RunOptions) => Promise<Ran>
+  /** The ssh the window's own connection runs (transport-node's sshProgram), so the update reaches the home as it does. */
+  readonly program: string
+  readonly signal: AbortSignal
+}) => {
   const running = new Map<string, Promise<HomeUpdated>>()
   return {
     update: (home: SshRemoteHome): Promise<HomeUpdated> => {
       const under = running.get(home.homeId)
       if (under !== undefined) return under
       const args = sshUpdateArguments(home.ssh)
-      const one = run('ssh', args, { signal, timeout: LONGEST })
+      const one = run(program, args, { signal, timeout: LONGEST })
         .then((ran) => updatedFrom(ran, home.name))
         .finally(() => running.delete(home.homeId))
       running.set(home.homeId, one)

@@ -1043,6 +1043,30 @@ it('updates an older home reached over SSH in one press, each step as it stands,
   expect(window.localStorage.getItem('althar.homeToured')).toBe('1')
 })
 
+it('offers Reconnect where an update failed after the home dropped the window’s connection', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const listeners = new Set<(state: unknown) => void>()
+  let fail: (error: Error) => void = () => {}
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: (listener: (state: unknown) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(() => new Promise((_, reject) => (fail = reject))),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  act(() => listeners.forEach((listener) => listener({ current: { kind: 'ssh', home: runner }, connection: 'disconnected' })))
+  act(() => fail(new Error('The new host did not become ready.')))
+  await userEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  expect(homes.reconnect).toHaveBeenCalledOnce()
+})
+
 it('says why an older home couldn’t update, with Try again and its command folded away', async () => {
   window.localStorage.clear()
   const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
@@ -1060,6 +1084,8 @@ it('says why an older home couldn’t update, with Try again and its command fol
   await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
   expect(await screen.findByText('There’s no newer Althar for runner-1 yet.')).not.toBeNull()
   expect(screen.getByText('Couldn’t update runner-1')).not.toBeNull()
+  // Still connected: nothing to reconnect.
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Update it on runner-1 yourself' })).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(homes.update).toHaveBeenCalledTimes(2)

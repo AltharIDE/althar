@@ -4,6 +4,7 @@ export { authenticateApiClient, AUTH_FRAME_LIMIT, Authenticated, readFrame, type
 export { openApiSocket } from './socket'
 export { inspectSshHost, openSshConnection } from './ssh'
 export type { SshRuntime, SshSpawn } from './sshProcess'
+export { sshProgram } from './sshProcess'
 export { LocalApiEndpoint, readLocalEndpoint } from './endpoint'
 export { openLocalConnection, apiClient, type ApiConnection } from './client'
 export { BridgeRejected, receiveBridgeIdentity, socketReady } from './bridgeProtocol'

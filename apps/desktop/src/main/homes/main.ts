@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
+import { join } from 'node:path'
 import { decodePairingCode, prepareApprovalKeyEnrollment, preparePermissionApproval, signDeviceMessage } from '@althar/transport-node'
 import { ClientIdentity, PermissionApproval } from '@althar/contracts'
 import { connectionCredentials, type ProtectCredential } from './credentials'
 import { Effect, Schema } from 'effect'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
-import { sshEnvironment } from '@althar/transport-node'
+import { sshEnvironment, sshProgram } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
 import { homeController, type HomeUsageEvent } from './controller'
@@ -14,7 +15,7 @@ import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS } from './release'
-import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
+import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
 
@@ -293,7 +294,13 @@ export const startHomeConnections = ({
   })
   // A window's home, over SSH, updated by its own updater; the window reconnects once it answers.
   const quitting = new AbortController()
-  const updates = homeUpdates(system.run, quitting.signal)
+  // By the ssh the window's connection runs (connection/bridge.ts): the Flatpak's way out, or a build's own tools.
+  const tools = sshTools()
+  const updates = homeUpdates({
+    run: runProgram,
+    program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
+    signal: quitting.signal,
+  })
   ipcMain.handle('althar:homes-update', (event) => {
     const { current } = controller.state(owner(event))
     if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')

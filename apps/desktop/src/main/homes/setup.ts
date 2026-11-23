@@ -719,6 +719,55 @@ export type HomeSetups = ReturnType<typeof homeSetups>
  */
 export const canSetUp = (env: NodeJS.ProcessEnv = process.env) => env.FLATPAK_ID === undefined
 
+/** Runs a program by its path, as OpenSSH's are run: its own process group, the SSH environment, bounded output. */
+export const runProgram = (program: string, args: ReadonlyArray<string>, { input, line, signal, timeout }: RunOptions): Promise<Ran> =>
+  new Promise((resolve) => {
+    const child = spawn(program, [...args], {
+      env: sshEnvironment(process.env),
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      stdio: 'pipe',
+    })
+    let stdout = ''
+    let stderr = ''
+    let partial = ''
+    const kill = () => {
+      try {
+        if (process.platform !== 'win32' && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
+        else child.kill()
+      } catch {
+        child.kill()
+      }
+    }
+    const deadline = setTimeout(kill, timeout)
+    signal.addEventListener('abort', kill, { once: true })
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (data: string) => {
+      if (stdout.length < 1_048_576) stdout += data
+      partial += data
+      const lines = partial.split('\n')
+      partial = lines.pop() ?? ''
+      for (const one of lines) line?.(one)
+    })
+    child.stderr.on('data', (data: string) => {
+      stderr = (stderr + data).slice(-65_536)
+    })
+    child.stdin.on('error', () => undefined)
+    child.stdout.on('error', () => undefined)
+    child.stderr.on('error', () => undefined)
+    const end = (code: number | null) => {
+      clearTimeout(deadline)
+      signal.removeEventListener('abort', kill)
+      if (partial !== '') line?.(partial)
+      partial = ''
+      resolve({ code, stdout, stderr })
+    }
+    child.once('error', () => end(255))
+    child.once('close', (code) => end(code))
+    child.stdin.end(input ?? '')
+  })
+
 /** The system as it is: OpenSSH beside the ssh the app reaches homes with, the network, and the profile's files. */
 export const nativeSetupSystem = (profile: string, release: SetupSystem['release'], own?: string): SetupSystem => {
   const tools = own ?? (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH') : '/usr/bin')
@@ -730,53 +779,7 @@ export const nativeSetupSystem = (profile: string, release: SetupSystem['release
       const path = await fs.mkdtemp(join(tmpdir(), 'althar-host-'))
       return { path, remove: () => fs.rm(path, { recursive: true, force: true }) }
     },
-    run: (program, args, { input, line, signal, timeout }) =>
-      new Promise((resolve) => {
-        const child = spawn(executable(program), [...args], {
-          env: sshEnvironment(process.env),
-          windowsHide: true,
-          detached: process.platform !== 'win32',
-          stdio: 'pipe',
-        })
-        let stdout = ''
-        let stderr = ''
-        let partial = ''
-        const kill = () => {
-          try {
-            if (process.platform !== 'win32' && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-            else child.kill()
-          } catch {
-            child.kill()
-          }
-        }
-        const deadline = setTimeout(kill, timeout)
-        signal.addEventListener('abort', kill, { once: true })
-        child.stdout.setEncoding('utf8')
-        child.stderr.setEncoding('utf8')
-        child.stdout.on('data', (data: string) => {
-          if (stdout.length < 1_048_576) stdout += data
-          partial += data
-          const lines = partial.split('\n')
-          partial = lines.pop() ?? ''
-          for (const one of lines) line?.(one)
-        })
-        child.stderr.on('data', (data: string) => {
-          stderr = (stderr + data).slice(-65_536)
-        })
-        child.stdin.on('error', () => undefined)
-        child.stdout.on('error', () => undefined)
-        child.stderr.on('error', () => undefined)
-        const end = (code: number | null) => {
-          clearTimeout(deadline)
-          signal.removeEventListener('abort', kill)
-          if (partial !== '') line?.(partial)
-          partial = ''
-          resolve({ code, stdout, stderr })
-        }
-        child.once('error', () => end(255))
-        child.once('close', (code) => end(code))
-        child.stdin.end(input ?? '')
-      }),
+    run: (program, args, options) => runProgram(executable(program), args, options),
     release,
     fetchArchive: async (found, to, progress, signal) => {
       const response = await fetch(found.url, { signal, redirect: 'follow' })

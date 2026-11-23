@@ -75,9 +75,11 @@ export type WelcomeNeed = {
  * the home restarting, the window reconnecting), or stopped, with why.
  */
 export type HomeUpdateRun =
-  | { readonly state: 'idle' }
+  /** Not yet; `busy`, the tasks running on the home, which its restart stops: asked about before it goes. */
+  | { readonly state: 'idle'; readonly busy?: number }
   | { readonly state: 'running'; readonly step: 'getting' | 'restarting' | 'reconnecting' }
-  | { readonly state: 'failed'; readonly problem: string }
+  /** `offline` where the window's connection dropped on the way: the home may be back on its old release. */
+  | { readonly state: 'failed'; readonly problem: string; readonly offline?: boolean }
 
 /** How an older home is updated: by the window itself, where `run` is given, else by its command, run there. */
 export interface HomeUpdateOffer {
@@ -138,8 +140,16 @@ export interface HomeWelcomeText {
     press: (name: string) => string
     running: (name: string) => string
     steps: { getting: string; restarting: (name: string) => string; reconnecting: string }
+    /** Tasks running on the home, which its restart stops. */
+    busy: (count: number, name: string) => string
+    /** Asked before an update that stops them. */
+    stop: (count: number) => string
+    stopLine: (name: string) => string
+    anyway: string
+    cancel: string
     failed: (name: string) => string
     tryAgain: string
+    reconnect: string
     /** Where the window can't run it: updated there, then looked at again. */
     there: (name: string) => string
     thereLine: string
@@ -207,8 +217,14 @@ export const homeWelcomeText: HomeWelcomeText = {
     press: (name) => `Update ${name}`,
     running: (name) => `Updating ${name}`,
     steps: { getting: 'Getting the new release', restarting: (name) => `Restarting ${name}`, reconnecting: 'Reconnecting' },
+    busy: (count, name) => `${count === 1 ? '1 task is' : `${count} tasks are`} running on ${name}. They stop while it restarts.`,
+    stop: (count) => (count === 1 ? 'Stop the running task?' : `Stop ${count} running tasks?`),
+    stopLine: (name) => `${name} restarts to update, and its running tasks stop with it.`,
+    anyway: 'Update anyway',
+    cancel: 'Cancel',
     failed: (name) => `Couldn’t update ${name}`,
     tryAgain: 'Try again',
+    reconnect: 'Reconnect',
     there: (name) => `Update it on ${name}`,
     thereLine: 'Then check again here.',
     checkAgain: 'Check again',
@@ -938,24 +954,44 @@ export function UpdateHome({
 }) {
   const t = { ...homeWelcomeText, ...text }
   const run = update.run
-  const state = run === undefined ? 'there' : run.state
+  const busy = run?.state === 'idle' ? (run.busy ?? 0) : 0
+  // Pressed on a busy home: asked first, in the same panel. Anything else under way ends the asking.
+  const [asking, setAsking] = useState(false)
+  if (asking && (run?.state !== 'idle' || busy === 0)) setAsking(false)
+  const state = run === undefined ? 'there' : asking ? 'asking' : run.state
   const steps = [t.update.steps.getting, t.update.steps.restarting(name), t.update.steps.reconnecting]
   const at = run?.state === 'running' ? (['getting', 'restarting', 'reconnecting'] as const).indexOf(run.step) : 0
   const title =
     run === undefined
       ? t.update.there(name)
-      : run.state === 'idle'
-        ? t.update.title
-        : run.state === 'running'
-          ? t.update.running(name)
-          : t.update.failed(name)
+      : asking
+        ? t.update.stop(busy)
+        : run.state === 'idle'
+          ? t.update.title
+          : run.state === 'running'
+            ? t.update.running(name)
+            : t.update.failed(name)
   const line =
-    run === undefined ? t.update.thereLine : run.state === 'idle' ? t.update.line(name) : run.state === 'running' ? steps[at] : run.problem
+    run === undefined
+      ? t.update.thereLine
+      : asking
+        ? t.update.stopLine(name)
+        : run.state === 'idle'
+          ? busy > 0
+            ? t.update.busy(busy, name)
+            : t.update.line(name)
+          : run.state === 'running'
+            ? steps[at]
+            : run.problem
   return (
     <section className={cx(s.updating, className)} aria-label={t.updateLabel(name)}>
       <div className={s.update} data-state={state}>
         <span className={s.updateTile} aria-hidden="true">
-          {state === 'running' ? <Spinner size="large" /> : <Icon name={state === 'failed' ? 'problem' : 'download'} size={20} />}
+          {state === 'running' ? (
+            <Spinner size="large" />
+          ) : (
+            <Icon name={state === 'failed' || state === 'asking' ? 'problem' : 'download'} size={20} />
+          )}
         </span>
         <span className={s.updateText} aria-live="polite">
           <span className={s.updateTitle}>{title}</span>
@@ -972,9 +1008,29 @@ export function UpdateHome({
                 {t.update.checkAgain}
               </Button>
             )
+          ) : asking ? (
+            <span className={s.updateActions}>
+              <LinkButton onClick={() => setAsking(false)}>{t.update.cancel}</LinkButton>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setAsking(false)
+                  onUpdate?.()
+                }}
+              >
+                {t.update.anyway}
+              </Button>
+            </span>
+          ) : run.state === 'failed' ? (
+            <span className={s.updateActions}>
+              {run.offline === true && onCheckAgain !== undefined && <Button onClick={onCheckAgain}>{t.update.reconnect}</Button>}
+              <Button variant="signal" onClick={onUpdate}>
+                {t.update.tryAgain}
+              </Button>
+            </span>
           ) : (
-            <Button variant="signal" onClick={onUpdate}>
-              {run.state === 'failed' ? t.update.tryAgain : t.update.press(name)}
+            <Button variant="signal" onClick={busy > 0 ? () => setAsking(true) : onUpdate}>
+              {t.update.press(name)}
             </Button>
           )}
         </span>
