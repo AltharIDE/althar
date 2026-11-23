@@ -16,6 +16,7 @@ import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
+import { homeUpdates } from './update'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -146,13 +147,11 @@ export const startHomeConnections = ({
   })
   // A home being set up over SSH: one for the whole app, told to every window as it goes.
   const source = releaseSource()
-  const setups = homeSetups(
-    nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
-    (setup) => {
-      for (const window of BrowserWindow.getAllWindows())
-        if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
-    },
-  )
+  const system = nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools)
+  const setups = homeSetups(system, (setup) => {
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+  })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Home connections are available only in Althar’s own window.')
@@ -292,6 +291,14 @@ export const startHomeConnections = ({
       throw new Error('Choose what to do with the setup.')
     void setups.act(action).catch(() => undefined)
   })
+  // A window's home, over SSH, updated by its own updater; the window reconnects once it answers.
+  const quitting = new AbortController()
+  const updates = homeUpdates(system.run, quitting.signal)
+  ipcMain.handle('althar:homes-update', (event) => {
+    const { current } = controller.state(owner(event))
+    if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
+    return updates.update(current.home)
+  })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
     approvals.get(id)?.abort()
@@ -429,6 +436,7 @@ export const startHomeConnections = ({
     previewPort,
     stopAll: async () => {
       controller.stopping()
+      quitting.abort()
       await setups.stop()
       await keyChanges
       for (const held of forgottenKeys.values()) clearTimeout(held.timer)

@@ -887,9 +887,10 @@ describe('a new project on a home on another computer', () => {
 
   it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {
     const at = onHome({}, null)
-    expect(await screen.findByText(/this home runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
-    // Not read how the home was installed: where Althar installs one, and said so.
-    expect(document.querySelector('code')?.textContent).toBe(`sh ${USUAL_LAUNCHER} update --apply --wait`)
+    expect(await screen.findByText(/this home runs an older Althar. Once it’s updated/)).not.toBeNull()
+    // Not read how the home was installed: where Althar installs one, folded away, and said so.
+    await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+    await waitFor(() => expect(document.querySelector('code')?.textContent).toBe(`sh ${USUAL_LAUNCHER} update --apply --wait`))
     expect(screen.getByText(/That’s for a home Althar installed/)).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy the update command' })).not.toBeNull()
     expect(at.client.findHomeFolders).not.toHaveBeenCalled()

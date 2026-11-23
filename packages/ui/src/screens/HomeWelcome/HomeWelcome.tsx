@@ -13,7 +13,9 @@ import { TaskStatus } from '../../foundations/vocabulary'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
+import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Spinner } from '../../primitives/Spinner/Spinner'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { morphPairs, type Pace, piecesIn, settle } from './morph'
 import s from './HomeWelcome.module.css'
@@ -68,6 +70,24 @@ export type WelcomeNeed = {
   | { readonly state: 'unchecked'; readonly why: string }
 )
 
+/**
+ * Updating an older home from the window, where the window runs it itself: not yet, under way (getting the release,
+ * the home restarting, the window reconnecting), or stopped, with why.
+ */
+export type HomeUpdateRun =
+  | { readonly state: 'idle' }
+  | { readonly state: 'running'; readonly step: 'getting' | 'restarting' | 'reconnecting' }
+  | { readonly state: 'failed'; readonly problem: string }
+
+/** How an older home is updated: by the window itself, where `run` is given, else by its command, run there. */
+export interface HomeUpdateOffer {
+  readonly command: string
+  /** How sure the window is that the command is how the home was installed (`known` where it's sure, as by default). */
+  readonly installed?: 'known' | 'custom' | 'unknown'
+  /** The window runs it itself, over SSH: how that stands. */
+  readonly run?: HomeUpdateRun
+}
+
 /** A way a new project's code comes in. */
 export type HomeDoor = 'clone' | 'folder' | 'fresh'
 
@@ -95,6 +115,9 @@ export interface HomeWelcomeText {
   readyLabel: (name: string) => string
   checking: string
   signedOut: string
+  /** Its sign-in, started in Settings. */
+  signIn: string
+  signInLabel: (agent: string, home: string) => string
   missing: string
   copy: string
   copyLabel: (name: string) => string
@@ -108,6 +131,23 @@ export interface HomeWelcomeText {
   fresh: { title: string; line: (name: string) => string }
   older: (name: string) => string
   updateLabel: (name: string) => string
+  update: {
+    /** What the update brings, over what pressing it does. */
+    title: string
+    line: (name: string) => string
+    press: (name: string) => string
+    running: (name: string) => string
+    steps: { getting: string; restarting: (name: string) => string; reconnecting: string }
+    failed: (name: string) => string
+    tryAgain: string
+    /** Where the window can't run it: updated there, then looked at again. */
+    there: (name: string) => string
+    thereLine: string
+    checkAgain: string
+    /** Opens the command, run on the home by hand: where the window tried and couldn't, and where it can't. */
+    byHand: (name: string) => string
+    how: string
+  }
   /** Under the update command, where the window can't be sure it's how the home was installed. */
   updateUnsure: (name: string, installed: 'custom' | 'unknown') => string
   copyUpdate: string
@@ -136,6 +176,8 @@ export const homeWelcomeText: HomeWelcomeText = {
   readyLabel: (name) => `On ${name}`,
   checking: 'Checking…',
   signedOut: 'Signed out',
+  signIn: 'Sign in',
+  signInLabel: (agent, home) => `Sign ${agent} in on ${home}`,
   missing: 'Not installed',
   copy: 'Copy',
   copyLabel: (name) => `Copy ${name}’s sign-in command`,
@@ -157,9 +199,22 @@ export const homeWelcomeText: HomeWelcomeText = {
             : `${found} repositories found on ${name}`,
   },
   fresh: { title: 'Start empty', line: (name) => `A new repository, made on ${name}` },
-  older: (name) =>
-    `${name} runs an older Althar, which can’t make projects from this window. Update it there, then open this window again.`,
+  older: (name) => `${name} runs an older Althar. Once it’s updated, you can bring it projects from here.`,
   updateLabel: (name) => `Updating ${name}`,
+  update: {
+    title: 'The newest Althar',
+    line: (name) => `${name} restarts once, in a minute or two.`,
+    press: (name) => `Update ${name}`,
+    running: (name) => `Updating ${name}`,
+    steps: { getting: 'Getting the new release', restarting: (name) => `Restarting ${name}`, reconnecting: 'Reconnecting' },
+    failed: (name) => `Couldn’t update ${name}`,
+    tryAgain: 'Try again',
+    there: (name) => `Update it on ${name}`,
+    thereLine: 'Then check again here.',
+    checkAgain: 'Check again',
+    byHand: (name) => `Update it on ${name} yourself`,
+    how: 'How to update it',
+  },
   updateUnsure: (name, installed) =>
     installed === 'custom'
       ? `That’s the launcher this window connects with. If it runs ${name} from a source checkout, pull and rebuild there instead.`
@@ -188,7 +243,13 @@ export interface HomeWelcomeProps {
    * the window is that it's how the home was installed, said under it where
    * it isn't (`known` where it's sure, as by default).
    */
-  update?: { readonly command: string; readonly installed?: 'known' | 'custom' | 'unknown' }
+  update?: HomeUpdateOffer
+  /** Update pressed, or Try again: the window updates the home itself (`update.run`). */
+  onUpdate?: () => void
+  /** Check again pressed, where the home was updated by hand: the window looks at it again. */
+  onCheckAgain?: () => void
+  /** Sign in pressed on an agent signed out on the home, by its id: its sign-in, started. Without it, its command is copied. */
+  onSignIn?: (id: string) => void
   /** A way in pressed, from the door pressed. */
   onDoor: (door: HomeDoor, from: HTMLElement) => void
   /** Something pasted anywhere but a field: true where it was a repository's address, taken in as a clone. */
@@ -254,6 +315,9 @@ export function HomeWelcome({
   repositories,
   found,
   update,
+  onUpdate,
+  onCheckAgain,
+  onSignIn,
   onDoor,
   onPaste,
   toured,
@@ -455,10 +519,13 @@ export function HomeWelcome({
       repositories={repositories}
       found={found}
       update={update}
+      onUpdate={onUpdate}
+      onCheckAgain={onCheckAgain}
       onDoor={onDoor}
       copied={copied}
       onCopy={copy}
       onGuide={onGuide}
+      onSignIn={onSignIn}
       t={t}
     />
   )
@@ -529,7 +596,7 @@ export function HomeWelcome({
                     </p>
                   </div>
                   <div className={s.scene}>
-                    <NeedList name={name} needs={needs} copied={copied} onCopy={copy} onGuide={onGuide} t={t} />
+                    <NeedList name={name} needs={needs} copied={copied} onCopy={copy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
                   </div>
                 </>
               )}
@@ -639,20 +706,30 @@ function HomeFacts({
 const markOf = (need: WelcomeNeed, size: number) =>
   need.brand === undefined ? <Icon name={need.icon ?? 'plug'} size={size} /> : <BrandMark brand={need.brand} size={size} />
 
-/** What a need that isn't ready takes: its sign-in command to copy, or its maker's page. */
+/** What a need that isn't ready takes: its sign-in, started (or its command to copy, where it can't be), or its maker's page. */
 function Fix({
+  home,
   need,
   copied,
   onCopy,
   onGuide,
+  onSignIn,
   t,
 }: {
+  home: string
   need: WelcomeNeed
   copied: string | null
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
+  onSignIn: ((id: string) => void) | undefined
   t: HomeWelcomeText
 }) {
+  if (need.state === 'signedOut' && onSignIn !== undefined)
+    return (
+      <Button size="small" onClick={() => onSignIn(need.id)} aria-label={t.signInLabel(need.name, home)}>
+        {t.signIn}
+      </Button>
+    )
   if (need.state === 'signedOut')
     return (
       <Button
@@ -677,7 +754,7 @@ function Fix({
 
 /** What a need says beside its name: how it stands where it isn't ready, else its note. */
 const noteOf = (need: WelcomeNeed, t: HomeWelcomeText) => {
-  if (need.state === 'signedOut') return need.command
+  if (need.state === 'signedOut') return t.signedOut
   if (need.state === 'missing') return t.missing
   if (need.state === 'unchecked') return need.why
   return need.note
@@ -690,6 +767,7 @@ function NeedList({
   copied,
   onCopy,
   onGuide,
+  onSignIn,
   t,
 }: {
   name: string
@@ -697,6 +775,7 @@ function NeedList({
   copied: string | null
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
+  onSignIn: ((id: string) => void) | undefined
   t: HomeWelcomeText
 }) {
   return (
@@ -708,15 +787,21 @@ function NeedList({
           <li key={need.id} data-state={need.state} style={cssVars({ '--i': i })}>
             <span className={s.needMark}>{markOf(need, 16)}</span>
             <span className={s.needName}>{need.name}</span>
-            <span className={s.needNote} data-code={need.state === 'signedOut' || undefined} title={noteOf(need, t)}>
-              {need.state === 'signedOut' && <span className={s.needState}>{t.signedOut}</span>}
-              {need.state === 'signedOut' ? <code>{need.command}</code> : noteOf(need, t)}
-            </span>
+            {need.state === 'signedOut' && onSignIn === undefined ? (
+              <span className={s.needNote} data-code title={need.command}>
+                <span className={s.needState}>{t.signedOut}</span>
+                <code>{need.command}</code>
+              </span>
+            ) : (
+              <span className={s.needNote} title={noteOf(need, t)}>
+                {noteOf(need, t)}
+              </span>
+            )}
             <span className={s.needEnd}>
               {need.state === 'ready' ? (
                 <Icon name="check" size={14} className={s.needTick} />
               ) : (
-                <Fix need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} t={t} />
+                <Fix home={name} need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
               )}
             </span>
           </li>
@@ -736,10 +821,13 @@ function Arrival({
   repositories,
   found,
   update,
+  onUpdate,
+  onCheckAgain,
   onDoor,
   copied,
   onCopy,
   onGuide,
+  onSignIn,
   t,
 }: {
   name: string
@@ -750,10 +838,13 @@ function Arrival({
   repositories: HomeWelcomeProps['repositories']
   found: HomeWelcomeProps['found']
   update: HomeWelcomeProps['update']
+  onUpdate: HomeWelcomeProps['onUpdate']
+  onCheckAgain: HomeWelcomeProps['onCheckAgain']
   onDoor: HomeWelcomeProps['onDoor']
   copied: string | null
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
+  onSignIn: HomeWelcomeProps['onSignIn']
   t: HomeWelcomeText
 }) {
   return (
@@ -784,24 +875,18 @@ function Arrival({
       {update === undefined ? (
         <Doors name={name} repositories={repositories} found={found} onDoor={onDoor} t={t} />
       ) : (
-        <section className={s.updating} aria-label={t.updateLabel(name)}>
-          <div className={s.update}>
-            <CommandText command={update.command} className={s.updateCommand} />
-            <Button
-              size="small"
-              icon={copied === 'update' ? 'check' : 'copy'}
-              onClick={() => onCopy('update', update.command)}
-              aria-label={t.copyUpdate}
-            >
-              {copied === 'update' ? t.copied : t.copy}
-            </Button>
-          </div>
-          {update.installed !== undefined && update.installed !== 'known' && (
-            <p className={s.updateUnsure}>{t.updateUnsure(name, update.installed)}</p>
-          )}
-        </section>
+        <UpdateHome
+          name={name}
+          update={update}
+          onUpdate={onUpdate}
+          onCheckAgain={onCheckAgain}
+          copied={copied === 'update'}
+          onCopy={() => onCopy('update', update.command)}
+          text={t}
+        />
       )}
-      {needs !== null && needs.length > 0 && (
+      {/* An older home takes nothing else until it's updated: what it has shows once it can take a project. */}
+      {update === undefined && needs !== null && needs.length > 0 && (
         <ul className={s.strip} aria-label={t.readyLabel(name)}>
           {needs.map((need) => (
             <li key={need.id} data-state={need.state}>
@@ -814,7 +899,7 @@ function Arrival({
                   <span className={s.stripState}>
                     {need.state === 'signedOut' ? t.signedOut : need.state === 'missing' ? t.missing : need.why}
                   </span>
-                  <Fix need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} t={t} />
+                  <Fix home={name} need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
                 </>
               )}
             </li>
@@ -822,6 +907,102 @@ function Arrival({
         </ul>
       )}
     </div>
+  )
+}
+
+/**
+ * An older home's update, in place of the ways in: one panel that stays where it is as it goes. Where the window runs
+ * it, its press, then where it's got to, then why it stopped, with Try again; where it can't, Check again for once
+ * it's updated there. The command, to run there by hand, only folded away under it: where the window can't run it,
+ * or where it tried and couldn't.
+ */
+export function UpdateHome({
+  name,
+  update,
+  onUpdate,
+  onCheckAgain,
+  copied,
+  onCopy,
+  className,
+  text,
+}: {
+  name: string
+  update: HomeUpdateOffer
+  onUpdate?: (() => void) | undefined
+  onCheckAgain?: (() => void) | undefined
+  /** The command was copied a moment ago. */
+  copied: boolean
+  onCopy: () => void
+  className?: string
+  text?: Partial<HomeWelcomeText>
+}) {
+  const t = { ...homeWelcomeText, ...text }
+  const run = update.run
+  const state = run === undefined ? 'there' : run.state
+  const steps = [t.update.steps.getting, t.update.steps.restarting(name), t.update.steps.reconnecting]
+  const at = run?.state === 'running' ? (['getting', 'restarting', 'reconnecting'] as const).indexOf(run.step) : 0
+  const title =
+    run === undefined
+      ? t.update.there(name)
+      : run.state === 'idle'
+        ? t.update.title
+        : run.state === 'running'
+          ? t.update.running(name)
+          : t.update.failed(name)
+  const line =
+    run === undefined ? t.update.thereLine : run.state === 'idle' ? t.update.line(name) : run.state === 'running' ? steps[at] : run.problem
+  return (
+    <section className={cx(s.updating, className)} aria-label={t.updateLabel(name)}>
+      <div className={s.update} data-state={state}>
+        <span className={s.updateTile} aria-hidden="true">
+          {state === 'running' ? <Spinner size="large" /> : <Icon name={state === 'failed' ? 'problem' : 'download'} size={20} />}
+        </span>
+        <span className={s.updateText} aria-live="polite">
+          <span className={s.updateTitle}>{title}</span>
+          <span className={s.updateLine} title={line}>
+            {line}
+          </span>
+        </span>
+        <span className={s.updateEnd}>
+          {run?.state === 'running' ? (
+            <StepTrack steps={trackOf(steps, at)} className={s.updateTrack} text={{ label: t.updateLabel(name) }} />
+          ) : run === undefined ? (
+            onCheckAgain !== undefined && (
+              <Button icon="reload" onClick={onCheckAgain}>
+                {t.update.checkAgain}
+              </Button>
+            )
+          ) : (
+            <Button variant="signal" onClick={onUpdate}>
+              {run.state === 'failed' ? t.update.tryAgain : t.update.press(name)}
+            </Button>
+          )}
+        </span>
+      </div>
+      {(run === undefined || run.state === 'failed') && (
+        <Disclosure className={s.byHand}>
+          <DisclosureTrigger>
+            <LinkButton className={s.byHandTrigger}>
+              {run === undefined ? t.update.how : t.update.byHand(name)}
+              <Caret />
+            </LinkButton>
+          </DisclosureTrigger>
+          <Fold bleed={false} className={s.byHandFold}>
+            <div className={s.byHandBody}>
+              <div className={s.byHandCommand}>
+                <CommandText command={update.command} className={s.updateCommand} />
+                <Button size="small" icon={copied ? 'check' : 'copy'} onClick={onCopy} aria-label={t.copyUpdate}>
+                  {copied ? t.copied : t.copy}
+                </Button>
+              </div>
+              {update.installed !== undefined && update.installed !== 'known' && (
+                <p className={s.updateUnsure}>{t.updateUnsure(name, update.installed)}</p>
+              )}
+            </div>
+          </Fold>
+        </Disclosure>
+      )}
+    </section>
   )
 }
 

@@ -1,4 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { HomeUpdateOffer, HomeUpdateRun } from '@althar/ui/screens'
+
 import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome, WindowHome } from '../../../homes'
 
 import { useServices } from '../../data/services'
@@ -75,6 +77,52 @@ export const updateOf = (current: WindowHome | undefined): HomeUpdate => {
 export const useHomeUpdate = (): HomeUpdate => {
   const { host } = useServices()
   return updateOf(useHomeState(host.homes)?.current)
+}
+
+type Running = 'idle' | 'running' | 'done' | { readonly problem: string }
+
+/**
+ * An older home's update, for its window to offer: run by the window itself where it reaches the home over SSH by the
+ * launcher Althar installs (`known`), each step as it really stands (the release coming down while the connection
+ * holds, the home restarting once it drops), and the window reconnecting onto the new release once it answers; where
+ * the window can't, the command to run there and Check again. `onDone` goes just before the window reconnects.
+ */
+export const useHomeUpdating = (
+  onDone?: () => void,
+): { readonly offer: HomeUpdateOffer; readonly onUpdate?: () => void; readonly onCheckAgain: () => void } => {
+  const { host } = useServices()
+  const homes = host.homes
+  const state = useHomeState(homes)
+  const { command, installed } = updateOf(state?.current)
+  const [running, setRunning] = useState<Running>('idle')
+  const reconnect = () => void homes?.reconnect().catch(() => undefined)
+  const update = homes?.update
+  if (update === undefined || installed !== 'known') return { offer: { command, installed }, onCheckAgain: reconnect }
+  const run: HomeUpdateRun =
+    running === 'idle'
+      ? { state: 'idle' }
+      : running === 'running' || running === 'done'
+        ? {
+            state: 'running',
+            step: running === 'done' ? 'reconnecting' : state?.connection === 'connected' ? 'getting' : 'restarting',
+          }
+        : { state: 'failed', problem: running.problem }
+  return {
+    offer: { command, installed, run },
+    onUpdate: () => {
+      if (running === 'running' || running === 'done') return
+      setRunning('running')
+      update().then(
+        () => {
+          setRunning('done')
+          onDone?.()
+          reconnect()
+        },
+        (error: unknown) => setRunning({ problem: homeProblem(error) }),
+      )
+    },
+    onCheckAgain: reconnect,
+  }
 }
 
 /**

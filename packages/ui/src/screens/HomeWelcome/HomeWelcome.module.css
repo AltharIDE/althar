@@ -708,35 +708,119 @@
   transform: none;
 }
 
-/* what the home has, in a strip along the foot */
-/* an older home: its update command, in place of the ways in */
-.update {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(720px, 100%);
-  padding: 8px 8px 8px 14px;
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  animation: blur-in 440ms linear 360ms backwards;
-}
+/* an older home: its update, in place of the ways in, one panel that stays put as it goes */
+/* The command, when it's opened, as wide as it needs to stay on two lines; the panel narrower, over it. */
 .updating {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 12px;
+  width: min(720px, 100%);
+}
+.update {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  width: min(580px, 100%);
+  min-height: 84px;
+  padding: 16px 18px 16px 16px;
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-2);
+  animation: blur-in 440ms linear 360ms backwards;
+}
+.updateTile {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: var(--t-2);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+.update[data-state='failed'] .updateTile {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+.updateText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.updateTitle {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.updateLine {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-wrap: pretty;
+}
+/* the press, or the steps under way, in the same place: the track as wide as the press it replaces */
+.updateEnd {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 140px;
+}
+.updateTrack {
+  width: 140px;
+}
+
+/* the command, folded away under it, for running it on the home by hand */
+.byHand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  animation: blur-in 440ms linear 460ms backwards;
+}
+.byHandTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.byHandFold {
+  align-self: stretch;
+}
+.byHandBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+}
+.byHandCommand {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  max-width: 100%;
+  padding: 8px 8px 8px 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .updateUnsure {
-  max-width: min(560px, 100%);
   margin: 0;
   font-size: 12.5px;
   line-height: 1.45;
   text-align: center;
   color: var(--t-3);
   text-wrap: pretty;
-  animation: blur-in 440ms linear 400ms backwards;
 }
 .command {
   font-family: var(--mono);
@@ -751,9 +835,11 @@
   overflow-wrap: anywhere;
 }
 .updateCommand {
+  flex: 1;
   min-width: 0;
 }
 
+/* what the home has, in a strip along the foot */
 .strip {
   display: flex;
   flex-wrap: wrap;
@@ -820,6 +906,18 @@
   .doorText {
     justify-content: center;
   }
+  .update {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .updateEnd {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .updateEnd > *,
+  .updateTrack {
+    flex: 1;
+    width: auto;
+  }
 }
 /* A short window: the mark goes, and the doors' pictures are lower. */
 @container welcome (max-height: 640px) {
@@ -867,7 +965,7 @@
   .name span,
   .doors li,
   .update,
-  .updateUnsure,
+  .byHand,
   .strip,
   .arriving .eyebrow,
   .arriving .arrivalLine {

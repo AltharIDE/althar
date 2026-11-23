@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { sshArguments, sshEnvironment } from '../src/sshArguments'
+import { sshArguments, sshEnvironment, sshUpdateArguments } from '../src/sshArguments'
 
 describe('SSH transport arguments', () => {
   it('uses strict host checking, existing SSH config, no forwarded agent/TTY, and a pinned home', () => {
@@ -23,6 +23,15 @@ describe('SSH transport arguments', () => {
     expect(args.slice(-3, -1)).toEqual(['--', 'person@my-vps'])
     expect(args.at(-1)).toContain('connect-stdio --home-id')
     expect(sshArguments({ target: 'my-vps' }).at(-1)).toContain('status --json')
+  })
+  it('runs the home’s own update by the same launcher, profile and strict options as its connection', () => {
+    const args = sshUpdateArguments({ target: 'person@my-vps', port: 2222, launcher: '/private/launcher', profile: '/private/profile' })
+    expect(args).toContain('-oStrictHostKeyChecking=yes')
+    expect(args).toContain('-oBatchMode=yes')
+    expect(args.slice(-3, -1)).toEqual(['--', 'person@my-vps'])
+    expect(args.at(-1)).toMatch(/\/private\/launcher'\\'' update --apply --wait --json --profile '\\''\/private\/profile/)
+    expect(sshUpdateArguments({ target: 'my-vps' }).at(-1)).toContain('althar-host-program/launcher" update --apply --wait --json')
+    expect(() => sshUpdateArguments({ target: 'my-vps; rm -rf ~' })).toThrow()
   })
   it.skipIf(process.platform === 'win32')(
     'quotes remote paths as literal arguments, including apostrophes, dollars and shell syntax',

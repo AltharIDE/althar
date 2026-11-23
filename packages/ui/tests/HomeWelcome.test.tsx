@@ -155,24 +155,53 @@ describe('a home’s welcome, every time after', () => {
     expect(screen.getByRole('button', { name: 'A folder on runner-1', description: 'Couldn’t look on runner-1 just now' })).not.toBeNull()
   })
 
-  it('says under the update command where it can’t be sure that’s how the home was installed', () => {
-    welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'unknown' } })
+  it('folds the update command away under it, saying where it can’t be sure that’s how the home was installed', () => {
+    const at = welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'unknown' } })
+    expect(screen.queryByRole('button', { name: 'Copy the update command' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'How to update it' }))
     expect(screen.getByText(/That’s for a home Althar installed. If you set runner-1 up another way, update it that way/)).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
+    expect(at.onCopy).toHaveBeenCalledWith('sh launcher update --apply --wait')
     cleanup()
     welcome({ toured: true, update: { command: "sh '/opt/althar/launcher' update --apply --wait", installed: 'custom' } })
+    fireEvent.click(screen.getByRole('button', { name: 'How to update it' }))
     expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
-    cleanup()
-    welcome({ toured: true, update: { command: 'sh launcher update --apply --wait', installed: 'known' } })
-    expect(screen.queryByText(/That’s/)).toBeNull()
   })
 
-  it('asks an older home to update, with its command to copy, in place of the ways in and the tour', () => {
-    const at = welcome({ toured: false, update: { command: 'sh launcher update --apply --wait' } })
+  it('asks an older home the window can’t update to be updated there, with Check again, in place of the ways in and the tour', () => {
+    const onCheckAgain = vi.fn()
+    welcome({ toured: false, update: { command: 'sh launcher update --apply --wait' }, onCheckAgain })
     expect(screen.getByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
     expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
     expect(screen.getByText(/runner-1 runs an older Althar/)).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
-    expect(at.onCopy).toHaveBeenCalledWith('sh launcher update --apply --wait')
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(onCheckAgain).toHaveBeenCalledOnce()
+  })
+
+  it('updates an older home the window reaches in one press, then says where it’s got to, or why it stopped', () => {
+    const onUpdate = vi.fn()
+    const offer = (run: NonNullable<HomeWelcomeProps['update']>['run']) => ({
+      toured: true,
+      update: { command: 'sh launcher update --apply --wait', installed: 'known' as const, run },
+      onUpdate,
+    })
+    welcome(offer({ state: 'idle' }))
+    // Only the press: nothing to copy, and nothing else the home has until it can take a project.
+    expect(screen.queryByRole('button', { name: /yourself/ })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'On runner-1' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(onUpdate).toHaveBeenCalledOnce()
+    cleanup()
+    welcome(offer({ state: 'running', step: 'restarting' }))
+    expect(screen.getByText('Updating runner-1')).not.toBeNull()
+    expect(screen.getByText('Restarting runner-1')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+    cleanup()
+    welcome(offer({ state: 'failed', problem: 'SSH couldn’t sign in to runner-1.' }))
+    expect(screen.getByText('SSH couldn’t sign in to runner-1.')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onUpdate).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Update it on runner-1 yourself' })).not.toBeNull()
   })
 
   it('shows what the home has along its foot, with what one that isn’t ready takes', () => {
@@ -181,6 +210,15 @@ describe('a home’s welcome, every time after', () => {
     expect(within(strip).getByText('Signed out')).not.toBeNull()
     fireEvent.click(within(strip).getByRole('button', { name: 'Copy Codex’s sign-in command' }))
     expect(at.onCopy).toHaveBeenCalledWith('codex login --device-auth')
+  })
+
+  it('signs an agent signed out on the home in from here, where it can', () => {
+    const onSignIn = vi.fn()
+    welcome({ toured: true, onSignIn })
+    const strip = screen.getByRole('list', { name: 'On runner-1' })
+    expect(within(strip).queryByRole('button', { name: /Copy/ })).toBeNull()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Sign Codex in on runner-1' }))
+    expect(onSignIn).toHaveBeenCalledWith('codex')
   })
 
   it('takes a repository’s address pasted anywhere but a field', () => {

@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('althar', {
       }
     },
     reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
+    update: () => ipcRenderer.invoke('althar:homes-update'),
     onState: (listener: (state: HomeState) => void) => {
       homeStates.add(listener)
       return () => {

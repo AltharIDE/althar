@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -34,6 +34,9 @@ const ARGS: HomeWelcomeProps = {
   onToured: fn(),
   onCopy: fn(),
   onGuide: fn(),
+  onSignIn: fn(),
+  onUpdate: fn(),
+  onCheckAgain: fn(),
 }
 
 const meta = {
@@ -96,21 +99,45 @@ export const Bare: Story = {
 /** Where it couldn't look on the home's disk: the folder door stays, saying so. */
 export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
 
-/** A home from before windows made projects there, over SSH: the update command its connection's launcher takes, in place of the ways in, and no tour. */
+const UPDATE = 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait'
+const OLDER: Partial<HomeWelcomeProps> = { toured: false, machine: null, git: undefined, repositories: [], found: null }
+
+/** A home from before windows made projects there, over SSH: one press updates it, in place of the ways in, and no tour. */
 export const Older: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'idle' } } },
+}
+
+/** Under way: the release coming down, where the press was. */
+export const OlderUpdating: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'running', step: 'getting' } } },
+}
+
+/** The home restarting into it: the window's connection drops meanwhile, and the panel says so. */
+export const OlderRestarting: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'running', step: 'restarting' } } },
+}
+
+/** It couldn't: why, Try again, and the command to run there by hand, folded away. */
+export const OlderFailed: Story = {
   args: {
-    toured: false,
-    machine: null,
-    git: undefined,
-    repositories: [],
-    found: null,
-    update: { command: 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait', installed: 'known' },
+    ...OLDER,
+    update: {
+      command: UPDATE,
+      installed: 'known',
+      run: { state: 'failed', problem: 'No verified host release is staged. Check the home’s network and try again.' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    // Opened as a pointer would, not a key: no focus ring left on it.
+    await fireEvent.click(await page.findByRole('button', { name: 'Update it on runner-1 yourself' }))
+    await expect(await page.findByRole('button', { name: 'Copy the update command' })).toBeVisible()
   },
 }
 
-/** An older home paired over HTTPS: the window can't see how it was installed, so the usual command, and a line saying so. */
+/** An older home paired over HTTPS: the window can't run it, so Check again once it's updated there, and the command folded away. */
 export const OlderPaired: Story = {
-  args: { ...Older.args, update: { command: Older.args!.update!.command, installed: 'unknown' } },
+  args: { ...OLDER, update: { command: UPDATE, installed: 'unknown' } },
 }
 
 /** A long name, in the app's narrowest window. */
