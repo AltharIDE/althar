@@ -28,6 +28,8 @@ const write = (path: string, body: string) => {
 }
 /** Claude Code's folder for a working folder. */
 const claudeFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
+/** An hour ago: a fixed date would age past the seven days an aside stays in view, and fold into "older". */
+const startedAt = Date.now() - 60 * 60 * 1000
 const session = (cwd: string, id: string, prompt: string, reply: string, title: string) =>
   [
     {
@@ -38,7 +40,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       cwd,
       gitBranch: 'main',
       isSidechain: false,
-      timestamp: '2026-11-16T09:00:00.000Z',
+      timestamp: new Date(startedAt).toISOString(),
       message: { role: 'user', content: prompt },
     },
     {
@@ -48,7 +50,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       sessionId: id,
       cwd,
       isSidechain: false,
-      timestamp: '2026-11-16T09:00:08.000Z',
+      timestamp: new Date(startedAt + 8000).toISOString(),
       message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: reply }] },
     },
     { type: 'ai-title', aiTitle: title, sessionId: id },
