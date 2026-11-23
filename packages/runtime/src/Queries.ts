@@ -2355,9 +2355,12 @@ export class Queries extends Context.Service<
 
       /** A task never waits behind itself: its own places aren't among those it waits for. */
       const queuedNow = (taskId: string) =>
-        Effect.map(workPlaces, (now) => {
+        Effect.gen(function* () {
+          const now = yield* workPlaces
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          return { ...now, busy: holders.length, holders }
+          // Held back for now, it says so and why: it would have a place with the person's number.
+          const held = (yield* (yield* Busy).held).get(taskId)
+          return { ...now, busy: holders.length, holders, ...(held === undefined ? {} : { held }) }
         })
 
       /** A project's line, read once in a read: the cards that read it at once share it. */
