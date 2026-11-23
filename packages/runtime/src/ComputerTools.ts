@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { Artifacts } from './Artifacts'
 import { RuntimeConfig } from './Config'
 import { ToolRefused, ToolServer } from './ToolServer'
-import { type ComputerOwner, computerCallOf, computerInput } from './computerBridge'
+import { type ComputerOwner, computerCallOf, computerCallProblem, computerInput } from './computerBridge'
 import { keepPicture } from './handed'
 import { addItem } from './threads'
 
@@ -45,14 +45,14 @@ export class ComputerTools extends Context.Service<ComputerTools, object>()('@al
           {
             name: 'computer',
             description:
-              'Use native apps on this task’s computer. Start with status. Request access with a short reason saying what you will do: the person allows this computer once for the turn, every app and window, foreground input, and the primary display where it can be shared. Request again later in the turn to find windows and apps opened since; it doesn’t ask again. An app another task is using stays with it until its turn ends; input to the whole display waits while another task holds an app, and once sent, holds every app until this turn ends. Observe a target for fresh observation and element references. Verify each input in the app before continuing. If background typing fails to reach the field, request foreground input, observe with a screenshot, and target the field using screenshot coordinates. Evidence keeps a selected screenshot in the task. Release returns control. Use page_* for the browser beside the conversation.',
+              'Use this computer’s apps as a person would. Start with status, then request access with a short reason saying what you will do: the person allows this computer once for the turn, every app and window, foreground input, and the primary display where it can be shared. Request again later in the turn to find windows opened since; it doesn’t ask again. Launch opens any installed app by its name ("Akiflow"), bundle id or path, or by an app id from the list, whether it is running or not, and brings back its window: the windows it returns have ids to observe. Observe a window for its elements and, with screenshot, a picture; observe "desktop" for a picture of the whole primary display (the Dock, the menu bar, Spotlight, dialogs), whose pixels are the coordinates for input to "desktop". Every input acts on the latest observation of its target: click an element or a point, type, key (one key such as ["return"], or a chord such as ["cmd","space"]), scroll or drag; then observe again to check what happened. Keys and typing to "desktop" go to the app in front; while Althar’s window is in front only cmd+space (Spotlight) and cmd+tab reach it, so bring the app forward first: launch it, click it in the Dock, or open it from Spotlight. If background input to a window doesn’t land, send it with foreground: true. Get past what a person would, within this grant: close what’s new and onboarding screens, dismiss prompts and banners, open menus. Leave passwords and secure fields to the person. An app another task is using stays with it until its turn ends; input to the whole display waits while another task holds an app, and once sent, holds every app until this turn ends. Evidence keeps a selected screenshot in the task. Release returns control. Use page_* for the browser beside the conversation.',
             input: computerInput,
             privateInput: true,
             cancelWithRequest: true,
             call: (input, access) =>
               Effect.gen(function* () {
                 const parsed = computerCallOf(input)
-                if (parsed === null) return yield* refuse('Give a valid computer operation and its arguments.')
+                if (parsed === null) return yield* refuse(computerCallProblem(input))
                 if (access.taskId === null || access.turnId == null) return yield* refuse('Computer use needs an active task turn.')
                 const [task] = yield* sql<{ title: string; projectId: ProjectId }>`
             SELECT t.title, t.project_id FROM tasks t JOIN threads h ON h.task_id = t.id AND h.project_id = t.project_id

@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 
-import type {
-  ComputerAnswer,
-  ComputerCall,
-  ComputerDecision,
-  ComputerDone,
-  ComputerOwner,
-  ComputerState,
+import {
+  type ComputerAnswer,
+  type ComputerCall,
+  type ComputerDecision,
+  type ComputerDone,
+  type ComputerOwner,
+  type ComputerState,
+  isComputerId,
 } from '@althar/runtime/computerBridge'
 
 import type { NativeAction, NativeApp, NativeFrame, NativeWindow } from '../../computer/protocol'
@@ -58,7 +59,21 @@ const error = (message: string): ComputerDone => ({ error: message })
 const done = (text: string): ComputerDone => ({ value: { text } })
 const publicWindows = (windows: ReadonlyMap<string, NativeWindow>) =>
   [...windows].map(([id, one]) => ({ id, app: one.app, title: one.title }))
-const publicApps = (apps: ReadonlyMap<string, NativeApp>) => [...apps].map(([id, one]) => ({ id, app: one.name }))
+const publicApps = (apps: ReadonlyMap<string, NativeApp>) =>
+  [...apps].map(([id, one]) => ({ id, app: one.name, ...(one.running === true ? { running: true } : {}) }))
+const sameApp = (one: NativeApp, other: NativeApp) =>
+  (one.bundleId ?? one.path ?? one.name) === (other.bundleId ?? other.path ?? other.name)
+const plain = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/\.app$/, '')
+const baseName = (path: string) =>
+  path
+    .replace(/\/+$/, '')
+    .split('/')
+    .at(-1)
+    ?.replace(/\.app$/i, '') ?? path
 
 export const computerSessions = (options: {
   readonly worker: () => ComputerWorker
@@ -66,7 +81,8 @@ export const computerSessions = (options: {
   readonly canAsk: () => boolean
   readonly canShareDisplay: () => boolean
   readonly available: () => boolean
-  readonly desktopInputSafe?: (action: NativeAction, frame: NativeFrame | undefined) => boolean
+  /** What keeps an input to the whole display off Althar’s own window, where something does. */
+  readonly desktopInputProblem?: (action: NativeAction, frame: NativeFrame | undefined) => string | undefined
 }) => {
   const sessions = new Map<string, Session>()
   let foreground: Session | undefined
@@ -115,7 +131,7 @@ export const computerSessions = (options: {
     const nextWindows = found.windows.map(
       (one) => [idOf(windows, (kept) => kept.pid === one.pid && kept.handle === one.handle), one] as const,
     )
-    const nextApps = found.apps.map((one) => [idOf(apps, (kept) => kept.path === one.path), one] as const)
+    const nextApps = found.apps.map((one) => [idOf(apps, (kept) => sameApp(kept, one)), one] as const)
     session.windows.clear()
     session.apps.clear()
     for (const [id, one] of nextWindows) session.windows.set(id, one)
@@ -187,6 +203,31 @@ export const computerSessions = (options: {
     return true
   }
 
+  /** The app a lead names: by the id it was given, or by its name, bundle id or path, listed or not, as a person types it in Spotlight. */
+  const appNamed = (session: Session, named: string): NativeApp | string => {
+    if (isComputerId(named)) {
+      const listed = session.apps.get(named)
+      if (listed !== undefined) return listed
+      if (session.windows.has(named)) return `${named} is a window’s id: observe it rather than launch it.`
+      return `No app has the id ${named} in this turn. Give the app’s name instead, such as {"op":"launch","app":"Akiflow"}.`
+    }
+    const wanted = plain(named)
+    const listed = [...session.apps.values()].find(
+      (one) => plain(one.name) === wanted || one.bundleId?.toLowerCase() === wanted || one.path === named.trim(),
+    )
+    if (listed !== undefined) return listed
+    if (named.trim().startsWith('/')) return { name: baseName(named.trim()), path: named.trim() }
+    return { name: named.trim() }
+  }
+  /** Apps whose names come close to one that didn’t open, to correct it by. */
+  const near = (session: Session, named: string) => {
+    const wanted = plain(named)
+    return [...session.apps.values()]
+      .map((one) => one.name)
+      .filter((one) => plain(one).includes(wanted) || (plain(one).length > 2 && wanted.includes(plain(one))))
+      .slice(0, 5)
+  }
+
   const summary = (session: Session): ComputerDone =>
     done(
       JSON.stringify({
@@ -252,7 +293,8 @@ export const computerSessions = (options: {
     }
     if (signal.aborted) return error('The computer call was cancelled.')
     if (session === undefined) {
-      if (command.op !== 'request') return error('Ask for computer access first.')
+      if (command.op !== 'request')
+        return error('Request access first, with what you will do: {"op":"request","reason":"Read today’s tasks in Akiflow"}.')
       if (!options.canAsk()) return error('Open the task in Althar to approve computer use.')
       if (sessions.size >= MAX_SESSIONS) return error('There are too many computer sessions. Release one first.')
       session = {
@@ -289,22 +331,47 @@ export const computerSessions = (options: {
     try {
       if (command.op === 'request') return await request(active, command, still)
       if (command.op === 'launch') {
-        const approved = active.apps.get(command.app)
-        if (approved === undefined) return error('That app has not been approved.')
+        // The person’s yes takes in every app on this computer for the turn, open or not.
+        if (!active.allowed) return error('The person hasn’t allowed computer use yet. Wait for the answer to your request.')
+        const app = appNamed(active, command.app)
+        if (typeof app === 'string') return error(app)
         if (displayElsewhere(active)) return using('the primary display')
-        const launched = await active.worker.run({ op: 'launch', app: approved })
-        if (!still() || launched.kind !== 'launched') return error('App launch was interrupted. Check the desktop.')
+        active.action = `Opening ${app.name}…`
+        changed(active)
+        const launched = await active.worker.run({ op: 'launch', app }).catch((cause: unknown) => {
+          const like = near(active, command.app).filter((one) => plain(one) !== plain(app.name))
+          const message = cause instanceof Error ? cause.message : `${app.name} didn’t open.`
+          throw new Error(like.length === 0 ? message : `${message} Installed apps with a name like it: ${like.join(', ')}.`)
+        })
+        if (!still() || launched.kind !== 'launched')
+          return error('Opening the app was interrupted. Observe "desktop" to see where it stands.')
+        const opened: Array<{ readonly id: string; readonly app: string; readonly title: string }> = []
+        let elsewhere: string | undefined
         for (const window of launched.windows) {
+          elsewhere ??= appElsewhere(active, window.pid)
           if (appElsewhere(active, window.pid) !== undefined) continue
           active.held.set(window.pid, window.app)
-          active.windows.set(randomUUID(), window)
+          const id = [...active.windows].find(([, kept]) => kept.pid === window.pid && kept.handle === window.handle)?.[0] ?? randomUUID()
+          active.windows.set(id, window)
+          opened.push({ id, app: window.app, title: window.title })
         }
-        active.action = `Opened ${approved.name}.`
+        active.action = `Opened ${app.name}.`
         changed(active)
-        return summary(active)
+        if (opened.length > 0) return done(`Opened ${app.name}. Its windows: ${JSON.stringify(opened)}. Observe one next.`)
+        if (elsewhere !== undefined) return using(elsewhere)
+        return done(
+          `Opened ${app.name}, but it shows no window yet. Request again in a moment to find it, or observe "desktop" to see the screen.`,
+        )
       }
-      const target = command.target === 'desktop' ? (active.desktop ? 'desktop' : undefined) : active.windows.get(command.target)
-      if (target === undefined) return error('That window or display has not been approved.')
+      if (command.target === 'desktop' && !active.desktop)
+        return error('The whole display can’t be shared on this computer (more than one display). Use a window’s id as target.')
+      const target = command.target === 'desktop' ? 'desktop' : active.windows.get(command.target)
+      if (target === undefined)
+        return error(
+          active.apps.has(command.target)
+            ? `${command.target} is an app’s id, not a window’s: launch it, and observe a window it returns.`
+            : `No window has the id ${command.target} in this turn. Window ids come from request, status and launch; request again to find windows opened since.`,
+        )
       if (target === 'desktop' && !options.canShareDisplay()) return error('The display layout no longer permits primary-display control.')
       if (target !== 'desktop') {
         if (appElsewhere(active, target.pid) !== undefined) return using(target.app)
@@ -335,9 +402,9 @@ export const computerSessions = (options: {
       const theirs = target === 'desktop' ? anyElsewhere(active) : undefined
       if (theirs !== undefined) return using(theirs)
       const inForeground = target === 'desktop' || command.foreground === true
-      if (target === 'desktop' && options.desktopInputSafe?.(command, active.frame) === false)
-        return error('Move away from the Althar window and take a fresh observation before sending input to the display.')
-      if (inForeground && !active.foreground) return error('Foreground input needs the person’s approval. Request desktop access.')
+      const unsafe = target === 'desktop' ? options.desktopInputProblem?.(command, active.frame) : undefined
+      if (unsafe !== undefined) return error(unsafe)
+      if (inForeground && !active.foreground) return error('Foreground input needs the person’s approval. Request access first.')
       if (
         inForeground &&
         ((foreground !== undefined && foreground !== active) || [...sessions.values()].some((other) => other !== active && other.busy))

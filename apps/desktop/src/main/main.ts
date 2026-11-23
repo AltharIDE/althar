@@ -42,7 +42,7 @@ import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { computerChannel, handleComputerWindow } from './computer/ipc'
-import { displayInputSafe } from './computer/display'
+import { displayInputProblem } from './computer/display'
 import { computerSessions } from './computer/sessions'
 import { computerWorker } from './computer/worker'
 import { testComputerWorker } from './computer/testNative'
@@ -629,13 +629,13 @@ const computers = computerSessions({
   canAsk: () => !quitting && localWindows().size > 0,
   // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
   canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
-  desktopInputSafe: (action, frame) => {
+  desktopInputProblem: (action, frame) => {
     const focused = BrowserWindow.getFocusedWindow()
-    if (focused !== null && mine(focused.webContents)) return false
     const protectedWindows = BrowserWindow.getAllWindows()
       .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
       .map((window) => window.getBounds())
-    return displayInputSafe(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows)
+    const inFront = focused !== null && mine(focused.webContents)
+    return displayInputProblem(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows, inFront)
   },
   changed: (state) => {
     for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
