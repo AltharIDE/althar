@@ -20,8 +20,8 @@ import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
 /*
- * What reaches the person outside the window (docs/plans/usable.md, work
- * that doesn't need you): a nudge each time something comes to need them,
+ * What reaches the person outside the window, for work that doesn't need
+ * you: a nudge each time something comes to need them,
  * a call or a task ready to accept, each said by its
  * kind so the app can keep to what the person wants told; and how many such
  * things wait, for the app's badge. Never for progress. What waits, and how

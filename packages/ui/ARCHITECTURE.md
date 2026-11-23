@@ -29,7 +29,7 @@ The rules between them:
 - `foundations` ← `primitives` ← the ten middle layers ← `screens`. A layer imports only from layers before it in that chain.
 - The ten middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: TaskFace's composer is a slot.
 - Nothing imports `screens`. It is exported on its own entry (see **Public API**).
-- `fixtures` and `storybook` serve stories, tests and the workbench. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
+- `fixtures` and `storybook` serve stories and tests. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
 - A screen is made of the real components, not pictures of them. Content a screen ships with, like the welcome's demo project, lives beside it, not in `fixtures`.
 
 ## Principles
@@ -71,7 +71,7 @@ export function WorkedFor({ text, ...props }: WorkedForProps) {
 
 The prop named `text` is always the component's copy. Content that happens to be text gets another name: `content` for streamed prose, `value` for what CopyButton copies, `question`, `label`.
 
-Translations live in the consumer. It passes `text` from its own translation files, or wraps components once to do so. The English defaults exist so that stories and the workbench read naturally. They are not the product's copy source.
+Translations live in the consumer. It passes `text` from its own translation files, or wraps components once to do so. The English defaults exist so that stories read naturally. They are not the product's copy source.
 
 The same holds for formatting: dates, durations, counts and file sizes arrive formatted.
 
@@ -201,10 +201,6 @@ The target is WCAG 2.2 AA, per the root document. In a component that means:
 - The accessibility addon runs on every story with `test: 'error'`.
 - Stories use the shared demo world in `src/fixtures` (one project, one task), so components are seen together as they will be used.
 
-### The workbench
-
-The workbench (`workbench/`, `bun run workbench`) is where components are seen in use rather than one at a time. It holds the specimen catalogue, where one thread shows each state named in the margin, and the example conversations. It sits outside Storybook's one-component-per-story model on purpose. It is also exposed as Storybook stories under **Workbench**. The workbench composes package components only. If it needs markup that isn't a component, that is a sign a component is missing.
-
 ## Public API
 
 - `@althar/ui` exports components, their prop and `text` types, their default `text`, and the enums, all from `src/index.ts`.
@@ -216,15 +212,14 @@ The workbench (`workbench/`, `bun run workbench`) is where components are seen i
 ## Checks
 
 - `bun run check`: type-aware lint, format and type checks (`vp check`). Lint and format settings are in the repository root's `vite.config.ts` and apply to every workspace. A pre-commit hook (`.vite-hooks/pre-commit`, installed by `prepare`) runs `vp staged`, which fixes and checks the staged files.
-- `bun run test:coverage`: Vitest in jsdom. It renders every story through `composeStories` and runs their `play` functions (`tests/stories.test.tsx`). Unit tests beside it cover what a play cannot reach: every Permission answer, the ModelBrowser keyboard, stream pacing, the pixel field and the thread's scroll. The gate is 90% lines and branches over `src/**`, excluding stories and fixtures.
+- `bun run test:coverage`: Vitest in jsdom. It renders every story through `composeStories` and runs their `play` functions (`tests/stories.*.test.tsx`, over `tests/stories.ts`). Unit tests beside it cover what a play cannot reach: every Permission answer, the ModelBrowser keyboard, stream pacing, the pixel field and the thread's scroll. The gate is 90% lines and branches over `src/**`, excluding stories and fixtures.
 - `bun run storybook` runs the catalogue with the accessibility addon. `bun run build` builds the static Storybook.
 
 ## Gaps
 
 These are known departures from the principles above, with the way back:
 
-- **The workbench** is not yet in the package, so neither is `bun run workbench`. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
-- **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
+- **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Those plays run in Storybook only; `BROWSER_ONLY` in `tests/stories.ts` lists them.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
 - **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions and StepGraph's canvas, which moves from its own arrow keys, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and the combobox of a searchable Select and of the Finder, whose options the field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
 - **Code colouring is built in only for TypeScript and JavaScript.** Other languages show plain unless the consumer passes a highlighter to CodeBlock. A real grammar-based highlighter belongs to the consumer until one is chosen for the package.
