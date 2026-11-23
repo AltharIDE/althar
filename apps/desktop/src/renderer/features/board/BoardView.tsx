@@ -28,7 +28,6 @@ import {
   FileChips,
   Findings,
   heldBackWords,
-  Icon,
   KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
@@ -1377,7 +1376,6 @@ export function BoardView({
             }
           >
             <span className={s.held} title={heldWhyWords(heldBy)}>
-              <Icon name="load" size={11} />
               {heldBackWords(heldBy.held)}
             </span>
           </BoardDivider>

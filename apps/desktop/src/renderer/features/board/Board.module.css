@@ -30,9 +30,6 @@
 /* Up next's line over what is held back for now: in the load meter's warm, as it says the same of this computer. Its
    words stay whole, the way to the meter going under them where the lane is narrow. */
 .held {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   color: var(--warm);
 }
 .heldLink {
