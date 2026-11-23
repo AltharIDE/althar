@@ -51,7 +51,7 @@ export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure
 
     const size = () => {
       const vh = window.innerHeight
-      if ('pin' in kind && stick) {
+      if ('pin' in kind && kind.pin > 0 && stick) {
         stick.style.top = `${Math.min(UNDER_NAV, vh - stick.offsetHeight - 12)}px`
         el.style.height = `${Math.max(stick.offsetHeight + vh * kind.pin, vh * 2)}px`
       }

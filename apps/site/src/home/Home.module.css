@@ -3,6 +3,9 @@
 .page {
   --wrap: 1272px;
   --gut: 64px;
+  /* Headings in Instrument Sans; their second beat in Instrument Serif's italic. */
+  --head: 'Instrument Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  --beat: 'Instrument Serif', Georgia, serif;
   background: var(--n-2);
 }
 @media (max-width: 900px) { .page { --gut: 22px; } }

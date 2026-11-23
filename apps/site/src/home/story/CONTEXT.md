@@ -4,6 +4,7 @@ The home page after its first screen. Each scene tells one part of the product, 
 
 ## Key files
 
+- `Race.tsx` is the first scene: a pinned timeline of the labs taking turns at the top, which becomes Althar's branch and ends on the first screen's orrery (`Rings` with `notes`). Its `draw(p)` sets data attributes and styles straight on the DOM. Narrower than 900px, or with reduced motion, it isn't pinned and stands whole.
 - `Story.tsx` holds the scenes, in order:
   - the board (pinned, poured cobalt by the pointer)
   - the coordinator
@@ -28,6 +29,8 @@ The home page after its first screen. Each scene tells one part of the product, 
 - With reduced motion nothing pins or scrubs. Pictures show their still moment, and rows wrap.
 
 ## Gotchas
+
+- Headings are in Instrument Sans (`--head`), with their bold second beat in Instrument Serif italic (`--beat`), both from fontsource and imported in `Home.tsx`.
 
 - The board seeks `p * 15400` and the review seeks at most 10.8 s. Both stop short of their loops' fade back to the start.
 - `aurora.webp` is the cobalt light gradient from the social posts. The CTA's five "blocks" are copies of it, each masked to one light block and pulsing in saturation, not in white.

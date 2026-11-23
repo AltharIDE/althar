@@ -32,13 +32,23 @@
 .h1 {
   margin-top: auto;
   padding-top: 50px;
-  font-size: clamp(42px, 5.05vw, 74px);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.045em;
+  font-family: var(--head);
+  font-size: clamp(40px, 4.8vw, 70px);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
 }
 .line { display: block; padding-bottom: 0.06em; white-space: nowrap; }
-.h1 b { font-weight: 700; color: var(--cobalt); }
+.h1 b {
+  font-family: var(--beat);
+  font-size: 1.14em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 0.9;
+  letter-spacing: -0.015em;
+  color: var(--cobalt);
+  -webkit-text-stroke: 0.018em currentColor;
+}
 
 .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
 .get,
@@ -155,7 +165,8 @@
   .art { position: relative; left: auto; top: auto; width: 100%; height: auto; aspect-ratio: 1400 / 760; transform: none; mask-image: none; }
   .foot { flex-direction: column; align-items: flex-start; }
   .runs { flex-wrap: wrap; gap: 16px 24px; }
-  .line { white-space: normal; }
+  .h1 { font-size: clamp(30px, 8.6vw, 44px); }
+  .line { white-space: normal; text-wrap: balance; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dot, .feed { display: none; }

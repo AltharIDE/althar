@@ -1,0 +1,156 @@
+/* The race: pinned, the timeline (.before) gives way to Althar's branch (.after) in the same place; unpinned, one under the other. Race.tsx sets data-live, and the scroll sets what is on. */
+
+.race { position: relative; }
+.wrap { position: relative; width: 100%; max-width: calc(var(--wrap) + 2 * var(--gut)); margin: 0 auto; padding: 0 var(--gut); }
+.before, .after { position: relative; padding-bottom: 64px; }
+.race[data-live] .stick { position: sticky; top: 76px; height: calc(100svh - 88px); overflow: hidden; }
+.race[data-live] .wrap { height: 100%; }
+.race[data-live] .before,
+.race[data-live] .after { position: absolute; inset: 0 var(--gut); padding-bottom: 0; will-change: opacity, transform; }
+.race[data-live] .after { opacity: 0; pointer-events: none; }
+.race[data-live] .before { display: flex; flex-direction: column; padding-bottom: 32px; }
+.race[data-live] .scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.head { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 64px; align-items: end; padding-top: 72px; }
+.title { font-family: var(--head); font-size: clamp(34px, 4vw, 58px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
+.title b {
+  font-family: var(--beat);
+  font-size: 1.14em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 0.9;
+  letter-spacing: -0.015em;
+  color: var(--cobalt);
+  -webkit-text-stroke: 0.018em currentColor;
+}
+.lead { max-width: 34em; font-size: 20px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); }
+
+/* The timeline: its key, the context as areas over the year, the year's line, the months, and the models as dots on it. Everything is placed from its foot. */
+.line { position: relative; height: 380px; margin-top: 56px; --x: 100%; }
+.race[data-live] .line { flex: 1; height: auto; min-height: 340px; margin-top: 40px; }
+.key { position: absolute; left: 0; top: 0; display: flex; gap: 24px; font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.key i { display: inline-block; width: 14px; height: 8px; margin-right: 8px; border-radius: 2px; }
+.k1 { background: rgba(43, 59, 255, 0.14); box-shadow: inset 0 1.5px 0 var(--cobalt); }
+.k2 { background: rgba(20, 20, 23, 0.06); box-shadow: inset 0 1.5px 0 rgba(20, 20, 23, 0.3); }
+.chart { position: absolute; left: 0; top: 24px; width: 100%; height: calc(100% - 102px); overflow: visible; }
+.area { fill: rgba(43, 59, 255, 0.12); transition: fill 500ms var(--ease); }
+.stroke { fill: none; stroke: var(--cobalt); stroke-width: 1.75; vector-effect: non-scaling-stroke; transition: stroke 500ms var(--ease); }
+.seg[data-lost] .area { fill: rgba(20, 20, 23, 0.055); }
+.seg[data-lost] .stroke { stroke: rgba(20, 20, 23, 0.28); }
+.tool {
+  position: absolute;
+  top: calc(100% - 98px);
+  margin-left: 18px;
+  font: 500 9.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cobalt);
+  opacity: 0;
+  transition: opacity 300ms var(--ease), color 500ms var(--ease);
+}
+.tool[data-on] { opacity: 1; }
+.tool[data-lost] { color: var(--t-3); }
+.base { position: absolute; left: 0; right: 0; top: calc(100% - 78px); height: 1px; background: rgba(20, 20, 23, 0.16); }
+.fill { position: absolute; left: 0; top: calc(100% - 79px); width: var(--x); height: 3px; border-radius: 2px; background: var(--cobalt); }
+.now { position: absolute; top: 24px; left: var(--x); height: calc(100% - 102px); border-left: 1px dashed rgba(43, 59, 255, 0.55); }
+.race:not([data-live]) .now { display: none; }
+.tick { position: absolute; top: calc(100% - 78px); width: 1px; height: 8px; background: rgba(20, 20, 23, 0.22); }
+.month { position: absolute; top: calc(100% - 10px); font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
+.dot {
+  position: absolute;
+  top: calc(100% - 83px);
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  box-shadow: 0 0 0 3px var(--n-2);
+  opacity: 0;
+  transform: scale(0.2);
+  transition: transform 300ms var(--ease), opacity 300ms var(--ease);
+}
+.dot[data-on] { opacity: 1; transform: none; }
+.model {
+  position: absolute;
+  top: calc(100% - 58px);
+  margin-left: -5px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--t-2);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 300ms var(--ease), transform 300ms var(--ease);
+}
+.model[data-low] { top: calc(100% - 40px); }
+.model[data-last] { margin-left: 5px; translate: -100% 0; }
+.model[data-on] { opacity: 1; transform: none; }
+
+/* Althar's branch: the core at the top, the line down from it, and each model branching off it. */
+.branch { position: relative; height: 500px; margin-top: 32px; }
+.lines { position: absolute; left: 50%; top: 0; width: 800px; height: 500px; margin-left: -400px; overflow: visible; }
+.trunk { fill: none; stroke: var(--cobalt); stroke-width: 2; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.fork path { fill: none; stroke: var(--cobalt); stroke-width: 1.25; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 700ms cubic-bezier(0.3, 0.7, 0.2, 1), opacity 500ms var(--ease); }
+.fork circle { fill: var(--cobalt); opacity: 0; transition: opacity 400ms var(--ease) 300ms; }
+.fork[data-on] path { stroke-dashoffset: 0; }
+.fork[data-on] circle { opacity: 1; }
+.fork[data-gone] path, .fork[data-gone] circle { opacity: 0.3; }
+.next path { fill: none; stroke: var(--t-3); stroke-width: 1.25; stroke-dasharray: 3 5; opacity: 0; transition: opacity 500ms var(--ease); }
+.next circle { fill: none; stroke: var(--t-3); stroke-width: 1.25; opacity: 0; transition: opacity 500ms var(--ease); }
+.next[data-on] path, .next[data-on] circle { opacity: 0.8; }
+.lab { position: absolute; display: flex; gap: 8px; align-items: baseline; white-space: nowrap; opacity: 0; transition: opacity 400ms var(--ease) 250ms; }
+.lab[data-on] { opacity: 1; }
+.lab[data-gone] { opacity: 0.38; }
+.lab[data-side='left'] { right: calc(50% + 206px); flex-direction: row-reverse; }
+.lab[data-side='right'] { left: calc(50% + 206px); }
+.lab b { font: 500 12px/1 var(--mono); letter-spacing: 0.03em; color: var(--t-1); }
+.lab span, .lab i { font: 500 9.5px/1 var(--mono); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.lab i { color: var(--cobalt); }
+.lab[data-next] b { color: var(--t-3); }
+.pt { position: absolute; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--cobalt); opacity: 0; transition: opacity 300ms var(--ease); }
+.lab[data-side='left'] .pt { right: -13.5px; }
+.lab[data-side='right'] .pt { left: -13.5px; }
+.lab[data-next] .pt { background: var(--n-2); box-shadow: inset 0 0 0 1.25px var(--t-3); }
+/* Flying into the orrery, a model is its dot and its name. */
+.lab[data-orb], .lab[data-orb][data-gone] { opacity: 1; }
+.lab[data-orb] .pt { opacity: 1; }
+.lab[data-orb] span { display: none; }
+
+.core { position: absolute; left: 50%; top: 5px; width: 360px; height: 150px; margin-left: -180px; transform-origin: 50% 50%; opacity: 0; transition: opacity 500ms var(--ease); }
+.core[data-on] { opacity: 1; }
+.coreSvg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ring { fill: none; stroke: var(--cobalt); stroke-opacity: 0.35; stroke-width: 1.25; }
+.sat { fill: var(--cobalt); }
+.word { position: absolute; font: 500 10px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; color: var(--t-2); }
+
+/* The last beat: the orrery, and the closing line with the download over it. */
+.orrery { position: absolute; left: 50%; top: 46%; width: 1400px; height: 760px; margin: -380px 0 0 -700px; transform-origin: 50% 50%; opacity: 0; pointer-events: none; }
+.rings { position: absolute; inset: 0; }
+.fin { position: absolute; left: 0; right: 0; top: 44px; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; opacity: 0; pointer-events: none; }
+.fin .title { white-space: nowrap; }
+.get {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 24px;
+  border-radius: 999px;
+  background: var(--cobalt);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: background var(--fast) var(--ease);
+}
+.get svg { stroke: #b4bcff; }
+.get:hover { background: #1f35c8; }
+.race:not([data-live]) .orrery, .race:not([data-live]) .fin { display: none; }
+
+@media (max-width: 900px) {
+  .head { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .scroll { overflow-x: auto; margin: 0 calc(-1 * var(--gut)); padding: 0 var(--gut); }
+  .line { min-width: 940px; }
+  .branch { min-width: 820px; }
+}

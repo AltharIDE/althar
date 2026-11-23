@@ -12,6 +12,7 @@ import { Review } from '../bodies/desktop/Review'
 import { SCREENS } from '../bodies/desktop/screens/list'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
 import { Altitude } from './Altitude'
+import { Race } from './Race'
 import aurora from './aurora.webp'
 import menubar from './menubar.webp'
 import { END, SCENE } from './scenes'
@@ -331,6 +332,7 @@ function End() {
 export function Story() {
   return (
     <main id="main" tabIndex={-1} className={s.story}>
+      <Race />
       <Board />
       <Coordinator />
       <ReviewScene />

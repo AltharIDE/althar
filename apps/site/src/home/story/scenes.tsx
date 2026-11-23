@@ -73,3 +73,37 @@ export const SCENE = {
 
 /** The last line, by the download: its quiet half, then its heavy one. */
 export const END = ['The craft of a paid app.', 'The freedom of open source.'] as const
+
+/** The race, before the board: the labs taking turns at the top, then Althar above it. */
+export const RACE = {
+  before: {
+    title: (
+      <>
+        Labs take turns at the top.
+        <br />
+        You start over <b>every time.</b>
+      </>
+    ),
+    lead: 'Eight new top models in nine months, from more than one lab. Each time you follow the leader, the context you built up stays behind in the last tool.',
+    label:
+      'A timeline of 2026 with eight new top models from OpenAI and Anthropic. Above it, the context you build up grows, then drops to nothing each time you move to a new tool: Codex in February, Claude Code in April, OpenCode in August.',
+  },
+  after: {
+    title: (
+      <>
+        Agents come and go.
+        <br />
+        <b>The project stays.</b>
+      </>
+    ),
+    lead: 'Althar sits above the race. Your context lives with the project; each new model branches in, does its work and moves on, and nothing at the core goes with it.',
+    label:
+      'Althar at the top, holding your project’s context: repo rules, decisions, the plan, review notes and the open task. Below it a single line runs down, and each new model branches off it for a while, then fades as the next arrives. At the end the models gather into orbits around Althar.',
+  },
+  end: (
+    <>
+      Agents come and go. <b>The project stays.</b>
+    </>
+  ),
+  key: ['Context you’ve built up', 'Left behind at a switch'],
+} as const

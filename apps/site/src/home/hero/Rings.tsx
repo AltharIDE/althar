@@ -59,10 +59,17 @@ const place = (orbit: number, deg: number) => {
   return { x: CX + rx * Math.cos(a), y: CY + ry * Math.sin(a), a }
 }
 
-/** How far a name sits from its disc's middle. */
+/** How far a name sits from its disc's middle, and a note's from its dot. */
 const GAP = 23
+const NOTE_GAP = 11
+/** Where the project's notes sit on the inner orbit, in degrees. */
+const NOTE_AT = [90, 150, 210, 270, 330]
 
-export function Rings({ className }: { className?: string }) {
+/**
+ * `notes`: the project's own, riding the inner orbit as cobalt dots with
+ * their names, for the race's last beat (story/Race.tsx).
+ */
+export function Rings({ className, notes }: { className?: string; notes?: readonly string[] }) {
   const svg = useRef<SVGSVGElement>(null)
   const mark = useRef<HTMLDivElement>(null)
   const still = useMedia('(prefers-reduced-motion: reduce)')
@@ -75,8 +82,9 @@ export function Rings({ className }: { className?: string }) {
       g,
       orbit: Number(g.dataset.orbit),
       at: Number(g.dataset.at),
-      disc: g.querySelector<SVGGElement>('[data-disc]')!,
+      disc: g.querySelector<SVGGElement>('[data-disc]'),
       name: g.querySelector<SVGTextElement>('text')!,
+      gap: Number(g.dataset.gap),
       w: -1,
     }))
     const ticks = [...root.querySelectorAll<SVGLineElement>('[data-tick]')].map((line) => ({
@@ -99,13 +107,13 @@ export function Rings({ className }: { className?: string }) {
         const depth = (Math.sin(p.a) + 1) / 2
         r.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`)
         r.g.setAttribute('opacity', (0.62 + depth * 0.38).toFixed(2))
-        r.disc.setAttribute('transform', `scale(${(0.82 + depth * 0.18).toFixed(3)})`)
+        r.disc?.setAttribute('transform', `scale(${(0.82 + depth * 0.18).toFixed(3)})`)
         if (r.w < 0) r.w = r.name.getComputedTextLength()
         // The name on the side away from the middle; as it changes side it fades out and in.
         const c = Math.cos(p.a)
         let f = Math.min(1, Math.abs(c) / 0.22)
         f = f * f * (3 - 2 * f)
-        r.name.setAttribute('x', c >= 0 ? String(GAP) : (-GAP - r.w).toFixed(1))
+        r.name.setAttribute('x', c >= 0 ? String(r.gap) : (-r.gap - r.w).toFixed(1))
         r.name.setAttribute('opacity', f.toFixed(2))
       }
     }
@@ -141,7 +149,8 @@ export function Rings({ className }: { className?: string }) {
       lastY = y
       t += dt * (1 + boost)
       // Off screen, only the clock runs.
-      if (y < window.innerHeight * 1.2) {
+      const box = root.getBoundingClientRect()
+      if (box.bottom > 0 && box.top < window.innerHeight) {
         draw()
         let tx = px
         let ty = py
@@ -207,7 +216,7 @@ export function Rings({ className }: { className?: string }) {
         {RIDERS.map((r) => {
           const p = place(r.orbit, r.at)
           return (
-            <g key={r.agent} data-rider="" data-orbit={r.orbit} data-at={r.at} transform={`translate(${p.x} ${p.y})`}>
+            <g key={r.agent} data-rider="" data-orbit={r.orbit} data-at={r.at} data-gap={GAP} transform={`translate(${p.x} ${p.y})`}>
               <text className={s.name} x={GAP} y="3.8">
                 {nameOf(r.agent)}
               </text>
@@ -218,6 +227,18 @@ export function Rings({ className }: { className?: string }) {
                   <AgentMark agent={r.agent} size={17} />
                 </g>
               </g>
+            </g>
+          )
+        })}
+        {notes?.map((note, i) => {
+          const at = NOTE_AT[i % NOTE_AT.length]!
+          const p = place(0, at)
+          return (
+            <g key={note} data-rider="" data-orbit={0} data-at={at} data-gap={NOTE_GAP} transform={`translate(${p.x} ${p.y})`}>
+              <text className={s.note} x={NOTE_GAP} y="3.8">
+                {note}
+              </text>
+              <circle r="3.5" className={s.noteDot} />
             </g>
           )
         })}

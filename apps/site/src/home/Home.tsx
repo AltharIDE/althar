@@ -1,3 +1,6 @@
+import '@fontsource-variable/instrument-sans'
+import '@fontsource/instrument-serif/400-italic.css'
+
 import { Footer } from '../shared/footer/Footer'
 import { Nav, NavSpace } from '../shared/Nav'
 import { Bar } from './Bar'

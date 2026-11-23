@@ -16,6 +16,9 @@
   fill: var(--t-3);
 }
 
+.note { font: 500 10.5px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--cobalt); }
+.noteDot { fill: var(--cobalt); }
+
 /* While the download is being fed (Hero), each agent's ring turns cobalt. */
 :global([data-feeding]) .disc { stroke: var(--cobalt); }
 

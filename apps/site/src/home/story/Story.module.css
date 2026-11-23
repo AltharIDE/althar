@@ -8,8 +8,20 @@
 .under { position: absolute; inset: 0; pointer-events: none; }
 
 .label { font: 500 13px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
-.title { font-size: clamp(34px, 4vw, 58px); font-weight: 700; line-height: 1; letter-spacing: -0.045em; }
-.title b { font-weight: 700; }
+.title { font-family: var(--head); font-size: clamp(34px, 4vw, 58px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
+/* A title's second beat, in the italic serif, in cobalt (pale on dark, white on cobalt). */
+.title b,
+.endLine b {
+  font-family: var(--beat);
+  font-size: 1.14em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 0.9;
+  letter-spacing: -0.015em;
+  color: var(--cobalt);
+  -webkit-text-stroke: 0.018em currentColor;
+}
+.review .title b { color: #b4bcff; }
 .lead { max-width: 34em; font-size: 20px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); }
 .small { font-size: 15px; line-height: 1.5; color: var(--t-2); }
 .head { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 64px; align-items: end; margin-top: 32px; }
@@ -77,8 +89,8 @@
 .card { display: flex; flex-direction: column; overflow: hidden; border-radius: 22px; background: #fff; }
 .cardHead { display: grid; gap: 8px; padding: 26px 26px 0; }
 .no { font: 500 13px var(--mono); letter-spacing: 0.12em; color: var(--cobalt); }
-.cardTitle { font-size: 24px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; }
-.cardTitle b { font-weight: 700; }
+.cardTitle { font-family: var(--head); font-size: 24px; font-weight: 600; line-height: 1.12; letter-spacing: -0.025em; }
+.cardTitle b { font-weight: inherit; }
 .pic { flex: 1; max-height: 190px; margin-top: 16px; overflow: hidden; }
 .mini { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
 .mini .card { gap: 10px; padding: 22px 20px; }
@@ -87,7 +99,7 @@
 .mini .small { font-size: 13.5px; }
 .also { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 40px; align-items: baseline; margin-top: 48px; }
 .also ul { display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 0; padding: 0; list-style: none; font-size: 19px; letter-spacing: -0.01em; }
-.more { margin-top: 28px; font-size: clamp(34px, 3.8vw, 54px); font-weight: 700; line-height: 1; letter-spacing: -0.05em; }
+.more { margin-top: 28px; font-family: var(--head); font-size: clamp(34px, 3.8vw, 54px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
 
 /* 05 Connections: on white, each name lighting as the list comes up the window. */
 .connect { margin-top: 88px; padding: 126px 0 72px; background: #fff; }
@@ -102,8 +114,8 @@
 /* 06 Notch: the tour round the notch, and the menu bar beside it. */
 .notch { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 44px; }
 .tour { overflow: hidden; border-radius: 22px; }
-.menuTitle { margin-top: 26px; margin-bottom: 12px; font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; }
-.menuTitle b { font-weight: 700; }
+.menuTitle { margin-top: 26px; margin-bottom: 12px; font-family: var(--head); font-size: 30px; font-weight: 600; line-height: 1.12; letter-spacing: -0.025em; }
+.menuTitle b { font-weight: inherit; }
 .crumbs { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; font-size: 14px; color: var(--t-3); }
 .crumbs span { display: inline-flex; gap: 10px; }
 .crumbs i { font-style: normal; }
@@ -149,8 +161,8 @@
   32% { opacity: 0.72; }
   50%, 100% { opacity: 0; }
 }
-.endLine { position: relative; font-size: clamp(38px, 4.4vw, 64px); font-weight: 700; line-height: 1; letter-spacing: -0.045em; }
-.endLine b { font-weight: 700; }
+.endLine { position: relative; font-family: var(--head); font-size: clamp(38px, 4.4vw, 64px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
+.end .endLine b { color: #fff; }
 .endCtas { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 44px; }
 .endGet,
 .endStar {
