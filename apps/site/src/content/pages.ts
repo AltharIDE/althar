@@ -89,6 +89,15 @@ export const PAGE_META = {
     image: '/og/home.jpg',
     index: true,
   },
+  /** What a phone's camera opens from the pairing QR in Althar on a computer, where the phone has no Althar yet: linked from nowhere, kept out of search. */
+  '/pair': {
+    path: '/pair',
+    name: 'Pair your phone',
+    title: 'Pair your phone · Althar',
+    description: 'Get Althar on your phone, then open the pairing code your computer showed.',
+    image: '/og/home.jpg',
+    index: false,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

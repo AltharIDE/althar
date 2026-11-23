@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
-import { useServices } from '../src/renderer/data/services'
+import { type Host, useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
 import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
@@ -17,21 +17,24 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, remoteConnection, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
   return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} />
 }
 
-function Start({ onProject }: { onProject: (id: string) => void }) {
+function Start({ onProject, onNew = () => {} }: { onProject: (id: string) => void; onNew?: () => void }) {
   const start = useStart()
   return (
     <StartView
       model={start}
       accounts={useAccountSignIn(start)}
       onProject={onProject}
+      onNew={onNew}
       home={() => <Home start={start} onProject={onProject} />}
     />
   )
@@ -954,22 +957,60 @@ describe('the start', () => {
   })
 })
 
-it('shows an empty remote home without offering desktop folders or agent installation', async () => {
-  const homeId = `home_${'1'.repeat(32)}`
-  const { client } = fakeClient({
-    connection: {
-      identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
-      hostDeviceId: `dev_${'3'.repeat(32)}`,
-      apiVersion: 1,
-      appVersion: 'fixture',
-      position: { homeId, cursor: 0, checkpoint: null },
-    },
-    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-  })
+it('welcomes an empty remote home with what it found there, and goes into New project the way chosen', async () => {
+  const { client } = fakeClient({ connection: remoteConnection(), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
   const host = fakeHost()
-  withServices(<Start onProject={() => {}} />, client, host)
-  expect(await screen.findByRole('heading', { name: 'No projects on this home yet' })).not.toBeNull()
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
+  expect(await screen.findByRole('heading', { name: /^This is / })).not.toBeNull()
+  expect(await screen.findByText('Ubuntu 24.04.1 LTS')).not.toBeNull()
   expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
   expect(host.pickFolder).not.toHaveBeenCalled()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(host.findRepositories).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('2 repositories found on this home')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
+  expect(onNew).toHaveBeenCalledOnce()
+  expect(draftsOf(client).get()?.way).toBe('new')
+})
+
+it('asks a home from before windows made projects there to update, by the launcher and profile its connection runs, in place of the ways in', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  // Installed somewhere of its own: its launcher and profile saved for it, as the connection runs them.
+  const runner = {
+    id: 'h1',
+    name: 'runner-1',
+    homeId: `home_${'1'.repeat(32)}`,
+    ssh: { target: 'althar@runner-1', launcher: '/opt/althar/launcher', profile: '/srv/althar' },
+  }
+  const homes = { state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }), onState: () => () => {} }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  const copied = vi.fn(async () => {})
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  // No tour: the home can't say what it is.
+  expect(await screen.findByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
+  expect(screen.getByText(/runner-1 runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
+  expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
+  expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
+  expect(copied).toHaveBeenCalledWith(`sh '/opt/althar/launcher' update --apply --wait --profile '/srv/althar'`)
+  expect(client.findHomeFolders).not.toHaveBeenCalled()
+  expect(client.getMachine).not.toHaveBeenCalled()
+})
+
+it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({
+    connection: remoteConnection(),
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    findHomeFolders: vi.fn(async () => {
+      throw new Error('The home disconnected.')
+    }),
+  })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(fakeHost(), client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('Couldn’t look on this home just now')).not.toBeNull()
+  expect(screen.getByRole('button', { name: 'A folder on this home' })).not.toBeNull()
 })

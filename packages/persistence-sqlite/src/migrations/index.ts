@@ -103,7 +103,10 @@ import { statements as threadGoals } from './0098_thread_goals'
 import { statements as threadItemDates } from './0099_thread_item_dates'
 import { statements as setupsByThread } from './0100_setups_by_thread'
 import { statements as boundedHomeSearch } from './0101_bounded_home_search'
-import { statements as issueDraftWaits } from './0102_issue_draft_waits'
+import { statements as canvasBoards } from './0102_canvas_boards'
+import { statements as canvasSaves } from './0103_canvas_saves'
+import { statements as artifactChats } from './0104_artifact_chats'
+import { statements as issueDraftWaits } from './0105_issue_draft_waits'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -224,7 +227,10 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0099_thread_item_dates', statements: threadItemDates },
   { key: '0100_setups_by_thread', statements: setupsByThread },
   { key: '0101_bounded_home_search', statements: boundedHomeSearch },
-  { key: '0102_issue_draft_waits', statements: issueDraftWaits },
+  { key: '0102_canvas_boards', statements: canvasBoards },
+  { key: '0103_canvas_saves', statements: canvasSaves },
+  { key: '0104_artifact_chats', statements: artifactChats },
+  { key: '0105_issue_draft_waits', statements: issueDraftWaits },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

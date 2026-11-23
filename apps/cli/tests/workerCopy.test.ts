@@ -11,6 +11,34 @@ import { Effect } from 'effect'
 
 import { testWorkerCopy } from '../src/workerCopy'
 
+it.live('releases a mismatched snapshot without downloading or running a local command', () =>
+  Effect.gen(function* () {
+    const into = mkdtempSync(join(tmpdir(), 'althar-unavailable-copy-'))
+    yield* Effect.addFinalizer(() => Effect.sync(() => removeTreeSync(into)))
+    const input = { projectId: 'proj_' + '1'.repeat(32), taskId: 'task_' + '2'.repeat(32), source: 'worker' as const }
+    const taskSnapshot: WorkerSnapshot = { ...input, id: 'snap_' + '4'.repeat(32), repositories: [] }
+    const released: string[] = []
+    const program = { command: process.execPath, args: ['-e', 'process.exit(7)'] }
+    for (const [snapshot, error] of [
+      [{ ...taskSnapshot, taskId: 'task_' + '5'.repeat(32) }, 'different task'],
+      [{ ...taskSnapshot, projectId: 'proj_' + '6'.repeat(32) }, 'different task'],
+      [{ ...taskSnapshot, source: 'home_copy' }, 'different task'],
+      [taskSnapshot, 'not part of the worker copy'],
+    ] as const) {
+      const api = {
+        PrepareWorkerSnapshot: () => Effect.succeed(snapshot),
+        ReadWorkerSnapshotChunk: () => Effect.die(new Error('An invalid snapshot must never be downloaded.')),
+        ReleaseWorkerSnapshot: ({ id }: { id: string }) => Effect.sync(() => void released.push(id)),
+      }
+      const failure = yield* Effect.flip(testWorkerCopy(api, input, into, undefined, program))
+      assert.instanceOf(failure, Error)
+      assert.include((failure as Error).message, error)
+    }
+    assert.deepStrictEqual(released, [taskSnapshot.id, taskSnapshot.id, taskSnapshot.id, taskSnapshot.id])
+    assert.deepStrictEqual(readdirSync(into), [])
+  }),
+)
+
 it.live('tests the actual worker files in a separate checkout and keeps the copy on failure', () =>
   Effect.gen(function* () {
     const root = mkdtempSync(join(tmpdir(), 'althar-cli-test-copy-'))

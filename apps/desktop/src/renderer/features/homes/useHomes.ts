@@ -1,5 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
+import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome, WindowHome } from '../../../homes'
+
+import { useServices } from '../../data/services'
+import { device } from '../../shared/device'
 
 /*
  * What the window's homes share: where its own home stands, what main knows
@@ -39,6 +42,53 @@ const useFollowed = <A>(read: (() => Promise<A>) | undefined, follow: ((listener
 
 export const useHomeState = (homes: HomesHost | undefined): HomeState | null => useFollowed(homes?.state, homes?.onState)
 
+/** The launcher a home's SSH connection runs where none is saved for it (transport-node's sshArguments): where Althar installs one. */
+export const USUAL_LAUNCHER = '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher"'
+
+const quoted = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+
+/**
+ * How the window's home updates, run there (apps/host/README.md, Managed
+ * releases and updates), and how sure the window is of it. Over SSH, by the
+ * launcher and profile its connection runs, so it's the very installation
+ * the window talks to: `known` where that's where Althar installs one,
+ * `custom` where it's one saved for the home, which may be a source
+ * checkout's. Paired, or before the window knows, the window can't see how
+ * it was installed: `unknown`, by where Althar installs one.
+ */
+export interface HomeUpdate {
+  readonly command: string
+  readonly installed: 'known' | 'custom' | 'unknown'
+}
+
+export const updateOf = (current: WindowHome | undefined): HomeUpdate => {
+  const ssh = current === undefined || current.kind === 'local' ? undefined : current.home.ssh
+  const launcher = ssh?.launcher === undefined ? USUAL_LAUNCHER : quoted(ssh.launcher)
+  const profile = ssh?.profile === undefined ? '' : ` --profile ${quoted(ssh.profile)}`
+  return {
+    command: `sh ${launcher} update --apply --wait${profile}`,
+    installed: ssh === undefined ? 'unknown' : ssh.launcher === undefined ? 'known' : 'custom',
+  }
+}
+
+/** How the home the window is on updates, as its connection says. */
+export const useHomeUpdate = (): HomeUpdate => {
+  const { host } = useServices()
+  return updateOf(useHomeState(host.homes)?.current)
+}
+
+/**
+ * The home the window is on, as its words name it: another computer's by its
+ * name (runner-1), this one's as this computer is named (this Mac).
+ */
+export const useHomeName = (): { readonly remote: boolean; readonly name: string } => {
+  const { client, host } = useServices()
+  const state = useHomeState(host.homes)
+  const remote = client.connection !== undefined
+  if (!remote) return { remote, name: device.this }
+  return { remote, name: state !== null && state.current.kind !== 'local' ? state.current.home.name : 'this home' }
+}
+
 /** Every home, as main knows it; null until first read. */
 export const useHomesOverview = (homes: HomesHost | undefined): HomesOverview | null => useFollowed(homes?.overview, homes?.onOverview)
 
@@ -48,7 +98,7 @@ export const useHomeSetup = (homes: HomesHost | undefined): HomeSetup | null => 
 /** Asks the window to show its homes, as File › Homes… does: the chip's menu, or Connect a home where there's no chip yet. */
 export const showHomes = () => window.dispatchEvent(new Event('althar:show-homes'))
 
-export type HomesDialog = 'connect' | 'manage' | null
+export type HomesDialog = 'connect' | 'manage' | 'phones' | null
 interface HomesUi {
   readonly menu: boolean
   readonly dialog: HomesDialog

@@ -1,22 +1,38 @@
 import { useId } from 'react'
 
 import { device } from '../../foundations/device'
+import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Switch } from '../../primitives/Switch/Switch'
-import { type LoadGlance, type LoadPoint, type LoadRow, percent } from './load'
+import {
+  type AgentsWhy,
+  fewerOf,
+  fewerWords,
+  type LoadAgents,
+  type LoadGlance,
+  type LoadPoint,
+  type LoadRow,
+  type LoadWorker,
+  percent,
+  type WorkerState,
+} from './load'
 import s from './LoadPeek.module.css'
 
 /*
  * What the load meter opens to: how hard this computer works, at more
  * length. Up to the last two minutes of CPU as a line, with Althar's work's
  * part under it, beginning where the readings do; CPU and memory as figures, each with Althar's part; what macOS
- * says of memory; each piece of Althar's work, most first, across every
- * project, and what the rest of the computer's apps use; and a switch that
- * takes the meter out of the bar. Cobalt is always Althar's work, as it is
- * wherever work in motion shows; the rest is ink.
+ * says of memory; its agents beside them, how many are at work of the number
+ * it runs at once, fewer for now and why while it is under load, and what
+ * waits; the home's workers, where it has any, each where it stands; each
+ * piece of Althar's work here, most first, across every project, and what the
+ * rest of the computer's apps use; and a switch that takes the meter out of
+ * the bar. Cobalt is always Althar's work, as it is wherever work in motion
+ * shows; the rest is ink. The readings alone (`LoadReadings`) are Settings ›
+ * Computers' too, for the home.
  */
 
 export interface LoadPeekText {
@@ -28,7 +44,21 @@ export interface LoadPeekText {
   memoryFigure: (used: string, total: string) => string
   /** Althar's work's part, under a bar. */
   work: (percent: number) => string
+  agents: string
+  /** How many are at work, of the number. */
+  agentsFigure: (busy: number, configured: number) => string
+  /** Fewer may work for now, and until when. */
+  fewer: (atOnce: number, why: AgentsWhy) => string
+  /** Tasks waiting for an agent. */
+  waiting: (n: number) => string
+  /** Of those at work, the ones on the home's workers rather than here. */
+  onWorkers: (n: number) => string
   running: string
+  /** Over what runs here, where the home's workers are listed above it. */
+  runningOn: (machine: string) => string
+  workers: string
+  /** Where a worker stands, at its row's end. */
+  workerState: Record<WorkerState, string>
   processes: (n: number) => string
   otherApps: string
   nothingRuns: string
@@ -46,7 +76,15 @@ export const loadPeekText: LoadPeekText = {
   percent: (p) => `${p}%`,
   memoryFigure: (used, total) => `${used} of ${total}`,
   work: (p) => `Althar’s work ${p}%`,
+  agents: 'Agents',
+  agentsFigure: (busy, configured) => `${busy} of ${configured}`,
+  fewer: fewerWords,
+  waiting: (n) => (n === 1 ? '1 task waiting' : `${n} tasks waiting`),
+  onWorkers: (n) => (n === 1 ? '1 of them on a worker' : `${n} of them on workers`),
   running: 'Running',
+  runningOn: (machine) => `Running on ${machine}`,
+  workers: 'Workers',
+  workerState: { working: 'At work', free: 'Free', full: 'Full', offline: 'Offline' },
   processes: (n) => (n === 1 ? '1 process' : `${n} processes`),
   otherApps: 'Other apps',
   nothingRuns: 'Nothing running',
@@ -112,6 +150,26 @@ function Figure({ name, figure, total, ours, work }: { name: string; figure: str
   )
 }
 
+/**
+ * The agents beside CPU and memory, in their form: how many work of the number, all of them Althar's; under it, how many
+ * of them run on the home's workers (the number counts them all), fewer for now and why, and what waits.
+ */
+function Agents({ agents, t }: { agents: LoadAgents; t: LoadPeekText }) {
+  const share = agents.busy / Math.max(1, agents.configured)
+  const fewer = fewerOf(agents)
+  const away = agents.onWorkers ?? 0
+  return (
+    <div className={s.row}>
+      <span className={s.name}>{t.agents}</span>
+      <span className={s.figure}>{t.agentsFigure(agents.busy, agents.configured)}</span>
+      <SplitBar total={share} ours={share} />
+      {away > 0 && <span className={s.work}>{t.onWorkers(away)}</span>}
+      {fewer !== null && <span className={s.work}>{t.fewer(fewer.atOnce, fewer.why)}</span>}
+      {agents.waiting > 0 && <span className={s.work}>{t.waiting(agents.waiting)}</span>}
+    </div>
+  )
+}
+
 function Row({ row, t }: { row: LoadRow; t: LoadPeekText }) {
   return (
     <>
@@ -130,35 +188,26 @@ function Row({ row, t }: { row: LoadRow; t: LoadPeekText }) {
   )
 }
 
-export type LoadPeekProps = RootProps<
-  'div',
-  {
-    load: LoadGlance
-    /** Opens a piece of work from its row, by its id. Without it, the rows say, but aren't ways in. */
-    onOpen?: (id: string) => void
-    /** Takes the meter out of the bar. Without it, there is no switch. */
-    onHide?: () => void
-    /** How many readings the trace has room for; it fills from the right, at now. As many as there are, unless given. */
-    slots?: number
-    headingLevel?: HeadingLevel
-    text?: Partial<LoadPeekText>
-  }
->
+export interface LoadReadingsProps {
+  load: LoadGlance
+  agents?: LoadAgents | null | undefined
+  /** How many readings the trace has room for; as many as there are, unless given. */
+  slots?: number | undefined
+  /** The trace's width, in px, where it is drawn at a size; laid along, it takes its column's. */
+  width?: number | undefined
+  /** Laid along a row, the trace and then a column a figure, as Settings › Computers has the home; else one under another. */
+  along?: boolean | undefined
+  text?: Partial<LoadPeekText> | undefined
+  className?: string | undefined
+}
 
-/** How hard this computer works, at length: the trace, the figures, each piece of Althar's work, and the switch. */
-export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, className, ...rest }: LoadPeekProps) {
+/** How hard a computer works, as the peek reads it: the trace, then CPU, memory and its agents. */
+export function LoadReadings({ load, agents, slots, width = 276, along = false, text, className }: LoadReadingsProps) {
   const t = { ...loadPeekText, ...text }
-  const id = useId()
-  const { rows } = load
   return (
-    <div className={cx(s.peek, className)} {...rest}>
-      <span className={s.head}>
-        <Heading level={headingLevel} className={s.heading}>
-          {t.machine}
-        </Heading>
-      </span>
+    <div className={cx(s.readings, along && s.along, className)}>
       <div className={s.trace}>
-        <Trace points={load.history} slots={slots ?? load.history.length} width={276} height={40} />
+        <Trace points={load.history} slots={slots ?? load.history.length} width={width} height={40} />
         <span className={s.axis} aria-hidden="true">
           <span>{t.ago}</span>
           <span>{t.now}</span>
@@ -179,12 +228,104 @@ export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, 
           ours={load.workMemory}
           work={t.work(percent(load.workMemory ?? 0))}
         />
+        {agents != null && <Agents agents={agents} t={t} />}
       </div>
+    </div>
+  )
+}
+
+/** Where a worker stands, said at its row's end; offline or full, in the danger colour. */
+const troubled = (state: WorkerState) => state === 'offline' || state === 'full'
+
+function WorkerRow({ worker, t }: { worker: LoadWorker; t: LoadPeekText }) {
+  return (
+    <>
+      <Icon name="worker" size={13} className={s.mark} />
+      <span className={s.words}>
+        <span className={s.title}>{worker.name}</span>
+        <span className={s.meta}>{worker.detail}</span>
+      </span>
+      <span className={cx(s.figure, s.standing, troubled(worker.state) && s.troubled)}>{t.workerState[worker.state]}</span>
+    </>
+  )
+}
+
+export type LoadPeekProps = RootProps<
+  'div',
+  {
+    load: LoadGlance
+    /** Its agents, as they stand; without them, CPU and memory alone. */
+    agents?: LoadAgents | null
+    /** The home's workers, each where it stands; none listed where it has none. */
+    workers?: readonly LoadWorker[] | null
+    /** Opens a worker from its row, by its id, where it is in Settings. Without it, the rows say, but aren't ways in. */
+    onWorker?: (id: string) => void
+    /** Opens a piece of work from its row, by its id. Without it, the rows say, but aren't ways in. */
+    onOpen?: (id: string) => void
+    /** Takes the meter out of the bar. Without it, there is no switch. */
+    onHide?: () => void
+    /** How many readings the trace has room for; it fills from the right, at now. As many as there are, unless given. */
+    slots?: number
+    headingLevel?: HeadingLevel
+    text?: Partial<LoadPeekText>
+  }
+>
+
+/** How hard this computer works, at length: the trace, the figures and its agents, each piece of Althar's work, and the switch. */
+export function LoadPeek({
+  load,
+  agents,
+  workers,
+  onOpen,
+  onWorker,
+  onHide,
+  slots,
+  headingLevel = 2,
+  text,
+  className,
+  ...rest
+}: LoadPeekProps) {
+  const t = { ...loadPeekText, ...text }
+  const id = useId()
+  const { rows } = load
+  const others = workers ?? []
+  return (
+    <div className={cx(s.peek, className)} {...rest}>
+      <span className={s.head}>
+        <Heading level={headingLevel} className={s.heading}>
+          {t.machine}
+        </Heading>
+      </span>
+      <LoadReadings load={load} agents={agents} slots={slots} text={text} />
+      {others.length > 0 && (
+        <section className={s.rows}>
+          <span className={s.rowsHead}>
+            <Heading level={below(headingLevel)} className={s.eyebrow}>
+              {t.workers}
+            </Heading>
+          </span>
+          <ul className={s.list}>
+            {others.map((worker) => (
+              <li key={worker.id}>
+                {onWorker === undefined ? (
+                  <div className={s.share}>
+                    <WorkerRow worker={worker} t={t} />
+                  </div>
+                ) : (
+                  <button type="button" className={cx(s.share, s.way)} onClick={() => onWorker(worker.id)}>
+                    <WorkerRow worker={worker} t={t} />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {rows !== null && (
         <section className={s.rows}>
           <span className={s.rowsHead}>
             <Heading level={below(headingLevel)} className={s.eyebrow}>
-              {t.running}
+              {others.length > 0 ? t.runningOn(t.machine) : t.running}
             </Heading>
             <span className={s.eyebrow}>{t.cpu}</span>
           </span>

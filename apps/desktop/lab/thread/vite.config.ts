@@ -14,7 +14,13 @@ export default defineConfig({
   plugins: [react()],
   css: { modules: { localsConvention: 'camelCaseOnly', generateScopedName: '[name]__[local]__[hash:base64:4]' } },
   // The fixtures the tests share make their client with Vitest's spies; on a page, a spy is the function it wraps.
-  resolve: { alias: { vitest: join(import.meta.dirname, 'vitest.ts') } },
+  // Of the tests' own package they need only its times: the rest reads the machine's files and settings, which a page hasn't.
+  resolve: {
+    alias: {
+      vitest: join(import.meta.dirname, 'vitest.ts'),
+      '@althar/testing': join(import.meta.dirname, '../../../../packages/testing/src/time.ts'),
+    },
+  },
   server: { port: 6131, strictPort: true },
   // Built as the app is, for timing frames as it runs (`vp build`, then `vp preview`, both with this config).
   build: { outDir: join(import.meta.dirname, 'shots/build'), emptyOutDir: true, target: 'chrome140' },

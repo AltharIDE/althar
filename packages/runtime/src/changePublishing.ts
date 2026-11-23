@@ -51,6 +51,7 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { baseBranch, forkOf, fromParent, tellOf, workRemotes } from './forks'
 import {
   branchExists,
+  committerIn,
   commitOf,
   commitsAhead,
   fetchInto,
@@ -383,14 +384,6 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
    * change is there already is left out. The files they conflict in, with
    * nothing picked left half done, or null once all are on it.
    */
-  /** Who git writes a commit as: the person, as their own git commits, or Althar where this Mac names no one. */
-  const committerIn = (path: string) =>
-    Effect.map(gitOutcome(path, 'config', 'user.email'), (email) =>
-      email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
-        ? []
-        : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
-    )
-
   const pickOnto = (path: string, commits: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const as = yield* committerIn(path)

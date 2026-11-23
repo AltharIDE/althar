@@ -2,10 +2,11 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, reveal, say, shown, startTask, still, toConversation } from './support'
+import { canvasView, inCanvas, pressIn, shoot } from './canvasViews'
+import { launch, openFirstProject, reveal, say, shown, startTask, toConversation } from './support'
 
 /*
  * The project's canvases (ADR-104), in a real window with the fake agents.
@@ -19,67 +20,6 @@ import { launch, openFirstProject, reveal, say, shown, startTask, still, toConve
  * project's Artifacts view has them all. The screenshots it takes are this
  * change's own evidence (test-results/canvas-*.png).
  */
-
-/** The canvas view's metadata; only a screenshot needs its composited picture, at 1×. */
-const canvasView = (electronApp: ElectronApplication, capture = false) =>
-  electronApp.evaluate(async ({ BrowserWindow }, capture) => {
-    const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/renderer/index.html'))
-    const view = window?.contentView.children.find(
-      (child): child is Electron.WebContentsView =>
-        'webContents' in child &&
-        (child as Electron.WebContentsView).webContents.getURL().startsWith('althar-canvas://') &&
-        child.getVisible(),
-    )
-    if (view === undefined) return null
-    const bounds = view.getBounds()
-    // A view can have its address before its compositor has a frame. Metadata polling must not request a screenshot.
-    const picture = capture ? await view.webContents.capturePage() : null
-    const sized = picture !== null && picture.getSize().width > bounds.width ? picture.resize({ width: bounds.width }) : picture
-    return {
-      bounds,
-      address: view.webContents.getURL(),
-      png: sized?.toPNG().toString('base64') ?? null,
-      partition: view.webContents.session.storagePath ?? '',
-    }
-  }, capture)
-
-/** Runs a script in the canvas's own page, as its scripts run. */
-const inCanvas = <T>(electronApp: ElectronApplication, code: string) =>
-  electronApp.evaluate(async ({ webContents }, script) => {
-    const contents = webContents.getAllWebContents().find((one) => one.getURL().startsWith('althar-canvas://'))
-    if (contents === undefined) throw new Error('No canvas view.')
-    return (await contents.executeJavaScript(script, true)) as unknown
-  }, code) as Promise<T>
-
-/**
- * A picture of a part of the window as the person sees it: the canvas is a view of its own over the window, which the
- * window's own screenshot leaves out, so its picture is laid where it is first.
- */
-const shoot = async (page: Page, electronApp: ElectronApplication, of: Locator | Page, path: string) => {
-  const view = await canvasView(electronApp, true)
-  if (view !== null)
-    await page.evaluate((drawn) => {
-      const picture = document.createElement('img')
-      picture.src = `data:image/png;base64,${drawn.png}`
-      picture.dataset.drawn = ''
-      Object.assign(picture.style, {
-        position: 'fixed',
-        left: `${drawn.bounds.x}px`,
-        top: `${drawn.bounds.y}px`,
-        width: `${drawn.bounds.width}px`,
-        height: `${drawn.bounds.height}px`,
-        pointerEvents: 'none',
-        zIndex: '2147483647',
-      })
-      document.getElementById('root')?.append(picture)
-    }, view)
-  await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('img[data-drawn]')].every((one) => one.complete))
-  await still(page)
-  await of.screenshot({ path, animations: 'disabled', scale: 'css' })
-  await page.evaluate(() => {
-    for (const one of document.querySelectorAll('img[data-drawn]')) one.remove()
-  })
-}
 
 test('a lead draws the project’s canvases, the person comments, the lead draws again, and every lead and the project see them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
@@ -108,7 +48,13 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' })).toBeVisible()
     const panel = page.getByRole('complementary', { name: 'Sign-in page' })
     await expect(panel).toBeVisible()
-    await expect(panel.getByText('Page · The lead of Redesign sign-in')).toBeVisible()
+    // Its name and close float on the page, drawn in its own view: never in the task's header, and no head of its own.
+    await expect(page.getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Open Sign-in page', exact: true })).toHaveCount(0)
+    await expect.poll(() => canvasView(electronApp)).not.toBeNull()
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('althar-chip')?.hidden === false`).catch(() => false))
+      .toBe(true)
 
     // It is a view of its own at its version's address, in the project's canvas partition, its style from a file beside it.
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/^althar-canvas:\/\/[0-9a-f]{32}\/v1\/$/)
@@ -129,6 +75,95 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await shoot(page, electronApp, page, 'test-results/canvas-page-beside.png')
     await shoot(page, electronApp, panel, 'test-results/canvas-page-panel.png')
 
+    // The page rewrites its document and lays its own over all of it: an overlay, then a popover in the top layer, then a
+    // modal dialog, which makes all outside it inert. Its chip is still there, over it all and inside the modal, and its
+    // close still closes the canvas.
+    await inCanvas(
+      electronApp,
+      `(() => {
+        document.documentElement.innerHTML = '<body><div style="position:fixed;inset:0;z-index:2147483647;background:#0003"></div>' +
+          '<div id="tip" popover="manual" style="inset:0;width:100vw;height:100vh;margin:0;border:0;background:#0002">A popover of its own</div>' +
+          '<dialog id="modal" style="width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0">A modal of its own</dialog>' +
+          '<p>Rewritten</p></body>'
+        document.getElementById('tip').showPopover()
+        document.getElementById('modal').showModal()
+      })()`,
+    )
+    await expect
+      .poll(() =>
+        inCanvas<boolean>(electronApp, `document.querySelector('#modal > althar-chip')?.matches(':popover-open') === true`).catch(
+          () => false,
+        ),
+      )
+      .toBe(true)
+    await shoot(page, electronApp, panel, 'test-results/canvas-page-modal.png')
+    // The modal closed, the chip comes back out over the page's popover; opened again, back in it.
+    const chipIn = (where: string) =>
+      expect
+        .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('${where} > althar-chip') !== null`).catch(() => false))
+        .toBe(true)
+    await inCanvas(electronApp, `document.getElementById('modal').close()`)
+    await chipIn('html')
+    await inCanvas(electronApp, `document.getElementById('modal').showModal()`)
+    await chipIn('#modal')
+    // Two modals opened in one go, the later in the page first: the chip goes inside the one opened last, the topmost, where
+    // it can be pressed, never the one under it, which is inert.
+    await inCanvas(
+      electronApp,
+      `(() => {
+        document.getElementById('modal').close()
+        const whole = 'width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0'
+        document.body.insertAdjacentHTML('beforeend', '<dialog id="first" style="' + whole + '">First in the page</dialog>' +
+          '<dialog id="second" style="' + whole + '">Second in the page</dialog>')
+        document.getElementById('second').showModal()
+        document.getElementById('first').showModal()
+      })()`,
+    )
+    await chipIn('#first')
+    // The one under it has its `open` given another value, open all along: that opens nothing, and the chip stays where it
+    // can be pressed. A real press on its close closes the canvas.
+    await inCanvas(electronApp, `document.getElementById('second').setAttribute('open', 'still')`)
+    await chipIn('#first')
+    const pressClose = async () => {
+      const chipBox = await inCanvas<{ readonly right: number; readonly top: number; readonly height: number }>(
+        electronApp,
+        `(() => { const r = document.querySelector('althar-chip').getBoundingClientRect(); return { right: r.right, top: r.top, height: r.height } })()`,
+      )
+      await pressIn(electronApp, { x: chipBox.right - 18, y: chipBox.top + chipBox.height / 2 })
+    }
+    await pressClose()
+    await expect(panel).toBeHidden()
+    // A page that opens its modals as it loads, the later in the page first, before the chip is there to hear them: the
+    // chip still goes inside the topmost, and its close still closes the canvas.
+    await page.getByRole('button', { name: 'Open Sign-in page beside the conversation' }).click()
+    await expect(panel).toBeVisible()
+    await expect
+      .poll(() => inCanvas<boolean>(electronApp, `document.querySelector('althar-chip')?.hidden === false`).catch(() => false))
+      .toBe(true)
+    await electronApp.evaluate(async ({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((one) => one.getURL().startsWith('althar-canvas://'))
+      if (contents === undefined) throw new Error('No canvas view.')
+      contents.debugger.attach('1.3')
+      await contents.debugger.sendCommand('Page.enable')
+      await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+        source: `addEventListener('DOMContentLoaded', () => {
+          const whole = 'width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0'
+          document.body.insertAdjacentHTML('beforeend', '<dialog id="loaded-first" style="' + whole + '">First in the page</dialog>' +
+            '<dialog id="loaded-second" style="' + whole + '">Second in the page</dialog>')
+          document.getElementById('loaded-second').showModal()
+          document.getElementById('loaded-first').showModal()
+        })`,
+      })
+      contents.reload()
+    })
+    await chipIn('#loaded-first')
+    await electronApp.evaluate(({ webContents }) => {
+      for (const one of webContents.getAllWebContents())
+        if (one.getURL().startsWith('althar-canvas://') && one.debugger.isAttached()) one.debugger.detach()
+    })
+    await pressClose()
+    await expect(panel).toBeHidden()
+
     // The chart, from its line: a picture, its script never run.
     await page.getByRole('button', { name: 'Open Checkout funnel beside the conversation' }).click()
     const funnel = page.getByRole('complementary', { name: 'Checkout funnel' })
@@ -140,7 +175,6 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await directions.click()
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(doc.getByRole('img', { name: 'Diagram' })).toBeVisible()
-    await expect(doc.getByText('First directions')).toBeVisible()
 
     // The person selects words in it and comments on them; the comment waits in the composer, the person's own until sent.
     await doc.getByText('B, split:').evaluate((node) => {
@@ -150,7 +184,8 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
       selection?.removeAllRanges()
       selection?.addRange(range)
     })
-    await doc.getByRole('button', { name: 'Comment' }).click()
+    // Its actions are in the task's own row, after its header: the canvas has no head of its own.
+    await doc.getByRole('button', { name: 'Comment', exact: true }).click()
     const field = doc.getByPlaceholder('Comment on “B, split:”')
     await field.fill('Put the picture on the left, so the field is read first.')
     await shoot(page, electronApp, doc, 'test-results/canvas-comment.png')
@@ -171,18 +206,32 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     // Its line for v2: the reply streams in before the window has read the line, so it is waited for, not taken as the last.
     await directions.filter({ hasText: 'v2' }).click()
     const again = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(again.getByText('The picture on the left, as asked')).toBeVisible()
-    await expect(again.getByText('v2', { exact: true })).toBeVisible()
     await expect(again.getByText(/on v1 · Answered/)).toBeVisible()
     await expect(again.getByText('Moved the picture to the left in v2.')).toBeVisible()
     await shoot(page, electronApp, again, 'test-results/canvas-v2.png')
-
-    // A step back shows v1 as it was, and says v2 is out.
-    await again.getByRole('button', { name: 'Older version' }).click()
-    await expect(again.getByText('v2 is out')).toBeVisible()
-    await expect(again.getByText('First directions')).toBeVisible()
-    await shoot(page, electronApp, again, 'test-results/canvas-older.png')
+    // Beside the task, it is what it is, floating on it: its name, which opens the artifact itself (its versions, saving and
+    // downloading are there), Comment and close; never in the task's header.
+    await expect(again.getByRole('button', { name: 'Open Sign-in, three directions' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Older version' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save to repo' })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/canvas-thread.png', scale: 'css' })
+
+    // Opened as itself, a step back shows v1 as it was, and says v2 is out; then back to the task.
+    await again.getByRole('button', { name: 'Open Sign-in, three directions' }).click()
+    await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()
+    await expect(page.getByText('v2', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Older version' }).click()
+    const older = page.getByRole('complementary', { name: 'Sign-in, three directions' })
+    await expect(older.getByText('v2 is out')).toBeVisible()
+    await expect(page.getByText('v1 of 2')).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/canvas-older.png')
+    await page.getByRole('button', { name: 'Back to Artifacts' }).click()
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Home' }).click()
+    await page
+      .getByRole('article', { name: 'Redesign sign-in' })
+      .getByRole('button', { name: /^(Open task|Answer)/ })
+      .click()
+    await toConversation(page)
 
     // Another task's lead reaches the same canvases: they are the project's.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
@@ -201,16 +250,49 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
+    // As cards first; as a list, one table.
+    await expect(page.getByRole('list', { name: 'The project’s artifacts' }).getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
+    await page.getByRole('radiogroup', { name: 'Show as' }).getByRole('radio', { name: 'List' }).click()
     const table = page.getByRole('table', { name: 'The project’s artifacts' })
     await expect(table.getByRole('row')).toHaveCount(4)
     const directionsRow = table.getByRole('row').filter({ hasText: 'Sign-in, three directions' })
     await expect(directionsRow).toContainText('Document')
     await expect(directionsRow).toContainText('Lead of Redesign sign-in')
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts.png')
+    // Opened, it is the artifact itself, with its own chat beside it: the chat's top row is the artifact's, never a task's.
     await table.getByRole('button', { name: 'Sign-in page' }).click()
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    // Its one top row is the artifact's, in the project's place: no project header, no task's, and no head on the canvas.
+    const chat = page.getByRole('region', { name: 'Its chat' })
+    await expect(page.getByRole('button', { name: /^Sign-in page/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Back to Artifacts' })).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'View' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Back to meridian' })).toHaveCount(0)
+    await expect(page.getByRole('complementary', { name: 'Sign-in page' }).getByRole('button', { name: 'Close the panel' })).toHaveCount(0)
+    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
     await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
+
+    // The person talks to it: going to its composer starts its own chat, and what they say goes there, beside it.
+    const words = chat.getByPlaceholder('Ask about it, or say what to change')
+    await words.click()
+    await words.fill('Make the button calmer.')
+    await words.press('Enter')
+    await expect(chat.getByText('Make the button calmer.')).toBeVisible()
+    await expect(chat.getByPlaceholder('Ask about it, or say what to change')).toHaveCount(0)
+    await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
+    await shoot(page, electronApp, page, 'test-results/canvas-artifact-chat.png')
+
+    // Escape goes back to every artifact.
+    await page.locator('body').press('Escape')
+    await expect(table).toBeVisible()
+
+    // Its chat is never a task: not on the board, nor among the asides.
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Home' }).click()
+    await expect(page.getByText('Redesign sign-in').first()).toBeVisible()
+    // (Its name is still in the coordinator's conversation, on the line of the canvas the lead drew.)
+    await expect(page.getByRole('article', { name: /Sign-in page/ })).toHaveCount(0)
+    await expect(page.getByRole('tab', { name: /Sign-in page/ })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }
@@ -242,7 +324,7 @@ test('a coordinator aside opens canvases and files over the board', async () => 
     await reply.fill('Open the sign-in document. [lead:canvas-open]')
     await reply.press('Enter')
     const doc = page.getByRole('complementary', { name: 'Sign-in, three directions' })
-    await expect(doc.getByText('First directions')).toBeVisible()
+    await expect(doc.getByRole('button', { name: 'Open Sign-in, three directions', exact: true })).toBeVisible()
     const thread = page.getByRole('region', { name: 'Thread', exact: true })
     const answer = thread.getByRole('paragraph').filter({ hasText: 'The repository also has' })
     const readme = answer.getByRole('button', { name: 'Open README.md', exact: true })

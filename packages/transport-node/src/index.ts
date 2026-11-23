@@ -22,6 +22,7 @@ export {
 } from './webSocket'
 
 export { createDeviceKey, signDeviceMessage, encodePairingCode, decodePairingCode, completeDevicePairing, type DeviceKey } from './pairing'
+export { selfSignedCertificate, type SelfSigned } from './selfSigned'
 
 export { untilPortCloses } from './lifetime'
 

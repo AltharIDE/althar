@@ -131,11 +131,14 @@ copies; a change to code is still a task.
 
 The coordinator keeps the same conversation and session as its context fills.
 If the agent compacts on its own, Althar carries on with the agent's summary.
-At 80% of the window, Althar sends the agent's own Compact command while the
-coordinator is idle, including when a late usage update reports that it is
-full. The command runs by itself between turns, and queued messages follow
-in order. A failed automatic request leaves the session available for the
-next turn.
+At 80% of the window, the coordinator is eligible to compact after an hour
+of inactivity, including when a late usage update reports that it is full.
+ACP doesn't report the provider's cache expiry, so Althar uses one hour as an
+estimate. A full coordinator can stay awake past its usual retirement time
+to compact. A message takes priority until Althar dispatches the command.
+Once the agent has the command, Althar lets it finish and delivers queued
+messages as soon as the session is available. A failed attempt leaves the
+session available for the next turn if the provider still has it.
 
 After compaction the next ordinary turn gets the coordinator's role and
 current Althar records alongside the agent's summary. The records include the

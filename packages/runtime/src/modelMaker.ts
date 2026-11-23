@@ -1,4 +1,20 @@
+import { knownModelName } from '@althar/contracts'
+
 import type { ModelFact } from './ModelFacts'
+
+/**
+ * Which model it is, whichever agent offers it: Codex's `gpt-6.2-sol` and OpenCode Go's are one. The list's id where it
+ * knows the model, else its name as people know it, without what sets the same name apart in spelling ("GPT-6.2-Sol").
+ */
+export const modelKey = (
+  fact: ModelFact | null,
+  agent: { readonly id: string; readonly name: string },
+  model: { readonly id: string; readonly name: string },
+): string =>
+  fact?.slug ??
+  knownModelName(agent, model)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
 
 /** Makers by the first part of the list's ids. */
 const MAKERS: Readonly<Record<string, string>> = {

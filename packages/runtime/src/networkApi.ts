@@ -1,10 +1,10 @@
 import { createServer } from 'node:https'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, X509Certificate } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 
 import { API_VERSION, ApiError, ClientChallenge, ClientDeviceId, ClientSignature, HomeId, PairingRegistration } from '@althar/contracts'
-import { httpsOrigin, untilPortCloses, webSocketServer, webSocketPort, webSocketHeartbeat } from '@althar/transport-node'
+import { httpsOrigin, tlsPublicKeyPin, untilPortCloses, webSocketServer, webSocketPort, webSocketHeartbeat } from '@althar/transport-node'
 import { Clock, Effect, Layer, Schema, type Scope } from 'effect'
 
 import { connection } from './Api'
@@ -327,5 +327,12 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
     const address = server.address()
     if (address === null || typeof address === 'string') return yield* rejected()
     if (given.port === 0 && origin.port === '0') origin.port = String(address.port)
+    // Pairing codes made from now carry where phones reach the home, and its certificate to pin.
+    yield* pairings.reachable({
+      origin: origin.origin,
+      tlsKeyPin: tlsPublicKeyPin(given.certificate),
+      tlsCertificate: new X509Certificate(given.certificate).raw.toString('base64url'),
+    })
+    yield* Effect.addFinalizer(() => pairings.reachable(null))
     return { port: address.port }
   }).pipe(Effect.mapError(() => rejected()))

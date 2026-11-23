@@ -1,4 +1,4 @@
-import { type BackgroundCommand, type Launch, workerPreviewTarget } from '@althar/contracts'
+import { type BackgroundCommand, type Launch, workerNameOf, workerPreviewTarget } from '@althar/contracts'
 import type { RunCardProps, RunningProcess } from '@althar/ui'
 
 import type { RunContent } from './thread'
@@ -10,13 +10,20 @@ import { ago, running } from './time'
  * itself (ADR-022, ADR-023).
  */
 
-/** Where one answers, as the pill says it: the address without its scheme or a bare trailing slash. */
-export const addressOf = (url: string) =>
-  workerPreviewTarget(url) === null ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : 'Worker preview'
+/** A run on a worker answers through the home, at an address of Althar's own that says nothing: its link says this. */
+export const PREVIEW = 'preview'
+
+/** Where one answers, as the pill says it: the address without its scheme or a bare trailing slash; or its preview, on a worker. */
+export const addressOf = (url: string) => (workerPreviewTarget(url) === null ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : PREVIEW)
+
+/** Where a run on one of the home's workers runs, by the worker's name. */
+export const onOf = (workerId: string | undefined) => (workerId === undefined ? {} : { on: workerNameOf(workerId) })
 
 /** What runs, each with how long it has run, or when it ended by itself and how; with `where`, where each runs. */
 export const runningOf = (
-  background: ReadonlyArray<BackgroundCommand & { readonly where?: string; readonly branch?: string | null | undefined }>,
+  background: ReadonlyArray<
+    BackgroundCommand & { readonly where?: string; readonly branch?: string | null | undefined; readonly workerId?: string | undefined }
+  >,
   now: string,
   { where = false }: { readonly where?: boolean } = {},
 ): ReadonlyArray<RunningProcess> =>
@@ -29,6 +36,7 @@ export const runningOf = (
     // A branch's run names it on the pill, alone or among others.
     ...(command.branch == null ? {} : { branch: command.branch }),
     ...(command.url === null ? {} : { url: addressOf(command.url) }),
+    ...onOf(command.workerId),
     ...(command.ended === null
       ? { since: running(command.startedAt, now) }
       : { since: ago(command.ended.at, new Date(now)), exited: command.ended.code }),

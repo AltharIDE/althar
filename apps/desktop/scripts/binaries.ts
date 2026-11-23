@@ -1,7 +1,7 @@
 /*
  * The programs a package carries for the platform it is made on, beside
  * Electron and the Node in its resources (node.ts): Codex and Claude Code,
- * which the adapters start, and dictation's speech engine. Each comes in a
+ * which the adapters start, dictation's speech engine, and the computer-use driver. Each comes in a
  * package of its own per platform, which npm installs as an optional
  * dependency of the package that names it; the runtime finds each where
  * this says (provider-adapters' registry.ts, `bundledCodex` and
@@ -29,14 +29,19 @@ export interface Binary {
 /** The speech engine's package for a platform: sherpa-onnx names Windows `win`, not `win32`. */
 export const speechPackage = (platform: string, arch: string) => `sherpa-onnx-${platform === 'win32' ? 'win' : platform}-${arch}`
 
-/** Codex, Claude Code and the speech engine, for a platform and processor. */
+/** Agent executables and native libraries for a platform and processor. */
 export const binariesFor = (platform: string, arch: string): ReadonlyArray<Binary> => {
   const target = CODEX_TARGETS[`${platform}-${arch}`]
   if (target === undefined) throw new Error(`Codex has no build for ${platform}-${arch}.`)
   const exe = platform === 'win32' ? '.exe' : ''
+  const driver = '@trycua/cua-driver'
+  const driverPackage = `${driver}-${platform}-${arch}${platform === 'win32' ? '-msvc' : platform === 'linux' ? '-gnu' : ''}`
+  const driverLibrary = platform === 'win32' ? 'cua_driver_sdk.dll' : `libcua_driver_sdk.${platform === 'darwin' ? 'dylib' : 'so'}`
   return [
     { parent: '@openai/codex', name: `@openai/codex-${platform}-${arch}`, file: `vendor/${target}/bin/codex${exe}` },
     { parent: '@anthropic-ai/claude-agent-sdk', name: `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`, file: `claude${exe}` },
     { parent: 'sherpa-onnx-node', name: speechPackage(platform, arch), file: 'sherpa-onnx.node' },
+    { parent: driver, name: driverPackage, file: 'cua_driver_node_runtime.node' },
+    { parent: driver, name: driverPackage, file: driverLibrary },
   ]
 }

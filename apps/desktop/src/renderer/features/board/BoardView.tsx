@@ -4,7 +4,6 @@ import {
   type BoardTask,
   type ChangeSummary,
   type HeldForShip,
-  type WorkPlaces,
   issuesWordOf,
   type PlanStep,
   type ReviewBrief,
@@ -1105,41 +1104,6 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   }
 }
 
-const roleWords = { lead: 'Lead', reviewer: 'Reviewer', helper: 'Helper' } as const
-const placeWords = { starting: 'Starting', turn: 'In a turn', background: 'Background work' } as const
-
-function AgentPlaces({ places, name }: { readonly places: WorkPlaces; readonly name: (id: string) => string }) {
-  const limit = places.atOnce < places.configured ? ` · Temporarily limited to ${places.atOnce}` : ''
-  const title = `${places.busy} of ${places.configured} agent places in use`
-  if (places.holders.length === 0 && limit === '' && !places.offline) return <p className={s.places}>{title}</p>
-  return (
-    <details className={s.places}>
-      <summary>
-        {title}
-        {limit}
-      </summary>
-      {places.offline && <p>Waiting for the connection</p>}
-      {limit !== '' && <p>New work is paced while this computer is under load.</p>}
-      {places.holders.length > 0 && (
-        <ul aria-label="Agents using a place">
-          {places.holders.map((holder) => (
-            <li key={`${holder.taskId}/${holder.role ?? ''}/${holder.threadId ?? ''}`}>
-              <span className={s.placeTask} title={holder.title}>
-                {holder.title || 'Untitled task'}
-              </span>
-              <span className={s.placeRole}>
-                {roleWords[holder.role ?? 'lead']}
-                {holder.agentId === undefined ? '' : ` · ${name(holder.agentId)}`} ·{' '}
-                {placeWords[holder.reason ?? (holder.kept ? 'background' : 'turn')]}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </details>
-  )
-}
-
 export function BoardView({
   lanes,
   agents,
@@ -1373,7 +1337,6 @@ export function BoardView({
             }
           : {})}
       >
-        {waitingRows.length > 0 && lanes.workPlaces !== undefined && <AgentPlaces places={lanes.workPlaces} name={name} />}
         {line?.failed != null && <Problem className={s.failure}>{line.failed}</Problem>}
         {line !== undefined && lanes.reordered && waitingRows.length > 1 && (
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>

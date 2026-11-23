@@ -256,6 +256,8 @@ export const takeDraftFocus = (key: string) => focusing.delete(key)
 export const draftKey = {
   coordinator: (projectId: string) => `coordinator:${projectId}`,
   task: (threadId: string) => `thread:${threadId}`,
+  /** An artifact's own chat's, by the artifact (or, while it draws its first version, its chat's task): kept from before it starts. */
+  artifact: (id: string) => `artifact:${id}`,
   /** What was dictated with no composer to say it to, until it is placed (`dictation/Loose.tsx`). */
   loose: 'dictation:loose',
 }

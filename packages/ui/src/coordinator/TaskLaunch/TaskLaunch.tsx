@@ -14,7 +14,9 @@ import { cx } from '../../lib/cx'
 import { useReducedMotion } from '../../lib/motion'
 import { Button } from '../../primitives/Button/Button'
 import { CountdownRing } from '../../primitives/CountdownRing/CountdownRing'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
@@ -114,6 +116,34 @@ export interface LaunchBlocker {
   onStopWaiting?: () => void
 }
 
+/** A computer it can run on: the home, whichever worker is free, or one worker. */
+export interface LaunchPlace {
+  value: string
+  /** This Mac, studio, Any free worker, Linux worker 3f9a2c. */
+  label: string
+  kind: 'home' | 'any' | 'worker'
+  /** Where it stands, at its row's end, in a word or two: 12 GB free, At work, No Codex. */
+  hint?: string
+  /** It can't take this task now: its hint, or the menu's note, says why. */
+  disabled?: boolean
+}
+
+/**
+ * Where it runs (ADR-103), while it is held: the home, or one of the home's
+ * workers. A menu beside where it works, at the head's end; what stops it
+ * starting there under the head, with the way back to the home.
+ */
+export interface LaunchRunsOn {
+  value: string
+  /** The home first, then any free worker, then each worker. */
+  places: readonly LaunchPlace[]
+  onChange: (value: string) => void
+  /** At the menu's foot: what runs where, or why no worker can take this task. */
+  note?: string
+  /** What keeps it from starting where it is set to run: Start waits until it changes. */
+  problem?: string
+}
+
 export type LaunchPhase = 'writing' | 'sizing' | 'lead' | 'review' | 'end'
 
 /**
@@ -166,6 +196,9 @@ export interface TaskLaunchText {
   localNote: (taken: string) => string
   /** Planned in a worktree while another task works Local: why, where the coordinator didn't say. */
   localTaken: (taken: string) => string
+  /** Where it runs: the menu's name, and what a problem there offers, going back to the home. */
+  runsOn: string
+  useHome: (home: string) => string
   /** The branch its work goes into (ADR-093): the picker's name, the word before it after how the work ends, and a line under its list. */
   toward: string
   into: (end: TaskEnd) => string
@@ -232,6 +265,8 @@ export const taskLaunchText: TaskLaunchText = {
   worktreeTip: 'Side by side with other tasks. Builds from cold.',
   localNote: (taken) => `Waits for ${taken}.`,
   localTaken: (taken) => `Local is taken by ${taken}.`,
+  runsOn: 'Runs on',
+  useHome: (home) => `Use ${home}`,
   toward: 'Works toward',
   into: (end) => (end === TaskEnd.PushOnly ? 'toward' : 'into'),
   towardNote: 'This task only. The project’s branch is beside Run.',
@@ -366,6 +401,70 @@ function BlockerNode({ stands }: { stands: BlockerStands }) {
         </span>
       </span>
     </span>
+  )
+}
+
+const placeIcon = (kind: LaunchPlace['kind']) => (kind === 'home' ? 'house' : 'worker')
+
+/**
+ * Where it runs, as a menu at the head's end beside where it works: the home,
+ * then whichever worker is free and each worker, with where each stands at its
+ * row's end, and what that choice means at its foot. The button says the one
+ * chosen, by its mark and name.
+ */
+function PlaceMenu({ runsOn, t }: { runsOn: LaunchRunsOn; t: TaskLaunchText }) {
+  const { places, value, onChange, note } = runsOn
+  const chosen = places.find((place) => place.value === value) ?? places[0]
+  const home = places.filter((place) => place.kind === 'home')
+  const workers = places.filter((place) => place.kind !== 'home')
+  const item = (place: LaunchPlace) => (
+    <MenuRadioItem
+      key={place.value}
+      value={place.value}
+      lead={<Icon name={placeIcon(place.kind)} size={13} />}
+      {...(place.hint === undefined ? {} : { hint: place.hint })}
+      {...(place.disabled === true ? { disabled: true } : {})}
+    >
+      {place.label}
+    </MenuRadioItem>
+  )
+  return (
+    <Menu
+      label={t.runsOn}
+      width={300}
+      placement="below"
+      align="end"
+      {...(note === undefined ? {} : { note })}
+      trigger={
+        <button type="button" className={s.place} aria-label={`${t.runsOn}: ${chosen?.label ?? ''}`} title={chosen?.label}>
+          <Icon name={placeIcon(chosen?.kind ?? 'home')} size={12} className={s.placeMark} />
+          <span className={s.placeName}>{chosen?.label}</span>
+          <Icon name="chevronD" size={9} className={s.placeChevron} />
+        </button>
+      }
+    >
+      <MenuRadioGroup label={t.runsOn} value={value} onChange={onChange}>
+        {home.map(item)}
+        {home.length > 0 && workers.length > 0 && <MenuSeparator />}
+        {workers.map(item)}
+      </MenuRadioGroup>
+    </Menu>
+  )
+}
+
+/** What keeps it from starting where it is set to run, under the head, with the way back to the home. */
+function PlaceProblem({ runsOn, problem, t }: { runsOn: LaunchRunsOn; problem: string; t: TaskLaunchText }) {
+  const home = runsOn.places.find((place) => place.kind === 'home')
+  return (
+    <Problem
+      size="small"
+      className={s.placeProblem}
+      {...(home === undefined || home.value === runsOn.value
+        ? {}
+        : { action: <LinkButton onClick={() => runsOn.onChange(home.value)}>{t.useHome(home.label)}</LinkButton> })}
+    >
+      {problem}
+    </Problem>
   )
 }
 
@@ -531,6 +630,8 @@ export interface TaskLaunchProps {
   worksInWhy?: string
   /** The task working Local now, by its title, which it would wait for there. */
   localTaken?: string
+  /** Where it runs, where the home has workers: none, and it runs on the home. */
+  runsOn?: LaunchRunsOn
   /**
    * The branch its work goes into (ADR-093): it starts from it, and its pull
    * request goes into it. In the last row, after how the work ends, a list
@@ -601,6 +702,7 @@ export function TaskLaunch({
   onWorksInChange,
   worksInWhy,
   localTaken,
+  runsOn,
   toward,
   defaultBranch,
   branches = [],
@@ -766,20 +868,24 @@ export function TaskLaunch({
           <p className={s.title} title={title === '' ? undefined : t.task(task)}>
             {title === '' ? <Skeleton width="58%" height={11} /> : <Roll key={title}>{title}</Roll>}
           </p>
-          {worksIn !== undefined && drafting === undefined && (
+          {(worksIn !== undefined || runsOn !== undefined) && drafting === undefined && (
             <div className={s.where}>
-              <Segmented<WorksIn>
-                label={t.worksIn}
-                value={worksIn}
-                onChange={(next) => onWorksInChange?.(next)}
-                options={[
-                  { value: WorksIn.Local, label: t.local, tooltip: { label: t.localTip } },
-                  { value: WorksIn.Worktree, label: t.worktree, tooltip: { label: t.worktreeTip } },
-                ]}
-              />
+              {runsOn !== undefined && <PlaceMenu runsOn={runsOn} t={t} />}
+              {worksIn !== undefined && (
+                <Segmented<WorksIn>
+                  label={t.worksIn}
+                  value={worksIn}
+                  onChange={(next) => onWorksInChange?.(next)}
+                  options={[
+                    { value: WorksIn.Local, label: t.local, tooltip: { label: t.localTip } },
+                    { value: WorksIn.Worktree, label: t.worktree, tooltip: { label: t.worktreeTip } },
+                  ]}
+                />
+              )}
             </div>
           )}
           {where !== null && <p className={s.whereLine}>{where}</p>}
+          {runsOn?.problem !== undefined && drafting === undefined && <PlaceProblem runsOn={runsOn} problem={runsOn.problem} t={t} />}
         </div>
         <ol className={s.roster}>
           {blocked &&

@@ -3,16 +3,11 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
-import {
-  CANVAS_LIMITS,
-  CANVASES_FOLDER,
-  type CanvasFile,
-  canvasMediaTypeOf,
-  type CanvasManifest,
-  isReservedCanvasPath,
-} from '@althar/contracts'
+import { CANVAS_LIMITS, CANVASES_FOLDER, type CanvasFile, canvasMediaTypeOf, CanvasManifest, isReservedCanvasPath } from '@althar/contracts'
 import { cleanUp, removeFully } from '@althar/provider-adapters'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
+
+import type { Artifacts } from './Artifacts'
 
 /*
  * A canvas's working copies on disk (ADR-104): the files an agent edits with
@@ -96,6 +91,24 @@ export const manifestOf = (entry: string, files: ReadonlyArray<CopyFile>): Canva
     type: canvasMediaTypeOf(file.path),
   })),
 })
+
+/** A version's manifest and exact bytes, as kept in the artifact store. */
+export const readVersionFiles = (artifacts: typeof Artifacts.Service, digest: string) =>
+  Effect.gen(function* () {
+    const raw = yield* artifacts.read(digest)
+    if (raw === null) return null
+    const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(CanvasManifest))(new TextDecoder().decode(raw)).pipe(
+      Effect.orElseSucceed(() => null),
+    )
+    if (manifest === null) return null
+    const files: Array<CopyFile> = []
+    for (const file of manifest.files) {
+      const bytes = yield* artifacts.read(file.sha256)
+      if (bytes === null) return null
+      files.push({ path: file.path, bytes })
+    }
+    return { manifest, files }
+  })
 
 /** Whether a copy holds exactly a manifest's files, unchanged: nothing added, taken away or edited since it was put there. */
 export const holdsOnly = (folder: string, manifest: CanvasManifest) => {

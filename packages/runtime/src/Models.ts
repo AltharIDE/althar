@@ -30,6 +30,9 @@ import { Accounts } from './Accounts'
  * to read its levels, and stops it, recording nothing, as a sign-in check
  * does. Until it has said, the latest session it had says, for the model it
  * was on, and what it is on is always what that session was last set to.
+ * Once it has said, a model a session offered in the day before or offers
+ * since is offered too: Codex answers with an older list of its own where
+ * OpenAI's doesn't come in time, a restart's asking included.
  * What can't be read is left empty; a picker offers the agent's own default.
  * An agent that couldn't say, as one asked before its sign-in is done, is
  * asked again once it is found signed in, and otherwise at a read a minute
@@ -74,7 +77,35 @@ const PROBE_TIMEOUT = Duration.seconds(30)
 const WALK_TIMEOUT = Duration.seconds(40)
 
 /** How long after an agent couldn't say its models it is asked again, at the next read. */
+/**
+ * Of one read of an agent's sessions since `from`, those that have said their settings and aren't read yet, and where the
+ * next read starts: from the first still starting, or a minute before the latest that said, so the reads stay small. One
+ * still starting in this read is never passed, whenever it says its settings after.
+ */
+export const readsOf = (
+  seen: ReadonlyArray<{
+    readonly id: string
+    readonly startedAt: string
+    readonly said: number | boolean
+    readonly starting: number | boolean
+  }>,
+  later: { readonly from: string; readonly read: ReadonlyMap<string, string> },
+): { readonly unread: ReadonlyArray<{ readonly id: string; readonly startedAt: string }>; readonly from: string } => {
+  const said = seen.filter((row) => Boolean(row.said))
+  const unread = said.filter((row) => !later.read.has(row.id))
+  if (unread.length === 0) return { unread, from: later.from }
+  const margin = new Date(Math.max(...said.map((row) => Date.parse(row.startedAt))) - 60_000).toISOString()
+  const pending = seen
+    .filter((row) => Boolean(row.starting))
+    .map((row) => row.startedAt)
+    .reduce<string | undefined>((first, at) => (first === undefined || at < first ? at : first), undefined)
+  const next = pending !== undefined && pending < margin ? pending : margin
+  return { unread, from: next > later.from ? next : later.from }
+}
+
 const ASK_AGAIN = Duration.minutes(1)
+/** How far before an agent's asking its sessions still say what it offers, where the asking got an older list. */
+const RECENT = 24 * 60 * 60 * 1000
 
 // Settings kept before names were, by their values alone.
 const choices = (option: ConfigOption | undefined) =>
@@ -219,6 +250,14 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      /*
+       * The models sessions offered around each agent's asking. An agent that can't reach its maker as it is asked answers
+       * with an older list of its own (Codex, where OpenAI's doesn't come in time), which mustn't hide a model its sessions
+       * offer: those of the day before it was asked (a restart's asking may get the older list where the last sessions
+       * didn't) and those since. Sessions are read by id once they have said their settings, which is as they start, not
+       * in the order they were made: `from` passes only those that can't say anything any more.
+       */
+      const since = new Map<string, { from: string; readonly read: Map<string, string>; readonly models: Map<string, OfferedModel> }>()
       const lastEntries = new Map<string, AgentEntry>()
       /* When each agent that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
@@ -235,6 +274,39 @@ export class Models extends Context.Service<
         probed.delete(agentId)
         failedAt.delete(agentId)
       }
+      /** Forgets what asking an agent found, and what its sessions offered since. */
+      const forgetAsked = (agentId: string) => {
+        probed.delete(agentId)
+        since.delete(agentId)
+        failedAt.delete(agentId)
+        probing.delete(agentId)
+      }
+      /** What it offered when asked, and before those, any model a session offered around the asking that the asking didn't. */
+      const withLater = (definition: AgentDefinition, asked: Offered) =>
+        Effect.gen(function* () {
+          const later = since.get(definition.id)
+          if (later === undefined) return asked.models
+          // Settings are '{}' until the session has started: those that said them, each read once, and those still starting,
+          // all in one statement, so one that says them as this reads is in it one way or the other, never passed between two.
+          const seen = yield* sql<{ id: string; startedAt: string; said: number; starting: number }>`
+            SELECT id, started_at, config <> '{}' AS said, (config = '{}' AND ended_at IS NULL) AS starting
+            FROM provider_sessions WHERE agent_id = ${definition.id} AND started_at >= ${later.from}`
+          const { unread, from } = readsOf(seen, later)
+          for (const row of unread) {
+            const [one] = yield* sql<{ config: string }>`SELECT config FROM provider_sessions WHERE id = ${row.id}`
+            later.read.set(row.id, row.startedAt)
+            if (one === undefined) continue
+            for (const model of modelsOf(definition, settingsIn(one.config)).models)
+              if (model.efforts.length > 0 || !later.models.has(model.id)) later.models.set(model.id, model)
+          }
+          if (from > later.from) {
+            later.from = from
+            for (const [id, at] of later.read) if (at < from) later.read.delete(id)
+          }
+          const offered = new Set(asked.models.map((model) => model.id))
+          const extra = [...later.models.values()].filter((model) => !offered.has(model.id))
+          return extra.length === 0 ? asked.models : [...extra, ...asked.models]
+        })
       // Found signed in: one asked before its sign-in was done said nothing, and is asked again at the next read.
       yield* Effect.forkIn(
         Stream.runForEach(signIns.signedIn, ({ agentId }) => Effect.sync(() => forgetFailure(agentId))),
@@ -246,7 +318,7 @@ export class Models extends Context.Service<
        * and stops it. Its process is recorded before it is spawned, as any
        * agent's is, so one a crash leaves behind is stopped at the next launch.
        */
-      const probe = (entry: AgentEntry, reservation: symbol) =>
+      const probe = (entry: AgentEntry, reservation: symbol, askedAt: string) =>
         Effect.acquireUseRelease(
           // A folder it can't make fails the asking, as a throw would have it asked again at every read.
           Effect.try(() => {
@@ -317,7 +389,15 @@ export class Models extends Context.Service<
               if (!ownsProbe(entry.definition.id, reservation)) return
               probed.set(entry.definition.id, found)
               if (found === null) failedAt.set(entry.definition.id, yield* Clock.currentTimeMillis)
-              else failedAt.delete(entry.definition.id)
+              else {
+                failedAt.delete(entry.definition.id)
+                // Sessions of the day before it was asked count too, and those since: one may have reached the maker the asking couldn't.
+                since.set(entry.definition.id, {
+                  from: new Date(Date.parse(askedAt) - RECENT).toISOString(),
+                  read: new Map(),
+                  models: new Map(),
+                })
+              }
             }),
           ),
           Effect.ensuring(Effect.sync(() => releaseProbe(entry.definition.id, reservation))),
@@ -327,11 +407,7 @@ export class Models extends Context.Service<
         Effect.gen(function* () {
           const { definition } = entry
           const previous = lastEntries.get(definition.id)
-          if (previous !== undefined && previous !== entry) {
-            probed.delete(definition.id)
-            failedAt.delete(definition.id)
-            probing.delete(definition.id)
-          }
+          if (previous !== undefined && previous !== entry) forgetAsked(definition.id)
           lastEntries.set(definition.id, entry)
           const defaults = yield* defaultEffortsOf(definition.id)
           const blocked = yield* blockedModelsOf(definition.id)
@@ -346,9 +422,11 @@ export class Models extends Context.Service<
           const failed = failedAt.get(definition.id)
           if (probed.get(definition.id) === null && failed !== undefined && (yield* Clock.currentTimeMillis) - failed >= askAgain)
             forgetFailure(definition.id)
-          // What it said when asked this launch is newer than any session: a model it offers since then is there.
+          // What it said when asked this launch is newer than any session before it; a model a session offered since is there too.
           const asked = probed.get(definition.id)
-          if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
+          if (asked === null) return { ...seen, ...now, defaults, blocked, probing: false }
+          if (asked !== undefined)
+            return { ...asked, models: yield* withLater(definition, asked), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
           // Whether it is signed in is its own command's to say, which takes seconds with the computer busy, so that is asked
           // behind too: the read never waits on it (foundations.md, The UI is instant). One signed out counts as one that
@@ -360,7 +438,7 @@ export class Models extends Context.Service<
               signIns.of(definition.id).pipe(
                 Effect.flatMap((status) => {
                   if (!ownsProbe(definition.id, reservation)) return Effect.void
-                  if (status !== 'signed_out') return Effect.asVoid(probe(entry, reservation))
+                  if (status !== 'signed_out') return Effect.asVoid(Effect.flatMap(timestamp, (at) => probe(entry, reservation, at)))
                   return Effect.gen(function* () {
                     probed.set(definition.id, null)
                     failedAt.set(definition.id, yield* Clock.currentTimeMillis)
@@ -391,16 +469,7 @@ export class Models extends Context.Service<
             const entry = yield* agents.get(input.agentId)
             yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
           }).pipe(Effect.provide(context)),
-        forget: (agentId) =>
-          signIns.forget(agentId).pipe(
-            Effect.andThen(
-              Effect.sync(() => {
-                probed.delete(agentId)
-                failedAt.delete(agentId)
-                probing.delete(agentId)
-              }),
-            ),
-          ),
+        forget: (agentId) => signIns.forget(agentId).pipe(Effect.andThen(Effect.sync(() => forgetAsked(agentId)))),
       })
     }),
   )

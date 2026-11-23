@@ -351,18 +351,7 @@ export const WithACanvas: Story = {
     <Beside
       opened={LAUNCH.canvasId}
       panel={
-        <CanvasPanel
-          {...LAUNCH}
-          version={3}
-          latest={3}
-          by="The lead of Payouts launch · just now"
-          note="Bigger, bolder headline"
-          onVersion={fn()}
-          onComment={fn()}
-          onReload={fn()}
-          onClose={fn()}
-          fill
-        >
+        <CanvasPanel {...LAUNCH} version={3} latest={3} onVersion={fn()} onComment={fn()} onReload={fn()} onClose={fn()} fill>
           {page('Payouts launch page', LAUNCH_PAGE)}
         </CanvasPanel>
       }

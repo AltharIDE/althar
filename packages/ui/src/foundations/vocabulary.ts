@@ -747,3 +747,15 @@ export enum ShipFar {
   /** Merged. */
   Merge = 'merge',
 }
+
+/** Where a task's use of this computer stands. */
+export enum ComputerPhase {
+  /** It asks the person for apps, windows or the desktop, and waits. */
+  Asking = 'asking',
+  /** It uses what it was allowed. */
+  Active = 'active',
+  /** The person took over: it waits until they hand it back. */
+  Paused = 'paused',
+  /** It ended: released, stopped, declined or expired. */
+  Stopped = 'stopped',
+}

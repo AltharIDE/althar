@@ -577,11 +577,17 @@ export function ProjectView({
   // Whatever it ran on last, while that agent can; otherwise the first that can.
   const first = model.agents[0]
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
+  // Another session takes it over after the one going out let it go: the picker says who leads as that one will.
+  const taking = session !== null && !session.held && session.handover === true ? upcomingOn(session) : null
   const chosen: Choice | null =
     waiting ??
-    (session === null || !session.held
+    (session === null
       ? null
-      : ((moving === null ? null : { ...moving, agentId: session.agentId }) ?? upcomingOn(session) ?? runningOn(session))) ??
+      : session.held
+        ? ((moving === null ? null : { ...moving, agentId: session.agentId }) ?? upcomingOn(session) ?? runningOn(session))
+        : taking === null
+          ? null
+          : ((moving === null ? null : { ...moving, agentId: taking.agentId }) ?? taking)) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
@@ -1030,7 +1036,8 @@ export function ProjectView({
           teamFor,
         ]}
       >
-        {header}
+        {/* An artifact open in Artifacts takes the window as a task does: its row is in the project's place. */}
+        {room === Room.Artifacts ? null : header}
         {room === Room.Automations ? (
           <AutomationsView
             projectId={projectId}
@@ -1042,7 +1049,17 @@ export function ProjectView({
             onTask={onTask}
           />
         ) : room === Room.Artifacts ? (
-          <ArtifactsView projectId={projectId} threadId={coordinator?.threadId ?? null} draft={draftOf} />
+          <ArtifactsView
+            projectId={projectId}
+            header={header}
+            threadId={coordinator?.threadId ?? null}
+            // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
+            lead={
+              chosen === null
+                ? null
+                : { key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false }
+            }
+          />
         ) : room === Room.Settings ? (
           <div className={s.settings}>
             <ProjectSettingsPage

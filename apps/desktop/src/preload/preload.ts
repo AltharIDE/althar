@@ -12,10 +12,15 @@ import {
 } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
+import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
+
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
 import type { WelcomeMilestone, WindowAction } from '../renderer/data/services'
 import type { PageKey, PageState } from '../main/browser/page'
+import type { CanvasGroundNews, CanvasPointed } from '../main/canvases/boards'
+import type { GroundChange, GroundPin } from '../overlay/ground'
 
 /*
  * The window's bridge to the main process, and nothing more: the port to the
@@ -119,6 +124,10 @@ ipcRenderer.on('althar:quit-ask', (_event, question: unknown) => {
 
 /* How each page beside a conversation stands, and what the person pressed in one that the window acts on, as main says. */
 const paging = new Set<(state: PageState) => void>()
+const computerStates = new Set<(state: ComputerState) => void>()
+ipcRenderer.on('althar:computer-state', (_event, state: ComputerState) => {
+  for (const listener of computerStates) listener(state)
+})
 ipcRenderer.on('althar:page', (_event, state: PageState) => {
   for (const listener of paging) listener(state)
 })
@@ -129,6 +138,11 @@ ipcRenderer.on('althar:page-key', (_event, owner: string, key: PageKey) => {
 const pagesClosed = new Set<(owner: string) => void>()
 ipcRenderer.on('althar:page-closed', (_event, owner: string) => {
   for (const listener of pagesClosed) listener(owner)
+})
+/* What a canvas of boards' ground said: how it stands, a part pointed at, a pin or a key pressed (ADR-104). */
+const canvasGround = new Set<(threadId: string, news: CanvasGroundNews) => void>()
+ipcRenderer.on('althar:canvas-ground', (_event, threadId: string, news: CanvasGroundNews) => {
+  for (const listener of canvasGround) listener(threadId, news)
 })
 /* A page a lead opened (or woke) that no window shows yet: the window places it beside the conversation. */
 const pagesOpened = new Set<(owner: string) => void>()
@@ -162,6 +176,13 @@ ipcRenderer.on('althar:homes-project', (_event, projectId: unknown) => {
   if (projectShown.size === 0) pendingProject = projectId
   for (const listener of projectShown) listener(projectId)
 })
+/* New project, asked from another window's Manage homes: held as a project to show is. */
+let pendingNew = false
+const newShown = new Set<() => void>()
+ipcRenderer.on('althar:homes-new-project', () => {
+  if (newShown.size === 0) pendingNew = true
+  for (const listener of newShown) listener()
+})
 
 contextBridge.exposeInMainWorld('althar', {
   homes: {
@@ -176,6 +197,7 @@ contextBridge.exposeInMainWorld('althar', {
     connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
     save: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-save', checkId, name),
     open: (id: string, projectId?: string) => ipcRenderer.invoke('althar:homes-open', id, projectId),
+    openNew: (id: string) => ipcRenderer.invoke('althar:homes-open', id, undefined, true),
     rename: (id: string, name: string) => ipcRenderer.invoke('althar:homes-rename', id, name),
     change: (id: string, checkId: string) => ipcRenderer.invoke('althar:homes-change', id, checkId),
     forget: (id: string) => ipcRenderer.invoke('althar:homes-forget', id),
@@ -219,6 +241,16 @@ contextBridge.exposeInMainWorld('althar', {
       }
       return () => {
         projectShown.delete(listener)
+      }
+    },
+    onNewProject: (listener: () => void) => {
+      newShown.add(listener)
+      if (pendingNew) {
+        listener()
+        pendingNew = false
+      }
+      return () => {
+        newShown.delete(listener)
       }
     },
   },
@@ -350,6 +382,16 @@ contextBridge.exposeInMainWorld('althar', {
     answer: (answer: string): void => ipcRenderer.send('althar:quit-answer', answer),
   },
   // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-100).
+  computer: {
+    states: (): Promise<ReadonlyArray<ComputerState>> => ipcRenderer.invoke('althar:computer-states'),
+    allow: (task: string, decision: ComputerDecision): Promise<boolean> => ipcRenderer.invoke('althar:computer-allow', task, decision),
+    control: (task: string, action: 'pause' | 'resume' | 'stop'): Promise<boolean> =>
+      ipcRenderer.invoke('althar:computer-control', task, action),
+    subscribe: (listener: (state: ComputerState) => void): (() => void) => {
+      computerStates.add(listener)
+      return () => void computerStates.delete(listener)
+    },
+  },
   pages: {
     open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
     states: (): Promise<unknown> => ipcRenderer.invoke('althar:pages-states'),
@@ -391,13 +433,27 @@ contextBridge.exposeInMainWorld('althar', {
   canvases: {
     show: (
       threadId: string,
-      target: { projectId: string; canvasId: string; version: number; manifest: string },
+      target: { projectId: string; canvasId: string; version: number; manifest: string; boards?: boolean },
       panel: { x: number; y: number; width: number; height: number } | null,
     ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
     close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
     reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
     still: (threadId: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-still', threadId),
     cover: (threadId: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:canvas-cover', threadId, covered),
+    ground: (threadId: string, change: GroundChange): void => ipcRenderer.send('althar:canvas-ground', threadId, change),
+    chip: (threadId: string, chip: { readonly title: string; readonly comment: boolean } | null): void =>
+      ipcRenderer.send('althar:canvas-chip', threadId, chip),
+    pins: (threadId: string, pins: ReadonlyArray<GroundPin>): Promise<ReadonlyArray<number> | null> =>
+      ipcRenderer.invoke('althar:canvas-pins', threadId, pins),
+    find: (threadId: string, part: { page: string; board: string; selector: string }): Promise<CanvasPointed | null> =>
+      ipcRenderer.invoke('althar:canvas-find', threadId, part),
+    clear: (threadId: string): void => ipcRenderer.send('althar:canvas-clear', threadId),
+    picture: (manifest: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-picture', manifest),
+    onGround: (listener: (threadId: string, news: CanvasGroundNews) => void): (() => void) => {
+      canvasGround.add(listener)
+      return () => void canvasGround.delete(listener)
+    },
+    download: (request: CanvasDownload): Promise<CanvasDownloaded> => ipcRenderer.invoke('althar:canvas-download', request),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

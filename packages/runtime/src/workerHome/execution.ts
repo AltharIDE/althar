@@ -13,6 +13,8 @@ import {
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
 
+import type { EnrolledWorker } from './store'
+
 const unavailable = (error: unknown): string => {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : 'The worker connection was lost.'
@@ -24,7 +26,25 @@ const setupOutcome = (report: { exitCode: number; timedOut: boolean; outputTail:
   output: Buffer.from(report.outputTail).toString('utf8'),
 })
 
-export const workerExecution = (active: () => AgentWorkerPool | undefined): WorkerExecutionPlatform => {
+/** The home's ledger of its workers, as its listener keeps it open: who is enrolled, and taking one out. */
+export interface WorkerLedger {
+  readonly workers: () => ReadonlyArray<EnrolledWorker>
+  readonly revoke: (workerId: string) => void
+  /**
+   * The run a worker's reservation still holds, by the workspace it holds: kept from its start until the worker says it
+   * ended, through a dropped connection, so it holds the workspace while it may still be at work there.
+   */
+  readonly outstanding?: (workerId: string) => { readonly workspaceId: string } | undefined
+}
+
+/**
+ * Where a task's work runs when it runs on a worker, from the pool of workers connected now (`active`); with the
+ * home's ledger (`ledger`), its own list of every worker it enrolled, connected or not, and taking one out.
+ */
+export const workerExecution = (
+  active: () => AgentWorkerPool | undefined,
+  ledger?: () => WorkerLedger | undefined,
+): WorkerExecutionPlatform => {
   const workspaces = new Map<
     string,
     {
@@ -41,6 +61,9 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
     }
   >()
   const preparing = new Set<string>()
+  /** A worker at work, or being readied for a task: taking it out would cut its task off, so it waits. */
+  const working = (workerId: string) =>
+    preparing.has(workerId) || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
   return {
     list: (projectId) =>
       (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {
@@ -52,6 +75,42 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
           busy: busy || preparing.has(workerId),
           ...(capacity === undefined ? {} : { capacity }),
         }
+      }),
+    enrolled: () => {
+      const listing = ledger?.()
+      if (listing === undefined) return null
+      const live = new Map((active()?.connected() ?? []).map((worker) => [worker.workerId, worker]))
+      return listing.workers().map(({ workerId, projectIds }) => {
+        const worker = live.get(workerId)
+        // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
+        const workspaceId = listing.outstanding?.(workerId)?.workspaceId
+        const holding = workspaceId === undefined ? {} : { workspaceId }
+        if (worker === undefined)
+          return { workerId, connected: false, busy: workspaceId !== undefined, providers: [], projectIds, ...holding }
+        return {
+          workerId,
+          connected: true,
+          busy: worker.busy || preparing.has(workerId) || workspaceId !== undefined,
+          ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
+          providers: [...new Set(worker.capabilities.map(({ providerId }) => providerId))],
+          projectIds,
+          ...holding,
+        }
+      })
+    },
+    revoke: (workerId) =>
+      Effect.try({
+        try: () => {
+          const listing = ledger?.()
+          if (listing === undefined) throw new Error('This home takes no workers.')
+          if (working(workerId)) throw new Error('It runs a task. Remove it once that finishes.')
+          // Gone mid-run, it holds its task's workspace until it reconnects and says that run stopped. Taken out now, it
+          // couldn't, and the workspace would stay held for good.
+          if (listing.outstanding?.(workerId) !== undefined)
+            throw new Error('It went offline during a task. Start it again so it can stop that work, then remove it.')
+          listing.revoke(workerId)
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),
       }),
     startCommand: (input) =>
       Effect.gen(function* () {

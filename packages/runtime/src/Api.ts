@@ -6,6 +6,7 @@ import { workerPreviewSockets } from './workerPreviewSockets'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
@@ -16,6 +17,7 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  SOCKET_CALLS,
   SocketAllowed,
   type MessageSender,
   type ClientIdentity,
@@ -84,6 +86,7 @@ import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestRevi
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
+import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
@@ -95,6 +98,7 @@ import { localTasksIn } from './local'
 import { PARENT_KEPT, tellOf, toldOf } from './forks'
 import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
+import { homeWorkers } from './homeWorkers'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
@@ -192,6 +196,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
@@ -235,14 +240,6 @@ export const text = {
     'The person wants issues filed and changed at once from now on: use draft_issue’s file_now and change_issue’s at_once. Each card is the record of it.',
   leadIssuesAskFirst:
     'The person wants to be asked first from now on: each issue, and each change to one, as a card for them to file or apply.',
-}
-
-const realpathOf = (path: string) => {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
-  }
 }
 
 /** Whether something is at a path, a link to nothing included. */
@@ -340,6 +337,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const canvasSaves = yield* CanvasSaves
     const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
@@ -367,14 +365,7 @@ export const handlers = apiLayer(
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
     /** A folder the person chose, by its grant, or a path inside it, as the runtime read one there: never a path elsewhere. */
-    const within = (grant: string, path?: string) =>
-      Effect.gen(function* () {
-        const chosen = realpathOf(yield* folders.path(grant))
-        if (path === undefined) return chosen
-        const inside = realpathOf(path)
-        if (inside !== chosen && !inside.startsWith(`${chosen}${sep}`)) return yield* new NotFound({ kind: 'folder', id: path })
-        return inside
-      })
+    const within = (grant: string, path?: string) => folders.inside(grant, path)
     /** A connection's code host, signed in through it; refused where it is a tracker's, or gone. */
     const codeHostOf = (connectionId: string) =>
       Effect.flatMap(connections.adapters(connectionId), ({ host }) =>
@@ -429,6 +420,9 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // The person's home on this computer, where they keep code: what a window on another computer finds folders in.
+    const personHome = config.elsewhere?.home ?? homedir()
+    const onHome = homeFolders((path, kind) => folders.allow(path, kind), personHome)
     // What About › Storage measures: kept for the session, and stopped when the window gives up.
     const sizes =
       config.storage === undefined
@@ -974,10 +968,15 @@ export const handlers = apiLayer(
               apiVersion: API_VERSION,
               appVersion: config.appVersion,
               position: { homeId: instance.homeId, cursor: last?.cursor ?? 0, checkpoint: last?.checkpoint ?? null },
+              ...(identity.role === 'socket' ? { calls: [...SOCKET_CALLS] } : {}),
             }),
           ),
         ),
       IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      CreatePairingCode: () => connectionAdmin(pairings.create()),
+      GetPairingStatus: ({ tokenHash }) => connectionAdmin(pairings.status(tokenHash)),
+      GetPhoneAccess: () => connectionAdmin(pairings.access()),
+      SetPhoneAccess: ({ on }) => connectionAdmin(pairings.setAccess(on)),
       RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
       ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
@@ -1057,12 +1056,14 @@ export const handlers = apiLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      FindHomeFolders: () => api(onHome),
+      GetMachine: () => api(machineFacts(personHome)),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.place(grant), (parent) => placeRepository(parent, name))),
       MakeRepository: ({ grant, name }) =>
         api(
           Effect.gen(function* () {
-            const made = yield* makeRepository(yield* folders.path(grant), name)
-            return { grant: yield* folders.allow(made.path), path: made.path }
+            const made = yield* makeRepository(yield* folders.place(grant), name)
+            return { grant: yield* folders.allow(made.path, 'repository'), path: made.path }
           }),
         ),
       PrepareFolder: ({ commandId, grant, path }) =>
@@ -1080,10 +1081,10 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const parent = yield* folders.path(grant)
+              const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
               const path = yield* cloneRepository({ parent, ...source })
-              return { grant: yield* folders.allow(path), path }
+              return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
         ),
@@ -1135,15 +1136,7 @@ export const handlers = apiLayer(
             const roots =
               repositories === undefined
                 ? undefined
-                : yield* Effect.forEach(repositories, (repository) =>
-                    Effect.gen(function* () {
-                      const within = realpathOf(yield* folders.path(repository.grant))
-                      const root = realpathOf(repository.path)
-                      if (root !== within && !root.startsWith(`${within}${sep}`))
-                        return yield* new NotFound({ kind: 'folder', id: repository.path })
-                      return root
-                    }),
-                  )
+                : yield* Effect.forEach(repositories, (repository) => within(repository.grant, repository.path))
             const opened = yield* projects.open({
               envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
@@ -1386,7 +1379,23 @@ export const handlers = apiLayer(
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
+      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"), newest first: each shows among
+      // the project's artifacts from the moment it starts, until its first canvas.
+      ListArtifactsDrawing: ({ projectId }) =>
+        api(
+          Effect.map(
+            sql<{ taskId: string; threadId: string; projectId: string; title: string; startedAt: string }>`
+              SELECT k.id AS task_id, t.id AS thread_id, k.project_id, k.title, k.created_at AS started_at
+              FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              WHERE k.project_id = ${projectId} AND k.artifact_chat = 1 AND k.artifact_canvas_id IS NULL
+                AND k.state IN ('open', 'draft')
+              ORDER BY k.created_at DESC, k.id DESC`,
+            (rows) => rows.map((row) => ({ ...row })),
+          ),
+        ),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
+      GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
+      ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),
       ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
       ReadCode: ({ threadId, path, commit, line, image }) =>
@@ -1470,8 +1479,11 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
+      SetModel: ({ commandId, threadId, agentId, model }) =>
+        once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), model })))),
+      SetEffort: ({ commandId, threadId, agentId, effort }) =>
+        once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), effort })))),
+      SetAgent: ({ commandId, threadId, agentId }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, agentId })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
@@ -1926,6 +1938,7 @@ export const handlers = apiLayer(
         chat,
         taskId,
         workerId,
+        artifact,
       }) =>
         once(
           commandId,
@@ -1936,12 +1949,20 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              // An artifact has one chat of its own (ADR-104, "Talking to an artifact"): asked again, it is the one open.
+              if (aside && artifact !== undefined && artifact.canvasId !== null) {
+                const [open] = yield* sql<{ id: string }>`
+                  SELECT id FROM tasks WHERE artifact_chat = 1 AND artifact_canvas_id = ${artifact.canvasId}
+                    AND project_id = ${projectId} AND state IN ('open', 'draft')
+                  ORDER BY created_at DESC LIMIT 1`
+                if (open !== undefined) return yield* queries.task(open.id)
+              }
               let repositoryLimit: number | undefined
               if (workerId !== undefined) {
                 const available = config.workers?.list(projectId) ?? []
                 const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
                 const message = aside
-                  ? 'This task stays on its home.'
+                  ? 'An aside runs on the home.'
                   : workerId === 'auto' && worker === undefined
                     ? automaticWorkerUnavailable
                     : workerProblem(worker, steps)
@@ -1970,7 +1991,12 @@ export const handlers = apiLayer(
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
                 ...(aside
-                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  ? {
+                      plain: true,
+                      shelf: 'scratch' as const,
+                      ...(artifact === undefined ? {} : { artifact }),
+                      ...(description?.trim() ? { request: description } : {}),
+                    }
                   : requestOf(title, description, issue)),
               })
               for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
@@ -2219,6 +2245,9 @@ export const handlers = apiLayer(
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
+      SetArtifactsHome: ({ commandId, projectId, home }) => once(commandId, api(canvasSaves.setHome(projectId, home))),
+      SaveCanvas: ({ commandId, ...asked }) => once(commandId, api(canvasSaves.save(asked))),
+      StopSavingCanvas: ({ commandId, canvasId }) => once(commandId, api(canvasSaves.stop(canvasId))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
@@ -2610,6 +2639,15 @@ export const handlers = apiLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlaces: () => api(busy.places),
+      GetWorkers: () => api(homeWorkers(config.workers)),
+      RemoveWorker: ({ commandId, workerId }) =>
+        once(
+          commandId,
+          config.workers?.revoke === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+            : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+        ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>

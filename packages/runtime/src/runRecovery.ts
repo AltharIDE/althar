@@ -769,7 +769,13 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
               id: string
             }>`SELECT id FROM threads WHERE task_id = ${current.taskId} AND kind = 'step' AND node_key = 'review'`
             if (thread !== undefined && round !== undefined)
-              yield* sessions.send({ envelope: envelope, threadId: thread.id, body: answer.note, sender: sender ?? { kind: 'internal' } })
+              yield* sessions.send({
+                envelope: envelope,
+                threadId: thread.id,
+                body: answer.note,
+                sender: sender ?? { kind: 'internal' },
+                ...(answer.quiet === true ? { quiet: true } : {}),
+              })
           }
           return
         }
@@ -806,6 +812,7 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
             threadId: current.threadId,
             body: answer.note,
             sender: sender ?? { kind: 'internal' },
+            ...(answer.quiet === true ? { quiet: true } : {}),
           })
         else
           yield* sessions.send({
@@ -1539,7 +1546,8 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
           return
         }
         const note = `Carry on with the task from where it stands. The external wait resolved: ${wait.reason}\n${observations.flatMap((one) => (one.summary === undefined ? [] : [one.summary])).join('\n')}\nCarry on toward the task’s goal. Read current host state before writing; this wake-up does not approve any push or merge, and an uncertain earlier write must be checked before retrying.`
-        const answer = { kind: 'tell' as const, note }
+        // Althar's words for the lead, not the person's: it reads them quietly, and the thread says the wait is over in a line.
+        const answer = { kind: 'tell' as const, note, quiet: true }
         const take = (room: boolean) =>
           sql.withTransaction(
             Effect.gen(function* () {
@@ -1548,7 +1556,7 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
               yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: note,
+                title: `Done waiting: ${wait.reason}`,
               })
               if (!room) {
                 yield* waitForPlace(current, step.attemptId, { how: 'answered', info, answer })
@@ -1712,11 +1720,11 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
           const live = yield* sessions.running(one.threadId)
           if (Option.isNone(live) || live.value.sessionId !== one.sessionId || live.value.stopping || live.value.nextLead !== undefined)
             continue
-          const standsIn = yield* standInOf(one.sessionId).pipe(contained('Runs.held', () => Option.none()))
+          const standsIn = yield* standInOf(one.sessionId, limits.sameModel).pipe(contained('Runs.held', () => Option.none()))
           if (Option.isNone(standsIn)) continue
-          const at = yield* whenBack(standsIn.value, (given) =>
-            given.accountId === null ? limits.out(given.agentId, one.projectId) : limits.outAccount(given.accountId),
-          ).pipe(contained('Runs.held', () => Option.none<number>()))
+          const at = yield* whenBack(standsIn.value, (given) => limits.spent(given, one.projectId)).pipe(
+            contained('Runs.held', () => Option.none<number>()),
+          )
           if (Option.isNone(at)) continue
           due.push({ key: one.sessionId, at: Math.max(at.value, notYetBack.get(one.sessionId) ?? 0), run: giveBack(one) })
         }
