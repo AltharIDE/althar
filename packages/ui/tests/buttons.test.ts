@@ -56,6 +56,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
+  'screens/WhatsNew/Releases.tsx': 'a release’s row, which folds its notes under it',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
   'thread/ReviewLine/ReviewLine.tsx': 'the line that folds a review round’s findings and words',

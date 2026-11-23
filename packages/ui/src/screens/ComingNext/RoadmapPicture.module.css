@@ -1,0 +1,1057 @@
+/*
+ * Coming next's pictures: each thing as it will work, in the app's own marks,
+ * on the kit's tokens. Each loops on its own clock (--loop); what it rests on
+ * without motion is how it ends, so the styles below say that, and the
+ * keyframes bring it in.
+ */
+
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-height: 220px;
+  border-radius: 12px;
+  background-color: var(--n-2);
+  background-image: radial-gradient(circle, var(--line-2) 1px, transparent 1.5px);
+  background-size: 14px 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.frame b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.frame code {
+  font: 500 0.92em/1.3 var(--mono);
+  color: var(--t-2);
+}
+.frame :where(ul) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- Windows signing: the installer's publisher ---- */
+
+.installer {
+  --loop: 7s;
+}
+.dialog {
+  position: relative;
+  width: 252px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.dialogBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--t-3);
+}
+.dialogBody {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 10px;
+}
+.dialogWords {
+  display: grid;
+  gap: 1px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.dialogWords b {
+  font-size: 13px;
+}
+.publisher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+.pubLabel {
+  color: var(--t-3);
+}
+.pubStates {
+  display: inline-grid;
+  justify-items: end;
+}
+.unknown,
+.verified {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.unknown {
+  color: var(--danger);
+  opacity: 0;
+  animation: unknown var(--loop) var(--ease) infinite;
+}
+.verified {
+  color: var(--ok-ink);
+  animation: verified var(--loop) var(--ease) infinite;
+}
+.dialogFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 12px 12px;
+  pointer-events: none;
+}
+.seal {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: var(--on-dark);
+  box-shadow:
+    0 0 0 3px var(--paper),
+    var(--lift-card);
+  animation: seal var(--loop) var(--ease-out) infinite;
+}
+@keyframes unknown {
+  0%,
+  40% {
+    opacity: 1;
+    transform: none;
+  }
+  44%,
+  94% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes verified {
+  0%,
+  45% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  52%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes seal {
+  0%,
+  50% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* ---- Event-based automations: an event starts a task ---- */
+
+.trigger {
+  --loop: 6.5s;
+  display: grid;
+  justify-items: center;
+  width: 272px;
+}
+.node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.nodeMark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.ruleMark {
+  background: var(--live-dim);
+  color: var(--live);
+}
+.nodeWords {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.nodeWords b {
+  font-size: 12.5px;
+}
+.running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--live);
+}
+.wire {
+  position: relative;
+  width: 1px;
+  height: 22px;
+  background: repeating-linear-gradient(var(--line-3) 0 3px, transparent 3px 6px);
+}
+.wire i {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 3px var(--live-dim);
+  opacity: 0;
+}
+.wireA i {
+  animation: wireA var(--loop) var(--ease) infinite;
+}
+.wireB i {
+  animation: wireB var(--loop) var(--ease) infinite;
+}
+.event {
+  animation: eventIn var(--loop) var(--ease-out) infinite;
+}
+.rule::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px var(--live);
+  opacity: 0;
+  animation: ruleRing var(--loop) var(--ease-out) infinite;
+}
+.started {
+  animation: startedIn var(--loop) var(--ease-out) infinite;
+}
+@keyframes eventIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  10%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes wireA {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  15% {
+    opacity: 1;
+  }
+  26% {
+    opacity: 1;
+    transform: translateY(19px);
+  }
+  29%,
+  100% {
+    opacity: 0;
+    transform: translateY(19px);
+  }
+}
+@keyframes ruleRing {
+  0%,
+  27% {
+    opacity: 0;
+    transform: none;
+  }
+  30% {
+    opacity: 0.9;
+    transform: none;
+  }
+  44%,
+  100% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+}
+@keyframes wireB {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  39% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(19px);
+  }
+  53%,
+  100% {
+    opacity: 0;
+    transform: translateY(19px);
+  }
+}
+@keyframes startedIn {
+  0%,
+  51% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  60%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- The mobile app: an ask, answered from a phone ---- */
+
+.phoneScene {
+  --loop: 7.5s;
+  align-self: end;
+  margin-bottom: -70px;
+}
+.phone {
+  position: relative;
+  width: 184px;
+  height: 300px;
+  border-radius: 30px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    0 0 0 6px var(--n-1),
+    0 0 0 7px var(--line-2),
+    var(--lift-card);
+}
+.phoneTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 18px 0;
+  font: 600 10px/1 var(--font);
+  color: var(--t-1);
+}
+.island {
+  width: 52px;
+  height: 14px;
+  border-radius: 8px;
+  background: var(--t-1);
+}
+.bars {
+  width: 16px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--t-3);
+}
+.notice {
+  display: grid;
+  gap: 3px;
+  margin: 16px 8px 0;
+  padding: 9px 10px 10px;
+  border-radius: 16px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font-size: 11px;
+  color: var(--t-2);
+  animation: notice var(--loop) var(--ease-out) infinite;
+}
+.noticeHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 10px;
+  color: var(--t-3);
+}
+.appIcon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.noticeWhen {
+  margin-left: auto;
+}
+.notice b {
+  font-size: 11.5px;
+}
+.noticeWhat code {
+  font-size: 10px;
+}
+.noticeWays {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 5px;
+  pointer-events: none;
+}
+.press {
+  position: relative;
+  display: inline-flex;
+  border-radius: 8px;
+  animation: press var(--loop) var(--ease-out) infinite;
+}
+.press::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px var(--signal);
+  opacity: 0;
+  animation: pressRing var(--loop) var(--ease-out) infinite;
+}
+.allowed {
+  position: absolute;
+  top: 44px;
+  right: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--t-2);
+  animation: allowed var(--loop) var(--ease-out) infinite backwards;
+}
+.homeBar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 56px;
+  height: 4px;
+  margin-left: -28px;
+  border-radius: 2px;
+  background: var(--t-1);
+}
+@keyframes notice {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+  16%,
+  58% {
+    opacity: 1;
+    transform: none;
+  }
+  66%,
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+}
+@keyframes press {
+  0%,
+  42% {
+    transform: none;
+  }
+  45% {
+    transform: scale(0.92);
+  }
+  52%,
+  100% {
+    transform: none;
+  }
+}
+@keyframes pressRing {
+  0%,
+  43% {
+    opacity: 0;
+    transform: none;
+  }
+  46% {
+    opacity: 0.9;
+    transform: none;
+  }
+  58%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+@keyframes allowed {
+  0%,
+  64% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  72%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- Integrated simulators: the lead taps through what it changed ---- */
+
+.sim {
+  --loop: 8s;
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  align-self: stretch;
+  padding-top: 22px;
+}
+.thread {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  width: 178px;
+  align-self: center;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.said {
+  display: flex;
+  gap: 7px;
+  color: var(--t-1);
+  animation: saidIn var(--loop) var(--ease-out) infinite;
+}
+.saidMark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.shot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 27px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  animation: shotIn var(--loop) var(--ease-out) infinite;
+}
+.shotScreen {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 36px;
+  border-radius: 5px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ok-ink);
+}
+.shotWords {
+  display: grid;
+  font-size: 10.5px;
+  color: var(--t-3);
+}
+.shotWords b {
+  font-size: 11px;
+}
+.said2 {
+  margin-left: 27px;
+  color: var(--t-2);
+  animation: said2In var(--loop) var(--ease-out) infinite;
+}
+.device {
+  position: relative;
+  flex: none;
+  width: 132px;
+  height: 214px;
+  padding: 6px 6px 0;
+  border-radius: 24px 24px 0 0;
+  background: var(--term);
+}
+.deviceIsland {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  z-index: 2;
+  width: 36px;
+  height: 10px;
+  margin-left: -18px;
+  border-radius: 6px;
+  background: var(--term);
+}
+.screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 18px 18px 0 0;
+  background: var(--paper);
+}
+.cart,
+.paid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 32px 12px 0;
+}
+.cart {
+  opacity: 0;
+  animation: cart var(--loop) var(--ease-out) infinite;
+}
+.cartTitle {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.cartLine,
+.cartTotal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 500 10px/1.2 var(--mono);
+  color: var(--t-2);
+}
+.cartLine i {
+  width: 46px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--n-4);
+}
+.cartTotal {
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font);
+  font-size: 10.5px;
+}
+.cartTotal b {
+  font-size: 12px;
+}
+.pay {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 28px;
+  margin-top: 4px;
+  border-radius: 8px;
+  background: var(--t-1);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--paper);
+  animation: payPress var(--loop) var(--ease-out) infinite;
+}
+.tap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--paper) 45%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper) 80%, transparent);
+  opacity: 0;
+  animation: tap var(--loop) var(--ease-out) infinite;
+}
+.paid {
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding-top: 0;
+  font-size: 11px;
+  color: var(--t-3);
+  animation: paid var(--loop) var(--ease-out) infinite;
+}
+.paid b {
+  font-size: 13px;
+}
+.paidMark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: var(--on-dark);
+}
+@keyframes saidIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  8%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes cart {
+  0%,
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+  37%,
+  94% {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes payPress {
+  0%,
+  22% {
+    transform: none;
+  }
+  25% {
+    transform: scale(0.95);
+  }
+  30%,
+  100% {
+    transform: none;
+  }
+}
+@keyframes tap {
+  0%,
+  17% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+  23% {
+    opacity: 1;
+    transform: none;
+  }
+  32%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+@keyframes paid {
+  0%,
+  31% {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  39%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes shotIn {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  54%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes said2In {
+  0%,
+  58% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  66%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- The project knowledge store: notes with their sources, read by every agent ---- */
+
+.know {
+  --loop: 7s;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.notes {
+  display: grid;
+  gap: 6px;
+  width: 232px;
+}
+.notes li {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--note-paper);
+  box-shadow: inset 0 0 0 1px var(--note-line);
+  font-size: 12px;
+  animation: noteIn var(--loop) var(--ease-out) infinite backwards;
+  animation-delay: calc(var(--i) * 0.45s);
+}
+.from {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 10.5px/1.3 var(--font-label);
+  color: var(--t-3);
+}
+.readers {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding-left: 14px;
+}
+.readers::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 1px;
+  background: var(--line-3);
+}
+.reader {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  color: var(--t-1);
+}
+.reader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px var(--live);
+  opacity: 0;
+  animation: read var(--loop) var(--ease-out) infinite;
+  animation-delay: calc(var(--i) * 0.3s);
+}
+@keyframes noteIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  8%,
+  84% {
+    opacity: 1;
+    transform: none;
+  }
+  92%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes read {
+  0%,
+  34% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  62%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- Teams, in the cloud: one project, its people, a hosted agent ---- */
+
+.team {
+  --loop: 7s;
+  width: 284px;
+  padding: 10px 12px 4px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.teamHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.projMark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--live-dim);
+  font: 700 11px/1 var(--font-display);
+  color: var(--live);
+}
+.people {
+  display: flex;
+  margin-left: auto;
+}
+.face,
+.owner {
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--n-3);
+  font: 600 8.5px/1 var(--font);
+  color: var(--t-2);
+}
+.face {
+  width: 22px;
+  height: 22px;
+  margin-left: -5px;
+  box-shadow: 0 0 0 2px var(--paper);
+  animation: join var(--loop) var(--ease-out) infinite backwards;
+  animation-delay: calc(var(--i) * 0.35s);
+}
+.owner {
+  width: 18px;
+  height: 18px;
+}
+.hosted {
+  background: var(--term);
+  color: var(--term-t1);
+}
+.teamTasks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  animation: taskIn var(--loop) var(--ease-out) infinite backwards;
+  animation-delay: calc(1.2s + var(--i) * 0.3s);
+}
+.teamTasks li:last-child {
+  border-bottom: 0;
+}
+.teamTask {
+  flex: 1;
+  color: var(--t-1);
+}
+.teamState {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 10.5px/1 var(--font-label);
+  color: var(--t-3);
+}
+@keyframes join {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  7%,
+  86% {
+    opacity: 1;
+    transform: none;
+  }
+  94%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes taskIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  8%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+  78%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Still, each stands as it ends: the publisher verified, the ask allowed, the app paid. */
+@media (prefers-reduced-motion: reduce) {
+  .frame *,
+  .frame *::after {
+    animation: none !important;
+  }
+  .allowed {
+    position: static;
+    margin: 8px 8px 0;
+  }
+}

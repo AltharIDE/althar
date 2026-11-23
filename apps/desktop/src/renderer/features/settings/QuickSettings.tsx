@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
 import {
@@ -55,6 +56,7 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
   const atOnce = useAgentsAtOnce()
   const places = usePlaces(open)
   const version = useQuery(reads(client).status()).data?.appVersion
+  const navigate = useNavigate()
   // Leaving for the Settings tab closes the panel.
   const settings = (section: Section | null) => {
     onOpenChange(false)
@@ -96,7 +98,18 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
       </div>
       <ControlFoot>
         <ControlFootStart>
-          {version !== undefined && <AppVersion version={version} notes={CHANGELOG} text={{ name: text.version }} />}
+          {version !== undefined && (
+            <AppVersion
+              version={version}
+              notes={CHANGELOG}
+              // What's new is Althar's own page, in the window; leaving for it closes the panel.
+              onNotes={() => {
+                onOpenChange(false)
+                void navigate({ to: '/althar' })
+              }}
+              text={{ name: text.version }}
+            />
+          )}
           {reportProblem !== undefined && (
             <LinkButton
               onClick={() => {
