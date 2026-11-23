@@ -29,6 +29,6 @@ describe('making a pairing code', () => {
   it('is a call with no command id, so no receipt keeps the code', () => {
     const rpc = Api.requests.get('CreatePairingCode')
     expect(rpc).toBeDefined()
-    expect(Object.keys((rpc?.payloadSchema as unknown as { fields: object }).fields)).not.toContain('commandId')
+    expect(Object.keys((rpc!.payloadSchema as unknown as { fields: object }).fields)).not.toContain('commandId')
   })
 })
