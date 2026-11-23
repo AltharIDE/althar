@@ -517,7 +517,12 @@ describe('a normal task assigned to a worker', () => {
           port: 6770,
           addresses: ['10.0.0.2:6770'],
         }
-        const { client, grant: folder } = yield* connected({
+        const {
+          client,
+          grant: folder,
+          connect,
+          separateDevice,
+        } = yield* connected({
           workers: {
             list: () => [],
             enrolled: () => null,
@@ -552,6 +557,23 @@ describe('a normal task assigned to a worker', () => {
           client.SetWorkerProjects({ commandId: commandId(), workerId, projectIds: ['proj_' + '9'.repeat(32)] }),
         )
         assert.strictEqual(unknown.reason, 'NotFound')
+
+        // The home's own socket, as a window over SSH reaches it, is its operator: it may.
+        const operator = yield* connect('socket')
+        assert.strictEqual((yield* operator.CreateWorkerCode({ name: 'laptop' })).code, 'althar-worker1.abc')
+        // A device paired over the network may not add, change or remove workers.
+        const paired = yield* separateDevice
+        const refusals = [
+          yield* Effect.flip(paired.AddWorker({ commandId: commandId(), publicKey: 'S0VZ', name: 'x' })),
+          yield* Effect.flip(paired.CreateWorkerCode({ name: 'x' })),
+          yield* Effect.flip(paired.SetWorkerProjects({ commandId: commandId(), workerId, projectIds: [] })),
+          yield* Effect.flip(paired.RemoveWorker({ commandId: commandId(), workerId })),
+        ]
+        assert.deepStrictEqual(
+          refusals.map((refused) => refused.reason),
+          ['Forbidden', 'Forbidden', 'Forbidden', 'Forbidden'],
+        )
+        assert.strictEqual(added.length, 1)
 
         // A home with no authority of its own enrolls by its operator's command only.
         const { client: operators } = yield* connected({
