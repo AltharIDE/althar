@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSy
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { isoAfter } from '@althar/testing'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
@@ -28,8 +29,11 @@ const write = (path: string, body: string) => {
 }
 /** Claude Code's folder for a working folder. */
 const claudeFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
-/** An hour ago: a fixed date would age past the seven days an aside stays in view, and fold into "older". */
-const startedAt = Date.now() - 60 * 60 * 1000
+/**
+ * When the conversations were had: an hour before the test, as work someone carried on recently, so the one brought in as an
+ * aside is a pill beside the coordinator's. Pinned to a day, it would fold into "N older" a week after it.
+ */
+const HOUR = 60 * 60 * 1000
 const session = (cwd: string, id: string, prompt: string, reply: string, title: string) =>
   [
     {
@@ -40,7 +44,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       cwd,
       gitBranch: 'main',
       isSidechain: false,
-      timestamp: new Date(startedAt).toISOString(),
+      timestamp: isoAfter(-HOUR),
       message: { role: 'user', content: prompt },
     },
     {
@@ -50,7 +54,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       sessionId: id,
       cwd,
       isSidechain: false,
-      timestamp: new Date(startedAt + 8000).toISOString(),
+      timestamp: isoAfter(-HOUR + 8000),
       message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: reply }] },
     },
     { type: 'ai-title', aiTitle: title, sessionId: id },

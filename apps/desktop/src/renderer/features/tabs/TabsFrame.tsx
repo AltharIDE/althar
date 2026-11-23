@@ -9,6 +9,7 @@ import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
 import { SearchNotice } from '../finder/SearchNotice'
 import { FinderView } from '../finder/FinderView'
+import { useNews } from '../news/useNews'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack, CarriedPlace } from '../../shared/dictation/Carried'
 import { LooseDictation, type Place, placeLoose } from '../../shared/dictation/Loose'
@@ -31,7 +32,9 @@ const text = {
 
 /*
  * Every screen under the window's tabs: the home's, Althar's settings' while
- * they are open, then each open project's. ⌘1 goes to the home, ⌘2 to ⌘8 to
+ * they are open, Althar's own (what's new, with a quiet dot after an update
+ * until it's looked at, and what's coming next) until it's closed, then each
+ * open project's. ⌘1 goes to the home, ⌘2 to ⌘8 to
  * the projects in order, ⌘9 to the last, and Control-Tab to the next tab
  * (with Shift, the one before), as in a browser. ⌘N starts a new project in
  * a tab of its own, as the + does. ⌘K finds a task: in the project whose tab
@@ -117,6 +120,9 @@ function TabsBar({
   // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and its tab takes the window back to where it came from.
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  // Althar's own tab, until it's closed; an update with news brings it back, with its dot.
+  const news = useNews()
+  const onAlthar = pathname === '/althar'
   const pageTabs = usePageTabs(host.pages).map(({ owner, state }) => ({
     id: owner,
     title: state === null ? text.page : state.title.trim() || shownAddress(state.address) || text.page,
@@ -139,6 +145,20 @@ function TabsBar({
       others={tabs.others}
       {...(tabs.settings.open
         ? { settings: { current: tabs.settings.current, onSelect: () => tabs.openSettings(), onClose: tabs.closeSettings } }
+        : {})}
+      {...(news.tab
+        ? {
+            althar: {
+              current: onAlthar,
+              news: news.unseen,
+              onSelect: () => void navigate({ to: '/althar' }),
+              onClose: () => {
+                news.close()
+                // The tab after it has the window: the first project's, else the home's.
+                if (onAlthar) select(tabs.tabs[0]?.id ?? null)
+              },
+            },
+          }
         : {})}
       onSelect={select}
       onPreview={tabs.preview}
