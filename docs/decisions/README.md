@@ -49,6 +49,14 @@ Proposals waiting now:
   and worker-language choices are in [Foundations](foundations.md#remote-connections-and-native-workers); the wider design remains proposed.
 - [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
   canvases the project's agents draw, version and hear comments on; the first slice is built.
+- [ADR-113](proposed/113-an-ops-sandbox-profile-opens-ssh-and-never-keys.md) to
+  [ADR-117](proposed/117-one-task-per-environment-and-every-run-in-the-log.md):
+  Ops mode for infrastructure repositories. An Ops sandbox profile opens
+  SSH's config and agent but never a key, secrets go to one run through
+  `ops_run`, commands are read or change per tool, environments set the
+  gate (prod is always the person's), and one task changes an environment
+  at a time, with every run in a log. The plan is
+  [ops-mode](../plans/ops-mode.md).
 
 ## The old ADRs
 
@@ -180,3 +188,8 @@ one.
 | 105 | Undo from a delivered task message restores its turn and later turns from private checkpoints, preserves commits and unrelated edits, and restarts the agent from retained context | [desktop-app § Undo from a task message](desktop-app.md#undo-from-a-task-message) |
 | [106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) | Agent process families share CPU where supported, with background priority and pressure-aware admission everywhere and no per-language setup | [scheduling § Process families](scheduling.md#how-agent-process-families-share-the-machine) |
 | 107 | Migrations keep their numbers, and `numbers` refuses a migration or ADR number main or a pull request ahead in the merge queue already has, with an open pull request's same number a warning | [foundations § Numbers that can't collide](foundations.md#numbers-that-cant-collide) |
+| [113](proposed/113-an-ops-sandbox-profile-opens-ssh-and-never-keys.md) | An Ops sandbox profile, off by default and switched on per project or task (offered by a card when a repository looks like infrastructure), lets a lead's sandbox read `~/.ssh/config` and `known_hosts` and use the SSH agent and the infra tools' caches, never a private key or a cloud or cluster credential | Proposed; would fold into [what-agents-may-do § The sandbox is the boundary](what-agents-may-do.md#the-sandbox-is-the-boundary) |
+| [114](proposed/114-secrets-go-to-one-run-never-to-the-agent.md) | Infra commands that need credentials run through Althar's `ops_run`, outside the sandbox, from an argv of a known tool; a vault password or token, sealed in DEV-208's store, goes to that run alone by a file or variable, and its output comes back masked | Proposed; would fold into [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |
+| [115](proposed/115-a-command-is-read-or-change-per-tool-and-unsure-asks.md) | In the Ops profile an infra command is a read, a change, a secret or unsure, per tool (ansible, terraform, pulumi, kubectl, helm, ssh); reads go ahead, secrets are refused, and changes and unsure get the `infra` kind on the project's Ask me | Proposed; would fold into [what-agents-may-do § What asks](what-agents-may-do.md#what-asks) |
+| [116](proposed/116-environments-bind-targets-and-set-the-gate.md) | `.althar/ops.yaml`, read from the default branch, binds environments to inventories, workspaces, kube contexts and hosts; a change is planned first, then dev goes ahead, the coordinator judges staging, and the person decides prod on a card with the plan, command, targets and commit | Proposed; would fold into [what-agents-may-do § What asks](what-agents-may-do.md#what-asks) |
+| [117](proposed/117-one-task-per-environment-and-every-run-in-the-log.md) | One task holds an environment's lock for its changes until it settles; every `ops_run` is logged with its command, target, commit, decision, exit code and output; a task can end "ran, with this result" | Proposed; would fold into [workspaces-and-runs](workspaces-and-runs.md) and [tasks](tasks.md) |
