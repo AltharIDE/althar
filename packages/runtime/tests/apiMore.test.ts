@@ -502,6 +502,68 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('adds a worker as the window asks, picks its projects among the home’s, and says where the home can’t', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '8'.repeat(32)
+        const added: Array<{ name: string; ssh: string | null; key: string }> = []
+        const assigned: Array<ReadonlyArray<string>> = []
+        const grant = {
+          homeId: 'home_' + '1'.repeat(32),
+          workerId,
+          authority: 'CA',
+          certificate: 'CERT',
+          serverName: 'home.althar.invalid',
+          port: 6770,
+          addresses: ['10.0.0.2:6770'],
+        }
+        const { client, grant: folder } = yield* connected({
+          workers: {
+            list: () => [],
+            enrolled: () => null,
+            open: () => Effect.die('No worker'),
+            adds: () => true,
+            admin: {
+              add: (input) =>
+                Effect.sync(() => {
+                  added.push({ name: input.name, ssh: input.ssh, key: Buffer.from(input.publicKey).toString('utf8') })
+                  return grant
+                }),
+              code: () => Effect.succeed({ code: 'althar-worker1.abc', expiresAt: 1 }),
+              assign: (_id, projectIds) => Effect.sync(() => void assigned.push(projectIds)),
+            },
+          },
+        })
+        // It takes none yet, but adds them itself.
+        assert.deepStrictEqual(yield* client.GetWorkers({}), { enabled: false, workers: [], adds: true })
+        const signed = yield* client.AddWorker({
+          commandId: commandId(),
+          publicKey: Buffer.from('KEY').toString('base64url'),
+          name: ' build-box ',
+          ssh: 'althar@build-box',
+        })
+        assert.deepStrictEqual(signed, grant)
+        assert.deepStrictEqual(added, [{ name: 'build-box', ssh: 'althar@build-box', key: 'KEY' }])
+        assert.deepStrictEqual(yield* client.CreateWorkerCode({ name: 'laptop' }), { code: 'althar-worker1.abc', expiresAt: 1 })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* folder(repository()) })
+        yield* client.SetWorkerProjects({ commandId: commandId(), workerId, projectIds: [project.id, project.id] })
+        assert.deepStrictEqual(assigned, [[project.id]])
+        const unknown = yield* Effect.flip(
+          client.SetWorkerProjects({ commandId: commandId(), workerId, projectIds: ['proj_' + '9'.repeat(32)] }),
+        )
+        assert.strictEqual(unknown.reason, 'NotFound')
+
+        // A home with no authority of its own enrolls by its operator's command only.
+        const { client: operators } = yield* connected({
+          workers: { list: () => [], enrolled: () => [], open: () => Effect.die('No worker') },
+        })
+        assert.deepStrictEqual(yield* operators.GetWorkers({}), { enabled: true, workers: [] })
+        const refused = yield* Effect.flip(operators.CreateWorkerCode({ name: 'laptop' }))
+        assert.strictEqual(refused.reason, 'WorkersOff')
+      }),
+    ),
+  )
+
   it.live('says a home that isn’t listening for workers takes none', () =>
     Effect.scoped(
       Effect.gen(function* () {

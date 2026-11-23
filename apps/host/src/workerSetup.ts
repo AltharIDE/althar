@@ -88,7 +88,7 @@ const writeAgents = async (folder: string, current: string) => {
   const programs = join(folder, 'agents')
   await privateDirectory(programs, true)
   const lines: string[] = [join(folder, 'workspaces')]
-  for (const agent of shipped()) {
+  for (const agent of system.agents()) {
     const spec = agent.definition.launch(node)
     const env = Object.entries({ ...spec.env, PATH: `${dirname(node)}:/usr/local/bin:/usr/bin:/bin` })
       .map(([name, value]) => `export ${name}=${shellQuoted(stable(value, release, current))}`)
@@ -106,10 +106,9 @@ const writeAgents = async (folder: string, current: string) => {
 /** Which shipped agents are signed in, kept where the worker reads it at each hello; says each. */
 const checkAgents = async (folder: string) => {
   const checked = await Promise.all(
-    shipped().map(async (agent) => {
-      const check = await Effect.runPromise(signInCheck(agent.definition, process.execPath))
-      return { id: agent.id, name: agent.definition.name, signedIn: check.status === 'signed_in' }
-    }),
+    system
+      .agents()
+      .map(async (agent) => ({ id: agent.id, name: agent.definition.name, signedIn: await system.signedIn(agent.definition) })),
   )
   const signedIn = checked.flatMap((agent) => (agent.signedIn ? [agent.id] : []))
   const was = (await readPrivate(join(folder, 'signed-in'), 4096))?.toString('utf8') ?? null
@@ -121,20 +120,36 @@ const checkAgents = async (folder: string) => {
 /** Whether the worker runs a task now: one of its agents' or a project command's own units is active. */
 const busy = async () => {
   try {
-    const { stdout } = await run(
-      'systemctl',
-      ['--user', 'list-units', '--state=active', '--plain', '--no-legend', 'althar-agent-*', 'althar-wpr_*'],
-      {
-        timeout: 15_000,
-      },
+    return (
+      (await system.systemctl(['list-units', '--state=active', '--plain', '--no-legend', 'althar-agent-*', 'althar-wpr_*'])).trim() !== ''
     )
-    return stdout.trim() !== ''
   } catch {
     return true
   }
 }
 
-const systemctl = (...args: string[]) => run('systemctl', ['--user', ...args], { timeout: 30_000 })
+const systemctl = (...args: string[]) => system.systemctl(args)
+
+/** What a worker's setup runs on: the user's service manager, the agents' own sign-in checks, the agents it ships. */
+export interface WorkerSystem {
+  /** `systemctl --user` with these arguments: what it printed. */
+  readonly systemctl: (args: ReadonlyArray<string>) => Promise<string>
+  readonly signedIn: (agent: AgentDefinition) => Promise<boolean>
+  readonly agents: typeof shipped
+}
+let system: WorkerSystem = {
+  systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
+  signedIn: async (agent) => (await Effect.runPromise(signInCheck(agent, process.execPath))).status === 'signed_in',
+  agents: shipped,
+}
+/** For tests: the system it runs on, in part; puts it back when called. */
+export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
+  const was = system
+  system = { ...system, ...given }
+  return () => {
+    system = was
+  }
+}
 
 /** The worker says its agents again once it starts again: then, unless it runs a task, when it would cut that off. */
 const restartIdle = async () => {
@@ -346,7 +361,7 @@ export const listAgents = async (out: (text: string) => void) => {
 
 /** An agent's sign-in, as on a home: its steps said, a pasted code read from stdin; checked again once it ends. */
 export const signIn = async (id: string, way: SignInWay, out: (text: string) => void) => {
-  const agent = shipped().find((one) => one.id === id)
+  const agent = system.agents().find((one) => one.id === id)
   if (agent === undefined) throw failed('UnknownAgent', 'This worker has no such agent.')
   await new Promise<void>((resolve) => {
     const lines = createInterface({ input: process.stdin })
