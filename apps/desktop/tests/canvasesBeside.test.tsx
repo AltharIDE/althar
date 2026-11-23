@@ -27,7 +27,7 @@ import { askToOpen } from '../src/renderer/features/canvases/opening'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
 import { commentsOf, forgetComments, gather, type GatheredComment } from '../src/renderer/shared/comments'
-import { coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
+import { agents, coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
 import { useSettingsOf, servicesFor, withServices } from './render'
 
 /*
@@ -442,6 +442,64 @@ describe('the project’s Artifacts view', () => {
     await waitFor(() => expect(client.getCanvas).toHaveBeenCalledWith(OTHER))
     await waitFor(() => expect(screen.queryByPlaceholderText('Ask about it, or say what to change')).toBeNull())
     expect(client.startTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows its composer’s model picker before anything is written, and starts its chat with the model picked there', async () => {
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={{ ...LEAD, effort: 'high' }} agents={agents} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    const chat = await screen.findByRole('region', { name: 'Its chat' })
+    expect(within(chat).getByRole('button', { name: 'Add files' })).toBeTruthy()
+    // Opening the picker isn't talking: nothing starts until the person goes to the field or sends.
+    await userEvent.click(await within(chat).findByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
+    expect(client.startTask).not.toHaveBeenCalled()
+    await userEvent.type(within(chat).getByPlaceholderText('Ask about it, or say what to change'), 'Calmer')
+    await waitFor(() =>
+      expect(client.startTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          steps: [{ key: 'implement', agentId: 'claude-code', model: 'default', effort: 'high', skipped: false }],
+        }),
+      ),
+    )
+  })
+
+  it('lets its chat’s edge be dragged wider or narrower, within limits, and keeps the width for the next artifact opened', async () => {
+    window.localStorage.removeItem('althar.artifactChat')
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
+    const view = withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    const chat = await screen.findByRole('region', { name: 'Its chat' })
+    const edge = within(chat).getByRole('separator', { name: 'Width of its chat' })
+    expect(edge.getAttribute('aria-valuenow')).toBe('380')
+    expect(edge.getAttribute('aria-valuemin')).toBe('300')
+    // Dragged 120px to the right, it is that much wider.
+    fireEvent.pointerDown(edge, { button: 0, clientX: 380, pointerId: 1 })
+    fireEvent.pointerMove(edge, { clientX: 500, pointerId: 1 })
+    fireEvent.pointerUp(edge, { clientX: 500, pointerId: 1 })
+    expect(chat.style.getPropertyValue('--chat-width')).toBe('500px')
+    expect(window.localStorage.getItem('althar.artifactChat')).toBe('500')
+    // Never narrower than its least, and never so wide the artifact has no room.
+    fireEvent.keyDown(edge, { key: 'Home' })
+    expect(edge.getAttribute('aria-valuenow')).toBe('300')
+    fireEvent.keyDown(edge, { key: 'End' })
+    expect(Number(edge.getAttribute('aria-valuenow'))).toBe(window.innerWidth - 420)
+    fireEvent.keyDown(edge, { key: 'ArrowLeft' })
+    const kept = edge.getAttribute('aria-valuenow')
+    // Opened again, it is as the person left it.
+    view.unmount()
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^The plan/ }),
+    )
+    expect((await screen.findByRole('separator', { name: 'Width of its chat' })).getAttribute('aria-valuenow')).toBe(kept)
   })
 
   it('sends words written before its chat started to that artifact’s own chat, even after going to another', async () => {

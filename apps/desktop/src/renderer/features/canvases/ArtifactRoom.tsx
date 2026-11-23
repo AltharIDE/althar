@@ -1,13 +1,19 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ArtifactChat, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
-import { ArtifactHead, type ArtifactHeadArtifact, Button, Problem } from '@althar/ui'
+import type { AgentStatus, ArtifactChat, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
+import { ArtifactHead, type ArtifactHeadArtifact, Button, DictationTray, Problem, ResizeHandle } from '@althar/ui'
 
 import { messageOf, newTaskId } from '../../data/client'
 import { reads } from '../../data/reads'
+import { useModels } from '../../data/models'
 import { useServices } from '../../data/services'
 import { DraftComposer } from '../../shared/DraftComposer'
+import { useDictation } from '../../shared/dictation/useDictation'
+import { ModelChoice } from '../../shared/ModelChoice'
+import type { Choice } from '../../shared/models'
+import { type Outgoing, sentWith, takesImages, useAttachments } from '../../shared/useAttachments'
+import { useKeptWidth } from '../../shared/useKeptWidth'
 import { canvasCommentsOf, composerComment, drop, takeComments, useComments, withComments } from '../../shared/comments'
 import { draftKey, setDraftText } from '../../shared/drafts'
 import { TaskView } from '../task/TaskView'
@@ -38,7 +44,12 @@ export const artifactRoomText = {
   sendFailed: (why: string) => `Couldn’t send it. ${why}`,
   again: 'Try again',
   drawing: 'Drawing the first version',
+  width: 'Width of its chat',
+  lead: 'Lead',
 }
+
+/** How wide its chat is beside the artifact, as the person last dragged it: the artifact keeps the most of the window. */
+const CHAT_WIDTH = { key: 'althar.artifactChat', start: 380, min: 300, rest: 420 } as const
 
 /*
  * Each artifact's chat as it starts, by its canvas, outside any room: what was sent before it was ready goes to that
@@ -67,6 +78,7 @@ export function ArtifactRoom({
   canvases,
   drawing,
   lead,
+  agents = [],
   onOpen,
   onBack,
 }: {
@@ -78,6 +90,8 @@ export function ArtifactRoom({
   drawing: ReadonlyArray<ArtifactDrawing>
   /** Who answers in a chat started here: the coordinator's composer's pick. */
   lead: PlanStep | null
+  /** The agents its composer's picker offers, to answer in a chat started here. */
+  agents?: ReadonlyArray<AgentStatus>
   onOpen: (open: OpenArtifact) => void
   onBack: () => void
 }) {
@@ -103,17 +117,26 @@ export function ArtifactRoom({
   const draft = draftKey.artifact(canvasId ?? open.id)
   // Where the canvas's versions and actions go: the end of the artifact's row.
   const [actions, setActions] = useState<HTMLSpanElement | null>(null)
+  const width = useKeptWidth(CHAT_WIDTH)
+  const column = useRef<HTMLElement>(null)
+  // Who answers in a chat started here: picked in its composer before it starts, else the coordinator's composer's pick.
+  const [pick, setPick] = useState<Choice | null>(null)
+  const answers: PlanStep | null = useMemo(() => (pick === null ? lead : { key: 'implement', ...pick, skipped: false }), [pick, lead])
+  const choice: Choice | null = useMemo(
+    () => (answers === null ? null : { agentId: answers.agentId, model: answers.model, effort: answers.effort ?? null }),
+    [answers],
+  )
 
   /** This artifact's chat: the one it has, or the one starting, or a new one started now; null where it can't start. */
   const start = useCallback((): Promise<ArtifactChat | null> => {
     if (chat !== null) return Promise.resolve(chat)
-    if (canvasId === null || summary === null || lead === null) return Promise.resolve(null)
+    if (canvasId === null || summary === null || answers === null) return Promise.resolve(null)
     const going = starting.get(canvasId)
     if (going !== undefined) return going
     setFailed(null)
     const taskId = newTaskId()
     const made = client
-      .startTask({ projectId, title: summary.latest.title, steps: [lead], chat: true, artifact: { canvasId }, taskId })
+      .startTask({ projectId, title: summary.latest.title, steps: [answers], chat: true, artifact: { canvasId }, taskId })
       .then(
         (one) => {
           // Read while the person writes: their first words open a ready conversation.
@@ -130,15 +153,15 @@ export function ArtifactRoom({
       .finally(() => starting.delete(canvasId))
     starting.set(canvasId, made)
     return made
-  }, [chat, canvasId, summary, lead, projectId, client, cache])
+  }, [chat, canvasId, summary, answers, projectId, client, cache])
 
   /**
    * Words sent before the chat is ready: they go to this artifact's own chat, with the parts pointed at as Send was pressed,
    * as it is ready. Those parts are its from then: one pointed at while it waits stays in the draft, for the next message.
    */
-  const sendSoon = (words: string) => {
+  const sendSoon = (words: string, outgoing: Outgoing | null, giveBack: (outgoing: Outgoing) => void) => {
     if (canvasId === null) return
-    const to = { canvasId, words, draft, batch: takeComments(draft) }
+    const to = { canvasId, words, draft, batch: takeComments(draft), outgoing }
     setFailed(null)
     setQueued({ canvasId, words })
     setDraftText(draft, '')
@@ -151,11 +174,15 @@ export function ArtifactRoom({
         // Its words and parts go back where they were written, for the person to send again.
         to.batch.finish(false)
         setDraftText(to.draft, (now) => (now.trim() === '' ? to.words : `${to.words}\n\n${now}`))
+        if (to.outgoing !== null) giveBack(to.outgoing)
         return settled(null)
       }
-      return sendFirst(client.send, ready.threadId, to.draft, to.words, to.batch).then(
+      return sendFirst(client.send, ready.threadId, to.draft, to.words, to.batch, to.outgoing ?? undefined).then(
         () => settled(null),
-        (error: unknown) => settled(artifactRoomText.sendFailed(messageOf(error))),
+        (error: unknown) => {
+          if (to.outgoing !== null) giveBack(to.outgoing)
+          settled(artifactRoomText.sendFailed(messageOf(error)))
+        },
       )
     })
   }
@@ -194,7 +221,12 @@ export function ArtifactRoom({
         end={<span ref={setActions} className={s.actions} />}
       />
       <div className={s.body}>
-        <section className={s.chat} aria-label={artifactRoomText.chat}>
+        <section
+          ref={column}
+          className={s.chat}
+          aria-label={artifactRoomText.chat}
+          style={{ '--chat-width': `${width.width}px` } as CSSProperties}
+        >
           {chat !== null && waiting === null ? (
             <Conversation
               key={chat.threadId}
@@ -207,6 +239,10 @@ export function ArtifactRoom({
           ) : (
             <FirstWords
               draft={draft}
+              projectId={projectId}
+              agents={agents}
+              choice={choice}
+              onChoose={setPick}
               queued={waiting}
               onStart={() => void start()}
               onSend={sendSoon}
@@ -214,6 +250,17 @@ export function ArtifactRoom({
               onAgain={() => void start()}
             />
           )}
+          <ResizeHandle
+            className={s.handle}
+            value={width.width}
+            min={width.min}
+            max={width.max}
+            onChange={width.set}
+            onCommit={width.keep}
+            onReset={width.reset}
+            onResizing={(on) => column.current?.toggleAttribute('data-resizing', on)}
+            label={artifactRoomText.width}
+          />
         </section>
         <div className={s.canvas}>
           {summary !== null && shownBy !== null ? (
@@ -262,6 +309,10 @@ function Conversation({
  */
 function FirstWords({
   draft,
+  projectId,
+  agents,
+  choice,
+  onChoose,
   queued,
   onStart,
   onSend,
@@ -269,14 +320,26 @@ function FirstWords({
   onAgain,
 }: {
   draft: string
+  projectId: string
+  agents: ReadonlyArray<AgentStatus>
+  /** Who answers once its chat starts, as its picker shows it; null where no one can yet. */
+  choice: Choice | null
+  onChoose: (choice: Choice) => void
   queued: string | null
   onStart: () => void
-  onSend: (words: string) => void
+  /** Sends what is written, with what goes with it; `giveBack` puts that back in the composer where it couldn't go. */
+  onSend: (words: string, outgoing: Outgoing | null, giveBack: (outgoing: Outgoing) => void) => void
   /** Why its chat couldn't start, or the words couldn't go, in a sentence. */
   failed: string | null
   onAgain: () => void
 }) {
   const comments = useComments(draft)
+  // Its images, files and dictation are the artifact's draft's, as its chat's composer's are: they go on there once it starts.
+  const voice = useDictation(draft, { projectId })
+  const { host } = useServices()
+  const images = useAttachments(draft, host)
+  const models = useModels()
+  const receiver = { name: agentNameOf(agents, choice?.agentId ?? null), takes: takesImages(models, choice?.agentId ?? null) }
   // Pointing at a part says the person means to talk: the chat starts. Parts given back, as a first message that couldn't
   // go returns them, were pointed at already: they don't start it again over why it couldn't.
   const seen = useRef(new Set<string>())
@@ -286,7 +349,13 @@ function FirstWords({
     if (pointed) onStart()
   }, [comments, onStart])
   return (
-    <div className={s.first} onFocusCapture={onStart}>
+    // Going to its field says the person means to talk; its picker, attach button or microphone don't start it yet.
+    <div
+      className={s.first}
+      onFocusCapture={(event) => {
+        if (event.target instanceof HTMLTextAreaElement) onStart()
+      }}
+    >
       <div className={s.empty} />
       {failed !== null && (
         <Problem banner>
@@ -299,12 +368,27 @@ function FirstWords({
       <DraftComposer
         draft={draft}
         placeholder={artifactRoomText.placeholder}
+        inputRef={voice.inputRef}
+        dictation={voice.dictation}
+        tray={voice.tray && <DictationTray {...voice.tray} />}
+        {...images.props(receiver)}
+        picker={
+          agents.length > 0 &&
+          choice !== null && (
+            <ModelChoice owner={artifactRoomText.lead} agents={agents} projectId={projectId} value={choice} onChange={onChoose} />
+          )
+        }
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onRemoveComment={(id) => drop(draft, id)}
         {...(queued === null ? {} : { queued: [{ id: 'first', text: queued }], busy: true })}
         onSubmit={(words) => {
-          if (words.trim() === '' && comments.length === 0) return
-          onSend(words)
+          const attached = images.props(receiver)
+          if (words.trim() === '' && comments.length === 0 && attached.images.length === 0 && attached.files.length === 0) return
+          const outgoing = attached.images.length === 0 && attached.files.length === 0 ? null : images.take(receiver)
+          // Not ready to go yet: the composer says why, and keeps it all.
+          if (outgoing === null && (attached.images.length > 0 || attached.files.length > 0)) return
+          if (outgoing !== null) images.clear()
+          onSend(words, outgoing, images.giveBack)
         }}
       />
     </div>
@@ -316,22 +400,26 @@ function FirstWords({
  * thread once it is: kept where it went, given back to the draft, words and parts, where it didn't.
  */
 export const sendFirst = async (
-  send: (input: {
-    threadId: string
-    body: string
-    disposition: 'after_current'
-    canvasComments?: ReturnType<typeof canvasCommentsOf>
-  }) => Promise<void>,
+  send: (
+    input: {
+      threadId: string
+      body: string
+      disposition: 'after_current'
+      canvasComments?: ReturnType<typeof canvasCommentsOf>
+    } & ReturnType<typeof sentWith>,
+  ) => Promise<void>,
   threadId: string,
   draft: string,
   words: string,
   batch: ReturnType<typeof takeComments>,
+  outgoing?: Outgoing,
 ) => {
   try {
     await send({
       threadId,
-      body: withComments(words, batch.taken, 0, false),
+      body: withComments(words, batch.taken, outgoing?.sent.length ?? 0, false),
       disposition: 'after_current',
+      ...sentWith(outgoing),
       canvasComments: canvasCommentsOf(batch.taken),
     })
     batch.finish(true)
@@ -341,3 +429,7 @@ export const sendFirst = async (
     throw error
   }
 }
+
+/** An agent by its name, as the composer says who it sends to. */
+const agentNameOf = (agents: ReadonlyArray<AgentStatus>, agentId: string | null) =>
+  agents.find((agent) => agent.id === agentId)?.name ?? agentId ?? ''

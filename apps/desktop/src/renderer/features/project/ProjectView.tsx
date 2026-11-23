@@ -1053,6 +1053,7 @@ export function ProjectView({
             projectId={projectId}
             header={header}
             threadId={coordinator?.threadId ?? null}
+            agents={model.agents}
             // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
             lead={
               chosen === null

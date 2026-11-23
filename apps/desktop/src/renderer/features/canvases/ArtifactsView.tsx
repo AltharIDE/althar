@@ -1,7 +1,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useState } from 'react'
 
-import type { ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
+import type { AgentStatus, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
 import { type ArtifactRow, Artifacts, type ArtifactsFilter, type ArtifactsLayout } from '@althar/ui'
 
 import { pictureUrl } from '../../../main/pictureAddress'
@@ -69,6 +69,7 @@ export function ArtifactsView({
   header = null,
   threadId,
   lead,
+  agents = [],
 }: {
   projectId: string
   /** The project's top row, shown over every artifact; one opened has its own row in its place. */
@@ -77,6 +78,8 @@ export function ArtifactsView({
   threadId: string | null
   /** Who answers in an artifact's chat started here: the coordinator's composer's pick. */
   lead: PlanStep | null
+  /** The agents an artifact's composer offers to answer in its chat. */
+  agents?: ReadonlyArray<AgentStatus>
 }) {
   const { client, host } = useServices()
   const views = host.canvases
@@ -146,6 +149,7 @@ export function ArtifactsView({
               canvases={list.data ?? []}
               drawing={drawing.data ?? []}
               lead={lead}
+              agents={agents}
               onOpen={setOpen}
               onBack={() => setOpen(null)}
             />
