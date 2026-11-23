@@ -96,7 +96,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
   execFileSync(process.execPath, [resolve('node_modules/vite-plus/bin/vp'), 'build', '--config', 'e2e/networkHost.config.ts'], {
     stdio: 'pipe',
   })
-  const port = await portNumber()
+  let port = await portNumber()
   const readySchema = Schema.Struct({ homeId: HomeId, hostDeviceId: ClientDeviceId, projectId: Schema.String, taskId: Schema.String })
   const start = async () => {
     let output = ''
@@ -123,7 +123,25 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
       throw error
     }
   }
-  let host = await start()
+  /**
+   * The host on `port`, which was only free when it was picked: another process on a busy machine may take it before the
+   * host listens, and a host just stopped may not have let go of it yet. The host then says its home refused to listen
+   * (ConnectionRefused). Before anything is paired, another port will do; after, the home is known by this one, so the same
+   * port is tried again.
+   */
+  const startListening = async (paired: boolean) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await start()
+      } catch (error) {
+        if (attempt === 5 || !String(error).includes('ConnectionRefused')) throw error
+        progress(`Native pairing: the host could not listen on ${port}, trying again`)
+        if (paired) await new Promise((resolve) => setTimeout(resolve, 500))
+        else port = await portNumber()
+      }
+    }
+  }
+  let host = await startListening(false)
   progress('Native pairing: standalone host ready')
   const clientRoot = mkdtempSync(join(tmpdir(), 'althar-pairing-client-'))
   const clientEnvironment = {
@@ -222,7 +240,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await host.closed
     await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
     const before = host.ready
-    host = await start()
+    host = await startListening(true)
     expect(host.ready).toEqual(before)
     await remote.getByRole('button', { name: 'Reconnect', exact: true }).click()
     await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
