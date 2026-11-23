@@ -92,9 +92,9 @@ export function AboutHeader({
       <span className={s.ways}>
         <Out href={website}>{t.website}</Out>
         {onNotes !== undefined ? (
-          <button type="button" className={s.out} onClick={onNotes}>
+          <Button size="small" onClick={onNotes}>
             {t.notes}
-          </button>
+          </Button>
         ) : (
           <Out href={notes}>{t.notes}</Out>
         )}

@@ -2,6 +2,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './AppVersion.module.css'
 
 /*
@@ -37,9 +38,9 @@ export function AppVersion({ version, notes, onNotes, text, className, ...rest }
     <span className={cx(s.version, className)} {...rest}>
       <span>{t.name(version)}</span>
       {onNotes !== undefined ? (
-        <button type="button" className={s.notes} onClick={onNotes}>
+        <LinkButton className={s.notes} onClick={onNotes}>
           {t.notes}
-        </button>
+        </LinkButton>
       ) : (
         href !== undefined && (
           <a className={s.notes} href={href} target="_blank" rel="noreferrer">
