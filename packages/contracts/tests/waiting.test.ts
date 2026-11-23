@@ -7,6 +7,7 @@ import {
   isAnswered,
   isAside,
   isUnshipped,
+  issuesNamed,
   issuesWordOf,
   kindWords,
   readyText,
@@ -78,8 +79,27 @@ describe('what waits on the person', () => {
     expect(on.issues).toEqual([task])
     expect(on.unread).toEqual([])
     expect(issuesWordOf({ drafts: 0, changes: 2 })).toBe(kindWords.issueChanges)
-    expect(issuesWordOf({ drafts: 1, changes: 2 })).toBe(kindWords.issues)
+    expect(issuesWordOf({ drafts: 1, changes: 2 })).toBe('1 issue to file')
     expect(issuesWordOf(undefined)).toBe(kindWords.issueChanges)
+  })
+
+  it('says a merged or done task waits only on issues to file, how many, and names them', () => {
+    const one = { drafts: 1, changes: 0, named: [{ title: 'CI: Postgres is ~30× slower on the runner', itemId: 'i1' }] }
+    const three = {
+      drafts: 3,
+      changes: 0,
+      named: [
+        { title: 'Browser end-to-end tests', itemId: 'i1' },
+        { title: 'Flaky checkout', itemId: 'i2' },
+        { title: 'Slow CI', itemId: 'i3' },
+      ],
+    }
+    expect(issuesWordOf(one, { state: 'done', change: { state: 'merged' } })).toBe('Merged · 1 issue to file')
+    expect(issuesWordOf(three, { state: 'done', change: null })).toBe('Done · 3 issues to file')
+    expect(issuesWordOf(three, { state: 'open', change: { state: 'open' } })).toBe('3 issues to file')
+    expect(issuesNamed(one)).toBe('CI: Postgres is ~30× slower on the runner')
+    expect(issuesNamed(three)).toBe('Browser end-to-end tests, and 2 more')
+    expect(issuesNamed({ drafts: 0, changes: 1 })).toBeUndefined()
   })
 
   it('shows the first open pull request and otherwise the latest, with no queue on an empty or closed set', () => {
@@ -174,7 +194,7 @@ describe('what waits on the person', () => {
   it('counts a Scratch task once it settles, and names drafted issues before issue changes', () => {
     expect(isAside({ scratch: true, phase: 'settled' })).toBe(false)
     expect(isAside({ phase: 'ready' })).toBe(false)
-    expect(issuesWordOf({ drafts: 1, changes: 1 })).toBe(kindWords.issues)
+    expect(issuesWordOf({ drafts: 2, changes: 1 })).toBe('2 issues to file')
     expect(issuesWordOf({ drafts: 0, changes: 1 })).toBe(kindWords.issueChanges)
     expect(issuesWordOf(undefined)).toBe(kindWords.issueChanges)
   })

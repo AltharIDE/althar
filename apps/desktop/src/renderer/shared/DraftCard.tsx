@@ -65,11 +65,13 @@ const STATES: Readonly<Record<State, IssueDraftState>> = {
   discarded: IssueDraftState.Discarded,
 }
 
-export function DraftCard({ draft, actions }: { draft: IssueDraftContent; actions: DraftActions }) {
+export function DraftCard({ draft, itemId, actions }: { draft: IssueDraftContent; itemId?: string; actions: DraftActions }) {
   // A change saved shows as saving until the runtime has it; its card then reads it back.
   const [saving, setSaving] = useState(false)
   return (
     <IssueDraft
+      // Its item in the thread: what a line pointing at it finds it by (`reveal`).
+      {...(itemId === undefined ? {} : { 'data-item': itemId })}
       mark={productBrand(draft.product)}
       source={draft.tracker}
       container={draft.container}

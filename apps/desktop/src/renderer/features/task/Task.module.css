@@ -76,6 +76,10 @@
 .issue {
   display: flex;
 }
+/* What keeps a finished task in Needs you, pointing at its issue drafts: their titles wrap as the line's words do. */
+.holding button {
+  text-align: start;
+}
 .fileAll {
   display: flex;
   justify-content: flex-end;

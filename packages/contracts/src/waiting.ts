@@ -49,9 +49,33 @@ export const kindWords = {
   issueChanges: 'Issue changes to apply',
 } as const
 
-/** What a task's lead left for the person on a tracker, in a word: issues to file first, else changes to its issue. */
-export const issuesWordOf = (issues: { readonly drafts: number; readonly changes: number } | undefined): string =>
-  (issues?.drafts ?? 0) > 0 ? kindWords.issues : kindWords.issueChanges
+/** What a task's lead left for the person on a tracker, as its card knows it: how many issues to file, and which. */
+export interface IssuesLeft {
+  readonly drafts: number
+  readonly changes: number
+  readonly named?: ReadonlyArray<{ readonly title: string; readonly itemId: string }> | undefined
+}
+
+/**
+ * What a task's lead left for the person on a tracker, in a word: how many issues to file first, else changes to its
+ * issue. A task merged or done says so first: these alone keep it in Needs you, and settle it once filed or discarded.
+ */
+export const issuesWordOf = (
+  issues: IssuesLeft | undefined,
+  task?: { readonly state?: string | undefined; readonly change?: { readonly state: string } | null | undefined },
+): string => {
+  const drafts = issues?.drafts ?? 0
+  const what = drafts === 0 ? kindWords.issueChanges : drafts === 1 ? '1 issue to file' : `${drafts} issues to file`
+  if (task?.state !== 'done') return what
+  return `${task.change?.state === 'merged' ? 'Merged' : 'Done'} · ${what}`
+}
+
+/** The issues to file, by title, as a task's card names them: the oldest, and how many more. Undefined where none is named. */
+export const issuesNamed = (issues: IssuesLeft | undefined): string | undefined => {
+  const [first, ...rest] = issues?.named ?? []
+  if (first === undefined) return undefined
+  return rest.length === 0 ? first.title : `${first.title}, and ${rest.length} more`
+}
 
 /** A ready change's word, where it isn't plainly ready to accept. */
 export const readyText = {

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
+import { type HomeCall, type HomeTask, issuesNamed, issuesWordOf } from '@althar/contracts'
 import { Button, type EdgeWork, Fact, LinkButton, MergeButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { abandonedBlocker, blockerText } from '../../shared/blockers'
@@ -277,9 +277,19 @@ export const needsOf = ({
   // Issues to file, or changes to apply, in its task, where its lead drafted them.
   ...issues.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
+    const named = issuesNamed(task.issues)
     return project === undefined
       ? []
-      : [{ id: task.taskId, threadId: task.threadId, kind: issuesWordOf(task.issues), project, title: task.title }]
+      : [
+          {
+            id: task.taskId,
+            threadId: task.threadId,
+            kind: issuesWordOf(task.issues, task),
+            project,
+            title: task.title,
+            ...(named === undefined ? {} : { brief: named }),
+          },
+        ]
   }),
   // A plan that waits for a task that was abandoned, saying which.
   ...abandoned.flatMap((task): ReadonlyArray<Need> => {

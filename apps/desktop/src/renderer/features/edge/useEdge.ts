@@ -84,7 +84,7 @@ const sayable = (home: HomeSnapshot) => {
   const waits = waitsOf(home)
   return [
     ...waits.calls.map((call) => ({ id: call.id, projectId: call.projectId, kind: callKindOf(call) })),
-    ...waits.issues.map((task) => ({ id: task.taskId, projectId: task.projectId, kind: issuesWordOf(task.issues) })),
+    ...waits.issues.map((task) => ({ id: task.taskId, projectId: task.projectId, kind: issuesWordOf(task.issues, task) })),
     ...waits.ready.map((task) => ({ id: task.taskId, projectId: task.projectId, kind: readyWordOf(task) })),
   ]
 }

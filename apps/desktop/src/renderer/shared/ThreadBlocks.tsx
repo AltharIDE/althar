@@ -709,8 +709,8 @@ export function ThreadBlocks({
   card?: (card: TaskCardContent) => ReactNode
   /** Draws a run's card, in the thread it was asked for in. */
   run?: (run: RunContent) => ReactNode
-  /** Draws an issue the coordinator drafted, in its thread. */
-  draft?: (draft: IssueDraftContent) => ReactNode
+  /** Draws an issue the coordinator or a lead drafted, in its thread, by its item there: what a line points at to find it. */
+  draft?: (draft: IssueDraftContent, itemId: string) => ReactNode
   /** Draws changes to issues, in the thread of whoever proposed them. */
   changes?: (changes: IssueChangesContent) => ReactNode
   /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
@@ -835,7 +835,7 @@ export function ThreadBlocks({
       case 'run':
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'draft':
-        return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+        return <Fragment key={block.id}>{draft?.(block.draft, block.id)}</Fragment>
       case 'changes':
         return <Fragment key={block.id}>{changes?.(block.changes)}</Fragment>
       case 'setup':

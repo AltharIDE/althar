@@ -6,7 +6,7 @@ import { Activity, useState } from 'react'
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 import { TrackStep, trackOf as trackItems } from '@althar/ui'
 
-import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
+import { BoardView, issuesCardOf, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { MERGE_QUEUE_STEP, MERGING_STEP } from '../src/renderer/data/merges'
 import { pictureUrl } from '../src/main/pictureAddress'
@@ -889,7 +889,39 @@ describe('the board’s lanes', () => {
       running: 0,
       yours: 1,
     })
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([['Issues to file', 'File the gaps']])
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([['2 issues to file', 'File the gaps']])
+  })
+
+  it('says a merged task waits only on its unfiled issue drafts, naming them, until each is filed or discarded', () => {
+    const named = [
+      { title: 'CI: Postgres is ~30× slower on the runner', itemId: 'it1' },
+      { title: 'Browser end-to-end tests', itemId: 'it2' },
+    ]
+    const merged = task({
+      taskId: 't7',
+      threadId: 'th7',
+      title: 'Approval center',
+      state: 'done',
+      phase: 'waiting',
+      change: change({ state: 'merged' }),
+      issues: { drafts: 2, changes: 0, named },
+    })
+    const lanes = lanesOf(board({ tasks: [merged], calls: [] }))
+    expect(lanes.issues.map((work) => work.taskId)).toEqual(['t7'])
+    expect(issuesCardOf(merged)).toMatchObject({
+      word: 'Merged · 2 issues to file',
+      why: 'CI: Postgres is ~30× slower on the runner, and 1 more',
+    })
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.kind)).toEqual(['Merged · 2 issues to file'])
+    // One filed: the other alone, named.
+    expect(issuesCardOf({ ...merged, issues: { drafts: 1, changes: 0, named: named.slice(1) } })).toMatchObject({
+      word: 'Merged · 1 issue to file',
+      why: 'Browser end-to-end tests',
+    })
+    // None left: it settles, out of Needs you.
+    const { issues: _filed, ...rest } = merged
+    const settled = lanesOf(board({ tasks: [{ ...rest, phase: 'settled' }], calls: [] }))
+    expect({ issues: settled.issues.length, yours: yoursOf(settled) }).toEqual({ issues: 0, yours: 0 })
   })
 
   it('lists work whose failing checks its lead brought to the person as not ready to accept, with its line', () => {
