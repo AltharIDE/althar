@@ -1,0 +1,689 @@
+/* The DevOps lens prototype. Tokens only. */
+
+/* ---- Frames ---------------------------------------------------------------- */
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 760px;
+  background: var(--n-2);
+}
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stage {
+  min-height: 100vh;
+  padding: 32px 24px;
+  background: var(--n-2);
+}
+.stageInner {
+  margin: 0 auto;
+}
+
+/* ---- Shared ---------------------------------------------------------------- */
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-4);
+}
+.dot[data-tone='ok'] {
+  background: var(--ok);
+}
+.dot[data-tone='warm'] {
+  background: var(--warm);
+}
+.dot[data-tone='danger'] {
+  background: var(--danger);
+}
+.dot[data-tone='signal'] {
+  background: var(--signal);
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.state[data-tone='danger'] {
+  color: var(--danger);
+}
+.state[data-tone='ok'] {
+  color: var(--ok-ink);
+}
+.mono {
+  font: 450 11.5px/1.4 var(--mono);
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.at {
+  flex: none;
+  font: 500 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.num {
+  font: 500 12px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.num[data-tone='danger'] {
+  color: var(--danger);
+}
+.inline {
+  display: inline;
+}
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.sectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.sectionAside {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.more {
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.rows > li + li {
+  border-top: 1px solid var(--line);
+}
+.envTag {
+  flex: none;
+  display: inline-block;
+  min-width: 52px;
+  font: 500 10.5px/1.6 var(--mono);
+  color: var(--t-2);
+}
+.envTag[data-env='prod'] {
+  color: var(--t-1);
+  font-weight: 650;
+}
+.pageTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.subTitle {
+  margin: 6px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+
+/* ---- Home ---------------------------------------------------------------- */
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+}
+.envs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.env {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift);
+}
+.envHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.envName {
+  font: 600 14px/1 var(--mono);
+  color: var(--t-1);
+}
+.envFacts {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  row-gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+.envFacts dt {
+  color: var(--t-3);
+}
+.envFacts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--t-1);
+}
+.free {
+  color: var(--t-3);
+}
+.held {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--t-1);
+}
+.held b {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.heldFor {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.deployRow,
+.runRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+}
+.runRow {
+  grid-template-columns: auto minmax(0, 0.9fr) minmax(0, 1.4fr) auto auto;
+}
+.runRow > code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.runTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-1);
+}
+.alertRow {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+.alertText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.alertName {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: 550 12.5px/1.3 var(--font);
+  color: var(--t-1);
+}
+.alertName .envTag {
+  min-width: 0;
+}
+.alertSummary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.hoverAct {
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease-out);
+}
+.alertRow:hover .hoverAct,
+.alertRow:first-child .hoverAct,
+.hoverAct:focus-visible {
+  opacity: 1;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+.stat + .stat {
+  border-left: 1px solid var(--line);
+}
+.statLabel {
+  font-size: 11px;
+  color: var(--t-3);
+}
+.statValue {
+  font: 600 20px/1.1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.stat[data-tone='danger'] .statValue {
+  color: var(--danger);
+}
+.statSays {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+/* ---- Cluster ------------------------------------------------------------- */
+.cluster,
+.runLog {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.clusterHead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.read {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.table {
+  background: var(--n-1);
+}
+.linkCell {
+  font: inherit;
+  color: var(--t-1);
+  text-align: left;
+}
+.linkCell:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ns {
+  color: var(--t-3);
+}
+.quietCell {
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift);
+}
+.detail .table {
+  background: var(--n-1);
+}
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.detailHead > :last-child {
+  margin-left: auto;
+}
+.detailTitle {
+  margin: 0;
+  font: 600 15px/1.2 var(--mono);
+  color: var(--t-1);
+}
+.kind {
+  font: 500 11px/1 var(--font);
+  color: var(--t-3);
+}
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 24px;
+}
+.events .rows {
+  background: var(--n-1);
+}
+.eventRow {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.eventSays {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.meterTrack {
+  width: 80px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--track);
+  overflow: hidden;
+}
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--t-3);
+}
+.meter[data-tone='warm'] .meterFill {
+  background: var(--warm);
+}
+.meter[data-tone='danger'] .meterFill {
+  background: var(--danger);
+}
+.meterValue {
+  width: 30px;
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--t-2);
+}
+.allow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.allow b {
+  font-weight: 600;
+  color: var(--t-2);
+}
+
+/* ---- The gate, the alert and the offer: cards -------------------------- */
+.gate,
+.alert,
+.draft,
+.offer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-card);
+  overflow: hidden;
+}
+.alert {
+  padding-bottom: 14px;
+}
+.offer {
+  margin-top: 10px;
+}
+.gateTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+}
+.gateWord {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.gateWord[data-tone='signal'] {
+  color: var(--signal-ink);
+}
+.gateWord[data-tone='danger'] {
+  color: var(--danger);
+}
+.gateWord[data-tone='ok'] {
+  color: var(--ok-ink);
+}
+.gateTask {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.gateTop .at {
+  margin-left: auto;
+}
+.gateTitle {
+  margin: -4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.gateDiff {
+  border-radius: var(--r);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.gateDiffHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-2);
+  background: var(--n-2);
+  border-bottom: 1px solid var(--line);
+}
+.dryRun {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--t-3);
+}
+.gateFold summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.gateFold[open] summary {
+  margin-bottom: 8px;
+}
+.command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 12px;
+  border-radius: var(--r);
+  background: var(--n-2);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.command code {
+  flex: 1;
+  min-width: 0;
+  font: 500 12px/1.5 var(--mono);
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.facts {
+  font-size: 12px;
+}
+.refuse {
+  margin-top: -2px;
+}
+.gateSteps {
+  margin: 2px -16px -14px;
+}
+.gateAfter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -16px -14px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-2);
+}
+
+/* ---- Run log -------------------------------------------------------------- */
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: -10px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+}
+.ending {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+
+/* ---- Alert to task -------------------------------------------------------- */
+.alertFlow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.severity {
+  margin-left: 6px;
+  font: 500 11px/1 var(--mono);
+  color: var(--danger);
+}
+.alertSays {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.alertActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.attached {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--n-2);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+}
+.attachedHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+
+/* ---- Ops profile ----------------------------------------------------------- */
+.found {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.found li {
+  display: contents;
+}
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.never {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.settings .subTitle {
+  margin: 0;
+  padding: 16px 22px 8px;
+}
