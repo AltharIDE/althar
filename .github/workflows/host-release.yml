@@ -94,9 +94,16 @@ jobs:
           binary: 'false'
       - run: bun run check
       - run: bun run test --maxWorkers=1
+      # A worker installs from the same release a home does: its native worker goes in it.
+      - name: Build the native worker
+        working-directory: .
+        run: |
+          rustup show
+          cargo build --locked --release -p althar-worker
       - name: Assemble and sign the complete native Linux release
         env:
           ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
+          ALTHAR_WORKER_BINARY: ${{ github.workspace }}/target/release/althar-worker
           RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.check.outputs.tag }}/
           RELEASE_SEQUENCE: ${{ github.run_number }}
         run: |
