@@ -42,6 +42,13 @@ test('says in Up next and on a held task what memory holds back, and starts one 
     // One at work; memory lets no other start, so the next two are held back, which the person's three would have running.
     await startTask(page, 'Translate the welcome emails', '[lead:wait]')
     await expect(page.getByRole('article', { name: 'Translate the welcome emails', exact: true })).toContainText('Running')
+    // Its agent at work, the runtime reads the computer: memory short, one may work for now. Only then does more start.
+    const meter = page.getByRole('button', { name: /^CPU \d+%, MEM \d+%$/ })
+    const load = page.getByRole('dialog', { name: /’s load$/ })
+    await meter.click()
+    await expect(load.getByText('1 at a time until memory frees up')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(load).toHaveCount(0)
     await startTask(page, 'Add a worker as easily as connecting a home', '[lead:wait]')
     await startTask(page, 'Show receipts in the customer portal', '[lead:wait]')
     await showPanes(page, { conversation: false, board: true })
@@ -64,7 +71,6 @@ test('says in Up next and on a held task what memory holds back, and starts one 
 
     // How many may work, of the number, opens This Mac from the bar: the same agents, and why fewer.
     await next.getByRole('button', { name: '1 of 3 at a time' }).click()
-    const load = page.getByRole('dialog', { name: /’s load$/ })
     await expect(load.getByText('1 at a time until memory frees up')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(load).toHaveCount(0)
@@ -76,8 +82,9 @@ test('says in Up next and on a held task what memory holds back, and starts one 
     await sizeWindow(electronApp, page, 1440, 900)
 
     // The first held starts anyway from its row: in Running at once, and at work.
+    // Reached by its title, from the keyboard: its line turns into Start anyway as it does under the pointer.
     const first = next.locator('[data-row]').filter({ hasText: 'Add a worker as easily as connecting a home' })
-    await first.hover()
+    await first.getByRole('button', { name: 'Add a worker as easily as connecting a home', exact: true }).focus()
     await still(page)
     await next.screenshot({ path: 'test-results/held-back-start-anyway.png', scale: 'css', animations: 'disabled' })
     await first.getByRole('button', { name: 'Start anyway' }).click()

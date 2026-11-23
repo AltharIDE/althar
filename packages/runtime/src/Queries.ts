@@ -2353,13 +2353,11 @@ export class Queries extends Context.Service<
         return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
       })
 
-      /** A task never waits behind itself: its own places aren't among those it waits for. */
+      /** A task never waits behind itself: its own places aren't among those it waits for. Held back for now, it says why. */
       const queuedNow = (taskId: string) =>
         Effect.gen(function* () {
-          const now = yield* workPlaces
+          const [now, held] = [yield* workPlaces, (yield* (yield* Busy).held).get(taskId)]
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          // Held back for now, it says so and why: it would have a place with the person's number.
-          const held = (yield* (yield* Busy).held).get(taskId)
           return { ...now, busy: holders.length, holders, ...(held === undefined ? {} : { held }) }
         })
 
