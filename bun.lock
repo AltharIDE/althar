@@ -23,7 +23,6 @@
         "@agentclientprotocol/claude-agent-acp": "0.108.0",
         "@agentclientprotocol/codex-acp": "2.7.0",
         "@althar/contracts": "workspace:*",
-        "@althar/domain": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/runtime": "workspace:*",
         "@althar/transport-node": "workspace:*",
@@ -314,7 +313,6 @@
         "js-yaml": "4.3.2",
       },
       "devDependencies": {
-        "@effect/vitest": "4.0.7",
         "@types/js-yaml": "^4.0.9",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.1.0",
