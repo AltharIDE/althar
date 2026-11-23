@@ -612,10 +612,13 @@ const bringForward = () => {
   return raiseWindow(availableWindows(localWindows(), closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
-/** Opens the window on a thread, as a notification or the edge asks. */
-const openThread = (threadId: string) => {
+/**
+ * Brings the window forward on a thread, as a notification or the edge asks. `asked` is a prompt the thread raised itself: the
+ * window comes forward, but stays where it was where the thread is an aside, whose prompt shows in place.
+ */
+const openThread = (threadId: string, asked = false) => {
   const { window, fresh } = bringForward()
-  const send = () => window.webContents.send('althar:open', threadId)
+  const send = () => window.webContents.send('althar:open', threadId, asked)
   if (fresh || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
   else send()
 }
@@ -639,7 +642,7 @@ const computers = computerSessions({
   },
   changed: (state) => {
     for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
-    if (state.phase === 'asking') openThread(state.threadId)
+    if (state.phase === 'asking') openThread(state.threadId, true)
   },
 })
 const computerConnection = computerChannel(computers)
