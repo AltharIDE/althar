@@ -91,6 +91,17 @@ pub struct AgentConfig {
     root: PathBuf,
     providers: Vec<Provider>,
     mcp: HashMap<String, Vec<AgentWorkerMcpCommand>>,
+    /// Where a worker its home set up keeps which of its agents are signed in, read again at each hello.
+    signed_in: Option<PathBuf>,
+    /// The Althar release it runs, where it was installed from one.
+    release: String,
+}
+
+/// An agent entry for any project its home grants it: a worker its home set up offers its agents so.
+pub const ANY_PROJECT: &str = "*";
+
+fn project_or_any(id: &str) -> bool {
+    id == ANY_PROJECT || valid_id(id, "proj_")
 }
 
 impl AgentConfig {
@@ -134,7 +145,7 @@ impl AgentConfig {
                 return Err(invalid("An agent entry needs a provider ID"));
             };
             if providers.len() == MAX_CAPABILITIES
-                || !valid_id(project_id, "proj_")
+                || !project_or_any(project_id)
                 || !executable.is_absolute()
                 || !executable.is_file()
                 || providers.iter().any(|provider| {
@@ -185,7 +196,51 @@ impl AgentConfig {
             root,
             providers,
             mcp,
+            signed_in: None,
+            release: String::new(),
         })
+    }
+
+    /// Says, in each hello, which agents are signed in (one provider ID a line, in `signed_in`) and the release it runs.
+    pub fn with_status(mut self, signed_in: PathBuf, release: String) -> Self {
+        self.signed_in = Some(signed_in);
+        self.release = release.chars().take(64).collect();
+        self
+    }
+
+    fn any_project(&self) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.capability.project_id == ANY_PROJECT)
+    }
+
+    /// The configured agents signed in now, as the file the setup keeps says; none where it can't be read.
+    fn signed_in(&self) -> Vec<String> {
+        let Some(path) = &self.signed_in else {
+            return Vec::new();
+        };
+        let text = fs::read_to_string(path).unwrap_or_default();
+        let mut found: Vec<String> = text
+            .lines()
+            .map(str::trim)
+            .filter(|id| {
+                self.providers
+                    .iter()
+                    .any(|provider| provider.capability.provider_id == *id)
+            })
+            .map(str::to_owned)
+            .collect();
+        found.sort();
+        found.dedup();
+        found
+    }
+
+    fn mcp_for(&self, project: &str) -> Vec<AgentWorkerMcpCommand> {
+        self.mcp
+            .get(project)
+            .or_else(|| self.mcp.get(ANY_PROJECT))
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn register_mcp<'a>(
@@ -196,7 +251,7 @@ impl AgentConfig {
         let project = fields.next().unwrap_or_default();
         let name = fields.next().unwrap_or_default();
         let executable = Path::new(fields.next().unwrap_or_default());
-        if !valid_id(project, "proj_")
+        if !project_or_any(project)
             || name.is_empty()
             || name.len() > 64
             || !name
@@ -235,7 +290,9 @@ impl AgentConfig {
         self.providers
             .iter()
             .find(|one| {
-                one.capability.project_id == project && one.capability.provider_id == provider
+                one.capability.provider_id == provider
+                    && (one.capability.project_id == project
+                        || (one.capability.project_id == ANY_PROJECT && valid_id(project, "proj_")))
             })
             .ok_or_else(|| invalid("This agent was not configured for this project"))
     }
@@ -702,7 +759,7 @@ async fn serve_agent(
                 tools_port: u32::from(tools_port),
                 setup,
                 skills_path: skills_path.into(),
-                mcp_commands: config.mcp.get(&run.project_id).cloned().unwrap_or_default(),
+                mcp_commands: config.mcp_for(&run.project_id),
             }),
         ),
     )
@@ -917,6 +974,10 @@ pub async fn watch_agent_slot(
                     .iter()
                     .map(|provider| provider.capability.clone())
                     .collect(),
+                any_project: config.any_project(),
+                reports_sign_in: config.signed_in.is_some(),
+                signed_in: config.signed_in(),
+                release: config.release.clone(),
             }),
         )
         .await?;
@@ -1332,6 +1393,39 @@ mod config_tests {
         std::os::unix::fs::symlink(&checked_out, &local)?;
         set_config(entry)?;
         assert!(AgentConfig::read(&config).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn an_agent_for_any_project_runs_for_each_the_home_sends_and_says_who_is_signed_in()
+    -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().join("workspaces");
+        crate::agent_workspace::private_directory(&root)?;
+        let binary = std::env::current_exe()?.canonicalize()?;
+        let config = temp.path().join("agents.conf");
+        fs::write(
+            &config,
+            format!(
+                "{}\n*\tcodex\t{}\n*\tclaude\t{}\n",
+                root.display(),
+                binary.display(),
+                binary.display()
+            ),
+        )?;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o600))?;
+        let signed_in = temp.path().join("signed-in");
+        let loaded = AgentConfig::read(&config)?.with_status(signed_in.clone(), "0.11.0".into());
+        assert!(loaded.any_project());
+        let project = format!("proj_{}", "1".repeat(32));
+        assert!(loaded.provider(&project, "codex").is_ok());
+        assert!(loaded.provider(&project, "opencode").is_err());
+        assert!(loaded.provider("not-a-project", "codex").is_err());
+        // Nothing said yet: none signed in. Then only the agents it has, once each.
+        assert!(loaded.signed_in().is_empty());
+        fs::write(&signed_in, "codex\nunknown\ncodex\n")?;
+        assert_eq!(loaded.signed_in(), vec!["codex".to_owned()]);
+        assert_eq!(loaded.release, "0.11.0");
         Ok(())
     }
 }
