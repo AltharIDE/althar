@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /*
  * What main sends as `althar:open` reaches the window's listener with whether the thread raised the prompt itself: held
- * for a page that listens later, as a window that just opened has none yet.
+ * for a page that listens later, as a window that just opened has none yet. Each test loads the preload afresh.
  */
 
 const handlers = new Map<string, (...args: unknown[]) => void>()
@@ -19,12 +19,21 @@ vi.mock('electron', () => ({
   webFrame: { setZoomFactor: vi.fn() },
 }))
 
+const load = async () => {
+  await import('../src/preload/preload')
+  return handlers.get('althar:open')!
+}
+
 describe('the open the preload forwards', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    handlers.clear()
+  })
+
   it('says a prompt the thread raised itself, and a click on a notification, apart', async () => {
-    await import('../src/preload/preload')
-    const send = handlers.get('althar:open')!
+    const send = await load()
     const listener = vi.fn()
-    const stop = exposed.onOpen(listener)
+    exposed.onOpen(listener)
     send({}, 'th1', true)
     send({}, 'th2', false)
     send({}, 'th3')
@@ -33,12 +42,10 @@ describe('the open the preload forwards', () => {
       ['th2', false],
       ['th3', false],
     ])
-    stop()
   })
 
   it('holds one that came before the page listened, with its flag', async () => {
-    const send = handlers.get('althar:open')!
-    // No listener now: the earlier one was removed; a new page listens after.
+    const send = await load()
     send({}, 'th4', true)
     const late = vi.fn()
     exposed.onOpen(late)
