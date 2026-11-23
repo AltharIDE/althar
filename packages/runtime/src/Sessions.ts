@@ -1541,6 +1541,7 @@ export class Sessions extends Context.Service<
         policies,
         questions,
         quietFor,
+        signInFault: planUsage.signInFault,
         run,
         runtimeConfig,
         sessionFact,
