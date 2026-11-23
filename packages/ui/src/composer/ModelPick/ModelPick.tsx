@@ -10,7 +10,6 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import s from './ModelPick.module.css'
-import type { ModelRoom, ModelRoomText } from './room'
 
 export interface ModelPickText {
   /** The popover's name. */
@@ -76,9 +75,6 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
-  /** @deprecated Account usage belongs in Plan usage and is never displayed by the model picker. */
-  room?: (model: ModelInfo) => ModelRoom | null | undefined
-  roomText?: Partial<ModelRoomText>
   /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
   confirm?: (model: ModelInfo) => string | undefined
   /** The model waiting on that yes: one picked here, or elsewhere, like the consumer's browser. */
