@@ -3,7 +3,6 @@ import { realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { type RemoveFailed, removeFully } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { gitWithin } from './git'
@@ -356,10 +355,3 @@ const whereRuns = (run: GitRun): Effect.Effect<string | undefined> =>
     // A remote's URL as its config has it, which is what git hands the hook; a URL or a path named itself.
     return `${top}\t${((yield* gitSays(folder, 'remote', 'get-url', '--push', remote)) ?? '') || remote}`
   })
-
-/**
- * Takes a session's pass away, as when it has ended: tried again where Windows still holds it, and a failure if it
- * stays, as a pass left behind would still let the session push.
- */
-export const dropPass = (sessionId: string, at: Guard | undefined = made): Effect.Effect<void, RemoveFailed> =>
-  at === undefined ? Effect.void : removeFully(passOf(sessionId, at))

@@ -74,7 +74,6 @@ export {
   type Verdict,
   RULES,
   type RuleId,
-  type CommandRule,
   type AllowRule,
   type ProjectRuleSet,
   sayAllowRule,
@@ -83,8 +82,8 @@ export {
   type RuleContext,
 } from './ruleContext'
 export { commandOf, commandIn, essentials, pathsOf } from './rulePaths'
-export { type Parsed, parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
-export { type ReaderVerdict, ALTHAR_TOOL, OFFLINE, type ReaderOptions, decideReader } from './readerRules'
+export { parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
+export { ALTHAR_TOOL, OFFLINE, decideReader } from './readerRules'
 
 /** Visible irreversible code-host actions. Unknown operations run (ADR-097). */
 const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {

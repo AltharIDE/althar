@@ -38,7 +38,6 @@ describe('a task that ends in a pull request', () => {
   it.live('pushes its branch, opens a draft with what the steps reported, and listens to it until it merges', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
-    const tip = tipOf(bare)
     github.addRepository(['meridian', 'api'])
     // The fake lead commits as the person, as agents do: Althar credits only the person's own commits.
     git(working, 'config', 'user.name', 'Fake')
