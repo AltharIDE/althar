@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, expect, type Locator, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
+import { displaySwitches, launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
 test('a task asks once to use the computer, transfers a note between two apps and keeps a screenshot that opens full size', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-computer-'))
@@ -21,7 +21,7 @@ test('a task asks once to use the computer, transfers a note between two apps an
       const app = join(import.meta.dirname, 'fixtures', 'computer-app', 'main.cjs')
       for (const kind of ['Writer', 'Reader']) {
         const fixture = await electron.launch({
-          args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
+          args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), ...displaySwitches],
           env: { ...process.env, ALTHAR_FIXTURE_KIND: kind, ALTHAR_FIXTURE_FILE: file },
         })
         fixtures.push(fixture)

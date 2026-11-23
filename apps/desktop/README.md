@@ -55,6 +55,12 @@ On a Mac, the end-to-end tests run quietly, so you can keep working while they r
 ALTHAR_E2E_FOREGROUND=1 bun run test:e2e
 ```
 
+On Linux, the end-to-end tests never open anything on your desktop: each run gets a display of its own that no one sees (`scripts/display.ts`). Where Xvfb is installed (Fedora `xorg-x11-server-Xvfb`, Debian and Ubuntu `xvfb`, Arch `xorg-server-xvfb`), the run starts it on a free display number and stops it when it ends, as CI's virtual display. Where it isn't, the app runs on Chromium's headless platform (`--ozone-platform=headless`, on a 1280 × 1024 screen), which needs nothing installed, still draws the window for screenshots, and puts no icon in a tray. CI, which already runs the tests under `xvfb-run`, keeps its own display. `ALTHAR_E2E_DISPLAY` chooses: `xvfb` or `headless` for one of them, or `inherit` to run on the display the shell has, to watch a run on your own desktop:
+
+```bash
+ALTHAR_E2E_DISPLAY=inherit bun run test:e2e e2e/home.spec.ts
+```
+
 ### On Linux
 
 `bun run package` makes an AppImage, a deb and an rpm of the app (Linux

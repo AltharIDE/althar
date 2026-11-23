@@ -4,6 +4,8 @@ import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
+import { chooseDisplay, displayEnv, onPath, type Running, startXvfb, XVFB_PACKAGES } from './display.ts'
+
 /*
  * Builds the app and runs the end-to-end tests (any arguments go to
  * Playwright, so `bun run test:e2e e2e/home.spec.ts` runs one file), at most
@@ -13,7 +15,10 @@ import { setTimeout as sleep } from 'node:timers/promises'
  * (ALTHAR_E2E_SLOTS, 3 unless set), waiting while all are taken, or while
  * another run in the same worktree has one. They are kept in /tmp rather
  * than the temporary folder, which a sandboxed agent may have of its own
- * (ALTHAR_E2E_LOCKS moves them). CI runs alone and takes none.
+ * (ALTHAR_E2E_LOCKS moves them). CI runs alone and takes none. On Linux,
+ * once it has its slot, it runs on a display of its own that no one sees,
+ * Xvfb or Chromium's headless one, never the person's desktop
+ * (scripts/display.ts), and stops it as it ends.
  */
 
 interface Owner {
@@ -99,11 +104,12 @@ const release = (slot: string | undefined) => {
 
 let child: ReturnType<typeof spawn> | undefined
 let slot: string | undefined
+let screen: Running | undefined
 
-const run = (command: string, args: ReadonlyArray<string>) =>
+const run = (command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = process.env) =>
   new Promise<number>((resolve) => {
     // Windows finds bun and playwright as .cmd files, which only a shell runs.
-    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32' })
+    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', env })
     child.once('exit', (code, signal) => resolve(code ?? (signal === null ? 1 : 128)))
     child.once('error', (error) => {
       console.error(`Could not start ${command}: ${error.message}`)
@@ -114,15 +120,43 @@ const run = (command: string, args: ReadonlyArray<string>) =>
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.on(signal, () => {
     child?.kill(signal)
+    screen?.stop()
     release(slot)
     process.exit(130)
   })
+// However the run ends, its display goes with it.
+process.on('exit', () => screen?.stop())
+
+// On Linux, a display of the run's own that no one sees (scripts/display.ts): never the person's desktop.
+const display = chooseDisplay(process.platform, process.env, (command) => onPath(command))
+if (display.kind === 'fail') {
+  console.error(display.message)
+  process.exit(1)
+}
 
 if (process.env.CI === undefined) slot = await take()
 try {
   const built = await run('bun', ['run', 'build'])
-  // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
-  process.exitCode = built === 0 ? await run('bunx', ['playwright', 'test', ...process.argv.slice(2)]) : built
+  if (built !== 0) process.exitCode = built
+  else {
+    if (display.kind === 'xvfb') screen = await startXvfb(display.program)
+    if (display.kind === 'xvfb' || display.kind === 'headless')
+      console.warn(
+        display.kind === 'xvfb'
+          ? `Running on Xvfb at ${screen?.display}, which no one sees.`
+          : `Running on Chromium's headless display, which no one sees: no Xvfb here (to run as CI does, install it: ${XVFB_PACKAGES}).`,
+      )
+    // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
+    process.exitCode = await run(
+      'bunx',
+      ['playwright', 'test', ...process.argv.slice(2)],
+      display.kind === 'xvfb' || display.kind === 'headless' ? displayEnv(display, process.env, screen?.display) : process.env,
+    )
+  }
+} catch (error) {
+  console.error((error as Error).message)
+  process.exitCode = 1
 } finally {
+  screen?.stop()
   release(slot)
 }
