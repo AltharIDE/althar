@@ -1,5 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { accessSync, constants } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { accessSync, constants, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 /*
@@ -7,19 +9,23 @@ import { delimiter, join } from 'node:path'
  * their desktop, and a display of its own, such as a nested Xwayland, shows up on it as a window too. So each run gets a
  * private one no one sees, as CI's does:
  *
- * - Xvfb, where it is installed: a virtual X display, on a number it picks free itself (-displayfd), stopped as the run ends.
- * - Otherwise Chromium's headless Ozone platform (`--ozone-platform=headless`, e2e/support.ts), which needs nothing
- *   installed: the app draws its windows in memory, so screenshots are real, and nothing reaches any display.
- * - The display it was given, where CI already wraps the run in xvfb-run, or where the person asks for it with
- *   ALTHAR_E2E_DISPLAY=inherit, to watch a run on their own desktop.
+ * - Xvfb, where it is installed: a virtual X display, on a number it picks free itself (-displayfd), with a cookie only
+ *   the run has, stopped as the run ends.
+ * - Otherwise, or where Xvfb won't start, Chromium's headless Ozone platform (`--ozone-platform=headless`, e2e/support.ts),
+ *   which needs nothing installed: the app draws its windows in memory, so screenshots are real, and nothing reaches any
+ *   display.
+ * - The display it was given with ALTHAR_E2E_DISPLAY=inherit: CI's workflows, which run the tests under xvfb-run, or a
+ *   person who wants to watch a run on their own desktop.
  *
- * ALTHAR_E2E_DISPLAY=xvfb or headless asks for one of them. macOS and Windows are left as they are.
+ * Either virtual one also runs off the person's session bus (displayEnv). ALTHAR_E2E_DISPLAY=xvfb or headless asks for one
+ * of them. macOS and Windows are left as they are.
  */
 
 export type Display =
   | { readonly kind: 'untouched' }
-  | { readonly kind: 'inherit'; readonly why: string }
-  | { readonly kind: 'xvfb'; readonly program: string }
+  | { readonly kind: 'inherit' }
+  /** `asked`: by ALTHAR_E2E_DISPLAY=xvfb, so a server that won't start fails the run rather than leaving it headless. */
+  | { readonly kind: 'xvfb'; readonly program: string; readonly asked: boolean }
   | { readonly kind: 'headless' }
   | { readonly kind: 'fail'; readonly message: string }
 
@@ -41,27 +47,32 @@ export const onPath = (command: string, path = process.env.PATH ?? ''): string |
   return undefined
 }
 
-const set = (value: string | undefined) => value !== undefined && value !== ''
-
 /** Which display a run on `platform` takes, given its environment and where Xvfb is (`find`). */
 export const chooseDisplay = (platform: NodeJS.Platform, env: Env, find: (command: string) => string | undefined): Display => {
   if (platform !== 'linux') return { kind: 'untouched' }
   const asked = (env.ALTHAR_E2E_DISPLAY ?? '').trim().toLowerCase()
-  if (asked === 'inherit') return { kind: 'inherit', why: 'ALTHAR_E2E_DISPLAY=inherit' }
+  // CI's workflows that run the tests under xvfb-run say so with inherit: their display is already a virtual one.
+  if (asked === 'inherit') return { kind: 'inherit' }
   if (asked === 'headless') return { kind: 'headless' }
   const xvfb = find('Xvfb')
   if (asked === 'xvfb')
     return xvfb === undefined
       ? { kind: 'fail', message: `ALTHAR_E2E_DISPLAY=xvfb, but Xvfb isn't installed. Install it (${XVFB_PACKAGES}).` }
-      : { kind: 'xvfb', program: xvfb }
+      : { kind: 'xvfb', program: xvfb, asked: true }
   if (asked !== '') return { kind: 'fail', message: `ALTHAR_E2E_DISPLAY is inherit, xvfb or headless, not ${env.ALTHAR_E2E_DISPLAY}.` }
-  // CI runs the tests under xvfb-run itself (.github/workflows): its display is already a virtual one.
-  if (set(env.CI) && (set(env.DISPLAY) || set(env.WAYLAND_DISPLAY))) return { kind: 'inherit', why: "CI's own display" }
-  return xvfb === undefined ? { kind: 'headless' } : { kind: 'xvfb', program: xvfb }
+  return xvfb === undefined ? { kind: 'headless' } : { kind: 'xvfb', program: xvfb, asked: false }
 }
 
-/** What Playwright and the app run with on `display`: none of the person's displays, only the one chosen. */
-export const displayEnv = (display: Display, env: Env, x?: string): Record<string, string | undefined> => {
+/**
+ * What Playwright and the app run with on a virtual display: none of the person's displays, only the one chosen, and not
+ * their session bus either, over which a tray icon would reach their panel and a notification their desktop whatever the
+ * display (e2e.ts gives the run a private bus where dbus-run-session is installed).
+ */
+export const displayEnv = (
+  display: Display,
+  env: Env,
+  x?: { readonly display: string; readonly authority: string },
+): Record<string, string | undefined> => {
   if (display.kind !== 'xvfb' && display.kind !== 'headless') return { ...env }
   const {
     DISPLAY: _display,
@@ -71,26 +82,75 @@ export const displayEnv = (display: Display, env: Env, x?: string): Record<strin
     ALTHAR_E2E_OZONE: _ozone,
     ...rest
   } = env
-  return display.kind === 'xvfb' ? { ...rest, DISPLAY: x, XDG_SESSION_TYPE: 'x11' } : { ...rest, ALTHAR_E2E_OZONE: 'headless' }
+  const own = { ...rest, DBUS_SESSION_BUS_ADDRESS: 'disabled:' }
+  return display.kind === 'xvfb'
+    ? { ...own, DISPLAY: x?.display, XAUTHORITY: x?.authority, XDG_SESSION_TYPE: 'x11' }
+    : { ...own, ALTHAR_E2E_OZONE: 'headless' }
 }
 
-export interface Running {
-  readonly display: string
+/**
+ * The run's own session bus (dbus-run-session --config-file): a bare one, as CI's, that starts none of the desktop's
+ * services when the app asks for them (its portals, its wallet, its file system), which on the person's computer would
+ * otherwise each start on the run's bus, for nothing.
+ */
+export const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:tmpdir=/tmp</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+`
+
+/** An Xauthority file of one MIT-MAGIC-COOKIE-1 entry for any host, on `number` (any display where empty). */
+export const authorityFile = (cookie: Buffer, number = ''): Buffer => {
+  const short = (value: number) => {
+    const bytes = Buffer.alloc(2)
+    bytes.writeUInt16BE(value)
+    return bytes
+  }
+  const field = (bytes: Buffer) => Buffer.concat([short(bytes.length), bytes])
+  const FAMILY_WILD = 0xffff
+  return Buffer.concat([
+    short(FAMILY_WILD),
+    field(Buffer.alloc(0)),
+    field(Buffer.from(number)),
+    field(Buffer.from('MIT-MAGIC-COOKIE-1')),
+    field(cookie),
+  ])
+}
+
+export interface Xvfb {
   readonly server: ChildProcess
+  /** The Xauthority file only this run's clients have, as xvfb-run makes: the server takes no one without its cookie. */
+  readonly authority: string
+  /** The display, once the server has picked it (`:N`); rejects where it exits first, or doesn't say within the wait. */
+  readonly ready: Promise<string>
+  /** Stops the server, starting or started, and takes its cookie away. */
   readonly stop: () => void
 }
 
-/** Starts Xvfb on a free display, which it picks and names on a pipe of its own; rejects if it doesn't say within `wait` ms. */
-export const startXvfb = (program: string, wait = 10_000): Promise<Running> =>
-  new Promise((resolve, reject) => {
-    const server = spawn(program, ['-displayfd', '3', '-screen', '0', '1280x1024x24', '-nolisten', 'tcp'], {
-      stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
-    })
+/** Starts Xvfb on a free display, which it picks and names on a pipe of its own (-displayfd), with a cookie of this run's. */
+export const startXvfb = (program: string, wait = 10_000): Xvfb => {
+  const folder = mkdtempSync(join(tmpdir(), 'althar-xvfb-'))
+  const authority = join(folder, 'Xauthority')
+  const cookie = randomBytes(16)
+  writeFileSync(authority, authorityFile(cookie), { mode: 0o600 })
+  const server = spawn(program, ['-displayfd', '3', '-screen', '0', '1280x1024x24', '-nolisten', 'tcp', '-auth', authority], {
+    stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
+  })
+  const stop = () => {
+    if (server.exitCode === null && server.signalCode === null) server.kill('SIGTERM')
+    rmSync(folder, { recursive: true, force: true })
+  }
+  const ready = new Promise<string>((resolve, reject) => {
     let said = ''
     let errors = ''
-    const stop = () => {
-      if (server.exitCode === null && server.signalCode === null) server.kill('SIGTERM')
-    }
     const fail = (why: string) => {
       clearTimeout(timer)
       stop()
@@ -106,6 +166,10 @@ export const startXvfb = (program: string, wait = 10_000): Promise<Running> =>
       if (number === undefined) return
       clearTimeout(timer)
       server.removeAllListeners('exit')
-      resolve({ display: `:${number}`, server, stop })
+      // Now on its number, as xvfb-run writes it; the same cookie, so the server, rereading it as it resets, takes it too.
+      writeFileSync(authority, authorityFile(cookie, number), { mode: 0o600 })
+      resolve(`:${number}`)
     })
   })
+  return { server, authority, ready, stop }
+}

@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { chooseDisplay, displayEnv, onPath, type Running, startXvfb, XVFB_PACKAGES } from './display.ts'
+import { BUS_CONFIG, chooseDisplay, type Display, displayEnv, onPath, startXvfb, type Xvfb, XVFB_PACKAGES } from './display.ts'
 
 /*
  * Builds the app and runs the end-to-end tests (any arguments go to
@@ -104,7 +104,9 @@ const release = (slot: string | undefined) => {
 
 let child: ReturnType<typeof spawn> | undefined
 let slot: string | undefined
-let screen: Running | undefined
+let screen: Xvfb | undefined
+let busFolder: string | undefined
+const dropBus = () => busFolder !== undefined && rmSync(busFolder, { recursive: true, force: true })
 
 const run = (command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = process.env) =>
   new Promise<number>((resolve) => {
@@ -125,10 +127,13 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const)
     process.exit(130)
   })
 // However the run ends, its display goes with it.
-process.on('exit', () => screen?.stop())
+process.on('exit', () => {
+  screen?.stop()
+  dropBus()
+})
 
 // On Linux, a display of the run's own that no one sees (scripts/display.ts): never the person's desktop.
-const display = chooseDisplay(process.platform, process.env, (command) => onPath(command))
+let display: Display = chooseDisplay(process.platform, process.env, (command) => onPath(command))
 if (display.kind === 'fail') {
   console.error(display.message)
   process.exit(1)
@@ -139,24 +144,42 @@ try {
   const built = await run('bun', ['run', 'build'])
   if (built !== 0) process.exitCode = built
   else {
-    if (display.kind === 'xvfb') screen = await startXvfb(display.program)
-    if (display.kind === 'xvfb' || display.kind === 'headless')
+    let x: { display: string; authority: string } | undefined
+    if (display.kind === 'xvfb') {
+      // Kept from the moment it is spawned, so a signal while it starts stops it too.
+      screen = startXvfb(display.program)
+      try {
+        x = { display: await screen.ready, authority: screen.authority }
+        console.warn(`Running on Xvfb at ${x.display}, which no one sees.`)
+      } catch (error) {
+        screen.stop()
+        screen = undefined
+        if (display.asked) throw error
+        console.warn(`${(error as Error).message}\nRunning on Chromium's headless display instead.`)
+        display = { kind: 'headless' }
+      }
+    } else if (display.kind === 'headless')
       console.warn(
-        display.kind === 'xvfb'
-          ? `Running on Xvfb at ${screen?.display}, which no one sees.`
-          : `Running on Chromium's headless display, which no one sees: no Xvfb here (to run as CI does, install it: ${XVFB_PACKAGES}).`,
+        `Running on Chromium's headless display, which no one sees: no Xvfb here (to run as CI does, install it: ${XVFB_PACKAGES}).`,
       )
+    const virtual = display.kind === 'xvfb' || display.kind === 'headless'
     // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
-    process.exitCode = await run(
-      'bunx',
-      ['playwright', 'test', ...process.argv.slice(2)],
-      display.kind === 'xvfb' || display.kind === 'headless' ? displayEnv(display, process.env, screen?.display) : process.env,
-    )
+    const playwright = ['bunx', 'playwright', 'test', ...process.argv.slice(2)]
+    // On a virtual display, on a session bus of the run's own too, where there is one to start: the person's never.
+    const bus = virtual ? onPath('dbus-run-session') : undefined
+    if (bus !== undefined) {
+      busFolder = mkdtempSync(join(tmpdir(), 'althar-bus-'))
+      writeFileSync(join(busFolder, 'session.conf'), BUS_CONFIG)
+    }
+    const [command = 'bunx', ...args] =
+      busFolder === undefined ? playwright : [bus ?? '', `--config-file=${join(busFolder, 'session.conf')}`, '--', ...playwright]
+    process.exitCode = await run(command, args, virtual ? displayEnv(display, process.env, x) : process.env)
   }
 } catch (error) {
   console.error((error as Error).message)
   process.exitCode = 1
 } finally {
   screen?.stop()
+  dropBus()
   release(slot)
 }
