@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, resolve } from 'node:path'
+import { delimiter, join, resolve, sep } from 'node:path'
 
 /**
  * Where a test's git may never look for a repository above: the temporary folder tests make theirs in. A folder a
@@ -25,15 +25,22 @@ export const isolateGit = (env: NodeJS.ProcessEnv = process.env): void => {
       : `${ceiling}${delimiter}${env.GIT_CEILING_DIRECTORIES}`
 }
 
-/** Whether the folder is the top level of a repository of its own, and not a folder inside another. */
+const revParse = (folder: string, ...args: Array<string>) =>
+  execFileSync('git', ['rev-parse', ...args], { cwd: folder, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+
+const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}${sep}`)
+
+/**
+ * Whether the folder is the top level of a repository a test owns, and not a folder inside another. A linked
+ * worktree's root is its own top level too, but its config is its main repository's (`--git-common-dir`), shared by
+ * every worktree of it: such a folder counts only where that main repository is a test's, in the temporary folder.
+ */
 export const isOwnRepository = (folder: string): boolean => {
   try {
-    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: folder,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim()
-    return realpathSync(top) === realpathSync(folder)
+    const real = realpathSync(folder)
+    if (realpathSync(revParse(folder, '--show-toplevel')) !== real) return false
+    const common = realpathSync(revParse(folder, '--path-format=absolute', '--git-common-dir'))
+    return common === join(real, '.git') || within(common, realpathSync(tmpdir()))
   } catch {
     return false
   }

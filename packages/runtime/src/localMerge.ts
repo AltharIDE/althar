@@ -3,7 +3,8 @@ import { join, win32 } from 'node:path'
 
 import { Effect } from 'effect'
 
-import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
+import { committerIdentity } from './commitIdentity'
+import { commitOf, git, gitExactly, gitOutcome, gitWith, trackedStatus } from './git'
 
 /*
  * Merging a task's branch into its repository's default branch on this Mac,
@@ -34,6 +35,8 @@ export type MergePlan =
       readonly to: string
       readonly from: string
       readonly fastForward: boolean
+      /** Where git would have written the merge commit as a test's identity, what to tell the person (commitIdentity.ts). */
+      readonly warning: string | null
       /** The working tree that has the branch checked out, which moves with it. */
       readonly checkout: string | null
     }
@@ -186,12 +189,14 @@ export const conflictsOf = (root: string, branch: string, head: string) =>
 const mergeOf = (root: string, tip: string, head: string, message: string) =>
   Effect.gen(function* () {
     const forward = yield* gitOutcome(root, 'merge-base', '--is-ancestor', tip, head)
-    if (forward.code === 0) return { kind: 'move', to: head, from: tip, fastForward: true } as const
+    if (forward.code === 0) return { kind: 'move', to: head, from: tip, fastForward: true, warning: null } as const
     const merged = yield* gitOutcome(root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', tip, head)
     const [tree, ...rest] = merged.stdout.split('\n')
     if (merged.code !== 0) return { kind: 'conflicts', files: rest.filter((line) => line !== '') } as const
-    const to = yield* git(root, 'commit-tree', tree ?? '', '-p', tip, '-p', head, '-m', message)
-    return { kind: 'move', to, from: tip, fastForward: false } as const
+    // Written as the person, or as Althar where git here would write a test's identity or no one.
+    const { as, warning } = yield* committerIdentity(root)
+    const to = yield* gitWith(as, root, 'commit-tree', tree ?? '', '-p', tip, '-p', head, '-m', message)
+    return { kind: 'move', to, from: tip, fastForward: false, warning } as const
   })
 
 /** The files git doesn't track in `checkout` (ignored ones aside, which git replaces) where moving from `from` to `to` puts one. */

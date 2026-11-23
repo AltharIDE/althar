@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { identify } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -214,6 +215,23 @@ describe('changing the branch a running task works toward', () => {
         (rows) => rows.length === 1,
       )
       assert.include(brief?.body, `git diff ${readAs.slice(0, 12)}`)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('moving a pushed change, where git would write a test’s identity', () => {
+  it.live('picks its commits as Althar, and says so in the task’s thread with the file', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // What a test left in the repository's own config, which every worktree of it shares.
+      identify(working, 'T', 't@t.test')
+      assert.include(yield* callTool(task.lead, 'work_toward', { toward: 'release/0.8.0' }), 'works toward release/0.8.0 now')
+      assert.strictEqual(git(task.path, 'log', '-1', '--format=%cn <%ce>'), 'Althar <althar@localhost>')
+      const said = (yield* items(task.threadId)).flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : []))
+      const warnings = said.filter((title) => title.startsWith('Git here would write commits as a test’s identity'))
+      assert.lengthOf(warnings, 1)
+      assert.include(warnings[0], `“T” (user.name) from ${join(realpathSync(working), '.git', 'config')}`)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

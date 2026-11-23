@@ -9,8 +9,10 @@ import { identify, isolateGit, setConfig } from '../../src/git.ts'
 
 isolateGit()
 
-const folder = mkdtempSync(join(tmpdir(), 'althar-repo-'))
-mkdirSync(join(folder, 'nested'))
+// Given a folder, the root of a task's worktree, the helper is called there: it shares the main repository's config.
+const given = process.argv[2]
+const folder = given ?? mkdtempSync(join(tmpdir(), 'althar-repo-'))
+if (given === undefined) mkdirSync(join(folder, 'nested'))
 const outcome: Record<string, string> = {}
 const tried = (name: string, run: () => void) => {
   try {
@@ -22,7 +24,7 @@ const tried = (name: string, run: () => void) => {
 }
 
 tried('identify', () => identify(folder, 'T', 't@t.test'))
-tried('setConfig', () => setConfig(join(folder, 'nested'), 'user.name', 'T'))
+tried('setConfig', () => setConfig(given ?? join(folder, 'nested'), 'user.name', 'T'))
 // The test's own git, as it ran before there was a helper: with the ceiling set, it finds no repository to write to.
-tried('plain', () => execFileSync('git', ['config', 'user.name', 'T'], { cwd: folder, stdio: 'ignore' }))
+if (given === undefined) tried('plain', () => execFileSync('git', ['config', 'user.name', 'T'], { cwd: folder, stdio: 'ignore' }))
 process.stdout.write(`${JSON.stringify(outcome)}\n`)

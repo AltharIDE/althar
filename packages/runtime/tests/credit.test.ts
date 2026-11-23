@@ -9,7 +9,7 @@ import { Effect } from 'effect'
 import { coAuthorLine, creditBranch, type CreditOptions, creditedMessage, forgetful, type Memory, withoutAgentCredit } from '../src/credit'
 import { remoteTip } from '../src/git'
 import { repository } from './support'
-import { identify } from '@althar/testing'
+import { identify, setConfig } from '@althar/testing'
 
 /*
  * What leaves the Mac carries the person as author and Althar as co-author,
@@ -376,9 +376,9 @@ describe('a branch', () => {
       const path = ours()
       const key = join(path, '.git', 'signing-key')
       execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key])
-      git(path, 'config', 'gpg.format', 'ssh')
-      git(path, 'config', 'user.signingkey', key)
-      git(path, 'config', 'commit.gpgsign', 'true')
+      setConfig(path, 'gpg.format', 'ssh')
+      setConfig(path, 'user.signingkey', key)
+      setConfig(path, 'commit.gpgsign', 'true')
       git(path, 'switch', '-q', '-c', 'task')
       commit(path, 'a.txt', `Add a${claude}`)
       const made = yield* credit(path, on)
@@ -391,8 +391,8 @@ describe('a branch', () => {
       const path = ours()
       const key = join(path, '.git', 'signing-key')
       execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key])
-      git(path, 'config', 'gpg.format', 'ssh')
-      git(path, 'config', 'user.signingkey', key)
+      setConfig(path, 'gpg.format', 'ssh')
+      setConfig(path, 'user.signingkey', key)
       git(path, 'switch', '-q', '-c', 'task')
       writeFileSync(join(path, 'a.txt'), 'a')
       git(path, 'add', '.')
@@ -407,9 +407,9 @@ describe('a branch', () => {
       const path = ours()
       const key = join(path, '.git', 'signing-key')
       execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key])
-      git(path, 'config', 'gpg.format', 'ssh')
-      git(path, 'config', 'user.signingkey', key)
-      git(path, 'config', 'commit.gpgsign', 'true')
+      setConfig(path, 'gpg.format', 'ssh')
+      setConfig(path, 'user.signingkey', key)
+      setConfig(path, 'commit.gpgsign', 'true')
       git(path, 'switch', '-q', '-c', 'task')
       const first = commit(path, 'a.txt', `Add a${claude}`)
       const second = commit(path, 'b.txt', `Add b${claude}`)

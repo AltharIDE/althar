@@ -527,8 +527,8 @@ describe('a test identity in the repository’s config', () => {
       assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', why: 'Only reading now.' }), 'is a copy now')
       assert.strictEqual(git(working, 'log', '-1', '--format=%an <%ae>', 'althar/add-a-retry'), 'Althar <althar@localhost>')
       const said = (yield* notices(task.threadId)).find((title) => title.startsWith('Git here would write commits as a test’s identity'))
-      assert.include(said ?? '', '“T” from ')
-      assert.include(said ?? '', '“t@t.test” from ')
+      assert.include(said ?? '', '“T” (user.name) from ')
+      assert.include(said ?? '', '“t@t.test” (user.email) from ')
       assert.include(said ?? '', join(slashPath(working), '.git', 'config'))
       // The person's config is left as it was: Althar never edits it.
       assert.strictEqual(git(working, 'config', '--local', '--get', 'user.email'), 't@t.test')

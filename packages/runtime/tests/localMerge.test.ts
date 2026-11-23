@@ -1036,7 +1036,7 @@ describe('a merge here, worked out', () => {
       const head = git(root, 'rev-parse', 'HEAD')
       git(root, 'checkout', '-q', 'main')
       const plan = yield* planMerge(root, 'main', head, 'Merge')
-      assert.deepInclude(plan, { kind: 'move', to: head, fastForward: true, checkout: realpathSync(root) })
+      assert.deepInclude(plan, { kind: 'move', to: head, fastForward: true, warning: null, checkout: realpathSync(root) })
     }),
   )
 })

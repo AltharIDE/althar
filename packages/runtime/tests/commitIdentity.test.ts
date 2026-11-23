@@ -3,54 +3,62 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { identify, removeTreeSync } from '@althar/testing'
+import { identify, removeTreeSync, setConfig } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { ALTHAR_IDENTITY, committerIdentity, identityIn, testIdentityWarning } from '../src/commitIdentity'
+import { ALTHAR, type Committer, type Identity, committerIdentity, identityIn, testIdentityWarning } from '../src/commitIdentity'
 import { repository } from './support'
 
 /*
- * A test identity (`T <t@t.test>`) in a repository's config is plainly not the person's: Althar says so, naming the file
- * and the value, and commits as itself instead.
+ * A test identity (`T <t@t.test>`) in a repository's config, or in Althar's environment, is plainly not the person's:
+ * Althar says so, naming the key, the value and where it came from, and writes that role of the commit as itself. Git
+ * resolves the author and the committer each on its own, the environment over `author.*`/`committer.*` over `user.*`,
+ * so the tests look at what a real commit is written as.
  */
 
-const some = (value: string, origin = '/home/you/.gitconfig') => ({ value, origin })
+const some = (value: string, key = 'user.email', origin = '/home/you/.gitconfig') => ({ value, key, origin })
+const both = (name: ReturnType<typeof some> | null, email: ReturnType<typeof some> | null): Identity => ({
+  author: { name, email },
+  committer: { name, email },
+})
 
 describe('a test identity', () => {
   it('is a name T, or an address on a .test domain, and nothing else', () => {
-    assert.isNotNull(testIdentityWarning({ name: some('T'), email: null }))
-    assert.isNotNull(testIdentityWarning({ name: null, email: some('t@t.test') }))
-    assert.isNotNull(testIdentityWarning({ name: some('Fake'), email: some('fake@althar.test') }))
-    assert.isNotNull(testIdentityWarning({ name: some('Ada'), email: some('ada@EXAMPLE.TEST ') }))
-    assert.isNull(testIdentityWarning({ name: some('Tamás'), email: some('tamas@pm.me') }))
-    assert.isNull(testIdentityWarning({ name: some('T. Smith'), email: some('t@testing.dev') }))
-    assert.isNull(testIdentityWarning({ name: some('Ada'), email: some('ada@test.example.com') }))
-    assert.isNull(testIdentityWarning({ name: null, email: null }))
+    assert.isNotNull(testIdentityWarning(both(some('T', 'user.name'), null)))
+    assert.isNotNull(testIdentityWarning(both(null, some('t@t.test'))))
+    assert.isNotNull(testIdentityWarning(both(some('Fake', 'user.name'), some('fake@althar.test'))))
+    assert.isNotNull(testIdentityWarning(both(some('Ada', 'user.name'), some('ada@EXAMPLE.TEST '))))
+    assert.isNull(testIdentityWarning(both(some('Tamás', 'user.name'), some('tamas@pm.me'))))
+    assert.isNull(testIdentityWarning(both(some('T. Smith', 'user.name'), some('t@testing.dev'))))
+    assert.isNull(testIdentityWarning(both(some('Ada', 'user.name'), some('ada@test.example.com'))))
+    assert.isNull(testIdentityWarning(both(null, null)))
   })
 
-  it('is told with each value and the file it came from', () => {
+  it('is told with each value, its key and the file it came from, once though both roles read it', () => {
+    const file = '/home/you/projects/althar/.git/config'
+    const said = testIdentityWarning(both(some('T', 'user.name', file), some('t@t.test', 'user.email', file)))
+    assert.strictEqual(said?.split(file).length, 3)
+    assert.include(said, `“T” (user.name) from ${file} and “t@t.test” (user.email) from ${file}`)
+  })
+
+  it('is told by its variable where Althar’s environment holds it', () => {
     const said = testIdentityWarning({
-      name: some('T', '/home/you/projects/althar/.git/config'),
-      email: some('t@t.test', '/home/you/projects/althar/.git/config'),
+      author: { name: null, email: { value: 't@t.test', key: 'GIT_AUTHOR_EMAIL', origin: 'the environment' } },
+      committer: { name: null, email: some('ada@pm.me') },
     })
-    assert.include(said, '“T” from /home/you/projects/althar/.git/config and “t@t.test” from /home/you/projects/althar/.git/config')
+    assert.include(said, '“t@t.test” from GIT_AUTHOR_EMAIL in Althar’s environment')
   })
 })
 
-/** A repository of its own, with git's global and system config set aside, so what git resolves is what a test put there. */
+const IDENTITY_VARIABLES = ['GIT_COMMITTER_EMAIL', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_NAME']
+
+/** A repository of its own, with git's global and system config and identity variables set aside: what git resolves is what a test put there. */
 const ownConfig = Effect.acquireRelease(
   Effect.sync(() => {
     const path = repository()
     const nowhere = mkdtempSync(join(tmpdir(), 'althar-no-config-'))
-    const names = [
-      'GIT_CONFIG_GLOBAL',
-      'GIT_CONFIG_NOSYSTEM',
-      'GIT_COMMITTER_EMAIL',
-      'GIT_AUTHOR_EMAIL',
-      'GIT_COMMITTER_NAME',
-      'GIT_AUTHOR_NAME',
-    ]
+    const names = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', ...IDENTITY_VARIABLES]
     const before = names.map((name) => [name, process.env[name]] as const)
     for (const name of names) delete process.env[name]
     process.env.GIT_CONFIG_GLOBAL = join(nowhere, 'none')
@@ -68,34 +76,89 @@ const ownConfig = Effect.acquireRelease(
     }),
 ).pipe(Effect.map(({ path }) => path))
 
+/**
+ * Who a real commit is written as, made with `environment` as Althar's own and `as` over it, as Althar's git runs
+ * (`gitWith`): `author | committer`.
+ */
+const committed = (path: string, environment: Record<string, string>, as: Committer) => {
+  const env = { ...process.env, ...environment, ...as, GIT_CONFIG_NOSYSTEM: '1' }
+  execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'Work'], { cwd: path, env, stdio: 'ignore' })
+  return execFileSync('git', ['log', '-1', '--format=%an <%ae> | %cn <%ce>'], { cwd: path, env }).toString().trim()
+}
+
 describe('who a commit of Althar’s is written as', () => {
   it.effect('is the person, where git has them', () =>
     Effect.gen(function* () {
       const path = yield* ownConfig
       identify(path, 'Ada', 'ada@pm.me')
-      assert.deepStrictEqual(yield* committerIdentity(path), { as: [], warning: null })
+      const said = yield* committerIdentity(path)
+      assert.deepStrictEqual(said, { as: {}, warning: null })
+      assert.strictEqual(committed(path, {}, said.as), 'Ada <ada@pm.me> | Ada <ada@pm.me>')
     }),
   )
 
   it.effect('is Althar, where git has no one', () =>
     Effect.gen(function* () {
       const path = yield* ownConfig
-      assert.deepStrictEqual(yield* committerIdentity(path), { as: ALTHAR_IDENTITY, warning: null })
+      const said = yield* committerIdentity(path)
+      assert.deepStrictEqual(said, { as: ALTHAR, warning: null })
+      assert.strictEqual(committed(path, {}, said.as), 'Althar <althar@localhost> | Althar <althar@localhost>')
     }),
   )
 
-  it.effect('is Althar, and says so with the file, where git has a test’s', () =>
+  it.effect('is Althar, and says so with the file, where the repository’s config has a test’s', () =>
     Effect.gen(function* () {
       const path = yield* ownConfig
       identify(path, 'T', 't@t.test')
       const found = yield* identityIn(path)
-      assert.strictEqual(found.name?.value, 'T')
-      assert.strictEqual(found.email?.origin, join(path, '.git', 'config'))
+      assert.strictEqual(found.author.name?.value, 'T')
+      assert.strictEqual(found.committer.email?.origin, join(path, '.git', 'config'))
       const said = yield* committerIdentity(path)
-      assert.deepStrictEqual(said.as, ALTHAR_IDENTITY)
-      assert.include(said.warning, `“t@t.test” from ${join(path, '.git', 'config')}`)
+      assert.deepStrictEqual(said.as, ALTHAR)
+      assert.include(said.warning, `“t@t.test” (user.email) from ${join(path, '.git', 'config')}`)
+      assert.strictEqual(committed(path, {}, said.as), 'Althar <althar@localhost> | Althar <althar@localhost>')
       // The repository's config is as the test left it: Althar never edits it.
       assert.strictEqual(execFileSync('git', ['config', '--local', '--get', 'user.name'], { cwd: path }).toString().trim(), 'T')
+    }),
+  )
+
+  it.effect('finds a test author in author.* though user.* is the person’s, and writes only the author as Althar', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'Ada', 'ada@pm.me')
+      setConfig(path, 'author.email', 't@t.test')
+      const said = yield* committerIdentity(path)
+      assert.include(said.warning, `“t@t.test” (author.email) from ${join(path, '.git', 'config')}`)
+      assert.strictEqual(committed(path, {}, said.as), 'Althar <althar@localhost> | Ada <ada@pm.me>')
+    }),
+  )
+
+  it.effect('finds a test author in the environment beside a real committer there, and writes the author as Althar', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'Ada', 'ada@pm.me')
+      const environment = {
+        GIT_AUTHOR_NAME: 'T',
+        GIT_AUTHOR_EMAIL: 't@t.test',
+        GIT_COMMITTER_NAME: 'Bea',
+        GIT_COMMITTER_EMAIL: 'bea@pm.me',
+      }
+      // Without the guard, the environment wins over the config, and the commit is the test's.
+      assert.strictEqual(committed(path, environment, {}), 'T <t@t.test> | Bea <bea@pm.me>')
+      const said = yield* committerIdentity(path, { ...process.env, ...environment })
+      assert.include(said.warning, '“t@t.test” from GIT_AUTHOR_EMAIL in Althar’s environment')
+      assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Bea <bea@pm.me>')
+    }),
+  )
+
+  it.effect('finds a test author in the config beside a real committer in the environment', () =>
+    Effect.gen(function* () {
+      const path = yield* ownConfig
+      identify(path, 'T', 't@t.test')
+      const environment = { GIT_COMMITTER_NAME: 'Bea', GIT_COMMITTER_EMAIL: 'bea@pm.me' }
+      const said = yield* committerIdentity(path, { ...process.env, ...environment })
+      assert.isNotNull(said.warning)
+      assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Bea <bea@pm.me>')
     }),
   )
 })

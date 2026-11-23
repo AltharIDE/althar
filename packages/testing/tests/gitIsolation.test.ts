@@ -81,6 +81,37 @@ describe('configuring a test repository', () => {
     expect(git(own, 'config', '--local', '--get', 'user.name')).toBe('Fake')
   })
 
+  test('refuses the root of a linked worktree of a repository outside the temporary folder, whose config it shares', () => {
+    // The task worktree's root is its own top level, but `git config --local` there writes to the main repository's.
+    const temporary = join(worktree, '.tmp-root')
+    mkdirSync(temporary, { recursive: true })
+    const before = readFileSync(join(main, '.git', 'config'), 'utf8')
+    const outcome = JSON.parse(
+      execFileSync(process.execPath, [fixture, worktree], {
+        cwd: worktree,
+        encoding: 'utf8',
+        env: { ...process.env, TMPDIR: temporary, TEMP: temporary, TMP: temporary },
+      })
+        .trim()
+        .split('\n')
+        .at(-1) ?? '{}',
+    ) as Record<string, string>
+    expect(outcome.identify).toMatch(/Refusing to set user\.name/)
+    expect(outcome.setConfig).toMatch(/Refusing to set user\.name/)
+    expect(readFileSync(join(main, '.git', 'config'), 'utf8')).toBe(before)
+  })
+
+  test('sets the identity at the root of a linked worktree of a test’s own repository', () => {
+    const own = join(sandbox, 'linked-own')
+    mkdirSync(own)
+    git(own, 'init', '-q', '-b', 'main')
+    git(own, 'commit', '-q', '--allow-empty', '-m', 'Start')
+    const linked = join(sandbox, 'linked-own-task')
+    git(own, 'worktree', 'add', '-q', '-b', 'task', linked)
+    identify(linked, 'Fake', 'fake@althar.test')
+    expect(git(own, 'config', '--local', '--get', 'user.email')).toBe('fake@althar.test')
+  })
+
   test('keeps git above the temporary folder out of reach in every test', () => {
     expect(process.env.GIT_CEILING_DIRECTORIES?.split(delimiter)).toContain(realPath(tmpdir()))
     expect(gitCeiling(sandbox)).toBe(sandbox)

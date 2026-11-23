@@ -215,6 +215,26 @@ export const gitOutcome = (
     })),
   )
 
+/** A git command run with `env` over Althar's own: a commit written as someone (commitIdentity.ts). */
+export const gitWith = (
+  env: Readonly<Record<string, string>>,
+  cwd: string,
+  ...args: ReadonlyArray<string>
+): Effect.Effect<string, GitFailed> => run(60_000, cwd, args, env)
+
+/** As `gitOutcome`, with `env` over Althar's own. */
+export const gitOutcomeWith = (
+  env: Readonly<Record<string, string>>,
+  cwd: string,
+  ...args: ReadonlyArray<string>
+): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
+  runProcess(60_000, cwd, args, env, undefined).pipe(
+    Effect.map(({ error, stdout }) => ({
+      code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128,
+      stdout: stdout.trim(),
+    })),
+  )
+
 /** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
