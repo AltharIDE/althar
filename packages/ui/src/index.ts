@@ -142,6 +142,8 @@ export * from './chrome/LoadMeter/LoadPeek'
 export {
   type AgentsWhy,
   fewerOf,
+  freesUpWords,
+  heldBackWords,
   type LoadAgents,
   type LoadGlance,
   type LoadPoint,
