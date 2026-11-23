@@ -134,7 +134,7 @@ export interface ComputersText {
   removeLater: string
   /** Under Remove, for one gone offline during a task. */
   removeStranded: string
-  /** Where this connection can't take workers out, as a window on a home over SSH can't: who can. */
+  /** Where this connection can't take workers out, as a window on a device paired over the network can't: who can. */
   removeElsewhere: (home: string) => string
   removeTitle: (name: string) => string
   removeNote: (home: string) => string
@@ -203,7 +203,7 @@ export const computersText: ComputersText = {
   remove: (name) => `Remove ${name}`,
   removeLater: 'You can remove it once its task finishes.',
   removeStranded: 'It went offline during a task. Start it again so it can stop that work, then remove it.',
-  removeElsewhere: (home) => `Over SSH, this window can’t remove workers. A device paired with ${home} can.`,
+  removeElsewhere: (home) => `From a paired device, this window can’t remove workers. A window on ${home} itself, or over SSH, can.`,
   removeTitle: (name) => `Remove ${name}?`,
   removeNote: (home) =>
     `It gets no more tasks from ${home}, and its certificate isn’t accepted again. To bring it back, enroll a new certificate.`,
@@ -326,7 +326,7 @@ export interface ComputersProps {
   onAdd: () => void
   /** Takes a worker out of the home, once the person says so. */
   onRemove: (id: string) => void
-  /** Whether this connection may take workers out: a window on a home over SSH may not. */
+  /** Whether this connection may take workers out: a window on a device paired over the network may not. */
   canRemove?: boolean | undefined
   /** Opens the task a worker runs. */
   onTask?: ((id: string) => void) | undefined

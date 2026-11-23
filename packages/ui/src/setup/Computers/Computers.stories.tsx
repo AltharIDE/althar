@@ -132,13 +132,15 @@ export const OfflineDuringATask: Story = {
   },
 }
 
-/** A window on a Linux home over SSH can't take workers out: Remove says who can. */
-export const OverSsh: Story = {
+/** A window on a device paired over the network can't take workers out: Remove says who can. */
+export const OnAPairedDevice: Story = {
   args: { opened: WORKER_FREE.id, canRemove: false, home: { name: 'studio', load: LOAD_BUSY, agents: AGENTS_BUSY } },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Remove Linux worker 98b21d' })).toBeDisabled()
-    await expect(c.getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeInTheDocument()
+    await expect(
+      c.getByText('From a paired device, this window can’t remove workers. A window on studio itself, or over SSH, can.'),
+    ).toBeInTheDocument()
   },
 }
 

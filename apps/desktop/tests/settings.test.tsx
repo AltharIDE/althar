@@ -710,7 +710,7 @@ describe('the Settings tab', () => {
     expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('in a window on a Linux home over SSH, name that home, give its own commands, and leave Remove to a paired device', async () => {
+  it('in a window on a Linux home over SSH, name that home, take workers out as its operator, and give its own commands', async () => {
     const studio = onLinuxHome('studio')
     const worker = {
       workerId: `wrk_${'6'.repeat(32)}`,
@@ -728,8 +728,8 @@ describe('the Settings tab', () => {
     expect(await within(page).findByRole('button', { name: /^studio/ })).toBeTruthy()
     expect(within(page).queryByText('This Mac')).toBeNull()
     await userEvent.click(within(page).getByRole('button', { name: /Linux worker 666666/ }))
-    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(within(page).getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeTruthy()
+    // Over SSH it reaches the home as its operator, as the host's console does: it may take workers out.
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(false)
     await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
     await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
     const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })

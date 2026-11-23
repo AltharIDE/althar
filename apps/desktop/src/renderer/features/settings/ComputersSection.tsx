@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
-import { AddWorkerDialog, AgentsAtOnce, Computers, fewerOf, Problem, SettingList } from '@althar/ui'
+import { AddWorkerByHandDialog, AddWorkerDialog, AgentsAtOnce, Computers, fewerOf, Problem, SettingList } from '@althar/ui'
 
+import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { usePlaces } from '../../shared/usePlaces'
-import { computerWorkerOf, useRemoveWorker, useWorkers } from '../../shared/useWorkers'
+import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkers, useWorkerSignIn } from '../../shared/useWorkers'
+import { useAddWorker } from './useAddWorker'
 import { useWindowHome } from '../homes/windowHome'
 import type { StartModel } from '../start/useStart'
 import { EVERY, glanceOf, SLOTS } from '../tabs/useLoad'
@@ -24,8 +26,11 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
  * seconds while the section shows, as the meter reads it; so are its workers.
  * Althar Cloud's line and page (the kit's `CloudLine`, `CloudPage`) join it
  * once a home has Althar Cloud; none has yet. It is the window's home it
- * reads: in a window on a Linux home, that home by its name, the commands
- * that add a worker to it there, and Remove only where this connection may.
+ * reads: in a window on a Linux home, that home by its name. Adding a worker
+ * (`useAddWorker`), picking its projects and taking it out are where this
+ * connection may; its agents sign in from here over the SSH address it was
+ * set up at. A home that takes workers only by its operator's certificates
+ * gets the commands that add one by hand.
  */
 
 export function ComputersSection({
@@ -40,7 +45,7 @@ export function ComputersSection({
   onOpen: (id: string | null) => void
   onTask?: ((threadId: string) => void) | undefined
 }) {
-  const { client } = useServices()
+  const { client, host } = useServices()
   const reading = useQuery({
     queryKey: ['load'],
     queryFn: () => client.getLoad(),
@@ -52,9 +57,21 @@ export function ComputersSection({
   const places = usePlaces(true)
   const workers = useWorkers(true)
   const removing = useRemoveWorker()
+  const picking = useWorkerProjects()
+  const signing = useWorkerSignIn()
   const atOnce = useAgentsAtOnce()
   const [adding, setAdding] = useState(false)
   const here = useWindowHome()
+  const projects = useQuery({ ...reads(client).projects(), enabled: here.canManageWorkers })
+  const allProjects = (projects.data?.projects ?? []).map((project) => ({ id: project.id, name: project.name }))
+  const added = useCallback(
+    (workerId: string) => {
+      setAdding(false)
+      onOpen(workerId)
+    },
+    [onOpen],
+  )
+  const adder = useAddWorker({ open: adding, here: !here.standalone, workers, onClose: () => setAdding(false), added })
   const names = new Map((start.status?.agents ?? []).map((agent) => [agent.id, agent.name]))
   return (
     <>
@@ -63,7 +80,10 @@ export function ComputersSection({
         workers={
           workers === null
             ? null
-            : { enabled: workers.enabled, list: workers.workers.map((one) => computerWorkerOf(one, (id) => names.get(id) ?? id)) }
+            : {
+                enabled: workers.enabled,
+                list: workers.workers.map((one) => computerWorkerOf(one, (id) => names.get(id) ?? id, host.workers !== undefined)),
+              }
         }
         opened={opened}
         onOpen={onOpen}
@@ -72,8 +92,30 @@ export function ComputersSection({
           onOpen(null)
           removing.remove(id)
         }}
-        canRemove={here.canRemoveWorkers}
+        canRemove={here.canManageWorkers}
         onTask={onTask}
+        allProjects={allProjects}
+        {...(here.canManageWorkers
+          ? {
+              onProjects: (workerId: string, ids: readonly string[]) =>
+                picking.set(
+                  workerId,
+                  allProjects.filter((project) => ids.includes(project.id)),
+                ),
+            }
+          : {})}
+        {...(host.workers === undefined
+          ? {}
+          : {
+              onSignIn: (workerId: string, agent: string) => {
+                const worker = workers?.workers.find((one) => one.workerId === workerId)
+                if (worker !== undefined) signing.start(worker, agent)
+              },
+              signingIn: signing.signingIn,
+              onPaste: signing.paste,
+              onCancelSignIn: signing.cancel,
+              onOpenLink: (url: string) => window.open(url, '_blank', 'noopener'),
+            })}
         homeSettings={
           atOnce === null ? null : (
             <SettingList>
@@ -92,9 +134,28 @@ export function ComputersSection({
         slots={SLOTS}
       />
       {removing.failed !== null && <Problem className={s.failed}>{removing.failed}</Problem>}
+      {picking.failed !== null && <Problem className={s.failed}>{picking.failed}</Problem>}
       {atOnce?.failed === true && <Problem className={s.failed}>{text.failed}</Problem>}
-      {adding && (
+      {adding && workers?.adds === true && here.canManageWorkers && (
         <AddWorkerDialog
+          home={here.name}
+          way={adder.way}
+          onWay={adder.setWay}
+          ssh={adder.ssh}
+          address={adder.address}
+          onAddress={adder.setAddress}
+          addressError={adder.addressError}
+          onAdd={adder.add}
+          setup={adder.setup}
+          onTrust={adder.trust}
+          onAgain={adder.again}
+          onStop={adder.stop}
+          code={adder.code}
+          onClose={adder.close}
+        />
+      )}
+      {adding && (workers?.adds !== true || !here.canManageWorkers) && (
+        <AddWorkerByHandDialog
           home={here.name}
           enabled={workers?.enabled ?? false}
           standalone={here.standalone}

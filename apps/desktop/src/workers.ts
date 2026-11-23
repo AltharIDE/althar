@@ -38,6 +38,10 @@ export interface WorkerSetup {
   readonly problem?: { readonly code: string; readonly said?: string }
   /** The worker's own public key, SPKI DER, base64url: what its home signs. */
   readonly publicKey?: string
+  /** What it found looking the machine over: Linux · arm64 · 62 GB free. */
+  readonly facts?: string
+  /** The release is sent from here, as the machine couldn't download it. */
+  readonly sending?: boolean
   /** The release it was given. */
   readonly version?: string
   /** Where the login has no lingering, a line for the machine's administrator: without it the worker stops at logout. */

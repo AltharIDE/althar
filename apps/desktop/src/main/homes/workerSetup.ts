@@ -236,7 +236,9 @@ export const workerSetups = (
       at: STEP.look,
       ...(action?.code === 'LingerOff' && typeof action.command === 'string' ? { linger: `sudo ${action.command}` } : {}),
     })
-    say(`Linux · ${arch} · ${Math.round((typeof look.freeKiB === 'number' ? look.freeKiB : 0) / 1_048_576)} GB free`)
+    const facts = `Linux · ${arch} · ${Math.round((typeof look.freeKiB === 'number' ? look.freeKiB : 0) / 1_048_576)} GB free`
+    set({ facts })
+    say(facts)
     if (look.root === true) {
       // As a home is, a worker runs as a user of its own, reached with the key that logged in.
       const key = await acceptedKey(target, probed.stderr, signal)
@@ -278,6 +280,7 @@ export const workerSetups = (
     }
     // It can't download it: sent from here instead, into a folder the machine made for it.
     say(`Release ${release.version}: sending from this computer`)
+    set({ sending: true })
     const prepared = await bootstrap(target, 'worker-prepare-upload', signed.slice(1), signal)
     const started = prepared.events.find((one) => one.step === 'get' && one.state === 'started')
     if (typeof started?.uploadId !== 'string' || typeof started.uploadPath !== 'string' || /["\n]/.test(started.uploadPath))
