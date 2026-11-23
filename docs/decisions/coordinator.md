@@ -215,8 +215,8 @@ own button. Enter and Escape never forget.
   thread, so every window and every reload agrees. Nothing is deleted:
   `read_thread`, a handover's brief and the agent's own memory still reach
   everything before the mark. It is asked from a "Coordinator" bar above the
-  thread, and with `/clear` in the composer, which isn't sent to the
-  coordinator.
+  thread, and with `/clear` among the composer's commands, which isn't sent
+  to the coordinator.
 - **Forget the conversation too.** This is red, and says it can't be
   undone. The session ends, and every item of the thread is deleted except
   those still open, so nothing can reach them afterwards. A "Fresh session"

@@ -28,6 +28,8 @@ import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import { Problem } from '../../primitives/Problem/Problem'
 import { CommentChip, type ComposerComment } from '../Comments/Comments'
+import { type CommandRow, CommandPanel, commandRows } from '../Commands/CommandPanel'
+import { type ComposerCommand, commandState, doneAsPicked } from '../Commands/commands'
 import s from './Composer.module.css'
 
 /* Bars at rest, for a transcriber that does not report levels. */
@@ -173,6 +175,8 @@ export interface ComposerText {
   attachments: (n: number) => string
   removeImage: (name: string) => string
   readingImage: (name: string) => string
+  /** The list of commands' name, while a slash starts what is written. */
+  commands: string
 }
 
 export const composerText: ComposerText = {
@@ -209,6 +213,7 @@ export const composerText: ComposerText = {
   attachments: (n) => (n === 1 ? '1 attachment to send' : `${n} attachments to send`),
   removeImage: (name) => `Remove ${name}`,
   readingImage: (name) => `Reading ${name}`,
+  commands: 'Commands',
 }
 
 export interface ComposerProps {
@@ -281,6 +286,15 @@ export interface ComposerProps {
   onRemoveComment?: (id: string) => void
   /** What the consumer says of what is added, in a line over the field: one it refused, and why; or that the agent doesn't take images. */
   fileNote?: string
+  /**
+   * What a slash at the start does here: the commands this composer offers,
+   * each with where it stands now. Typed, they open on its top edge, picked
+   * one opens into what it acts on, and Enter does it rather than sending
+   * the words. Without them, a slash is a letter like any other.
+   */
+  commands?: readonly ComposerCommand[]
+  /** The command picked and open, by name, as it changes; null with none. What it acts on can step aside meanwhile, so it isn't shown twice. */
+  onCommand?: (name: string | null) => void
   inputRef?: RefObject<HTMLTextAreaElement | null>
   className?: string
   text?: Partial<ComposerText>
@@ -326,6 +340,8 @@ export function Composer({
   onRemoveImage,
   onRemoveFile,
   fileNote,
+  commands,
+  onCommand,
   inputRef,
   className,
   text,
@@ -377,6 +393,77 @@ export function Composer({
   const drafted = value.trim() !== '' || attached > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
+
+  /* A slash at the start: the commands it could be, or the one picked. Not while words arrive or are written down. */
+  const commanding = dictating || interim !== '' ? ({ kind: 'none' } as const) : commandState(value, commands ?? [])
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  /* The row the keys are on, for the list it was moved on: a new list starts on its first row. */
+  const [moved, setMoved] = useState<{ readonly list: string; readonly index: number }>({ list: '', index: 0 })
+  const listId = useId()
+  const commandWords = useRef<HTMLDivElement>(null)
+  const rows = commandRows(commanding)
+  const panelOpen = (commanding.kind === 'finding' || commanding.kind === 'picked') && dismissed !== value
+  const rowsKey = rows
+    .map((row) => (row.kind === 'command' ? row.command.name : row.kind === 'option' ? row.option.name : 'enter'))
+    .join(' ')
+  const onRow = moved.list === rowsKey ? Math.min(moved.index, Math.max(0, rows.length - 1)) : 0
+  const setActive = (index: number) => setMoved({ list: rowsKey, index })
+  const pickedName = panelOpen && commanding.kind === 'picked' ? commanding.command.name : null
+  useEffect(() => onCommand?.(pickedName), [pickedName, onCommand])
+  const caretToEnd = () =>
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (el) el.setSelectionRange(el.value.length, el.value.length)
+    })
+  const fill = (words: string) => {
+    setDismissed(null)
+    onChange(words)
+    caretToEnd()
+  }
+  /* What is done is not sent: the field empties as it is done, and the screen puts the words back where it couldn't be. */
+  const run = (does: () => void) => {
+    setDismissed(null)
+    onChange('')
+    does()
+  }
+  /* A row taken, by Enter or a press: a command is picked, or done where it takes nothing; one of what it takes is done or goes in the field. */
+  const take = (row: CommandRow | undefined) => {
+    if (row === undefined || commanding.kind === 'none' || commanding.kind === 'unknown') return
+    if (row.kind === 'command') {
+      const { command } = row
+      if (command.unavailable !== undefined) return
+      if (doneAsPicked(command)) run(() => command.run(''))
+      else fill(`/${command.name} `)
+      return
+    }
+    if (commanding.kind !== 'picked') return
+    const { command, words } = commanding
+    if (row.kind === 'action') return run(() => command.run(words.trim()))
+    const { option } = row
+    if (option.run !== undefined) run(option.run)
+    else fill(`/${command.name} ${option.fill ?? `${option.name} `}`)
+  }
+  /* Tab: a command, or one of what it takes, into the field, to go on from. */
+  const complete = (row: CommandRow | undefined) => {
+    if (row === undefined || commanding.kind === 'none' || commanding.kind === 'unknown') return
+    if (row.kind === 'command') return fill(`/${row.command.name} `)
+    if (row.kind === 'option' && commanding.kind === 'picked') fill(`/${commanding.command.name} ${row.option.fill ?? row.option.name}`)
+  }
+  /** Enter, or the send button, on a command: it is done, never sent as words. False where what is written isn't one. */
+  const commandEnter = () => {
+    if (commanding.kind === 'finding') {
+      if (!panelOpen) return false
+      take(rows[onRow])
+      return true
+    }
+    if (commanding.kind !== 'picked') return false
+    if (panelOpen && rows[onRow] !== undefined) take(rows[onRow])
+    else if (commanding.action !== null) {
+      const { command, words } = commanding
+      run(() => command.run(words.trim()))
+    }
+    return true
+  }
 
   /* Back to a draft kept from before, the cursor goes after what is there, to carry on from it. */
   useLayoutEffect(() => {
@@ -433,6 +520,7 @@ export function Composer({
   const submit = (e?: FormEvent, now = steering) => {
     e?.preventDefault()
     if (finishing !== null) return
+    if (commandEnter()) return
     setNotSent(false)
     if (!dictating) return deliver(now)
     setFinishing({ now, failed: dictation?.failed })
@@ -454,7 +542,9 @@ export function Composer({
   useEffect(() => {
     if (!failedNow) setNotSent(false)
   }, [failedNow])
-  const canSendNow = busy && drafted && onSendNow !== undefined
+  /* A command isn't sent to the agent: no Send now beside one. */
+  const canSendNow =
+    busy && drafted && onSendNow !== undefined && commanding.kind !== 'picked' && !(panelOpen && commanding.kind === 'finding')
   /* The key also sends now while dictating with nothing written yet: what was said is the message, and it goes the way it was asked for. */
   const sendNowByKey = busy && (drafted || dictating) && onSendNow !== undefined
 
@@ -476,6 +566,9 @@ export function Composer({
      to stop it; text you send waits until it is done with what it is doing, rather than cutting in. */
   const action = (() => {
     if (finishing !== null) return <IconButton icon="up" label={t.finishing} tone="fill" type="submit" busy />
+    /* For a command, what it does: it isn't sent, or queued for the agent. */
+    if (drafted && commanding.kind === 'picked')
+      return <IconButton icon="up" label={commanding.action ?? t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (drafted)
       return <IconButton icon="up" label={busy ? (steering ? t.sendNow : t.queue) : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
@@ -492,6 +585,11 @@ export function Composer({
           {carried && <div className={s.carried}>{carried}</div>}
           {above && <div className={s.above}>{above}</div>}
           {notice && <div className={s.notice}>{notice}</div>}
+        </div>
+      )}
+      {panelOpen && (
+        <div className={s.tray}>
+          <CommandPanel state={commanding} rows={rows} active={onRow} id={listId} label={t.commands} onPick={take} onActive={setActive} />
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
@@ -645,16 +743,32 @@ export function Composer({
               <span className={s.written}>{after}</span>
             </div>
           )}
+          {/* a command picked reads as one, in cobalt, and what it takes is written ahead of the caret in grey */}
+          {commanding.kind === 'picked' && <CommandWords ref={commandWords} value={value} state={commanding} />}
           <textarea
             ref={ref}
             rows={1}
             value={value}
-            className={cx(interim && s.under)}
+            className={cx((interim || commanding.kind === 'picked') && s.under)}
             readOnly={dictating}
             placeholder={shownPlaceholder}
             aria-label={placeholder}
             aria-describedby={note ? hintId : undefined}
-            onChange={(e) => onChange(e.target.value)}
+            {...(panelOpen && rows.length > 0
+              ? {
+                  'aria-autocomplete': 'list' as const,
+                  'aria-expanded': true,
+                  'aria-controls': listId,
+                  'aria-activedescendant': `${listId}-${onRow}`,
+                }
+              : {})}
+            onScroll={(e) => {
+              if (commandWords.current) commandWords.current.scrollTop = e.currentTarget.scrollTop
+            }}
+            onChange={(e) => {
+              setDismissed(null)
+              onChange(e.target.value)
+            }}
             onPaste={(e) => {
               // A picture or a file on the clipboard is added, not pasted as its name; one a file manager copied may say it holds files and list none, for the host to read.
               const pasted = [...e.clipboardData.files]
@@ -676,6 +790,25 @@ export function Composer({
                 e.preventDefault()
                 onStopAgent()
                 return
+              }
+              /* While the commands are open, the arrows move along them, Tab takes one into the field, and Escape shuts them. */
+              if (panelOpen && !e.nativeEvent.isComposing) {
+                if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && rows.length > 0) {
+                  e.preventDefault()
+                  setActive((onRow + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length)
+                  return
+                }
+                if (e.key === 'Tab' && !e.shiftKey && rows.length > 0) {
+                  e.preventDefault()
+                  complete(rows[onRow])
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDismissed(value)
+                  return
+                }
               }
               /* Tab takes the suggestion into the field, to send with Enter or change first. */
               if (e.key === 'Tab' && !e.shiftKey && suggested !== null) {
@@ -794,4 +927,29 @@ function micLabel(d: Dictation, t: ComposerText): string {
   if (d.busy) return t.dictateBusy
   if (d.progress !== undefined) return t.dictateProgress(Math.round(Math.max(0, Math.min(1, d.progress)) * 100))
   return t.dictate
+}
+
+/* The words written, drawn over the field letter for letter while a command is picked: its name (and what it takes, where the
+   words are one of those) in cobalt, the rest as written, and what it takes ahead of the caret while nothing is. */
+function CommandWords({
+  ref,
+  value,
+  state,
+}: {
+  ref: RefObject<HTMLDivElement | null>
+  value: string
+  state: Extract<ReturnType<typeof commandState>, { kind: 'picked' }>
+}) {
+  const head = value.length - state.words.length
+  const said = state.exact === null ? 0 : state.words.length - state.words.trimStart().length + state.exact.name.length
+  const command = value.slice(0, head + said)
+  const rest = value.slice(head + said)
+  const ahead = state.words.trim() === '' ? state.command.takes : undefined
+  return (
+    <div ref={ref} className={s.commandWords} aria-hidden="true">
+      <span className={s.commandName}>{command}</span>
+      {rest}
+      {ahead !== undefined && <span className={s.ahead}>{ahead}</span>}
+    </div>
+  )
 }

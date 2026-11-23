@@ -28,6 +28,16 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import {
+  asideCommandOf,
+  commandsOf,
+  commandText,
+  compactCommandOf,
+  goalElsewhere,
+  interruptCommandOf,
+  modelCommandOf,
+  pressOf,
+} from '../../shared/composerCommands'
 import { useModels } from '../../data/models'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -701,6 +711,22 @@ export function ProjectView({
       },
     )
   }
+  /*
+   * /aside with words from the coordinator's composer: a new aside opens, and the words are its first, as + and then typing
+   * them would do; they wait here until it is open.
+   */
+  const asideFirst = useRef<string | null>(null)
+  const startAsideFrom = (words: string) => {
+    asideFirst.current = words
+    asides.begin(null)
+  }
+  const opened = talkingTo.kind
+  useEffect(() => {
+    const words = asideFirst.current
+    if (opened !== 'new' || words === null) return
+    asideFirst.current = null
+    startAside(words)
+  })
   const send = (body: string, now: boolean) => {
     // Asking to clear the chat is not said to the coordinator.
     if (clearing.command(body)) {
@@ -814,10 +840,26 @@ export function ProjectView({
       </>
     ) : null
 
+  // What a slash in the coordinator's composer offers; a new aside's is only its first words. Goals are a task's: said where.
+  const commands =
+    talkingTo.kind === 'new'
+      ? []
+      : commandsOf(
+          asideCommandOf((words) => startAsideFrom(words)),
+          model.agents.length > 0 &&
+            picking !== null &&
+            modelCommandOf(models, text.coordinator.toLowerCase(), model.agents, picking, choose),
+          compactCommandOf(session, () => void model.compact()),
+          interruptCommandOf(busy, text.coordinator.toLowerCase(), () => void model.interrupt()),
+          clearing.ask !== null && pressOf('clear', commandText.clear.does, 'remove', clearing.ask),
+          goalElsewhere,
+        )
+
   const composer = (
     <div className={s.composer}>
       <DraftComposer
         draft={draftOf}
+        commands={commands}
         {...(helpMe.suggestion === undefined ? {} : { suggestion: helpMe.suggestion })}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
