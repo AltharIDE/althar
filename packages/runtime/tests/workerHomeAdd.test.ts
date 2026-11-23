@@ -14,7 +14,7 @@ import { testAgentWorker } from '../../worker-protocol/integration/worker-agent-
 import { SERVER_NAME } from '../src/workerHome/authority'
 import { workerCodeOf, type WorkerGrant } from '../src/workerHome/codes'
 import { workerExecution } from '../src/workerHome/execution'
-import { openWorkers, WORKER_PORT, type WorkerListener } from '../src/workerHome/network'
+import { listenWorkers, openWorkers, WORKER_PORT, type WorkerListener } from '../src/workerHome/network'
 import { workerTestDirectory } from './workerTestFiles'
 
 /*
@@ -154,6 +154,15 @@ it.live('opens its worker port when asked, signs a worker’s own key, and takes
       yield* home.admin!.assign(grant.workerId, [])
       assert.deepStrictEqual(home.list(projectId), [])
       assert.strictEqual(yield* Effect.flip(home.admin!.assign(grant.workerId, ['not-a-project'])), 'Choose projects of this home')
+
+      // Removed, then added again by the person, with the key it kept: a new worker; the removed one stays out.
+      yield* home.revoke!(grant.workerId)
+      const again = yield* home.admin!.add({ publicKey: worker.publicKey, name: 'build-box', ssh: 'root@build-box' })
+      assert.notStrictEqual(again.workerId, grant.workerId)
+      assert.deepStrictEqual(
+        home.enrolled?.()?.map((one) => one.workerId),
+        [again.workerId],
+      )
     }),
   ),
 )
@@ -235,6 +244,26 @@ it.live('takes another port where its own is taken, and keeps it for next time',
       const listener = yield* openWorkers(paths, homeId)
       assert.notStrictEqual(listener.port, WORKER_PORT)
       assert.deepStrictEqual(JSON.parse(readFileSync(join(paths.profile, 'workers.json'), 'utf8')), { version: 2, port: listener.port })
+    }),
+  ),
+)
+
+it.live('listens on another port, for this run, where its kept port is taken at a later start', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = workerTestDirectory()
+      const paths = { profile: join(root, 'profile'), worktrees: join(root, 'worktrees') }
+      mkdirSync(paths.profile, { mode: 0o700 })
+      const first = yield* Effect.scoped(Effect.map(openWorkers(paths, homeId), (listener) => listener.port))
+      const holder = createServer()
+      yield* Effect.promise(
+        () => new Promise<void>((resolve) => holder.once('error', () => resolve()).listen(first, '::', () => resolve())),
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => holder.close()))
+      const later = yield* listenWorkers(paths, homeId)
+      assert.isDefined(later)
+      assert.notStrictEqual(later?.port, first)
+      assert.deepStrictEqual(JSON.parse(readFileSync(join(paths.profile, 'workers.json'), 'utf8')), { version: 2, port: first })
     }),
   ),
 )

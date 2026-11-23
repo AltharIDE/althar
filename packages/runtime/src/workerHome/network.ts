@@ -249,6 +249,35 @@ const startListener = async (
   }
 }
 
+/**
+ * A home that is its own authority listens on its port; where something else holds it (gRPC says only that it couldn't
+ * bind), on one the system picks, for this run, rather than not at all. A worker set up meanwhile is told that one.
+ */
+const startManaged = async (
+  options: WorkerHomePaths,
+  homeId: string,
+  port: number,
+  now: () => number,
+  connectionChanged: ((outcome: AgentWorkerConnection) => void) | undefined,
+) => {
+  try {
+    return await startListener(options, homeId, { version: 2, port }, now, connectionChanged)
+  } catch (error) {
+    if (!(error instanceof WorkerHomeError) || error.code !== 'HostUnavailable') throw error
+    return startListener(options, homeId, { version: 2, port: 0 }, now, connectionChanged)
+  }
+}
+const startKept = (
+  options: WorkerHomePaths,
+  homeId: string,
+  config: typeof Configuration.Type,
+  now: () => number,
+  connectionChanged: ((outcome: AgentWorkerConnection) => void) | undefined,
+) =>
+  config.version === 1
+    ? startListener(options, homeId, config, now, connectionChanged)
+    : startManaged(options, homeId, config.port, now, connectionChanged)
+
 export const listenWorkers = (options: WorkerHomePaths, homeId: string, connectionChanged?: (outcome: AgentWorkerConnection) => void) =>
   Clock.clockWith((clock) =>
     Effect.acquireRelease(
@@ -256,7 +285,7 @@ export const listenWorkers = (options: WorkerHomePaths, homeId: string, connecti
         try: async () => {
           const config = await readConfiguration(options.profile)
           if (config === undefined) return undefined
-          return startListener(options, homeId, config, () => clock.currentTimeMillisUnsafe(), connectionChanged)
+          return startKept(options, homeId, config, () => clock.currentTimeMillisUnsafe(), connectionChanged)
         },
         catch: configureFailure,
       }),
@@ -275,16 +304,9 @@ export const openWorkers = (options: WorkerHomePaths, homeId: string, connection
         try: async () => {
           const now = () => clock.currentTimeMillisUnsafe()
           const kept = await readConfiguration(options.profile)
-          if (kept !== undefined) return startListener(options, homeId, kept, now, connectionChanged)
-          let listening: WorkerListener
-          try {
-            listening = await startListener(options, homeId, { version: 2, port: WORKER_PORT }, now, connectionChanged)
-          } catch (error) {
-            // Taken by something else (gRPC says only that it couldn't bind): the port the system picks, kept, so a worker
-            // finds it there again after a restart.
-            if (!(error instanceof WorkerHomeError) || error.code !== 'HostUnavailable') throw error
-            listening = await startListener(options, homeId, { version: 2, port: 0 }, now, connectionChanged)
-          }
+          if (kept !== undefined) return startKept(options, homeId, kept, now, connectionChanged)
+          // Where its own port is taken, the one the system picks, kept, so a worker finds it there again after a restart.
+          const listening = await startManaged(options, homeId, WORKER_PORT, now, connectionChanged)
           await writePrivate(configurationPath(options.profile), JSON.stringify({ version: 2, port: listening.port }), true)
           return listening
         },

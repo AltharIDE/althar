@@ -285,6 +285,11 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       enrollNamed(fingerprint: string, name: string, ssh: string | null) {
         db.exec('BEGIN IMMEDIATE')
         try {
+          // Removed before, and added again by the person: a new worker for the same key. The removed one keeps its
+          // history under a fingerprint no key matches, so it stays out.
+          db.prepare(
+            `UPDATE worker_enrollment SET fingerprint = 'removed:' || id || ':' || fingerprint WHERE fingerprint = ? AND revoked = 1`,
+          ).run(fingerprint)
           db.prepare('INSERT INTO worker_enrollment (id, fingerprint) VALUES (?, ?) ON CONFLICT(fingerprint) DO NOTHING').run(
             id('wrk'),
             fingerprint,

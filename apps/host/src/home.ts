@@ -127,7 +127,10 @@ export const serveHome = (
         networkFingerprint = files.networkFingerprint
       }
       homeId = instance.homeId
-      worker = yield* listenWorkers(options, instance.homeId)
+      // Its workers are not the home: where their listener can't start, the home still serves, and says why.
+      worker = yield* listenWorkers(options, instance.homeId).pipe(
+        Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)),
+      )
       const endpoint = yield* listenLocalApi(options.profile, networkFingerprint).pipe(Effect.provideContext(context))
       yield* ready({
         homeId: endpoint.homeId,

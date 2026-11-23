@@ -205,8 +205,7 @@ export const computersText: ComputersText = {
   removeStranded: 'It went offline during a task. Start it again so it can stop that work, then remove it.',
   removeElsewhere: (home) => `From a paired device, this window can’t remove workers. A window on ${home} itself, or over SSH, can.`,
   removeTitle: (name) => `Remove ${name}?`,
-  removeNote: (home) =>
-    `It gets no more tasks from ${home}, and its certificate isn’t accepted again. To bring it back, enroll a new certificate.`,
+  removeNote: (home) => `It gets no more tasks from ${home}, and its key isn’t accepted again. To bring it back, add it again.`,
   removeConfirm: 'Remove',
   cancel: 'Cancel',
   addTitle: (home) => `Add a worker to ${home}`,
