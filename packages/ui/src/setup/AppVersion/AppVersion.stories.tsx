@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { States, statesOn } from '../../storybook/States'
 import { AppVersion } from './AppVersion'
@@ -18,6 +18,16 @@ export const WithNotes: Story = {
     const notes = within(canvasElement).getByRole('link', { name: 'What’s new' })
     await expect(notes).toHaveAttribute('href', 'https://github.com/AltharIDE/althar/releases/tag/v0.1.0')
     await expect(notes).toHaveAttribute('target', '_blank')
+  },
+}
+
+/** Where the app shows what's new in the window, it opens there: a press, not a link out. */
+export const InTheWindow: Story = {
+  args: { onNotes: fn() },
+  play: async ({ args, canvasElement }) => {
+    await expect(within(canvasElement).queryByRole('link')).toBeNull()
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'What’s new' }))
+    await expect(args.onNotes).toHaveBeenCalledOnce()
   },
 }
 

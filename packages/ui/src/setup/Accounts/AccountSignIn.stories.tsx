@@ -410,12 +410,12 @@ export const SameAccount: Story = {
   },
 }
 
-/** The agent stopped, in its own words. */
+/** Why it stopped, in one short line, beside Try again. */
 export const Failed: Story = {
-  args: { step: { kind: 'failed', said: 'error: login timed out after 300s' } },
+  args: { step: { kind: 'failed', said: 'No reply. Check the connection.' } },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('error: login timed out after 300s')).toBeInTheDocument()
+    await expect(c.getByText('No reply. Check the connection.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Try again' }))
     await expect(args.onBack).toHaveBeenCalled()
   },
@@ -521,7 +521,7 @@ const STEPS: { state: string; step: AccountSignInStep }[] = [
     step: { kind: 'named', name: 'weekend', who: 'you@weekend.dev', paid: 'ChatGPT Plus', placed: 'After your plans, before the key' },
   },
   { state: 'the same account', step: { kind: 'same', name: 'Personal' } },
-  { state: 'failed', step: { kind: 'failed', said: 'error: login timed out after 300s' } },
+  { state: 'failed', step: { kind: 'failed', said: 'No reply. Check the connection.' } },
 ]
 
 /** Every step, each in its line. */
