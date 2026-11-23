@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 
 import type { Client } from './data/client'
 import { useServices } from './data/services'
+import { staysInPlace } from './features/project/asked'
 import { KeptScreens } from './features/tabs/KeptScreens'
 import { TabsFrame } from './features/tabs/TabsFrame'
 
@@ -17,9 +18,17 @@ import { TabsFrame } from './features/tabs/TabsFrame'
  * moves along a row of them, shows at once.
  */
 function Root() {
-  const { host } = useServices()
+  const { host, cache } = useServices()
   const navigate = useNavigate()
-  useEffect(() => host.onOpen((threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })), [host, navigate])
+  useEffect(
+    () =>
+      host.onOpen((threadId, asked) => {
+        // A prompt an aside raised shows where the aside is: the window came forward, and stays where it was.
+        if (asked && staysInPlace(cache, threadId)) return
+        void navigate({ to: '/threads/$threadId', params: { threadId } })
+      }),
+    [host, cache, navigate],
+  )
   return (
     <HoverCardProvider>
       <TabsFrame>
