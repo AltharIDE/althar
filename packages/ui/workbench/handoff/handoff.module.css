@@ -1,0 +1,530 @@
+/* storefront's window: its tabs, its row, then the conversation beside the scene's pane. */
+.window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-2);
+}
+.rooms {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.talk {
+  --face-surface: var(--n-1);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(520px, 36vw, 620px);
+  min-width: 0;
+  background: var(--n-1);
+  border-right: 1px solid var(--line);
+}
+.face {
+  flex: 1;
+  min-height: 0;
+}
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A page in the pane. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 880px;
+  padding: 20px 28px 32px;
+}
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.track {
+  max-width: 560px;
+}
+.mono,
+.monoCell {
+  font: 400 11.5px/1.3 var(--mono);
+  color: var(--t-3);
+}
+.mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.monoCell {
+  color: var(--t-2);
+}
+.dim {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.label {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+.state {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.state[data-tone='live'] {
+  color: var(--live);
+}
+
+/* spec.md's frontmatter, as the page's head. */
+.front {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.4fr);
+  gap: 14px 24px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.frontCol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.owners {
+  grid-row: span 2;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.owners th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+  padding: 0 12px 6px 0;
+}
+.owners td {
+  padding: 4px 12px 4px 0;
+  border-top: 1px solid var(--line);
+}
+.frontFacts {
+  display: flex;
+  gap: 24px;
+  margin: 0;
+}
+.frontFacts dt {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+  margin-bottom: 3px;
+}
+.frontFacts dd {
+  margin: 0;
+}
+.doc {
+  padding: 4px 4px 0;
+}
+
+/* A sheet: a handoff, an artefact, a question. */
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 0;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  overflow: hidden;
+}
+.sheet > :last-child:not(.steps) {
+  margin-bottom: 14px;
+}
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.kicker {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.kicker[data-signal] {
+  color: var(--signal);
+}
+.sheetTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.sheetLine {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.steps {
+  margin: 4px -16px 0;
+}
+.readOnly {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.waits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.facts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.facts svg {
+  color: var(--t-3);
+}
+.proposed {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--r);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.proposed li + li {
+  border-top: 1px solid var(--line);
+}
+.pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.pick:hover {
+  background: var(--hover-faint);
+}
+.pick input {
+  margin-top: 3px;
+  accent-color: var(--signal);
+}
+.pickText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pickTitle {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.quiet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+/* A question back, and its answer. */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--n-2);
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.question .dim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+.who {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+
+/* The feature's stages, a row each. */
+.stages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.stage {
+  display: grid;
+  grid-template-columns: 76px 190px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.stage + .stage {
+  border-top: 1px solid var(--line);
+}
+.stage[data-cell='next'] {
+  color: var(--t-3);
+}
+.stageName {
+  font-weight: 600;
+}
+.stage[data-cell='now'] .stageName {
+  color: var(--signal);
+}
+.stagePrs {
+  display: flex;
+  gap: 10px;
+}
+.pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stageGate {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t-2);
+}
+.stageGate svg {
+  color: var(--ok);
+}
+.stageChecks {
+  grid-column: 2 / -1;
+}
+
+/* Design's lens: canvases, screenshot diffs. */
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px 8px 10px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px var(--line);
+  text-align: left;
+  transition: box-shadow var(--fast);
+}
+.tile:hover {
+  box-shadow: 0 0 0 1px var(--line-3);
+}
+.tile[data-chosen] {
+  box-shadow: 0 0 0 1.5px var(--signal);
+}
+.tileName {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.diffs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.diffs > svg {
+  flex: none;
+  color: var(--t-3);
+}
+.diff {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  min-width: 0;
+}
+
+/* A cart screen, drawn small. */
+.mini {
+  --mini-paper: #fbf9f5;
+  --mini-ink: #d9d2c5;
+  --mini-ink-2: #ebe5da;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r);
+  background: var(--mini-paper);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.diff[data-dark] .mini {
+  --mini-paper: #2a2723;
+  --mini-ink: #4a453e;
+  --mini-ink-2: #37332e;
+}
+.miniBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 14%;
+  padding: 0 8%;
+  background: var(--mini-ink-2);
+}
+.miniBar span:first-child {
+  width: 22%;
+  height: 30%;
+  border-radius: 2px;
+  background: var(--mini-ink);
+}
+.miniBadge {
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 9px;
+  line-height: 13px;
+}
+.miniBody {
+  flex: 1;
+  display: flex;
+  gap: 6%;
+  padding: 6% 8%;
+}
+.miniItems {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10%;
+}
+.miniItem {
+  display: flex;
+  align-items: center;
+  gap: 8%;
+  height: 18%;
+}
+.miniThumb {
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--mini-ink);
+}
+.miniLine {
+  flex: 1;
+  height: 35%;
+  border-radius: 2px;
+  background: var(--mini-ink-2);
+}
+.miniSync {
+  height: 9%;
+  width: 60%;
+  border-radius: 2px;
+  background: var(--mini-ink);
+}
+.miniSync[data-changed] {
+  background: var(--signal-fill);
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+}
+.miniTotals {
+  width: 30%;
+  border-radius: 3px;
+  background: var(--mini-ink-2);
+}
+.miniTotals[data-drawer] {
+  width: 40%;
+  margin: -6% -8% -6% 0;
+  border-radius: 0;
+  background: var(--mini-ink);
+}
+
+/* The role picker's lines under its checklist. */
+.lands {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+}
+.lands div {
+  display: flex;
+  gap: 8px;
+}
+.lands dt {
+  width: 92px;
+  color: var(--t-1);
+  font-weight: 550;
+}
+.lands dd {
+  margin: 0;
+  color: var(--t-3);
+}
+.nothingHidden {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--n-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
