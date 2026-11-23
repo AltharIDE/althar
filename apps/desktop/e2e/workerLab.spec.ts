@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, sizeWindow, still } from './support'
+import { launch, openFirstProject, planTask, sizeWindow, still, toConversation } from './support'
 
 /*
  * Adding a worker to This Mac from Settings › Computers, against a real Linux machine reached over SSH: a lab, not CI.
@@ -115,12 +115,16 @@ test('adds a fresh Linux machine as a worker over SSH, picks its project and sig
     await expect(plan.getByRole('button', { name: 'Runs on: build-box' })).toBeVisible()
     await shoot(page, '7-runs-on')
     await plan.getByRole('button', { name: /^Start( now)?$/ }).click()
+    // Its card, then its thread: the lead's answer comes from the worker.
+    const task = page.getByRole('article', { name: 'Say hello from the worker' }).last()
+    await task.getByRole('button', { name: /Open task/ }).click({ timeout: 120_000 })
+    await toConversation(page)
     await expect(
       page
         .getByText(/Hello from build-box/)
         .filter({ visible: true })
         .first(),
-    ).toBeVisible({ timeout: 10 * 60_000 })
+    ).toBeVisible({ timeout: 5 * 60_000 })
     await shoot(page, '8-ran-on-worker')
   } finally {
     await electronApp.close()

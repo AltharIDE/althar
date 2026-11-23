@@ -199,8 +199,10 @@ export const useAddWorker = ({
   // Started and connected: the dialog gives way to its sheet.
   const workerId = setup?.phase === 'done' ? setup.workerId : undefined
   const connected = workerId !== undefined && workers?.workers.some((one) => one.workerId === workerId && one.connected) === true
+  const shown = useRef<string | null>(null)
   useEffect(() => {
-    if (!connected || workerId === undefined || bridge === undefined) return
+    if (!connected || workerId === undefined || bridge === undefined || shown.current === workerId) return
+    shown.current = workerId
     // Main says it is put away; the dialog is closed meanwhile.
     void bridge.act({ kind: 'dismiss' })
     added(workerId)
