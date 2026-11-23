@@ -106,3 +106,75 @@ describe('device pairing invitations', () => {
     }).pipe(Effect.provide(env)),
   )
 })
+
+describe('pairing codes the home makes for a window', () => {
+  const reach = { origin: 'https://mac.local:6769', tlsKeyPin: 'a'.repeat(64), tlsCertificate: 'Y2VydGlmaWNhdGU' }
+  const bodyOf = (code: string) =>
+    JSON.parse(Buffer.from(code.slice('althar-pairing1.'.length), 'base64url').toString('utf8')) as Record<string, unknown>
+
+  it.effect('refuses a code until phones can reach the home, then carries where they reach it', () =>
+    Effect.gen(function* () {
+      const pairings = yield* DevicePairings
+      assert.strictEqual((yield* Effect.flip(pairings.create())).reason, 'PhonesCantReach')
+      assert.deepStrictEqual(yield* pairings.access(), { origin: null, switchable: false, on: false })
+      yield* pairings.reachable(reach)
+      assert.deepStrictEqual(yield* pairings.access(), { origin: reach.origin, switchable: false, on: true })
+      const made = yield* pairings.create()
+      const body = bodyOf(made.code)
+      assert.strictEqual(body.origin, reach.origin)
+      assert.strictEqual(body.tlsKeyPin, reach.tlsKeyPin)
+      assert.strictEqual(body.tlsCertificate, reach.tlsCertificate)
+      assert.strictEqual(hash(String(body.token)), made.tokenHash)
+      assert.strictEqual(made.link, `https://althar.ai/pair#${made.code.slice('althar-pairing'.length)}`)
+      assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'waiting', expiresAt: made.expiresAt })
+    }).pipe(Effect.provide(env)),
+  )
+
+  it.effect('says which device a code paired, and that it ran out otherwise', () =>
+    Effect.gen(function* () {
+      const pairings = yield* DevicePairings
+      yield* pairings.reachable(reach)
+      const made = yield* pairings.create()
+      const device = yield* pairings.complete(request(String(bodyOf(made.code).homeId), String(bodyOf(made.code).token)))
+      const paired = yield* pairings.status(made.tokenHash)
+      assert.strictEqual(paired.state, 'paired')
+      assert.strictEqual(paired.state === 'paired' ? paired.device.deviceId : null, device.deviceId)
+      const unused = yield* pairings.create()
+      yield* TestClock.adjust('5 minutes')
+      assert.deepStrictEqual(yield* pairings.status(unused.tokenHash), { state: 'expired' })
+      assert.deepStrictEqual(yield* pairings.status(hash(token())), { state: 'expired' })
+    }).pipe(Effect.provide(env)),
+  )
+
+  it.effect('still says a code paired after it ran out and another code cleared it away', () =>
+    Effect.gen(function* () {
+      const pairings = yield* DevicePairings
+      yield* pairings.reachable(reach)
+      const made = yield* pairings.create()
+      yield* TestClock.adjust('4 minutes')
+      const device = yield* pairings.complete(request(String(bodyOf(made.code).homeId), String(bodyOf(made.code).token)))
+      yield* TestClock.adjust('2 minutes')
+      // Another window's code, made after the first ran out, clears the run-out invitations away.
+      yield* pairings.create()
+      const status = yield* pairings.status(made.tokenHash)
+      assert.strictEqual(status.state === 'paired' ? status.device.deviceId : status.state, device.deviceId)
+      yield* TestClock.adjust('15 minutes')
+      yield* pairings.create()
+      assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'expired' })
+    }).pipe(Effect.provide(env)),
+  )
+
+  it.effect('switches phone access only where the home lets a window, and drops codes out as it turns off', () =>
+    Effect.gen(function* () {
+      const pairings = yield* DevicePairings
+      assert.strictEqual((yield* Effect.flip(pairings.setAccess(true))).reason, 'Forbidden')
+      yield* pairings.switchable((on) => pairings.reachable(on ? reach : null), false)
+      assert.deepStrictEqual(yield* pairings.access(), { origin: null, switchable: true, on: false })
+      assert.deepStrictEqual(yield* pairings.setAccess(true), { origin: reach.origin, switchable: true, on: true })
+      const made = yield* pairings.create()
+      assert.deepStrictEqual(yield* pairings.setAccess(false), { origin: null, switchable: true, on: false })
+      assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'expired' })
+      assert.strictEqual((yield* Effect.flip(pairings.create())).reason, 'PhonesCantReach')
+    }).pipe(Effect.provide(env)),
+  )
+})

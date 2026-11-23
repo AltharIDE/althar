@@ -1,6 +1,13 @@
 import { webcrypto } from 'node:crypto'
 
-import { API_VERSION, PAIRING_CODE_MAX_LENGTH, PairingCode, PairingResult, pairingRegistrationMessage } from '@althar/contracts'
+import {
+  API_VERSION,
+  PAIRING_CODE_MAX_LENGTH,
+  PairingCode,
+  PairingResult,
+  pairingCodeIn,
+  pairingRegistrationMessage,
+} from '@althar/contracts'
 import { Clock, Effect, Schema } from 'effect'
 
 import { homeHttpsAgent, httpsJson, httpsOrigin, pairedCertificate } from './https'
@@ -42,8 +49,10 @@ export const signDeviceMessage = (privateKey: string, message: string) =>
 
 export const encodePairingCode = (code: PairingCode): string => `althar-pairing1.${Buffer.from(JSON.stringify(code)).toString('base64url')}`
 
-export const decodePairingCode = (given: string): PairingCode => {
+/** A pairing code, or a pairing link with the code after its # (as the Mac's QR carries it). */
+export const decodePairingCode = (pasted: string): PairingCode => {
   try {
+    const given = pairingCodeIn(pasted)
     if (given.length > PAIRING_CODE_MAX_LENGTH || !/^althar-pairing1\.[A-Za-z0-9_-]+$/.test(given)) throw invalid()
     const encoded = given.slice('althar-pairing1.'.length)
     const bytes = Buffer.from(encoded, 'base64url')

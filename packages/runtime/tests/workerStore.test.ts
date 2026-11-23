@@ -325,6 +325,24 @@ describe('the private worker ledger', () => {
     }
   })
 
+  it('lists each enrolled worker with its projects, in the order it was enrolled, until it is revoked', async () => {
+    const store = await openWorkerStore(temporary(), homeId)
+    try {
+      expect(store.workers()).toEqual([])
+      const first = store.enroll(fingerprint, `proj_${'4'.repeat(32)}`)
+      store.enroll(fingerprint, `proj_${'3'.repeat(32)}`)
+      const second = store.enroll(otherFingerprint)
+      expect(store.workers()).toEqual([
+        { workerId: first, projectIds: [`proj_${'3'.repeat(32)}`, `proj_${'4'.repeat(32)}`] },
+        { workerId: second, projectIds: [] },
+      ])
+      store.revoke(first)
+      expect(store.workers()).toEqual([{ workerId: second, projectIds: [] }])
+    } finally {
+      store.close()
+    }
+  })
+
   it('refuses an invalid home or ledger path outside the private profile', async () => {
     const profile = temporary()
     await expect(openWorkerStore(profile, 'invalid')).rejects.toThrow('initialized home')

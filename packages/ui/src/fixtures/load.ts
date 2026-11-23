@@ -1,4 +1,4 @@
-import type { LoadGlance, LoadPoint, LoadRow } from '../chrome/LoadMeter/load'
+import type { LoadAgents, LoadGlance, LoadPoint, LoadRow } from '../chrome/LoadMeter/load'
 import { Brand } from '../foundations/brands/brands'
 import { MemoryPressure } from '../foundations/vocabulary'
 
@@ -142,3 +142,12 @@ export const LOAD_FIRST_READING: LoadGlance = { ...LOAD_ONE_TASK, history: histo
 
 /** Where the system says nothing of memory pressure, nor of Althar's processes, as on Windows. */
 export const LOAD_UNKNOWN_WORK: LoadGlance = { ...LOAD_BUSY, work: null, workMemory: null, pressure: null, rows: null }
+
+/** Its agents beside the busy reading: three of its four at work, nothing waiting. */
+export const AGENTS_BUSY: LoadAgents = { busy: 3, configured: 4, atOnce: 4, why: null, waiting: 0 }
+/** Memory short: one at a time for now, of the person's five, and two tasks waiting for it. */
+export const AGENTS_FEWER: LoadAgents = { busy: 2, configured: 5, atOnce: 1, why: 'memory', waiting: 2 }
+/** The CPU busy for a while: three at a time for now, of four. */
+export const AGENTS_FEWER_CPU: LoadAgents = { busy: 4, configured: 4, atOnce: 3, why: 'cpu', waiting: 1 }
+/** Nothing at work. */
+export const AGENTS_IDLE: LoadAgents = { busy: 0, configured: 4, atOnce: 4, why: null, waiting: 0 }

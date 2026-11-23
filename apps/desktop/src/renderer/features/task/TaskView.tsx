@@ -540,10 +540,24 @@ export function TaskView({
    * Shown as an aside, in the coordinator's pane (docs/decisions/tasks.md, "Asides"): its conversation alone, the same
    * composer as here, with `bar` (its own moves) over it, and no header, other faces or keys of its own.
    */
-  aside?: { readonly bar: ReactNode; readonly notice?: ReactNode }
+  aside?: {
+    readonly bar: ReactNode
+    readonly notice?: ReactNode
+    /**
+     * An artifact's own chat, in the artifact's room (ADR-104, "Talking to an artifact"): its lead speaks as itself, not as
+     * the coordinator; what the person writes is kept by the artifact (`draft`), from before the chat started, with the parts
+     * they pointed at; and a canvas its thread opens goes to the canvas beside it (`onCanvas`), never into the conversation.
+     */
+    readonly artifact?: {
+      readonly draft: string
+      readonly opened: string | null
+      readonly onCanvas: (canvasId: string, version: number | null, follow: boolean) => void
+    }
+  }
 }) {
+  const artifact = aside?.artifact
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
-  const kept = draftKey.task(model.snapshot?.threadId ?? '')
+  const kept = artifact?.draft ?? draftKey.task(model.snapshot?.threadId ?? '')
   // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the task again.
   const setDraft = useSetDraft(kept)
   const threadId = model.snapshot?.threadId ?? null
@@ -666,8 +680,22 @@ export function TaskView({
         },
     conversation,
   )
-  // A canvas its lead publishes or opens beside the conversation opens on the workbench as it arrives (ADR-104).
-  useCanvasArrivals(model.snapshot?.items, host.openCanvas)
+  // A canvas its lead publishes or opens beside the conversation opens on the workbench as it arrives (ADR-104); an artifact's
+  // chat's, beside it in its room.
+  const openCanvas = artifact?.onCanvas ?? host.openCanvas
+  useCanvasArrivals(model.snapshot?.items, openCanvas)
+  const shell = useMemo(
+    () =>
+      artifact === undefined
+        ? host.shell
+        : {
+            ...host.shell,
+            openCanvas: (ref: { readonly canvasId: string; readonly version: number | null }) =>
+              artifact.onCanvas(ref.canvasId, ref.version, false),
+            openedCanvas: artifact.opened,
+          },
+    [artifact, host.shell],
+  )
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
@@ -1480,7 +1508,7 @@ export function TaskView({
             return
           }
           setFace('talk')
-          if (spot?.kind === 'canvas') host.openCanvas(spot.canvasId, spot.version, false)
+          if (spot?.kind === 'canvas') openCanvas(spot.canvasId, spot.version, false)
           if (spot?.kind === 'page') {
             pages.place(taskId, 'beside')
             pages.reopen(taskId, id)
@@ -1811,7 +1839,7 @@ export function TaskView({
               style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
             >
               {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
-              <ThreadShellProvider value={host.shell}>
+              <ThreadShellProvider value={shell}>
                 <Outputs
                   snapshot={snapshot}
                   pending={model.doing !== null}
@@ -1895,11 +1923,11 @@ export function TaskView({
                   >
                     <Thread label={text.thread} busy={busy}>
                       {opening}
-                      <ThreadShellProvider value={host.shell}>
+                      <ThreadShellProvider value={shell}>
                         <ThreadWaysContext.Provider value={ways}>
                           <TaskThread
-                            // An aside is the coordinator's, as its conversation is.
-                            {...(embedded ? { signed: coordinatorSigned } : {})}
+                            // An aside is the coordinator's, as its conversation is; an artifact's chat speaks as itself.
+                            {...(embedded && artifact === undefined ? { signed: coordinatorSigned } : {})}
                             rounds={blocks}
                             gallery={{
                               reportId:

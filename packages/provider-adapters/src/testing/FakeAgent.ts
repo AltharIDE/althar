@@ -352,7 +352,8 @@ export interface FakeAgentOptions {
    */
   readonly variants?: boolean
   /** Models offered by this fake, for routing between makers. */
-  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  /** `description` as an agent's own default says the model it stands for. */
+  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly description?: string }>
   /** Models it fails to put a session on the first time, as Claude Code does now and then when Anthropic doesn't confirm one. */
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
@@ -1190,13 +1191,20 @@ const playRole = async (
           said.push(`${name}: ${answer}`)
           return answer
         }
-        const draw = (name: string, files: Readonly<Record<string, string>>) => {
+        const draw = (name: string, files: Readonly<Record<string, string | Uint8Array>>) => {
           for (const [path, words] of Object.entries(files)) {
             mkdirSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/').slice(0, -1)), { recursive: true })
             writeFileSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/')), words)
           }
         }
         if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        // Asked for boards (`[lead:canvas-boards]`), it lays out a canvas of boards: two pages of designs side by side, each
+        // board a page of the canvas at its own size, sharing one stylesheet.
+        if (text.includes('[lead:canvas-boards]')) {
+          draw('gift-a-class', CANVAS_BOARDS)
+          await told('canvas_publish', { name: 'gift-a-class', title: 'Gift a class', note: 'Three directions, and the receipt' })
+          return said.join('\n\n')
+        }
         if (text.includes('[lead:canvas-open]')) {
           const answer = await told('canvas_open', { name: 'sign-in' })
           return `${answer} The repository also has a \`README.md\`.`
@@ -1740,7 +1748,11 @@ const modelOption = (session: SessionState, variants: boolean, models?: FakeAgen
               { value: 'large', name: 'Large', description: 'The most capable' },
               ...(variants ? [{ value: 'huge', name: 'Huge', description: 'Thinks the longest' }] : []),
             ]
-          : models.map((model) => ({ value: model.id, name: model.name })),
+          : models.map((model) => ({
+              value: model.id,
+              name: model.name,
+              ...(model.description === undefined ? {} : { description: model.description }),
+            })),
     },
   ],
 })
@@ -2891,6 +2903,75 @@ const CANVAS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Sig
 <p class="or">or</p><button class="provider" type="button">Continue with GitHub</button></main>
 <script>document.getElementById('send').onclick = () => (document.getElementById('send').textContent = 'Code sent')</script></body></html>
 `
+
+/* A canvas of boards: Kiln's gift a class, three directions and a phone on one page, the receipt on another. */
+const BOARD_CSS = `* { box-sizing: border-box } body { margin: 0; min-height: 100vh; background: #f6f1ea; color: #2b211b; font: 15px/1.5 Inter, -apple-system, system-ui, sans-serif }
+nav { display: flex; align-items: center; gap: 22px; padding: 18px 40px; background: #2f3a31; color: #efe7dc; font-size: 13px } nav b { font-size: 16px; margin-right: auto }
+main { padding: 44px 40px; display: grid; gap: 28px } h1 { margin: 0; font: 600 34px/1.15 Georgia, serif } p { margin: 0; color: #6b5d52 }
+.hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; align-items: center }
+.card { padding: 28px; border-radius: 16px; background: #c2552d; color: #fff8f1; box-shadow: 0 18px 40px -18px rgba(90,40,20,.6) } .card h2 { margin: 0 0 8px; font: 600 26px/1.2 Georgia, serif }
+.classes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px } .class { padding: 14px; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(60,40,20,.08) }
+.class i { display: block; height: 120px; margin-bottom: 10px; border-radius: 8px; background: #e7c9b3 } .class:nth-child(2) i { background: #c9d6c8 } .class:nth-child(3) i { background: #e9dcc0 }
+.amounts { display: flex; gap: 10px } .amounts span { padding: 8px 16px; border-radius: 999px; background: #fff; box-shadow: inset 0 0 0 1px #d9cbbd } .amounts .on { background: #2b211b; color: #fff; box-shadow: none }
+.go { justify-self: start; padding: 12px 22px; border: 0; border-radius: 10px; background: #2b211b; color: #fff; font: 600 15px Inter, system-ui, sans-serif }
+.phone main { padding: 24px 20px; gap: 18px } .phone nav { padding: 14px 20px } .phone h1 { font-size: 26px } .phone .classes { grid-template-columns: 1fr } .phone .class i { height: 90px }
+.receipt { max-width: 520px; margin: 0 auto; padding: 32px; border-radius: 16px; background: #fff } .receipt dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 20px 0 } dt { color: #8a7a6c } dd { margin: 0 }
+`
+const board = (body: string, phone = false) =>
+  `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../kiln.css"></head><body${phone ? ' class="phone"' : ''}><nav><b>kiln</b><span>Classes</span><span>Gifts</span><span>Studio</span></nav><main>${body}</main></body></html>`
+const AMOUNTS = '<div class="amounts" data-part="amounts"><span>£45</span><span class="on">£80</span><span>£120</span></div>'
+const CLASSES =
+  '<div class="classes"><div class="class"><i></i>Wheel throwing for beginners</div><div class="class"><i></i>Glazing a set of bowls</div><div class="class"><i></i>Hand-building a planter</div></div>'
+const CANVAS_BOARDS: Readonly<Record<string, string | Uint8Array>> = {
+  'canvas.json': JSON.stringify(
+    {
+      pages: [
+        {
+          name: 'Directions',
+          boards: [
+            { name: 'A present first', file: 'directions/present.html', width: 1440, height: 900 },
+            { name: 'The card leads', file: 'directions/card.html', width: 1440, height: 900 },
+            { name: 'Pick the class', file: 'directions/pick.html', width: 1440, height: 900 },
+            { name: 'Phone', file: 'directions/phone.html', width: 390, height: 844 },
+          ],
+        },
+        {
+          name: 'Receipt',
+          boards: [
+            { name: 'Desktop', file: 'receipt/desktop.html', width: 1440, height: 900 },
+            { name: 'Email', file: 'receipt/email.html', width: 600, height: 900 },
+            // A picture beside the pages, at its own size: a canvas of boards holds both.
+            { name: 'Stamp', file: 'receipt/stamp.png', width: 480, height: 300 },
+          ],
+        },
+      ],
+    },
+    null,
+    2,
+  ),
+  'kiln.css': BOARD_CSS,
+  'receipt/stamp.png': Buffer.from(SCREENSHOT_PNG, 'base64'),
+  'directions/present.html': board(
+    `<div class="hero"><div><h1 data-part="title">An evening on the wheel, wrapped</h1><p>Give someone a class at kiln. They pick the date.</p></div><div class="card" data-part="card"><h2>A gift for Ana</h2>Two hours at the wheel, clay and firing included.</div></div>${AMOUNTS}<button class="go" data-part="go">Send the gift</button>`,
+  ),
+  'directions/card.html': board(
+    `<div class="card" data-part="card"><h2>An evening on the wheel</h2>For Ana, from Sam. Two hours, clay and firing included.</div><h1 data-part="title">Give someone a class</h1>${AMOUNTS}${CLASSES}<button class="go" data-part="go">Send the gift</button>`,
+  ),
+  'directions/pick.html': board(
+    `<h1 data-part="title">Pick the class</h1><p>Choose one, or let them choose.</p>${CLASSES}${AMOUNTS}<button class="go" data-part="go">Send the gift</button>`,
+  ),
+  'directions/phone.html': board(
+    `<h1 data-part="title">Give someone a class</h1><div class="card" data-part="card"><h2>An evening on the wheel</h2>For Ana, from Sam.</div>${AMOUNTS}<button class="go" data-part="go">Send the gift</button>`,
+    true,
+  ),
+  'receipt/desktop.html': board(
+    '<div class="receipt"><h1>Your gift is on its way</h1><dl><dt>For</dt><dd>Ana</dd><dt>Class</dt><dd>Wheel throwing for beginners</dd><dt>Amount</dt><dd>£80</dd></dl><p>We emailed Ana a card with a link to pick her date.</p></div>',
+  ),
+  'receipt/email.html': board(
+    '<div class="receipt"><h1>Sam gave you a class</h1><p>An evening on the wheel at kiln, two hours, clay and firing included.</p><dl><dt>From</dt><dd>Sam</dd><dt>Valid</dt><dd>A year</dd></dl><button class="go">Pick a date</button></div>',
+    true,
+  ),
+}
 
 const CANVAS_PAGE_CSS = `body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f2ec; color: #141417; font: 14px/1.45 Inter, -apple-system, system-ui, sans-serif }
 .card { width: 320px; padding: 28px; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(60,50,30,.06), 0 10px 24px -12px rgba(60,50,30,.14) }

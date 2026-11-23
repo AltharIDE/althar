@@ -9,6 +9,7 @@ import {
   apiClient,
   completeDevicePairing,
   createDeviceKey,
+  decodePairingCode,
   openHttpsConnection,
   signDeviceMessage,
   tlsPublicKeyPin,
@@ -92,6 +93,25 @@ const probe = (origin: string, agent: Agent, headers: Record<string, string> = {
   )
 
 describe('direct HTTPS and WSS home connections', () => {
+  it.live('makes a code a phone pairs with through its link, and says which device it paired', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { pairings, code: listening } = yield* home
+        const made = yield* pairings.create()
+        assert.strictEqual(made.link.startsWith('https://althar.ai/pair#1.'), true)
+        // What the phone's camera hands the app: the link, read back into the code, pinned to the listener's certificate.
+        const code = decodePairingCode(made.link)
+        assert.strictEqual(code.origin, listening.origin)
+        assert.strictEqual(code.tlsKeyPin, pin)
+        assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'waiting', expiresAt: made.expiresAt })
+        const target = yield* completeDevicePairing(code, yield* createDeviceKey, 'iPhone')
+        const status = yield* pairings.status(made.tokenHash)
+        assert.strictEqual(status.state === 'paired' ? status.device.deviceId : null, target.deviceId)
+        assert.strictEqual(status.state === 'paired' ? status.device.name : null, 'iPhone')
+      }).pipe(Effect.provide(environment)),
+    ),
+  )
+
   it.live('rejects foreign browser origins, host headers, malformed bodies and repeated device proofs before admitting RPC', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -31,6 +31,7 @@ import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
 import { ComputerTools } from './ComputerTools'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
@@ -224,14 +225,15 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(
         startupLayer('coordinator', Coordinator.layer),
         TaskActions.layer,
-        // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
-        SettingsTools.layer,
+        // The settings, read and changed by the coordinator and leads as the person can (ADR-097), the place for
+        // artifacts among them, through the canvases' own CanvasSaves (the one layer, built once).
+        SettingsTools.layer.pipe(Layer.provide(CanvasSaves.layer)),
         IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
         ComputerTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
-        Canvases.layer,
+        Canvases.layer.pipe(Layer.provideMerge(CanvasSaves.layer)),
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
         Elsewhere.layer,
         MachineLoad.layer,

@@ -54,7 +54,7 @@ import {
   tailOf,
   uncoloured,
 } from './leftRunning'
-import { Limits, backWords } from './Limits'
+import { Limits, backWords, routeWords } from './Limits'
 import { type KeptLineComment, withLineComments } from './lineComments'
 import { Live } from './Live'
 import { noteServerStatus } from './mcpHealth'
@@ -1389,7 +1389,7 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           // The lead a stand-in stood in for, taking the thread back as Althar queued it (`giveBack`): said now it does.
           const standing = Option.getOrUndefined(
-            yield* standInOf(previous.sessionId).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
+            yield* standInOf(previous.sessionId, limits.sameModel).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
           )
           const back =
             standing !== undefined && standing.agentId === next.agentId && (next.model === undefined || next.model === standing.model)
@@ -1560,7 +1560,7 @@ export class Sessions extends Context.Service<
       const locks = makeKeyedLock()
       const exclusive = locks.withLock
 
-      const start = (input: {
+      const startOn = (input: {
         readonly threadId: string
         readonly agentId: string
         readonly model?: string
@@ -1967,7 +1967,7 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [was] = yield* sql<{ model: string | null; effort: string | null }>`
             SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
-          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId, limits.sameModel))
           const given = kept ?? {
             agentId: previous.entry.definition.id,
             model: was?.model ?? null,
@@ -1988,10 +1988,9 @@ export class Sessions extends Context.Service<
         })
 
       /** Whether the lead a session stands in for is back: its usage again, or the step it failed over (standIn.ts). */
-      const backFrom = (standsIn: StandIn, projectId: string) =>
-        isBack(standsIn, (one) => (one.accountId === null ? limits.out(one.agentId, projectId) : limits.outAccount(one.accountId)))
+      const backFrom = (standsIn: StandIn, projectId: string) => isBack(standsIn, (one) => limits.spent(one, projectId))
 
-      const switchAgent = (input: {
+      const switchOn = (input: {
         readonly threadId: string
         readonly agentId: string
         readonly model?: string
@@ -2141,7 +2140,7 @@ export class Sessions extends Context.Service<
                 ? yield* handoverBrief(thread)
                 : yield* briefFor(thread, { kind: 'handover', lost: reason !== 'moved' })
             // Started afresh, a stand-in still stands in for the lead it was given.
-            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId, limits.sameModel))
             // A model or effort the person picks while it starts is the fresh session's, as is one picked as this began.
             const to = handing(
               previous.thread.threadId,
@@ -2230,6 +2229,109 @@ export class Sessions extends Context.Service<
         ),
       )
 
+      /**
+       * Where a session asked for on a model the person turned off for its agent starts: the same model through another
+       * agent with room, never another model unasked; only where none has it, the agent's strongest other model. Either way
+       * the thread says so plainly. One already on the thread is left as it is, unless it is being replaced (`replacing`).
+       * A review never goes to the lead it reviews.
+       */
+      const routed = <
+        I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
+      >(
+        input: I,
+        replacing: boolean,
+      ) =>
+        Effect.gen(function* () {
+          if (!replacing && threads.has(input.threadId)) return { input, said: undefined }
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
+            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${input.threadId}`
+          if (thread === undefined) return { input, said: undefined }
+          // A review's thread: the lead it reviews, as it leads now on the task's thread.
+          const [lead] =
+            thread.kind === 'step' && thread.nodeKey === 'review' && thread.taskId !== null
+              ? yield* sql<{ agentId: string; model: string | null }>`
+                  SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+                  WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+              : []
+          const way = yield* limits.route({
+            agentId: input.agentId,
+            model: input.model ?? null,
+            projectId: thread.projectId,
+            ...(lead === undefined ? {} : { reviewing: lead }),
+          })
+          if (way.kind === 'here') return { input, said: undefined }
+          const from = yield* limits.named(input.agentId, input.model ?? null)
+          const { model: _model, accountId: _account, ...rest } = input
+          if (way.kind === 'elsewhere') {
+            const to = yield* limits.named(way.to.agentId, way.to.model)
+            const moved = {
+              ...rest,
+              agentId: way.to.agentId,
+              accountId: way.to.accountId,
+              ...(way.to.model === null ? {} : { model: way.to.model }),
+            } as I
+            return { input: moved, said: routeWords({ from, to }) }
+          }
+          const instead = yield* limits.modelFor({
+            agentId: input.agentId,
+            projectId: thread.projectId,
+            ...(lead === undefined ? {} : { reviewing: lead }),
+          })
+          // A review with no model left but the lead's own doesn't start: on the agent's default, it could be the lead itself.
+          if (lead !== undefined && instead === null)
+            return {
+              input,
+              said: undefined,
+              refused: `${routeWords({ from })} A review never goes to the lead it reviews, so it waits until another model is free.`,
+            }
+          const to = instead === null ? undefined : yield* limits.named(input.agentId, instead)
+          const kept = {
+            ...rest,
+            ...(input.accountId === undefined ? {} : { accountId: input.accountId }),
+            ...(instead === null ? {} : { model: instead }),
+          } as I
+          return { input: kept, said: routeWords({ from, ...(to === undefined ? {} : { to: { ...to, otherModel: true } }) }) }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logWarning('Could not read where a model runs; starting as asked', cause), { input, said: undefined }),
+          ),
+          Effect.map((way): { readonly input: I; readonly said: string | undefined; readonly refused?: string } => way),
+        )
+
+      /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
+      const start = (asked: Parameters<typeof startOn>[0]) =>
+        Effect.gen(function* () {
+          const { input, said, refused } = yield* routed(asked, false)
+          if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
+          const sessionId = yield* startOn(input)
+          if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
+          return sessionId
+        })
+
+      /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
+      const switchAgent = (asked: Parameters<typeof switchOn>[0]) =>
+        Effect.gen(function* () {
+          const { input, said, refused } = yield* routed(asked, true)
+          if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
+          const sessionId = yield* switchOn(input)
+          if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
+          return sessionId
+        })
+
+      const sayRouted = (threadId: string, sessionId: string, said: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+          if (thread === undefined) return
+          yield* addItem({ projectId: thread.projectId, threadId, sessionId }, 'notice', {
+            source: 'runtime',
+            severity: said.includes('a different model') || said.includes('no other agent') ? 'warning' : 'info',
+            title: said,
+            handover: true,
+          })
+        })
+
       const startLast = (threadId: string, recovering?: string, goalRevision?: number) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2274,7 +2376,9 @@ export class Sessions extends Context.Service<
           // The last lead stood in for the one a usage limit stopped (standIn.ts): that one leads again where it has usage again,
           // after a stop or a restart too; else the stand-in carries on standing in.
           const standing =
-            on.agentId === last.agentId && on.model === last.model ? Option.getOrUndefined(yield* standInOf(last.id)) : undefined
+            on.agentId === last.agentId && on.model === last.model
+              ? Option.getOrUndefined(yield* standInOf(last.id, limits.sameModel))
+              : undefined
           // Queued back by `giveBack` before the stop, it is still standing in: the given lead starts, as it would have.
           if (standing !== undefined && (yield* backFrom(standing, last.projectId))) {
             yield* start({
@@ -2809,6 +2913,14 @@ export class Sessions extends Context.Service<
               const running = threads.get(input.threadId)
               if (running === undefined) return false
               const sql = yield* SqlClient.SqlClient
+              // Its model turned off on the stand-in's own agent, the given lead comes back as that model through another agent
+              // with room, as any session started on it would (`routed`); none has it, the stand-in carries on.
+              const asked = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
+              const way =
+                asked !== undefined && asked.agentId === running.entry.definition.id && asked.model !== null
+                  ? yield* limits.route({ agentId: asked.agentId, model: asked.model, projectId: running.thread.projectId })
+                  : ({ kind: 'here' } as const)
+              if (way.kind === 'none') return false
               // One transaction: the stand-in still the lead, still standing in, and nothing chosen for it since, as the lead given
               // back is queued; a choice made meanwhile (chooseLead, changeLead) is never overwritten. No `choice` is recorded, so
               // the stand-in stays one until the given lead has started (`takeOver`), and a stop or restart before still gives it back.
@@ -2816,17 +2928,34 @@ export class Sessions extends Context.Service<
                 Effect.gen(function* () {
                   if (running.stopping || running.sessionId !== input.sessionId || running.handover !== 'none') return undefined
                   if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
-                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId))
-                  if (standsIn === undefined) return undefined
+                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId, limits.sameModel))
+                  if (standsIn === undefined || standsIn.agentId !== asked?.agentId || standsIn.model !== asked.model) return undefined
+                  // The effort it was given goes with it either way, as `routed` keeps a session's.
                   const next = {
-                    agentId: standsIn.agentId,
-                    ...(standsIn.model === null ? {} : { model: standsIn.model }),
+                    ...(way.kind === 'elsewhere'
+                      ? { agentId: way.to.agentId, ...(way.to.model === null ? {} : { model: way.to.model }) }
+                      : { agentId: standsIn.agentId, ...(standsIn.model === null ? {} : { model: standsIn.model }) }),
                     ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
                   }
                   return (yield* setLeadChoice(running, next, { onlyIfEmpty: true })) ? standsIn : undefined
                 }),
               )
               if (queued === undefined) return false
+              if (way.kind === 'elsewhere') {
+                // Handed to another agent between turns (`takeOver`): said here, as that agent isn't the one it stood in for.
+                const said = routeWords({
+                  from: yield* limits.named(queued.agentId, queued.model),
+                  to: yield* limits.named(way.to.agentId, way.to.model),
+                })
+                yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: said,
+                  about: queued.why === 'stall' ? 'stall' : 'limit',
+                  handover: true,
+                })
+                return true
+              }
               // The same agent on its own model again is set between turns, with no hand-over to say it: said here.
               if (queued.agentId === running.entry.definition.id) {
                 const said = yield* backSaid(queued, running)

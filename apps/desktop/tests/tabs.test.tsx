@@ -21,7 +21,7 @@ import { brandOf } from '../src/renderer/shared/agents'
 import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
-import { card, changed, fakeClient, fakeHost, home, load, project, remoteConnection } from './fixtures'
+import { card, changed, fakeClient, fakeHost, home, load, onLinuxHome, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, yours: 0 }
@@ -529,6 +529,77 @@ describe('how hard the Mac works, in the bar', () => {
     expect(client.getLoad).not.toHaveBeenCalled()
   })
 
+  it('has this Mac’s agents beside CPU and memory: how many work, of the number', async () => {
+    const { client } = windowAt('/projects/p2')
+    const load = await peek()
+    expect(await load.findByText('2 of 4')).toBeTruthy()
+    expect(load.getByText('Agents')).toBeTruthy()
+    expect(client.getPlaces).toHaveBeenCalled()
+  })
+
+  it('lists the home’s workers under its readings, each where it stands, and a row opens it in Settings › Computers', async () => {
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
+    const workers = [
+      {
+        workerId: `wrk_${'2'.repeat(32)}`,
+        connected: true,
+        busy: true,
+        capacity,
+        providers: ['codex'],
+        projects: [{ id: 'p1', name: 'meridian' }],
+        task: { taskId: 't1', threadId: 'th1', title: 'Fix the login redirect', project: 'meridian' },
+      },
+      { workerId: `wrk_${'1'.repeat(32)}`, connected: true, busy: false, capacity, providers: ['codex'], projects: [], task: null },
+      { workerId: `wrk_${'3'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null },
+    ]
+    const { router } = windowAt('/projects/p2', undefined, undefined, undefined, {
+      getWorkers: vi.fn(async () => ({ enabled: true, workers })),
+    })
+    const load = await peek()
+    expect(await load.findByRole('heading', { name: 'Workers' })).toBeTruthy()
+    expect(load.getByRole('heading', { name: 'Running on This Mac' })).toBeTruthy()
+    expect(load.getByRole('button', { name: /^Linux worker 222222/ }).textContent).toContain('Fix the login redirect · meridian')
+    expect(load.getByRole('button', { name: /^Linux worker 111111/ }).textContent).toContain('12.4 GB memory free')
+    expect(load.getByRole('button', { name: /^Linux worker 333333/ }).textContent).toContain('Offline')
+
+    await userEvent.click(load.getByRole('button', { name: /^Linux worker 111111/ }))
+    await waitFor(() => expect(where()).toBe('/settings/computers'))
+    expect(router.state.location.search).toEqual({ worker: workers[1]?.workerId })
+    expect(screen.queryByRole('dialog', { name: 'This Mac’s load' })).toBeNull()
+  })
+
+  it('in a window on a Linux home, goes by that home’s name, says which agents run on its workers, and opens one in Computers there', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = {
+      workerId: `wrk_${'2'.repeat(32)}`,
+      connected: true,
+      busy: true,
+      providers: ['codex'],
+      projects: [],
+      task: { taskId: 't1', threadId: 'th1', title: 'Fix the login redirect', project: 'meridian' },
+    }
+    const { router } = windowAt('/projects/p2', undefined, fakeHost({ homes: studio.homes }), undefined, {
+      connection: studio.connection,
+      getPlaces: vi.fn(async () => ({ busy: 1, configured: 4, atOnce: 4, why: null, waiting: 0, onWorkers: 1 })),
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+    })
+    await userEvent.click(await meter())
+    const load = within(await screen.findByRole('dialog', { name: 'studio’s load' }))
+    expect(await load.findByText('1 of them on a worker')).toBeTruthy()
+    expect(load.getByRole('heading', { name: 'Running on studio' })).toBeTruthy()
+    await userEvent.click(load.getByRole('button', { name: /^Linux worker 222222/ }))
+    await waitFor(() => expect(where()).toBe('/settings/computers'))
+    expect(router.state.location.search).toEqual({ worker: worker.workerId })
+  })
+
+  it('lists no workers where the home takes none', async () => {
+    windowAt('/projects/p2')
+    const load = await peek()
+    expect(await load.findByText('2 of 4')).toBeTruthy()
+    expect(load.queryByRole('heading', { name: 'Workers' })).toBeNull()
+    expect(load.getByRole('heading', { name: 'Running' })).toBeTruthy()
+  })
+
   it('is never read while it is off', async () => {
     const host = fakeHost()
     await host.setPreference('showLoad', false)
@@ -536,6 +607,7 @@ describe('how hard the Mac works, in the bar', () => {
     await screen.findByRole('navigation', { name: 'Projects' })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(client.getLoad).not.toHaveBeenCalled()
+    expect(client.getPlaces).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull()
   })
 

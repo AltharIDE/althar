@@ -1,0 +1,124 @@
+/* althar.ai/pair: one column, for a phone, on the paper the other pages read on. */
+
+.page {
+  min-height: 100svh;
+  padding: 28px 22px 40px;
+  background: var(--paper);
+  color: var(--t-1);
+}
+.column {
+  display: grid;
+  gap: 20px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+.brand {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-2);
+  text-decoration: none;
+}
+.title {
+  margin: 4px 0 0;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.lede {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.home {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--well);
+}
+.homeWords {
+  display: grid;
+  gap: 3px;
+  font-size: 13.5px;
+  color: var(--t-2);
+}
+.words {
+  font: 500 14px/1.3 var(--mono);
+  color: var(--t-1);
+}
+.steps {
+  display: grid;
+  gap: 20px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.stepBody {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding-top: 2px;
+}
+.storeWay {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.stepTitle {
+  font-size: 16px;
+  font-weight: 560;
+}
+.store,
+.open {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 560;
+  text-decoration: none;
+}
+.store {
+  background: var(--ink-fill);
+  color: var(--paper);
+}
+.open {
+  background: var(--signal);
+  color: #fff;
+}
+.small {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.time {
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+.foot {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}

@@ -84,7 +84,6 @@ export interface Lanes {
   readonly running: ReadonlyArray<BoardTask>
   /** How many have an agent on them, or checks Althar sees through: Running's count, which leaves out what waits. */
   readonly atWork: number
-  readonly workPlaces?: BoardSnapshot['workPlaces']
   /** Tasks that wait on a call of the person's, each once, with its call. */
   readonly waiting: ReadonlyArray<Waiting>
   /** Tasks that wait on nothing but issues their lead drafted, or changes to their issue, for the person to file or apply. */
@@ -166,7 +165,6 @@ export const lanesOf = (
     // By their latest exchange, the latest first; one with nothing said yet, by when it began.
     scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
     ...arranged,
-    ...(board.workPlaces === undefined ? {} : { workPlaces: board.workPlaces }),
     upNext: arranged.upNext + stopped.length,
     waiting: waits.waiting,
     issues: waits.issues,

@@ -15,12 +15,14 @@ import {
   Cloud,
   ClockRotateRight,
   CoffeeCup,
+  CursorPointer,
   Community,
   Compress,
   Computer,
   Cookie,
   Copy,
   Download,
+  DragHandGesture,
   Edit,
   EditPencil,
   Expand,
@@ -28,6 +30,7 @@ import {
   Frame,
   InfoCircle,
   GitBranch,
+  GitCommit,
   GitCompare,
   GitMerge,
   GitPullRequest,
@@ -47,6 +50,7 @@ import {
   NavArrowLeft,
   NavArrowRight,
   NavArrowUp,
+  OneFingerSelectHandGesture,
   OpenNewWindow,
   Page,
   Palette,
@@ -62,6 +66,7 @@ import {
   Refresh,
   Search,
   Server,
+  SmartphoneDevice,
   ServerConnection,
   Settings,
   ShieldCheck,
@@ -71,6 +76,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  ViewGrid,
   WarningCircle,
   WifiOff,
   Xmark,
@@ -149,6 +155,8 @@ export const ICONS = {
   plug: ServerConnection,
   /** A home: one of the person's own computers that keeps Althar's work, reached over SSH. */
   home: Server,
+  /** A phone a home opens on: pairing one, and those it has paired. */
+  phone: SmartphoneDevice,
   /** This computer, as one of the homes. */
   computer: Laptop,
   /** The home, among the computers it runs work on: it keeps the projects. */
@@ -215,6 +223,18 @@ export const ICONS = {
   cookie: Cookie,
   /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
   canvas: Palette,
+  /** A canvas of boards: designs laid side by side, every board of a page at once. */
+  boards: ViewGrid,
+  /** One board at a time, on a canvas of boards. */
+  board: Frame,
+  /** Pointing at a part of a board, to say something about it. */
+  point: CursorPointer,
+  /** Moving around a canvas by dragging it. */
+  hand: DragHandGesture,
+  /** Using a board as the page it is: its links and buttons take the press. */
+  use: OneFingerSelectHandGesture,
+  /** A commit, as git keeps what was saved to a repository. */
+  commit: GitCommit,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
   /** Something failed: the mark before the words that say what, in the danger colour. */

@@ -85,10 +85,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
     await openTask(page)
     // A handover to another model is said in the thread as it happens, each named by its model where known (never silent).
     await expect(
-      shown(
-        page,
-        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
-      ),
+      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over\.$/),
     ).toBeVisible()
     await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved.png', animations: 'disabled' })
@@ -121,10 +118,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     // A handover to another model is said in the thread as it happens, each named by its model where known (never silent).
     await expect(
-      shown(
-        page,
-        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
-      ),
+      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over\.$/),
     ).toBeVisible()
     // Passive quota notices stay out of the thread; its actionable waiting state still offers another model.
     await expect(
@@ -148,7 +142,7 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     await openTask(page)
     await expect(
-      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task\. (.+ on )?Codex takes the work over( until .+)?\.$/),
+      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task\. (.+ on )?Codex takes the work over\.$/),
     ).toBeVisible()
     await expect(shown(page, 'Codex is out of usage.')).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
