@@ -2,10 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { CLOUD_USE, WORKER_AT_WORK, WORKER_FREE, WORKER_OFFLINE, WORKERS } from '../../fixtures/computers'
 import { AGENTS_BUSY, AGENTS_FEWER, LOAD_BUSY, LOAD_MEMORY_SHORT, LOAD_SLOTS } from '../../fixtures/load'
 import { AgentsAtOnce, SettingList } from '../Preferences/Preferences'
-import { AddWorkerDialog, Computers, type ComputersProps, HOME } from './Computers'
+import { AddWorkerByHandDialog, Computers, type ComputersProps, HOME } from './Computers'
 
 const width = (px: number) => (Story: () => ReactNode) => <div style={{ maxWidth: px }}>{Story()}</div>
 
@@ -142,11 +143,11 @@ export const OverSsh: Story = {
 }
 
 /**
- * Add a worker: what it takes, and each line to run for it, the worker left running with its agents; the first step
- * only where the home takes none yet.
+ * Add a worker to a home that takes workers only by its operator's certificates: what it takes, and each line to run
+ * for it, the worker left running with its agents; the first step only where the home takes none yet.
  */
-export const AddAWorker: Story = {
-  render: () => <AddWorkerDialog home="This Mac" enabled={false} onClose={fn()} />,
+export const AddAWorkerByHand: Story = {
+  render: () => <AddWorkerByHandDialog home="This Mac" enabled={false} onClose={fn()} />,
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
     await expect(page.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeInTheDocument()
@@ -157,8 +158,8 @@ export const AddAWorker: Story = {
 }
 
 /** On a Linux home of its own: set up there with althar-host. */
-export const AddAWorkerToALinuxHome: Story = {
-  render: () => <AddWorkerDialog home="studio" enabled={false} standalone onClose={fn()} />,
+export const AddAWorkerByHandToALinuxHome: Story = {
+  render: () => <AddWorkerByHandDialog home="studio" enabled={false} standalone onClose={fn()} />,
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
     await expect(page.getByRole('dialog', { name: 'Add a worker to studio' })).toBeInTheDocument()
@@ -167,5 +168,68 @@ export const AddAWorkerToALinuxHome: Story = {
     await expect(page.getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeInTheDocument()
     await expect(page.getByText(/at a name the home’s certificate covers/)).toBeInTheDocument()
     await expect(page.queryByText(/althar workers/)).toBeNull()
+  },
+}
+
+const PROJECTS = [
+  { id: 'proj_meridian', name: 'meridian' },
+  { id: 'proj_ledger', name: 'ledger-api' },
+  { id: 'proj_site', name: 'site' },
+]
+/** A worker its home set up, just added: connected, its agents from its release, one signed in; no project yet. */
+const ADDED = {
+  ...WORKER_FREE,
+  id: 'wrk_build_box',
+  name: 'build-box',
+  managed: true,
+  reachable: true,
+  projects: [],
+  projectIds: [],
+  agents: [
+    { id: 'claude-code', name: 'Claude Code', mark: Brand.ClaudeCode, signedIn: true },
+    { id: 'codex', name: 'Codex', mark: Brand.Codex, signedIn: false },
+  ],
+}
+
+/** A worker just added: its projects picked here, none yet, and its agents each signed in or not, with Sign in. */
+export const WorkerJustAdded: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: { enabled: true, list: [ADDED] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/Pick the projects it works on/)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('checkbox', { name: 'meridian' }))
+    await expect(args.onProjects).toHaveBeenCalledWith(ADDED.id, ['proj_meridian'])
+    await expect(c.getByText('Signed in')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Sign in' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith(ADDED.id, 'codex')
+  },
+}
+
+/** Its agent signing in, with a one-time code to enter on the provider's page. */
+export const WorkerSigningIn: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: { enabled: true, list: [{ ...ADDED, projects: ['meridian'], projectIds: ['proj_meridian'] }] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+    onCancelSignIn: fn(),
+    onOpenLink: fn(),
+    signingIn: {
+      workerId: ADDED.id,
+      agent: 'codex',
+      step: { kind: 'code', code: 'K7QF-2MXD', page: 'https://auth.openai.com/codex/device' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('K7QF-2MXD')).toBeInTheDocument()
+    await expect(c.getByText('Enter this code at auth.openai.com/codex/device')).toBeInTheDocument()
   },
 }

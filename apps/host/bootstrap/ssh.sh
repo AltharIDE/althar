@@ -136,6 +136,33 @@ root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program.setup-v1
 if [ "$role" = worker ]; then root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program; fi
 if printf '%s' "$root" | grep -q '[[:cntrl:]]' || [ "$(printf '%s' "$root" | wc -l)" != 0 ]; then fail setup InvalidRequest; fi
 
+# A machine without SSH adds itself with a one-time code (Settings › Computers › Add a worker › With a code): the
+# person runs this script there, published beside the release as althar-worker.sh, with `join <code>`. It takes the
+# newest release from where the script came from, checks its archive against its manifest, and installs it as the SSH
+# setup would; the release then asks the home for its certificate with the code (worker join). The release's key comes
+# from the same place: later updates must be signed by it.
+join_code=''
+if [ "$operation" = join ]; then
+  [ "$#" -eq 1 ] || fail enroll InvalidRequest
+  case "$1" in althar-worker1.*) ;; *) fail enroll InvalidCode ;; esac
+  case "$1" in *[!A-Za-z0-9._-]*) fail enroll InvalidCode ;; esac
+  [ "${#1}" -le 8192 ] || fail enroll InvalidCode
+  join_code=$1
+  role=worker
+  root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program
+  probe 1
+  command -v curl >/dev/null || fail get CannotDownload
+  base=${ALTHAR_RELEASE_BASE:-https://github.com/AltharIDE/althar/releases/latest/download}
+  case "$base" in https://*|http://127.0.0.1*|http://localhost*) ;; *) fail get InvalidRequest ;; esac
+  fetched=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 262144 -- "$base/althar-host-linux-$arch.json") || fail get NoRelease
+  release_key=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 4096 -- "$base/althar-host-release.pub") || fail get NoRelease
+  payload=$(printf '%s' "$fetched" | sed -n 's/.*"payload":"\([A-Za-z0-9+/=_-]*\)".*/\1/p' | base64 -d 2>/dev/null) || fail get ReleaseRejected
+  field() { printf '%s' "$payload" | sed -n "s/.*\"$1\":\($2\).*/\1/p"; }
+  set -- download "$(field sha256 '"[a-f0-9]*"' | tr -d '"')" "$(field bytes '[0-9]*')" "$(field unpackedBytes '[0-9]*')" \
+    "$(field url '"https://[^"]*"' | tr -d '"')" "$(printf '%s' "$fetched" | base64 | tr -d '\n')" "$(printf '%s\n' "$release_key" | base64 | tr -d '\n')"
+  operation=install
+fi
+
 worker_program() {
   current=$root/current
   [ -x "$current/node/bin/node" ] && [ -f "$current/dist/althar-host.js" ] || fail start WorkerNotInstalled
@@ -270,6 +297,9 @@ private_dir "$root" || fail get UnsafeState
   event get done ",\"bytes\":$bytes,\"totalBytes\":$bytes"
   if [ "$role" = worker ]; then
     "$bundle/node/bin/node" "$bundle/dist/althar-host.js" worker install --program "$bundle"
+    if [ -n "$join_code" ]; then
+      "$bundle/node/bin/node" "$bundle/dist/althar-host.js" worker join --code "$join_code" --name "$(hostname)"
+    fi
   else
     "$bundle/node/bin/node" "$bundle/dist/althar-host.js" setup --manifest "$bundle/.manifest" --release-key "$bundle/.release-key" --json
   fi
