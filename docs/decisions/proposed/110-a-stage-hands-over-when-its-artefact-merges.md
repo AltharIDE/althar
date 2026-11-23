@@ -6,8 +6,7 @@
 > (a stage's merge as news), and [tasks.md § Needs you and settling](../tasks.md#needs-you-and-settling)
 > (a handoff waiting). The plan is [Althar for the whole team](../../plans/whole-team.md).
 
-- **Status:** Proposed. Handoffs (the plan's Phase 3) are accepted only
-  once DEV-267 is fixed; reading stages (Phase 2) doesn't wait on it.
+- **Status:** Proposed.
 - **Date:** 2026-11-22
 - **Owner:** Runtime maintainers
 - **Related:** [ADR-061, automations](../scheduling.md#automations),
@@ -99,19 +98,16 @@ earlier stage, and the feature doesn't move back.
 |---|---|---|
 | A stage became done | The feature sweep, as news | New |
 | A next-stage task already planned waits for this stage's tasks | `waits_for` on its plan (`task_waits`) | Built (DEV-228) |
-| The person's "later" ask ("when the build merges, draft the rollout") | An errand, its step waiting on the merge | Built, but waits never fire (DEV-267) |
+| The person's "later" ask ("when the build merges, draft the rollout") | An errand, its step waiting on the merge | Built; waits fire since DEV-267 (#1103) |
 
-**DEV-267 is a condition of accepting handoffs.** The first mechanism
-needs no errand, so the feature's timeline and its stages (the plan's
-Phase 2) are delivered without it. Handoffs (Phase 3) are not accepted
-until DEV-267 is fixed, as the brief and the canvas said: the third
-mechanism is where people will ask for errands most, and DEV-267's "Done
-when" (a wait fires for an event that happened before the errand was
-kept, and a step whose target merged or was settled fires or says it
-can't) is what a handoff's follow-ups need. Errands also need a wait on a
-path merging on the default branch, beside `task_merged`, which today
-serves only a release's tag. Whether automatic handoffs could ship before
-DEV-267 is left open for Balázs in the plan.
+**Errands are ready for it.** DEV-267, fixed by #1103, wakes an errand on
+the task results it waits for, including those recorded before the errand
+was kept (`errandTaskWaits.ts`, `errandWake.ts`), so "when the build
+merges, draft the rollout" works for a task's own merge today. What's
+missing is a wait on a feature's stage becoming done, beside
+`task_merged`, which serves a task's own pull request and a release's tag:
+the feature sweep's news is what fires it, so an errand can wait on a
+stage whose pull requests no task of this Althar opened.
 
 ## Alternatives
 
@@ -121,8 +117,8 @@ DEV-267 is left open for Balázs in the plan.
 - **Starting the next role's tasks at once.** Spends someone's plan on work
   they haven't looked at. Rejected; a lens may let them count down.
 - **An errand per feature, kept from the first stage.** Every handoff would
-  rest on errands, which don't fire today, and on the one computer that
-  kept them. Reading state is idempotent and works on everyone's.
+  rest on the one computer that kept the errand, and on someone keeping it.
+  Reading state is idempotent and works on everyone's.
 - **A sign-off in Althar** before a stage hands over. Rejected in
   [ADR-111](111-gates-live-on-the-code-host-and-the-tracker.md).
 
@@ -138,8 +134,8 @@ DEV-267 is left open for Balázs in the plan.
 ## What an implementation touches
 
 - `packages/runtime/src/errandWaits.ts`, `errandTaskWaits.ts`,
-  `errandWatch.ts`, `Errands.ts`: DEV-267's fix, and a wait on a path
-  merged on the default branch.
+  `errandWake.ts`: a wait on a feature's stage becoming done, fired by the
+  feature sweep's news.
 - New: the feature sweep, beside the open pull requests' follow and the
   news in `Coordinator.ts` (not `MergeLine.ts`'s `redWatch`, which stays
   as it is), with its last-read state per feature in a migration; and

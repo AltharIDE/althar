@@ -74,6 +74,11 @@ instead. A stage whose merges Althar can't all confirm, as in a
 repository the project doesn't bind, is unverified and hands over nothing
 ([ADR-109](../decisions/proposed/109-a-feature-moves-through-stages-kept-in-the-repository.md)).
 
+**A worked example,** Saved carts, the prototype's feature, has every file
+filled in: `spec.md` with its frontmatter, `design/`, `build.md`,
+`ops.md` and the project's `.althar/flow.yaml`, with the reference for
+both ([whole-team/example](whole-team/example/README.md)).
+
 ## The flow
 
 ```mermaid
@@ -117,7 +122,7 @@ reachable from every lens.
 | **Presets first** | Spec draft, Research summary, Chat | Prototype, Directions, UI audit | Change, Small change, Review a PR | Ops task, Runbook, Incident look |
 | **Pinned panels** | Feature stage, tracker cycle | Storybook (a page) | Checks, pull requests | Cluster health, alerts |
 | **Notified of** | Questions back on specs, handoffs | Handoffs, comments on canvases | As today | Handoffs into Ship, alerts |
-| **Sandbox** | As today | As today | As today | **Ops profile** (Ops A) |
+| **Sandbox** | As today | As today | As today | **Ops profile** ([Ops A, DEV-283](https://linear.app/althar/issue/DEV-283)) |
 | **Its stage is done when** | `spec.md` merges | `design/` merges | its pull requests merge | `ops.md` merges |
 
 ## Design directions
@@ -160,11 +165,12 @@ Reading the code moved a few things against the canvas:
   `packages/runtime/src/waits.ts`) and **leads wait for outside changes**
   (`wait_for`, `externalWaits.ts`), both built. A next stage's task that
   is already planned can wait on this stage's tasks without errands.
-- **Errands are still needed** for what the person asks for later ("when
-  the build pull requests merge, draft the rollout"), and those waits
-  never fire today (DEV-267). That makes DEV-267 a condition of accepting
-  handoffs (Phase 3), as the canvas said, but not of reading stages
-  (Phase 2).
+- **Errands fire,** since DEV-267 was fixed (#1103, "Wake errands on
+  recorded task results"): a step waiting on a task's merge wakes,
+  including for a result recorded before the errand was kept. What the
+  person asks for later ("when the build pull requests merge, draft the
+  rollout") works for a task's own merge today; Phase 3 adds a wait on a
+  feature's stage becoming done. The canvas's prerequisite is met.
 - **Nothing reads every repository's main today.** The merge line watches
   main only for an hour after this Althar's own merge (`redWatch` in
   `MergeLine.ts`), so handoffs need a feature sweep of their own, with a
@@ -192,7 +198,7 @@ Reading the code moved a few things against the canvas:
   folders there (`attachments`, `canvases`, `ci`, scratch) each carry a
   `.gitignore` of their own, so a committed `.althar/flow.yaml` beside
   them is possible without changing how they are ignored.
-- **There is no named sandbox profile.** Ops A adds the first; `~/.kube`
+- **There is no named sandbox profile.** Ops A ([DEV-283](https://linear.app/althar/issue/DEV-283)) adds the first; `~/.kube`
   is one of the denied places today (`secrets.ts`).
 - **A page beside the conversation** (ADR-100) can already show Grafana,
   ArgoCD or Storybook. Devops can pin one before any panel is built.
@@ -201,7 +207,6 @@ Reading the code moved a few things against the canvas:
 
 ```mermaid
 flowchart LR
-  D267[0 DEV-267] --> P3
   OPSA[0 Ops A] --> P5
   P1[1 Lenses] --> P2[2 Features and stages]
   P2 --> P3[3 Handoffs]
@@ -210,13 +215,9 @@ flowchart LR
   P3 --> P6[6 The team view<br/>with Althar Cloud]
 ```
 
-0. **Prerequisites.** DEV-267, so errands fire on the events they wait on,
-   including those that happened before the errand was kept: Phase 3 is
-   accepted only once it is fixed. Ops A, the Ops sandbox profile, so the
-   devops lens has a profile to default to. Ops A's and Ops B's scope here
-   is taken from the project's decision on Ops mode; no Linear issue for
-   either was found, so it is an assumption for Balázs to confirm, and
-   their issues are linked once filed.
+0. **Prerequisites.** Ops A ([DEV-283](https://linear.app/althar/issue/DEV-283)), the Ops sandbox profile, so the
+   devops lens has a profile to default to. DEV-267, which the canvas
+   listed here too, is done (#1103).
 1. **Lenses** ([ADR-108](../decisions/proposed/108-a-role-is-a-lens-not-a-separate-app.md)).
    A role per person per project, a switch in the project's header, and
    each lens's landing view, preset order and notification defaults first:
@@ -227,23 +228,22 @@ flowchart LR
    Read `.althar/flow.yaml` and `specs/*/spec.md` from the default branch;
    a feature card and its timeline, read-only; `Feature:` links, with
    their stage, across the project's repositories; unverified stages; the
-   optional tracker mirror. Nothing here acts, and none of it waits on
-   DEV-267.
+   optional tracker mirror. Nothing here acts.
 3. **Handoffs** ([ADR-110](../decisions/proposed/110-a-stage-hands-over-when-its-artefact-merges.md),
    [ADR-111](../decisions/proposed/111-gates-live-on-the-code-host-and-the-tracker.md)).
    The feature sweep reads every bound repository's main and the marked
    pull requests, catching up on start; the coordinator of each next-stage
    owner proposes their tasks, held. "Ready for next" as a soft signal. The host's gates
-   shown on the timeline, CODEOWNERS read for who owns each artefact.
-   Accepted only once DEV-267 is fixed (open question 8 asks whether it
-   should be).
+   shown on the timeline, CODEOWNERS read for who owns each artefact. An
+   errand can wait on a feature's stage becoming done.
 4. **Spec and design as artefacts.** A spec view beside the conversation
    (a document, as today), a canvas exported into `specs/<feature>/design/`
    on the person's word, Figma links and screenshots there. A Figma
    connector only if links and screenshots fall short (open question 1).
 5. **DevOps** ([ADR-112](../decisions/proposed/112-panels-are-read-only-connectors-with-a-view-devops-first.md)).
    Kubernetes and Prometheus panels, read-only, and the tools agents read
-   them with; Ops B (environments, the plan/apply gate, locks, a run log);
+   them with; [Ops B, DEV-284](https://linear.app/althar/issue/DEV-284) (environments, the plan/apply gate,
+   locks, a run log);
    the handoff into Ship and an alert offered as an incident task. The
    panels need only Phase 1, so they can start beside Phases 2 and 3.
 6. **The team view.** Who works on what, and what waits on whom, across
@@ -286,7 +286,8 @@ Each has a recommendation; none is decided.
 2. **Which role comes after engineering?** *Recommended: product.* The
    chain starts with the spec, and without product's lens and stage there
    is nothing for design or devops to carry on from. Devops runs in
-   parallel through Ops A and B, which are needed for infrastructure
+   parallel through Ops A and B ([DEV-283](https://linear.app/althar/issue/DEV-283),
+   [DEV-284](https://linear.app/althar/issue/DEV-284)), which are needed for infrastructure
    repositories whether or not features exist, and their panels need only
    the lenses. **Open.**
 3. **Positioning and pricing.** Whether "The IDE for your whole team"
@@ -317,13 +318,6 @@ Two smaller ones came up while reading the code:
    next stage's owner looks: a handoff is someone else's work arriving,
    and the person decides when theirs starts. A lens setting could let
    them count down like any plan. **Open.**
-8. **Should handoffs wait for DEV-267?** As written, yes: Phase 3 is
-   accepted only once DEV-267 is fixed, as the brief and the canvas say.
-   The alternative is to ship the feature sweep's handoffs first, as they
-   need no errand, and add errand follow-ups after. *Recommended: keep the
-   dependency,* since people will ask for "when this merges, do that" as
-   soon as handoffs exist, and an errand that never fires there would be
-   the first thing they meet. **Open.**
 
 ## Out of scope
 

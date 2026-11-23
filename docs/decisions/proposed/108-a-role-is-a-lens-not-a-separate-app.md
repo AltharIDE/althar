@@ -36,7 +36,7 @@ changes defaults only:
 | **Board grouping and filters** | Fixed lanes, no grouping or filter (`features/board/lanes.ts`) | Rows by feature, stage or environment within the lanes, and a filter; the lanes stay |
 | **Preset order** | Built-ins, then the person's by creation (`presetsIn`, `presets.ts`) | An order, and which presets come first in the picker |
 | **Notification defaults** | App-wide switches per kind (`notifyCalls`, `notifyReady`, `notifyStopped`, `appPreferences.ts`) | Per-project defaults for those, and for a handoff ([ADR-110](110-a-stage-hands-over-when-its-artefact-merges.md)) |
-| **Sandbox profile** | One for everyone (`sandboxReach.ts`, `registry.ts`) | The profile a new task starts with: Ops for devops, once Ops A adds it (Ops A's scope is assumed from the project's decision; its issue isn't filed yet) |
+| **Sandbox profile** | One for everyone (`sandboxReach.ts`, `registry.ts`) | The profile a new task starts with: Ops for devops, once Ops A ([DEV-283](https://linear.app/althar/issue/DEV-283)) adds it |
 | **Default models** | The coordinator picks; the person tunes a preset's lead and reviewer (`preset_tunings`) | A lead and reviewer for its presets, below the person's own tunings |
 
 - **Nothing is hidden or forbidden by a role.** Every room, preset, panel

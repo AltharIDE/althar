@@ -40,6 +40,7 @@ what has merged there.**
   ---
   feature: offline-sync
   title: Work offline and sync when back
+  stage: build         # optional: the stage the team says it is at
   owners: { spec: product, design: design, build: engineering, ship: devops }
   repositories: [althar, althar-relay]   # the home repository is first
   tracker: https://linear.app/althar/project/offline-sync
@@ -58,22 +59,27 @@ what has merged there.**
   stages:
     - { id: spec,    owner: product,     artefact: spec.md }
     - { id: design,  owner: design,      artefact: design/ }
-    - { id: build,   owner: engineering, artefact: build.md, pullRequests: true }
+    - { id: build,   owner: engineering, artefact: build.md, done: pull-requests }
     - { id: ship,    owner: devops,      artefact: ops.md }
-    - { id: operate, owner: devops }     # ongoing: never done
+    - { id: operate, owner: devops,      done: never }   # ongoing
   roles:
     - { id: data, like: engineering }   # a custom role (ADR-108)
   ```
 
+  A stage's `done` is `merged` (its artefact merged; the default),
+  `pull-requests` (its artefact and every pull request in its set merged)
+  or `never`; its `next` is the stage below it unless it names another.
   With no file, these five are the default. A stage can be skipped per
-  feature (`skip`), and a project can add, rename or drop stages.
+  feature (`skip`), and a project can add, rename or drop stages. A worked
+  example, Saved carts, with every file filled in and the schema's
+  reference, is in [the plan's example](../../plans/whole-team/example/README.md).
 - **A stage's state is read, never kept by Althar.** Done when its artefact
-  has merged on the default branch, and for a stage with `pullRequests`,
-  when every pull request in its set has merged
+  has merged on the default branch, and for a stage whose `done` is
+  `pull-requests`, when every pull request in its set has merged
   ([ADR-110](110-a-stage-hands-over-when-its-artefact-merges.md)). The
   current stage is the first not done and not skipped. Where the
-  frontmatter's `ready` says more than the merges do, both are shown; Althar
-  never picks one.
+  frontmatter's `stage` or `ready` says otherwise than the merges do, both
+  are shown; Althar never picks one, and never writes `stage` itself.
 - **Each pull request belongs to a feature and a stage.** A pull request in
   any of the project's repositories carries a `Feature: <slug> <stage>`
   line in its description (`Feature: offline-sync build`), or a

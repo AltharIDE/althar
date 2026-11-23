@@ -17,11 +17,10 @@
   [ADR-097, the person's MCP servers](../the-persons-setup.md#in-every-role),
   [ADR-100, a page beside the conversation](../desktop-app.md#a-web-page-beside-the-conversation),
   [ADR-108, lenses](108-a-role-is-a-lens-not-a-separate-app.md),
-  Ops A (the Ops sandbox profile) and Ops B (environments, the plan/apply
-  gate, locks, a run log). Their scope here is taken from the project's
-  decision on Ops mode, not from issues: no Linear issue for either was
-  found, so what this ADR says of them is an assumption for Balázs to
-  confirm, and their issues are to be linked once filed.
+  Ops A ([DEV-283](https://linear.app/althar/issue/DEV-283), the Ops
+  sandbox profile) and Ops B
+  ([DEV-284](https://linear.app/althar/issue/DEV-284): environments, the
+  plan/apply gate, locks, a run log).
 
 ## Context
 
