@@ -56,6 +56,10 @@ it.live('opens the Desktop profile’s worker listener and exposes only workers 
             const hello = yield* Effect.promise(() =>
               worker.hello({
                 $typeName: 'althar.worker.v1.AgentWorkerHello',
+                anyProject: false,
+                reportsSignIn: false,
+                signedIn: [],
+                release: '',
                 reserveBeforeTransfer: false,
                 version: 1,
                 workerId,

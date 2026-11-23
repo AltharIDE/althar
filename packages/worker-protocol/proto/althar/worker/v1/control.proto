@@ -63,6 +63,14 @@ message AgentWorkerHello {
   string journal_id = 4;
   AgentWorkerCapacity capacity = 5;
   bool reserve_before_transfer = 6;
+  // A worker its home set up offers each agent for any project the home grants
+  // it, as a capability whose project_id is "*". The home's grants decide.
+  bool any_project = 7;
+  // It says which of its providers are signed in on it.
+  bool reports_sign_in = 8;
+  repeated string signed_in = 9;
+  // The Althar release it runs, where it was installed from one.
+  string release = 10;
 }
 
 message AgentWorkerCapacity {

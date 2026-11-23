@@ -1,4 +1,4 @@
-import type { ProjectWorker } from '@althar/contracts'
+import type { ProjectWorker, WorkerGrant } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
   WorkerFile,
@@ -85,6 +85,30 @@ export interface EnrolledWorkerState {
   readonly projectIds: ReadonlyArray<string>
   /** The task workspace its run holds, connected or not, from its start until it says that run ended. */
   readonly workspaceId?: string
+  /** As the person added it, and the SSH address it was set up at, where it was. */
+  readonly name?: string
+  readonly ssh?: string
+  /** Of `providers`, those signed in on it, where it says. */
+  readonly signedIn?: ReadonlyArray<string>
+  /** The Althar release it runs, where it says. */
+  readonly release?: string
+  /** It works on whatever project it is given: the home's grants say which. */
+  readonly anyProject?: boolean
+}
+
+/**
+ * Adding workers, where the home is its own authority for them (ADR-103): signing a worker's own key, a one-time code
+ * for a machine without SSH, and the projects each works on. Each opens the home's worker port first where it isn't
+ * open yet, without a restart. Fails with words to show.
+ */
+export interface WorkerAdmin {
+  readonly add: (input: {
+    readonly publicKey: Uint8Array
+    readonly name: string
+    readonly ssh: string | null
+  }) => Effect.Effect<WorkerGrant, string>
+  readonly code: (name: string) => Effect.Effect<{ readonly code: string; readonly expiresAt: number }, string>
+  readonly assign: (workerId: string, projectIds: ReadonlyArray<string>) => Effect.Effect<void, string>
 }
 
 export interface WorkerExecutionPlatform {
@@ -93,6 +117,8 @@ export interface WorkerExecutionPlatform {
   readonly enrolled?: () => ReadonlyArray<EnrolledWorkerState> | null
   /** Takes a worker out of this home for good: its certificate is no longer accepted. Fails with words to show. */
   readonly revoke?: (workerId: string) => Effect.Effect<void, string>
+  /** Adding workers, where the home does that itself; none where an operator enrolls them by command. */
+  readonly admin?: WorkerAdmin
   readonly startCommand?: (input: AssignedCommand) => Effect.Effect<WorkerManagedProcess, AgentStartFailed, Scope.Scope>
   readonly readFile?: (
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'> & { readonly path: string },

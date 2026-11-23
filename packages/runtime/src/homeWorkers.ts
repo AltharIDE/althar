@@ -18,8 +18,10 @@ import type { WorkerExecutionPlatform } from './workerExecution'
 export const homeWorkers = (platform: WorkerExecutionPlatform | undefined) =>
   Effect.gen(function* () {
     const enrolled = platform?.enrolled?.() ?? null
-    if (enrolled === null) return { enabled: false, workers: [] } satisfies HomeWorkers
-    if (enrolled.length === 0) return { enabled: true, workers: [] } satisfies HomeWorkers
+    // A home that is its own authority adds workers itself, listening or not yet.
+    const adds = platform?.admin === undefined ? {} : { adds: true }
+    if (enrolled === null) return { enabled: false, workers: [], ...adds } satisfies HomeWorkers
+    if (enrolled.length === 0) return { enabled: true, workers: [], ...adds } satisfies HomeWorkers
     const sql = yield* SqlClient.SqlClient
     const ids = [...new Set(enrolled.flatMap((worker) => worker.projectIds))]
     const names = ids.length === 0 ? [] : yield* sql<{ id: string; name: string }>`SELECT id, name FROM projects WHERE id IN ${sql.in(ids)}`
@@ -51,6 +53,11 @@ export const homeWorkers = (platform: WorkerExecutionPlatform | undefined) =>
       (worker.workspaceId === undefined ? undefined : byWorkspace.get(worker.workspaceId)) ?? placed.get(worker.workerId) ?? null
     const workers = enrolled.map((worker): HomeWorker => ({
       workerId: worker.workerId,
+      ...(worker.name === undefined ? {} : { name: worker.name }),
+      ...(worker.ssh === undefined ? {} : { ssh: worker.ssh }),
+      ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
+      ...(worker.release === undefined ? {} : { release: worker.release }),
+      ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
       connected: worker.connected,
       busy: worker.busy,
       ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
@@ -61,5 +68,5 @@ export const homeWorkers = (platform: WorkerExecutionPlatform | undefined) =>
       }),
       task: worker.busy ? taskOf(worker) : null,
     }))
-    return { enabled: true, workers } satisfies HomeWorkers
+    return { enabled: true, workers, ...adds } satisfies HomeWorkers
   })

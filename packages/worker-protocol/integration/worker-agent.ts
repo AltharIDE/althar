@@ -155,6 +155,10 @@ const hello = (
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
+    anyProject: false,
+    reportsSignIn: false,
+    signedIn: [],
+    release: '',
     reserveBeforeTransfer: false,
     workerId: id,
     version: 1,
