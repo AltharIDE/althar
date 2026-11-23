@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Effect, Fiber, Layer, Logger, Option, References, Stream } from 'effect'
 import { until } from '@althar/testing/effect'
 
 import { Accounts } from '../src/Accounts'
@@ -51,6 +51,15 @@ process.stdin.on('data', (data) => {
     process.exit(1)
   }
 })`
+
+/** What was logged: each line's words and what it was annotated with. */
+const logged = () => {
+  const lines: Array<{ readonly message: unknown; readonly annotations: Readonly<Record<string, unknown>> }> = []
+  const logger = Logger.make((options) =>
+    lines.push({ message: options.message, annotations: { ...options.fiber.getRef(References.CurrentLogAnnotations) } }),
+  )
+  return { lines, layer: Logger.layer([logger]) }
+}
 
 const claudeSigningIn = (): AgentDefinition => {
   const base = definition('claude-code')
@@ -167,8 +176,9 @@ describe('signing an account in inside Althar', () => {
     }).pipe(Effect.provide(layer(false, opened)))
   })
 
-  it.live('says when a pasted code is refused, takes another, and says why it failed', () =>
-    Effect.gen(function* () {
+  it.live('says when a pasted code is refused, takes another, and says why it failed', () => {
+    const log = logged()
+    return Effect.gen(function* () {
       const accounts = yield* Accounts
       const signIns = yield* AccountSignIns
       const [usual] = yield* accounts.of('claude-code')
@@ -187,9 +197,15 @@ describe('signing an account in inside Althar', () => {
       // Another code clears it while it is tried.
       yield* signIns.paste(flowId, 'another')
       const failed = yield* until(signIns.get(flowId), (state) => state.state === 'failed')
-      assert.deepStrictEqual(failed, { state: 'failed', message: 'Login was not completed.' })
-    }).pipe(Effect.provide(layer(false, [], claudeSigningIn()))),
-  )
+      // The person reads a short line; Claude Code's own words go to the runtime's log.
+      assert.deepStrictEqual(failed, { state: 'failed', message: 'Couldn’t sign in.' })
+      const warned = yield* until(
+        Effect.sync(() => log.lines.find((line) => String(line.message).includes('A sign-in failed'))),
+        (line) => line !== undefined,
+      )
+      assert.deepStrictEqual(warned?.annotations, { agent: 'claude-code', account: usual.id, error: 'Login was not completed.' })
+    }).pipe(Effect.provide(layer(false, [], claudeSigningIn())), Effect.provide(log.layer))
+  })
 
   it.live('stops a sign-in still under way when the runtime stops', () => {
     const pidFile = join(mkdtempSync(join(tmpdir(), 'althar-signin-')), 'pid')
