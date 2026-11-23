@@ -135,7 +135,7 @@ A worker can be any 64-bit Linux machine (x64 or arm64) with systemd 254 or late
 
 It shows in **Settings › Computers** once it connects. Pick the projects it works on there, and sign its agents in: Codex with a one-time code you enter on your computer or phone, Claude Code in your browser, with the code its page shows pasted back. A worker takes no task until it has a project.
 
-For a login without lingering, Althar shows the line for the machine's administrator: `sudo loginctl enable-linger -- <user>`. Without it, the worker stops when that user logs out.
+The worker is a service of its login's own, so that login must linger: without it, the worker stops when the setup's SSH session ends. A root login gets a user that lingers. For a regular login without lingering, Althar turns it on where the login may use `sudo` without a password; otherwise it stops before installing anything and shows the line for the machine's administrator, `sudo loginctl enable-linger -- <user>`, and **Try again** goes on once it has been run.
 
 **With a code.** Choose **With a code** in the same dialog and run the line it shows on the machine. It installs the newest release from Althar's releases page and enrolls the worker with the code. The code works once, for ten minutes or until the home restarts. The window can't reach such a machine to sign its agents in, so sign them in there, as the worker's user. This says Codex's one-time code, and the worker says it's signed in once it ends:
 
@@ -144,7 +144,7 @@ program="${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program/current"
 "$program/node/bin/node" "$program/dist/althar-host.js" worker sign-in --agent codex --way device
 ```
 
-To take a worker out, open it in **Settings › Computers** and choose **Remove**. The home no longer accepts its key and gives it no more work. Add it again to make it a new worker.
+To take a worker out, open it in **Settings › Computers** and choose **Remove**. The home no longer accepts its key and gives it no more work. Add it again, over SSH or with a code, and it becomes a new worker with the same key.
 
 ### How a worker and its home trust each other
 
@@ -168,6 +168,8 @@ The timer checks hourly for a newer release from the same place its own came fro
 ## Set a worker up by hand
 
 A home that takes workers by its operator's own certificates, configured with `configure-workers`, keeps them: Add a worker shows the commands for it, and the home doesn't make its own authority. The rest of this section covers that way, a diagnostic run and a project command. Most people don't need it.
+
+<a id="native-worker-diagnostic"></a>
 
 <details>
 <summary>The native worker diagnostic</summary>

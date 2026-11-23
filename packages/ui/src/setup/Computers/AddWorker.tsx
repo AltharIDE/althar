@@ -36,11 +36,10 @@ export interface WorkerSetupView {
   /** The release, while it comes: how far, and its size. */
   progress?: { fraction: number; megabytes: number; sending: boolean } | undefined
   version?: string | undefined
-  hostKey?: { fingerprint: string } | undefined
+  /** Its SSH host key, seen the first time: its fingerprint, and its type (ED25519, ECDSA, RSA) to read it by there. */
+  hostKey?: { fingerprint: string; type?: string | undefined } | undefined
   /** Where it stopped: what happened, what to do, and whether trying again can help. */
   problem?: { title: string; body?: string | undefined; command?: string | undefined; retry: boolean } | undefined
-  /** A line for the machine's administrator, where its login doesn't linger: without it the worker stops at logout. */
-  linger?: string | undefined
 }
 
 /** A one-time code for a machine without SSH, and the line that takes it there. */
@@ -70,11 +69,10 @@ export interface AddWorkerText {
   started: string
   firstTime: string
   isThisKey: (name: string) => string
-  keyWhere: { before: string; command: string; after: string }
+  keyWhere: { before: string; command: (type: string | undefined) => string; after: string }
   trust: string
   again: string
   stop: string
-  linger: string
   waiting: string
   codeNote: (home: string) => string
   making: string
@@ -100,11 +98,15 @@ export const addWorkerText: AddWorkerText = {
   started: 'Starts with the machine, updates itself',
   firstTime: 'First time on this machine',
   isThisKey: (name) => `Is this ${name}’s key?`,
-  keyWhere: { before: 'On the machine, ', command: 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub', after: ' prints it.' },
+  keyWhere: {
+    before: 'On the machine, ',
+    // The file of the type the machine offered: ed25519 where it has one, else ECDSA or RSA.
+    command: (type) => `ssh-keygen -lf /etc/ssh/ssh_host_${type === 'ECDSA' ? 'ecdsa' : type === 'RSA' ? 'rsa' : 'ed25519'}_key.pub`,
+    after: ' prints it.',
+  },
   trust: 'Trust and go on',
   again: 'Try again',
   stop: 'Stop',
-  linger: 'Its login stops its services when it logs out. To keep the worker running, have its administrator run:',
   waiting: 'Waiting for it to connect…',
   codeNote: (home) => `Run this on the machine. It installs the worker and enrolls it with ${home}. The code works once.`,
   making: 'Making a code…',
@@ -300,7 +302,7 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
                     </span>
                     <span className={s.addressHint}>
                       {t.keyWhere.before}
-                      <Code>{t.keyWhere.command}</Code>
+                      <Code>{t.keyWhere.command(setup.hostKey.type)}</Code>
                       {t.keyWhere.after}
                     </span>
                   </AskCard>
@@ -324,15 +326,6 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
           )
         })}
       </ol>
-      {setup.linger !== undefined && setup.phase !== 'failed' && (
-        <div className={s.leftToDo}>
-          <span className={s.addressHint}>{t.linger}</span>
-          <span className={s.lineToRun}>
-            <Code className={s.lineToRunText}>{setup.linger}</Code>
-            <CopyButton value={setup.linger} ghost />
-          </span>
-        </div>
-      )}
       {setup.phase === 'done' && <span className={s.waiting}>{t.waiting}</span>}
     </div>
   )

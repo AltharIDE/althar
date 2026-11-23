@@ -87,6 +87,11 @@ describe('adding a worker', () => {
     expect(onTrust).toHaveBeenCalledOnce()
   })
 
+  it('names the key file of the type the machine offered', () => {
+    dialog({ setup: running({ phase: 'trust', hostKey: { fingerprint: 'SHA256:abc', type: 'ECDSA' } }) })
+    expect(screen.getByText('ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub')).toBeTruthy()
+  })
+
   it('says where it stopped and what to do; Try again only where it can help', async () => {
     const { onAgain } = dialog({
       setup: running({
@@ -112,12 +117,11 @@ describe('adding a worker', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('once started, waits for it to connect, with the line its administrator runs where its login doesn’t linger', () => {
-    dialog({ setup: running({ phase: 'done', at: 5, version: '0.11.0', linger: 'sudo loginctl enable-linger -- build' }) })
+  it('once started, waits for it to connect', () => {
+    dialog({ setup: running({ phase: 'done', at: 5, version: '0.11.0' }) })
     expect(screen.getByText('0.11.0, signature checked')).toBeTruthy()
     expect(screen.getByText('Signed by This Mac')).toBeTruthy()
     expect(screen.getByText('Starts with the machine, updates itself')).toBeTruthy()
-    expect(screen.getByText('sudo loginctl enable-linger -- build')).toBeTruthy()
     expect(screen.getByText('Waiting for it to connect…')).toBeTruthy()
   })
 

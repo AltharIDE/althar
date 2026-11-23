@@ -44,8 +44,6 @@ export interface WorkerSetup {
   readonly sending?: boolean
   /** The release it was given. */
   readonly version?: string
-  /** Where the login has no lingering, a line for the machine's administrator: without it the worker stops at logout. */
-  readonly linger?: string
   /** The worker it became, once its home signed it and it started. */
   readonly workerId?: string
   readonly agents?: ReadonlyArray<WorkerAgent>

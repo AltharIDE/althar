@@ -144,11 +144,9 @@ export const workerSetups = (
     const failed = events.find((one) => one.state === 'failed')
     if (failed !== undefined) {
       const step = (STEP as Record<string, number>)[failed.step] ?? STEP.start
-      throw new Stopped(
-        typeof failed.code === 'string' ? failed.code : 'Failed',
-        step,
-        typeof failed.message === 'string' ? failed.message : undefined,
-      )
+      // Its words, or the line that puts it right, as LingerOff gives it.
+      const words = typeof failed.message === 'string' ? failed.message : typeof failed.command === 'string' ? failed.command : undefined
+      throw new Stopped(typeof failed.code === 'string' ? failed.code : 'Failed', step, words)
     }
     return { ...ran, events }
   }
@@ -231,14 +229,18 @@ export const workerSetups = (
     const look = probed.events.find((one) => one.step === 'look' && one.state === 'done')
     if (look === undefined) throw new Stopped('Unreachable', STEP.reach)
     const arch = typeof look.arch === 'string' ? look.arch : 'x64'
-    const action = look.action as Record<string, unknown> | undefined
-    set({
-      at: STEP.look,
-      ...(action?.code === 'LingerOff' && typeof action.command === 'string' ? { linger: `sudo ${action.command}` } : {}),
-    })
+    set({ at: STEP.look })
     const facts = `Linux · ${arch} · ${Math.round((typeof look.freeKiB === 'number' ? look.freeKiB : 0) / 1_048_576)} GB free`
     set({ facts })
     say(facts)
+    // A regular login without lingering would stop the worker as this login ends: turned on here where it may be, else
+    // the line for the machine's administrator, before anything is installed. A root login makes a user that lingers.
+    if (look.root !== true && look.linger !== true) {
+      const lingers = await bootstrap(target, 'worker-linger', [], signal)
+      if (!lingers.events.some((one) => one.step === 'look' && one.state === 'done' && one.linger === true))
+        throw new Stopped('LingerOff', STEP.look)
+      say('loginctl enable-linger: on')
+    }
     if (look.root === true) {
       // As a home is, a worker runs as a user of its own, reached with the key that logged in.
       const key = await acceptedKey(target, probed.stderr, signal)

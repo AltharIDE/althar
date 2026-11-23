@@ -87,6 +87,13 @@ export const problemOf = (
         body: 'Reach it as a user of your own instead.',
         retry: false,
       }
+    case 'LingerOff':
+      return {
+        title: `${name} would stop the worker whenever you log out.`,
+        body: 'Its login can’t keep services running on its own. Have its administrator run this, then try again:',
+        ...(said === undefined ? {} : { command: said }),
+        retry: true,
+      }
     case 'NoPublicKey':
       return {
         title: 'Althar couldn’t tell which of your SSH keys logged in, to make the worker’s user with it.',
@@ -117,9 +124,8 @@ export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
           sending: setup.sending === true,
         },
   version: setup.version,
-  hostKey: setup.hostKey === undefined ? undefined : { fingerprint: setup.hostKey.fingerprint },
+  hostKey: setup.hostKey === undefined ? undefined : { fingerprint: setup.hostKey.fingerprint, type: setup.hostKey.type },
   problem: setup.problem === undefined ? undefined : problemOf(setup.problem.code, setup, setup.problem.said),
-  linger: setup.linger,
 })
 
 export interface AddWorkerModel {

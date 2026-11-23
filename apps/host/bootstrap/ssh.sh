@@ -196,6 +196,20 @@ if [ "$role" = worker ]; then
       worker_program
       exec "$current/node/bin/node" "$current/dist/althar-host.js" worker sign-in --agent "$1" --way "$2"
       ;;
+    linger)
+      # A worker is a user service: without lingering, the user's service manager, and the worker with it, stops once
+      # this login ends. Turned on where this login may without a password; else the line for its administrator.
+      [ "$#" -eq 0 ] || fail look InvalidRequest
+      user=$(id -un)
+      lingers() { [ "$(loginctl -p Linger --value show-user -- "$user" 2>/dev/null || :)" = yes ]; }
+      if ! lingers && command -v sudo >/dev/null; then sudo -n loginctl enable-linger -- "$user" >/dev/null 2>&1 || :; fi
+      if ! lingers; then
+        event look failed ",\"code\":\"LingerOff\",\"command\":$(json_string "sudo loginctl enable-linger -- $user")"
+        exit 1
+      fi
+      event look done ',"linger":true'
+      exit
+      ;;
     status|resume) fail setup InvalidRequest ;;
   esac
 fi

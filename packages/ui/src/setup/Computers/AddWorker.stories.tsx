@@ -60,7 +60,7 @@ export const Installing: Story = {
   },
 }
 
-/** Started, with a line left for its administrator: its login doesn't linger, so it would stop at logout. */
+/** Started: waiting for it to connect. */
 export const StartedWaiting: Story = {
   args: {
     setup: {
@@ -69,7 +69,6 @@ export const StartedWaiting: Story = {
       at: 5,
       facts: 'Linux · arm64 · 62 GB free',
       version: '0.11.0',
-      linger: 'sudo loginctl enable-linger -- build',
     },
   },
 }
