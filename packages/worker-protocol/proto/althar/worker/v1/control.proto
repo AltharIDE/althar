@@ -287,6 +287,10 @@ enum AgentRunOutcome {
 message AgentWorkerHeartbeat {
   uint32 sequence = 1;
   AgentWorkerCapacity capacity = 2;
+  // Which of its providers are signed in now, where it says: an agent signed
+  // in or out during a run reaches the home without the worker starting again.
+  bool reports_sign_in = 3;
+  repeated string signed_in = 4;
 }
 
 message AgentFileRef {

@@ -183,6 +183,9 @@ export const useWorkerProjects = (): WorkerProjectsModel => {
 
 export interface WorkerSignInModel {
   readonly signingIn: WorkerSignInView | null
+  /** Who is signed in on a worker, as a sign-in that ended here showed it, until a read of the home says so too. */
+  readonly held: ReadonlyMap<string, ReadonlyArray<string>>
+  readonly confirmed: (workers: ReadonlyArray<HomeWorker>) => void
   readonly start: (worker: HomeWorker, agent: string) => void
   readonly paste: (code: string) => void
   readonly cancel: () => void
@@ -193,9 +196,10 @@ export interface WorkerSignInModel {
  * agent's own sign-in says them; once over, the worker says again who is signed in, and the list is read again.
  */
 export const useWorkerSignIn = (): WorkerSignInModel => {
-  const { host, cache } = useServices()
+  const { host } = useServices()
   const bridge = host.workers
   const [signingIn, setSigningIn] = useState<WorkerSignInView | null>(null)
+  const [held, setHeld] = useState<ReadonlyMap<string, ReadonlyArray<string>>>(new Map())
   useEffect(
     () =>
       bridge?.onSignIn((event: WorkerSignInEvent) =>
@@ -211,14 +215,10 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
             case 'failed':
               return { ...was, step: { kind: 'failed', message: event.message } }
             case 'agents': {
-              // Signed in there: shown at once, and read again once the worker has said so itself.
+              // Signed in there: shown at once, and held until a read of the home says so too (its worker says it with its
+              // next heartbeats), so an older read never takes it back.
               const signedIn = event.agents.filter((agent) => agent.signedIn).map((agent) => agent.id)
-              cache.setQueryData<HomeWorkers>(keys.workers, (list) =>
-                list === undefined
-                  ? list
-                  : { ...list, workers: list.workers.map((one) => (one.workerId === was.workerId ? { ...one, signedIn } : one)) },
-              )
-              void cache.invalidateQueries({ queryKey: keys.workers })
+              setHeld((before) => new Map(before).set(was.workerId, signedIn))
               return null
             }
             default:
@@ -226,10 +226,25 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
           }
         }),
       ),
-    [bridge, cache],
+    [bridge],
+  )
+  // Let go of each a read now says as it was shown.
+  const confirmed = useCallback(
+    (workers: ReadonlyArray<HomeWorker>) =>
+      setHeld((before) => {
+        const same = (one: ReadonlyArray<string>, other: ReadonlyArray<string>) =>
+          one.length === other.length && one.every((id) => other.includes(id))
+        const still = [...before].filter(
+          ([workerId, signedIn]) => !workers.some((worker) => worker.workerId === workerId && same(worker.signedIn ?? [], signedIn)),
+        )
+        return still.length === before.size ? before : new Map(still)
+      }),
+    [],
   )
   return {
     signingIn,
+    held,
+    confirmed,
     start: (worker, agent) => {
       if (bridge === undefined || worker.ssh === undefined) return
       setSigningIn({ workerId: worker.workerId, agent, step: { kind: 'starting' } })

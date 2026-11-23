@@ -159,6 +159,8 @@ export const startHomeConnections = ({
     system: nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
     tools: source.tools,
     mine,
+    // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
+    reachesOwnHome: (id) => controller.state(id).current.kind !== 'https',
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)

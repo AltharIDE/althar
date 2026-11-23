@@ -36,7 +36,7 @@ import { extractRelease } from './updates/archive'
  * - `enroll --grant <base64url>`: what the home gave once it signed that key, written to the worker's folder; its
  *   agents, from the release (the ACP adapters and the agents' own programs ship in it); and its services, started.
  * - `join --code <code>`: a code's way to the same, asking the home itself.
- * - `agents`: which agents it has and which are signed in, kept where the worker reads it at each hello.
+ * - `agents`: which agents it has and which are signed in, kept where the worker reads it with its heartbeats.
  * - `sign-in --agent <id> --way <browser|device>`: the agent's own sign-in, as Althar runs it on a home, its steps
  *   said as JSON lines; a code pasted back comes in on stdin.
  * - `update`: its timer's, hourly: a newer signed release, from where the home's come from, verified, unpacked and
@@ -114,7 +114,7 @@ const checkAgents = async (folder: string) => {
   const was = (await readPrivate(join(folder, 'signed-in'), 4096))?.toString('utf8') ?? null
   const now = signedIn.map((id) => `${id}\n`).join('')
   if (was !== now) await writePrivate(join(folder, 'signed-in'), now, true)
-  return { agents: checked, changed: was !== null && was !== now }
+  return { agents: checked }
 }
 
 /** Whether the worker runs a task now: one of its agents' or a project command's own units is active. */
@@ -149,13 +149,6 @@ export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
   return () => {
     system = was
   }
-}
-
-/** The worker says its agents again once it starts again: then, unless it runs a task, when it would cut that off. */
-const restartIdle = async () => {
-  if (await busy()) return false
-  await systemctl('try-restart', SERVICE)
-  return true
 }
 
 const renderUnits = (folder: string, program: string) => {
@@ -354,9 +347,9 @@ export const join_ = async (code: string, name: string, out: (text: string) => v
 
 export const listAgents = async (out: (text: string) => void) => {
   const folder = workerFolder()
-  const { agents: found, changed } = await checkAgents(folder)
-  const restarted = changed ? await restartIdle() : false
-  say(out, { step: 'agents', state: 'done', agents: found, restarted })
+  // The worker reads the file again with its heartbeats: the home hears of it within seconds, a task running or not.
+  const { agents: found } = await checkAgents(folder)
+  say(out, { step: 'agents', state: 'done', agents: found })
 }
 
 /** An agent's sign-in, as on a home: its steps said, a pasted code read from stdin; checked again once it ends. */

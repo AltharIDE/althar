@@ -1,3 +1,5 @@
+import { socketCanCall } from '@althar/contracts'
+
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
 import { useHomeState } from './useHomes'
@@ -19,16 +21,23 @@ export interface WindowHomeName {
   readonly standalone: boolean
   /** Whether this window may add the home's workers, pick their projects and take them out: one on a paired device may not. */
   readonly canManageWorkers: boolean
+  /** It may not because the home runs an older Althar, which lets no window over SSH manage its workers. */
+  readonly olderHome: boolean
 }
 
 export const useWindowHome = (): WindowHomeName => {
   const { client, host } = useServices()
   const here = useHomeState(host.homes)
-  const canManageWorkers = client.connection?.identity.role !== 'socket' || here?.current.kind === 'ssh'
-  if (here !== null && here.current.kind !== 'local') return { name: here.current.home.name, standalone: true, canManageWorkers }
-  if (client.connection === undefined) return { name: device.This, standalone: false, canManageWorkers }
+  // Over SSH, as its operator, where the home lets a socket manage workers: an older one doesn't, and its window says so.
+  const connection = client.connection
+  const canManageWorkers =
+    connection?.identity.role !== 'socket' ||
+    (here?.current.kind === 'ssh' && (connection.calls?.includes('RemoveWorker') ?? socketCanCall('RemoveWorker')))
+  const olderHome = connection?.identity.role === 'socket' && here?.current.kind === 'ssh' && !canManageWorkers
+  if (here !== null && here.current.kind !== 'local') return { name: here.current.home.name, standalone: true, canManageWorkers, olderHome }
+  if (client.connection === undefined) return { name: device.This, standalone: false, canManageWorkers, olderHome }
   // On another home before main says which: never This Mac.
-  return { name: text.thisHome, standalone: true, canManageWorkers }
+  return { name: text.thisHome, standalone: true, canManageWorkers, olderHome }
 }
 
 const text = { thisHome: 'This home' }

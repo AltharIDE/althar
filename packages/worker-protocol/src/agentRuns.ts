@@ -176,7 +176,8 @@ export interface AvailableAgentWorker {
 
 interface Slot {
   readonly workerId: string
-  readonly said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject'>
+  /** What it said of itself; who is signed in, again with its heartbeats. */
+  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject'>
   readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
@@ -699,6 +700,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         if (payload.case === 'heartbeat') {
           if (payload.value.sequence !== sequence + 1) return fail(status.INVALID_ARGUMENT, 'The worker heartbeat was out of order.')
           sequence = payload.value.sequence
+          if (payload.value.reportsSignIn && payload.value.signedIn.every((providerId) => PROVIDER_ID.test(providerId)))
+            slot.said = { ...slot.said, signedIn: [...new Set(payload.value.signedIn)].slice(0, MAX_CAPABILITIES) }
           if (payload.value.capacity !== undefined) {
             capacity = capacityOf(payload.value.capacity)
             accountReserved = payload.value.capacity.accountReserved

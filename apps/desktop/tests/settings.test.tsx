@@ -740,6 +740,69 @@ describe('the Settings tab', () => {
     expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
   })
 
+  it('on an older Linux home over SSH, leaves Remove off and says to update it', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = { workerId: `wrk_${'6'.repeat(32)}`, connected: true, busy: false, providers: ['codex'], projects: [], task: null }
+    const { client } = fakeClient({
+      connection: { ...studio.connection, calls: studio.connection.calls.filter((call) => call !== 'RemoveWorker') },
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+    })
+    withServices(<Settings at="computers" />, client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 666666/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(page).getByText('studio runs an older Althar: update it to remove its workers from here.')).toBeTruthy()
+  })
+
+  it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {
+    const studio = onLinuxHome('studio')
+    const paired = {
+      ...studio.homes,
+      state: vi.fn(async () => ({
+        ...(await studio.homes.state()),
+        current: {
+          kind: 'https' as const,
+          home: { ...(await studio.homes.list())[0]!, ssh: undefined, https: { origin: 'https://studio:6769' } },
+        },
+      })),
+    }
+    const worker: HomeWorker = {
+      workerId: `wrk_${'6'.repeat(32)}`,
+      name: 'box',
+      ssh: 'root@box',
+      anyProject: true,
+      signedIn: [],
+      connected: true,
+      busy: false,
+      providers: ['codex'],
+      projects: [],
+      task: null,
+    }
+    const signIn = vi.fn(async () => undefined)
+    const { client } = fakeClient({ connection: studio.connection, getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })) })
+    withServices(
+      <Settings at="computers" />,
+      client,
+      fakeHost({
+        homes: paired as never,
+        workers: {
+          setup: vi.fn(async () => null),
+          setUp: vi.fn(async () => undefined),
+          act: vi.fn(async () => undefined),
+          onSetup: vi.fn(() => () => undefined),
+          agents: vi.fn(async () => []),
+          signIn,
+          signInAct: vi.fn(async () => undefined),
+          onSignIn: vi.fn(() => () => undefined),
+        },
+      }),
+    )
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^box/ }))
+    expect(within(page).getByText('Not signed in')).toBeTruthy()
+    expect(within(page).queryByRole('button', { name: 'Sign in' })).toBeNull()
+  })
+
   it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
     const worker = { workerId: `wrk_${'4'.repeat(32)}`, connected: false, busy: false, providers: [], projects: [], task: null }
     const { client } = fakeClient({

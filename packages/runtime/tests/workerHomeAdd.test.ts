@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 
 import { assert, it } from '@effect/vitest'
+import { until } from '@althar/testing/effect'
 import { newKey } from '@althar/transport-node'
 import type { AgentWorkerHello } from '@althar/worker-protocol'
 import { ANY_PROJECT } from '@althar/worker-protocol/agent-runs'
@@ -146,6 +147,15 @@ it.live('opens its worker port when asked, signs a worker’s own key, and takes
         anyProject: true,
         projectIds: [],
       })
+      // Signed in on it later, even while it runs a task: its next heartbeat says so.
+      connected.send({
+        case: 'heartbeat',
+        value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1, reportsSignIn: true, signedIn: ['codex', 'claude'] },
+      })
+      yield* until(
+        Effect.sync(() => home.enrolled?.()?.[0]?.signedIn),
+        (signedIn) => signedIn?.length === 2,
+      )
       // No project picked: it takes no work. Picked, it takes that project's, by its name.
       assert.deepStrictEqual(home.list(projectId), [])
       yield* home.admin!.assign(grant.workerId, [projectId])

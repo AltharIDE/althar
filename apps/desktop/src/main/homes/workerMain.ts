@@ -21,11 +21,14 @@ export const startWorkerSetups = ({
   system,
   tools,
   mine,
+  reachesOwnHome,
 }: {
   readonly system: SetupSystem
   /** Where OpenSSH's programs are, where not where the system keeps them. */
   readonly tools?: string | undefined
   readonly mine: (contents: WebContents) => boolean
+  /** Whether a window's home is this computer's or one reached over SSH: only those may have SSH run to a worker's address. */
+  readonly reachesOwnHome: (windowId: number) => boolean
 }) => {
   const tell = (channel: string, value: unknown) => {
     for (const window of BrowserWindow.getAllWindows())
@@ -49,6 +52,11 @@ export const startWorkerSetups = ({
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Workers are added only in Althar’s own window.')
   }
+  /** Its own window, on a home whose workers it may reach over SSH. */
+  const operator = (event: IpcMainInvokeEvent) => {
+    owner(event)
+    if (!reachesOwnHome(event.sender.id)) throw new Error('A window on a home paired over the network can’t reach its workers over SSH.')
+  }
   const address = (value: unknown) => {
     if (typeof value !== 'string' || value.length > 270 || !/^[A-Za-z0-9_.@:[\]-]+$/u.test(value))
       throw new Error('Give the worker’s SSH address.')
@@ -59,7 +67,7 @@ export const startWorkerSetups = ({
     return setups.current()
   })
   ipcMain.handle('althar:workers-set-up', (event, target: unknown, here: unknown) => {
-    owner(event)
+    operator(event)
     if (!canSetUp()) throw new Error('This Althar can’t reach your SSH keys: add the worker with a code instead.')
     setups.start(homeTarget(target), here === true)
   })
@@ -74,11 +82,11 @@ export const startWorkerSetups = ({
     return setups.act({ kind } satisfies WorkerSetupAction)
   })
   ipcMain.handle('althar:workers-agents', (event, at: unknown) => {
-    owner(event)
+    operator(event)
     return setups.agents(address(at))
   })
   ipcMain.handle('althar:workers-sign-in', (event, at: unknown, agent: unknown, way: unknown) => {
-    owner(event)
+    operator(event)
     if (typeof agent !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/u.test(agent)) throw new Error('Choose one of the worker’s agents.')
     return setups.signIn(address(at), agent, way === 'device' ? 'device' : 'browser')
   })

@@ -665,7 +665,10 @@ void test('managed output and stop stay attached to the selected task lease', { 
     agent.startCommand({ id: 'proc_' + '7'.repeat(32), directory: '', command: 'true', output: () => undefined }),
     /no longer owns/i,
   )
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',
@@ -711,7 +714,10 @@ void test('revocation withdraws the lease and leaves the in-flight stop unconfir
   await rejects(agent.write(Buffer.from('new input')), /no longer owns/)
   await rejects(agent.readPatch('a'.repeat(40), 'b'.repeat(40)), /cannot check/)
   const unconfirmed = rejects(agent.exit, /not enrolled/)
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   await rejects(worker.read(), { code: status.UNAUTHENTICATED })
   await unconfirmed
   deepEqual(pool.list(projectId), [])
@@ -764,7 +770,10 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
   tunnel.send({ case: 'data', value: Buffer.from('withdrawn') })
   await rejects(tunnel.read(), { code: status.PERMISSION_DENIED })
   deepEqual(received, ['granted'])
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',

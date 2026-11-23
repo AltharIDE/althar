@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
 import { AddWorkerByHandDialog, AddWorkerDialog, AgentsAtOnce, Computers, fewerOf, Problem, SettingList } from '@althar/ui'
@@ -73,6 +73,13 @@ export function ComputersSection({
   )
   const adder = useAddWorker({ open: adding, here: !here.standalone, workers, onClose: () => setAdding(false), added })
   const names = new Map((start.status?.agents ?? []).map((agent) => [agent.id, agent.name]))
+  // Its agents sign in over the SSH address the home gives, with the person's own SSH: only from a window that may manage
+  // the home's workers, as this computer's own home or one reached over SSH is, never one paired over the network.
+  const signsIn = host.workers !== undefined && here.canManageWorkers
+  const confirmed = signing.confirmed
+  useEffect(() => {
+    if (workers !== null) confirmed(workers.workers)
+  }, [confirmed, workers])
   return (
     <>
       <Computers
@@ -82,7 +89,13 @@ export function ComputersSection({
             ? null
             : {
                 enabled: workers.enabled,
-                list: workers.workers.map((one) => computerWorkerOf(one, (id) => names.get(id) ?? id, host.workers !== undefined)),
+                list: workers.workers.map((one) =>
+                  computerWorkerOf(
+                    signing.held.has(one.workerId) ? { ...one, signedIn: signing.held.get(one.workerId) ?? [] } : one,
+                    (id) => names.get(id) ?? id,
+                    signsIn,
+                  ),
+                ),
               }
         }
         opened={opened}
@@ -93,6 +106,7 @@ export function ComputersSection({
           removing.remove(id)
         }}
         canRemove={here.canManageWorkers}
+        {...(here.olderHome ? { text: { removeElsewhere: text.olderHome } } : {})}
         onTask={onTask}
         allProjects={allProjects}
         {...(here.canManageWorkers
@@ -104,7 +118,7 @@ export function ComputersSection({
                 ),
             }
           : {})}
-        {...(host.workers === undefined
+        {...(!signsIn
           ? {}
           : {
               onSignIn: (workerId: string, agent: string) => {

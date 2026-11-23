@@ -97,6 +97,20 @@ pub struct AgentConfig {
     release: String,
 }
 
+/// The agents of `providers` that the setup's file says are signed in, once each, in order; none where it can't be read.
+fn signed_in_from(path: &Path, providers: &[String]) -> Vec<String> {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    let mut found: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|id| providers.iter().any(|provider| provider == id))
+        .map(str::to_owned)
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
 /// An agent entry for any project its home grants it: a worker its home set up offers its agents so.
 pub const ANY_PROJECT: &str = "*";
 
@@ -219,20 +233,12 @@ impl AgentConfig {
         let Some(path) = &self.signed_in else {
             return Vec::new();
         };
-        let text = fs::read_to_string(path).unwrap_or_default();
-        let mut found: Vec<String> = text
-            .lines()
-            .map(str::trim)
-            .filter(|id| {
-                self.providers
-                    .iter()
-                    .any(|provider| provider.capability.provider_id == *id)
-            })
-            .map(str::to_owned)
+        let providers: Vec<String> = self
+            .providers
+            .iter()
+            .map(|provider| provider.capability.provider_id.clone())
             .collect();
-        found.sort();
-        found.dedup();
-        found
+        signed_in_from(path, &providers)
     }
 
     fn mcp_for(&self, project: &str) -> Vec<AgentWorkerMcpCommand> {
@@ -477,6 +483,8 @@ struct Slot {
     until: Instant,
     workspace_root: PathBuf,
     reserve_before_transfer: bool,
+    /// Where it keeps which agents are signed in, and the agents it has: said again with its capacity.
+    sign_ins: Option<(PathBuf, Vec<String>)>,
 }
 
 impl Slot {
@@ -498,6 +506,13 @@ impl Slot {
                     capacity: (self.sequence.is_multiple_of(4))
                         .then(|| worker_capacity(&self.workspace_root))
                         .flatten(),
+                    reports_sign_in: self.sign_ins.is_some() && self.sequence.is_multiple_of(4),
+                    signed_in: match &self.sign_ins {
+                        Some((path, providers)) if self.sequence.is_multiple_of(4) => {
+                            signed_in_from(path, providers)
+                        }
+                        _ => Vec::new(),
+                    },
                 }),
             ),
         )
@@ -1011,6 +1026,16 @@ pub async fn watch_agent_slot(
             lease,
             until: Instant::now() + lease,
             workspace_root: config.root.clone(),
+            sign_ins: config.signed_in.as_ref().map(|path| {
+                (
+                    path.clone(),
+                    config
+                        .providers
+                        .iter()
+                        .map(|provider| provider.capability.provider_id.clone())
+                        .collect(),
+                )
+            }),
             reserve_before_transfer: hello.reserve_before_transfer,
         })
     })

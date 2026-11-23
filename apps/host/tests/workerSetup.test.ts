@@ -165,7 +165,7 @@ describe('enrolling a worker with what its home gave', () => {
 })
 
 describe('its agents, checked again', () => {
-  it('starts the worker again to say a change, unless it runs a task', async () => {
+  it('keeps who is signed in where the worker says it with its heartbeats, without starting it again', async () => {
     await install(release(), out)
     await enroll(await grantFor(keyOf()), out)
     calls = []
@@ -173,7 +173,7 @@ describe('its agents, checked again', () => {
     restore = withWorkerSystem({
       systemctl: async (args) => {
         calls.push(args)
-        return args[0] === 'list-units' ? busy : ''
+        return ''
       },
       signedIn: async () => true,
       agents: () => [
@@ -181,15 +181,10 @@ describe('its agents, checked again', () => {
         { id: 'claude-code', definition: agents['claude-code'], program: '/opt/claude' },
       ],
     })
-    busy = 'althar-agent-war_1.service loaded active running'
     await listAgents(out)
-    expect(said.at(-1)).toMatchObject({ step: 'agents', restarted: false })
+    expect(said.at(-1)).toMatchObject({ step: 'agents', state: 'done' })
     expect(readFileSync(join(data, 'althar-worker', 'signed-in'), 'utf8')).toBe('codex\nclaude-code\n')
-    // Nothing changed since: nothing to say again.
-    busy = ''
-    await listAgents(out)
-    expect(said.at(-1)).toMatchObject({ step: 'agents', restarted: false })
-    expect(calls.some((args) => args[0] === 'try-restart')).toBe(false)
+    expect(calls).toEqual([])
   })
 })
 
