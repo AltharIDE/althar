@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentStatus, ArtifactChat, ArtifactDrawing, CanvasSummary, PlanStep } from '@althar/contracts'
 import { ArtifactHead, type ArtifactHeadArtifact, Button, DictationTray, Problem, ResizeHandle } from '@althar/ui'
@@ -117,8 +118,6 @@ export function ArtifactRoom({
   const draft = draftKey.artifact(canvasId ?? open.id)
   // Where the canvas's versions and actions go: the end of the artifact's row.
   const [actions, setActions] = useState<HTMLSpanElement | null>(null)
-  const width = useKeptWidth(CHAT_WIDTH)
-  const column = useRef<HTMLElement>(null)
   // Who answers in a chat started here: picked in its composer before it starts, else the coordinator's composer's pick.
   const [pick, setPick] = useState<Choice | null>(null)
   const answers: PlanStep | null = useMemo(() => (pick === null ? lead : { key: 'implement', ...pick, skipped: false }), [pick, lead])
@@ -159,8 +158,9 @@ export function ArtifactRoom({
    * Words sent before the chat is ready: they go to this artifact's own chat, with the parts pointed at as Send was pressed,
    * as it is ready. Those parts are its from then: one pointed at while it waits stays in the draft, for the next message.
    */
-  const sendSoon = (words: string, outgoing: Outgoing | null, giveBack: (outgoing: Outgoing) => void) => {
-    if (canvasId === null) return
+  const sendSoon = (words: string, outgoing: Outgoing, giveBack: (outgoing: Outgoing) => void) => {
+    // No artifact to talk to yet (its list not read): what went with the words stays in the composer, as they do.
+    if (canvasId === null) return giveBack(outgoing)
     const to = { canvasId, words, draft, batch: takeComments(draft), outgoing }
     setFailed(null)
     setQueued({ canvasId, words })
@@ -174,13 +174,13 @@ export function ArtifactRoom({
         // Its words and parts go back where they were written, for the person to send again.
         to.batch.finish(false)
         setDraftText(to.draft, (now) => (now.trim() === '' ? to.words : `${to.words}\n\n${now}`))
-        if (to.outgoing !== null) giveBack(to.outgoing)
+        giveBack(to.outgoing)
         return settled(null)
       }
-      return sendFirst(client.send, ready.threadId, to.draft, to.words, to.batch, to.outgoing ?? undefined).then(
+      return sendFirst(client.send, ready.threadId, to.draft, to.words, to.batch, to.outgoing).then(
         () => settled(null),
         (error: unknown) => {
-          if (to.outgoing !== null) giveBack(to.outgoing)
+          giveBack(to.outgoing)
           settled(artifactRoomText.sendFailed(messageOf(error)))
         },
       )
@@ -221,12 +221,7 @@ export function ArtifactRoom({
         end={<span ref={setActions} className={s.actions} />}
       />
       <div className={s.body}>
-        <section
-          ref={column}
-          className={s.chat}
-          aria-label={artifactRoomText.chat}
-          style={{ '--chat-width': `${width.width}px` } as CSSProperties}
-        >
+        <ChatColumn>
           {chat !== null && waiting === null ? (
             <Conversation
               key={chat.threadId}
@@ -250,18 +245,7 @@ export function ArtifactRoom({
               onAgain={() => void start()}
             />
           )}
-          <ResizeHandle
-            className={s.handle}
-            value={width.width}
-            min={width.min}
-            max={width.max}
-            onChange={width.set}
-            onCommit={width.keep}
-            onReset={width.reset}
-            onResizing={(on) => column.current?.toggleAttribute('data-resizing', on)}
-            label={artifactRoomText.width}
-          />
-        </section>
+        </ChatColumn>
         <div className={s.canvas}>
           {summary !== null && shownBy !== null ? (
             <CanvasHost
@@ -281,6 +265,39 @@ export function ArtifactRoom({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Its chat's column, as wide as the person last dragged its edge. The width is its own, set on the column itself: a drag
+ * draws neither the chat nor the artifact again, and no custom property has every element of the thread's style worked
+ * out again. While its edge is dragged, something of the window's own lies over the artifact, as an open menu does
+ * (`browser/cover.ts`): an artifact drawn in a view of its own over the window steps aside for its picture, and takes
+ * neither the pointer nor its hover.
+ */
+function ChatColumn({ children }: { children: ReactNode }) {
+  const width = useKeptWidth(CHAT_WIDTH)
+  const column = useRef<HTMLElement>(null)
+  const [dragging, setDragging] = useState(false)
+  return (
+    <section ref={column} className={s.chat} aria-label={artifactRoomText.chat} style={{ width: width.width }}>
+      {children}
+      <ResizeHandle
+        className={s.handle}
+        value={width.width}
+        min={width.min}
+        max={width.max}
+        onChange={width.set}
+        onCommit={width.keep}
+        onReset={width.reset}
+        onResizing={(on) => {
+          column.current?.toggleAttribute('data-resizing', on)
+          setDragging(on)
+        }}
+        label={artifactRoomText.width}
+      />
+      {dragging && createPortal(<div className={s.dragging} data-state="open" aria-hidden="true" />, document.body)}
+    </section>
   )
 }
 
@@ -328,7 +345,7 @@ function FirstWords({
   queued: string | null
   onStart: () => void
   /** Sends what is written, with what goes with it; `giveBack` puts that back in the composer where it couldn't go. */
-  onSend: (words: string, outgoing: Outgoing | null, giveBack: (outgoing: Outgoing) => void) => void
+  onSend: (words: string, outgoing: Outgoing, giveBack: (outgoing: Outgoing) => void) => void
   /** Why its chat couldn't start, or the words couldn't go, in a sentence. */
   failed: string | null
   onAgain: () => void
@@ -384,10 +401,10 @@ function FirstWords({
         onSubmit={(words) => {
           const attached = images.props(receiver)
           if (words.trim() === '' && comments.length === 0 && attached.images.length === 0 && attached.files.length === 0) return
-          const outgoing = attached.images.length === 0 && attached.files.length === 0 ? null : images.take(receiver)
-          // Not ready to go yet: the composer says why, and keeps it all.
-          if (outgoing === null && (attached.images.length > 0 || attached.files.length > 0)) return
-          if (outgoing !== null) images.clear()
+          // With its images and files, and whether it was dictated; not ready to go yet, the composer says why and keeps it all.
+          const outgoing = images.take(receiver)
+          if (outgoing === null) return
+          images.clear()
           onSend(words, outgoing, images.giveBack)
         }}
       />

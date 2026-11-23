@@ -24,17 +24,17 @@
 .chat {
   position: relative;
   flex: none;
-  /* as the person last dragged its edge (`--chat-width`, kept by the room) */
-  width: var(--chat-width, 380px);
+  /* its width is set on it, as the person last dragged its edge; its right is kept for that edge's handle */
   min-width: 0;
+  padding-right: 8px;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line-2);
   background: var(--paper);
 }
-/* its edge's handle stays on the chat's side of the line: the artifact beside it may be a page in a view of its own over
-   the window, which would take the pointer from half of it */
+/* its edge's handle lies in the chat's own right, clear of the thread's scrollbar and of the artifact beside it, which may
+   be drawn in a view of its own over the window */
 .chat > .handle {
   right: -1px;
 }
@@ -42,9 +42,12 @@
   left: auto;
   right: 0;
 }
-/* while its edge is dragged, the artifact (a page in a frame) doesn't take the pointer */
-.chat[data-resizing] + .canvas {
-  pointer-events: none;
+/* over the window while the edge is dragged: the artifact steps aside under it, and the pointer keeps its cursor */
+.dragging {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  cursor: col-resize;
 }
 .canvas {
   flex: 1;
@@ -101,7 +104,9 @@
     flex-direction: column;
   }
   .chat {
-    width: auto;
+    /* over the width set on it: stacked, the window's */
+    width: auto !important;
+    padding-right: 0;
     height: 45%;
     border-right: 0;
     border-bottom: 1px solid var(--line-2);

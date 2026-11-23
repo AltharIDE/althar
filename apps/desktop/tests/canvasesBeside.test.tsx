@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -27,6 +28,8 @@ import { askToOpen } from '../src/renderer/features/canvases/opening'
 import { pages } from '../src/renderer/features/browser/pages'
 import { type ThreadPage, useThreadHost } from '../src/renderer/shared/ThreadHost'
 import { commentsOf, forgetComments, gather, type GatheredComment } from '../src/renderer/shared/comments'
+import { draftOf, forgetDrafts, setDraftDictated, setDraftFiles } from '../src/renderer/shared/drafts'
+import type { DictationHost } from '../src/renderer/data/services'
 import { agents, coordinatorSnapshot, snapshot, fakeClient, fakeHost, fakePagesHost, NOW } from './fixtures'
 import { useSettingsOf, servicesFor, withServices } from './render'
 
@@ -40,6 +43,31 @@ import { useSettingsOf, servicesFor, withServices } from './render'
  * said on it to the coordinator's conversation.
  */
 
+/* How often an artifact room's chat composer and its canvas are drawn: dragging its chat's edge draws neither again. */
+const drawn = vi.hoisted(() => ({ composer: 0, canvas: 0 }))
+
+vi.mock('../src/renderer/shared/DraftComposer', async (actual) => {
+  const real = await actual<typeof import('../src/renderer/shared/DraftComposer')>()
+  return {
+    ...real,
+    DraftComposer: (props: ComponentProps<typeof real.DraftComposer>) => {
+      drawn.composer += 1
+      return <real.DraftComposer {...props} />
+    },
+  }
+})
+
+vi.mock('../src/renderer/features/canvases/CanvasHost', async (actual) => {
+  const real = await actual<typeof import('../src/renderer/features/canvases/CanvasHost')>()
+  return {
+    ...real,
+    CanvasHost: (props: ComponentProps<typeof real.CanvasHost>) => {
+      drawn.canvas += 1
+      return <real.CanvasHost {...props} />
+    },
+  }
+})
+
 const CANVAS = `cnv_${'c3'.repeat(16)}`
 const OTHER = `cnv_${'d4'.repeat(16)}`
 const PROJECT = `proj_${'b2'.repeat(16)}`
@@ -48,6 +76,7 @@ const OWNER = `task_${'e5'.repeat(16)}`
 const DRAFT = `task:${THREAD}`
 
 afterEach(() => {
+  forgetDrafts()
   forgetComments()
   forgetArtifactsView()
 })
@@ -467,7 +496,7 @@ describe('the project’s Artifacts view', () => {
     )
   })
 
-  it('lets its chat’s edge be dragged wider or narrower, within limits, and keeps the width for the next artifact opened', async () => {
+  it('lets its chat’s edge be dragged wider or narrower, within limits, drawing nothing else again, and keeps the width', async () => {
     window.localStorage.removeItem('althar.artifactChat')
     const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
     const view = withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
@@ -476,22 +505,42 @@ describe('the project’s Artifacts view', () => {
       within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
     )
     const chat = await screen.findByRole('region', { name: 'Its chat' })
+    await panelOf('Sign-in flow, take 3')
     const edge = within(chat).getByRole('separator', { name: 'Width of its chat' })
     expect(edge.getAttribute('aria-valuenow')).toBe('380')
     expect(edge.getAttribute('aria-valuemin')).toBe('300')
-    // Dragged 120px to the right, it is that much wider.
+    expect(chat.style.width).toBe('380px')
+    const composer = drawn.composer
+    const canvas = drawn.canvas
+
+    // Dragged, it follows the pointer; something of the window's own lies over the artifact meanwhile, so one drawn in a
+    // view of its own steps aside, and goes once the pointer lets go.
     fireEvent.pointerDown(edge, { button: 0, clientX: 380, pointerId: 1 })
-    fireEvent.pointerMove(edge, { clientX: 500, pointerId: 1 })
+    expect(document.body.querySelector(':scope > [data-state="open"][aria-hidden="true"]')).not.toBeNull()
+    for (const x of [420, 460, 500]) {
+      fireEvent.pointerMove(edge, { clientX: x, pointerId: 1 })
+      expect(chat.style.width).toBe(`${x}px`)
+    }
+    expect(window.localStorage.getItem('althar.artifactChat')).toBeNull()
     fireEvent.pointerUp(edge, { clientX: 500, pointerId: 1 })
-    expect(chat.style.getPropertyValue('--chat-width')).toBe('500px')
+    expect(document.body.querySelector(':scope > [data-state="open"][aria-hidden="true"]')).toBeNull()
     expect(window.localStorage.getItem('althar.artifactChat')).toBe('500')
-    // Never narrower than its least, and never so wide the artifact has no room.
+    // Neither its composer nor the artifact is drawn again, and its width is the column's own, no custom property.
+    expect(drawn.composer - composer).toBe(0)
+    expect(drawn.canvas - canvas).toBe(0)
+    expect(chat.getAttribute('style')).not.toContain('--')
+
+    // Never narrower than its least, and never so wide the artifact has no room; a double click puts it back.
     fireEvent.keyDown(edge, { key: 'Home' })
     expect(edge.getAttribute('aria-valuenow')).toBe('300')
     fireEvent.keyDown(edge, { key: 'End' })
     expect(Number(edge.getAttribute('aria-valuenow'))).toBe(window.innerWidth - 420)
-    fireEvent.keyDown(edge, { key: 'ArrowLeft' })
+    fireEvent.doubleClick(edge)
+    expect(edge.getAttribute('aria-valuenow')).toBe('380')
+    expect(window.localStorage.getItem('althar.artifactChat')).toBe('380')
+    fireEvent.keyDown(edge, { key: 'ArrowRight' })
     const kept = edge.getAttribute('aria-valuenow')
+    expect(kept).toBe('396')
     // Opened again, it is as the person left it.
     view.unmount()
     withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
@@ -500,6 +549,122 @@ describe('the project’s Artifacts view', () => {
       within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^The plan/ }),
     )
     expect((await screen.findByRole('separator', { name: 'Width of its chat' })).getAttribute('aria-valuenow')).toBe(kept)
+  })
+
+  /** A file waiting in the artifact's draft, measured and granted as main would. */
+  const attachFile = () =>
+    act(() =>
+      setDraftFiles(ARTIFACT_DRAFT, () => [
+        {
+          id: 'f1',
+          name: 'notes.txt',
+          ready: {
+            sent: { grant: 'grant_1' },
+            attached: { id: 'grant_1', name: 'notes.txt', kind: 'file', mediaType: null, bytes: 12, entries: null, path: '' },
+          },
+        },
+      ]),
+    )
+  const openFirst = async () => {
+    await userEvent.click(await screen.findByRole('radio', { name: 'Cards' }))
+    await userEvent.click(
+      within(await screen.findByRole('list', { name: 'The project’s artifacts' })).getByRole('button', { name: /^Sign-in flow/ }),
+    )
+    return screen.findByPlaceholderText('Ask about it, or say what to change')
+  }
+
+  it('sends a first message’s files and its being dictated with it, once its chat has started', async () => {
+    let ready: (started: { id: string; threadId: string }) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((resolve) => (ready = resolve as never)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    const field = await openFirst()
+    attachFile()
+    expect(await screen.findByText('notes.txt')).toBeTruthy()
+    await userEvent.type(field, 'Read this')
+    act(() => setDraftDictated(ARTIFACT_DRAFT, true))
+    await userEvent.type(field, '{Enter}')
+    await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'thr_new', body: 'Read this', files: [{ grant: 'grant_1' }], dictated: true }),
+      ),
+    )
+  })
+
+  it('gives a first message’s files and its being dictated back to the composer where its chat couldn’t start', async () => {
+    let refuse: (why: unknown) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((_, reject) => (refuse = reject)))
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed), startTask })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    const field = await openFirst()
+    attachFile()
+    await userEvent.type(field, 'Read this')
+    act(() => setDraftDictated(ARTIFACT_DRAFT, true))
+    await userEvent.type(field, '{Enter}')
+    expect(draftOf(ARTIFACT_DRAFT).files).toEqual([])
+    await act(async () => refuse(new ApiError({ reason: 'Unavailable', message: 'The runtime is busy.' })))
+    expect(await screen.findByText(/Couldn’t start its chat/)).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    const back = draftOf(ARTIFACT_DRAFT)
+    expect(back.text).toBe('Read this')
+    expect(back.files).toEqual([expect.objectContaining({ name: 'notes.txt' })])
+    expect(back.dictated).toBe(true)
+  })
+
+  it('gives a first message’s files and its being dictated back to the composer where its send failed', async () => {
+    let ready: (started: { id: string; threadId: string }) => void = () => {}
+    const startTask = vi.fn(() => new Promise<never>((resolve) => (ready = resolve as never)))
+    const { client } = canvasClient({
+      listCanvases: vi.fn(async () => listed),
+      startTask,
+      send: vi.fn(async () => {
+        throw new ApiError({ reason: 'Unavailable', message: 'The runtime is busy.' })
+      }),
+    })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    const field = await openFirst()
+    attachFile()
+    await userEvent.type(field, 'Read this')
+    act(() => setDraftDictated(ARTIFACT_DRAFT, true))
+    await userEvent.type(field, '{Enter}')
+    await act(async () => ready({ id: 'task_new', threadId: 'thr_new' }))
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    // Its chat has started, and shows in the composer's place: what didn't go is back in the artifact's draft, which it reads.
+    await waitFor(() => expect(draftOf(ARTIFACT_DRAFT).files).toEqual([expect.objectContaining({ name: 'notes.txt' })]))
+    const back = draftOf(ARTIFACT_DRAFT)
+    expect(back.text).toBe('Read this')
+    expect(back.files).toEqual([expect.objectContaining({ name: 'notes.txt' })])
+    expect(back.dictated).toBe(true)
+  })
+
+  it('keeps a file in the composer where it is sent before the artifact’s list is read', async () => {
+    const { client } = canvasClient({ listCanvases: vi.fn(() => new Promise<never>(() => {})) })
+    askToOpen(PROJECT, CANVAS)
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client)
+    const field = await screen.findByPlaceholderText('Ask about it, or say what to change')
+    attachFile()
+    await userEvent.type(field, 'Read this{Enter}')
+    expect(client.startTask).not.toHaveBeenCalled()
+    expect(draftOf(ARTIFACT_DRAFT).files).toEqual([expect.objectContaining({ name: 'notes.txt' })])
+  })
+
+  it('offers dictation in its composer from the start', async () => {
+    const dictation = {
+      state: vi.fn(async () => ({
+        platform: 'darwin',
+        microphone: 'granted',
+        settings: true,
+        model: { name: 'Parakeet TDT 0.6B v3', ready: true, got: 0, size: 1, downloading: false },
+      })),
+      onEvent: vi.fn(() => () => {}),
+    } as unknown as DictationHost
+    const { client } = canvasClient({ listCanvases: vi.fn(async () => listed) })
+    withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} lead={LEAD} />, client, fakeHost({ dictation }))
+    await openFirst()
+    const chat = screen.getByRole('region', { name: 'Its chat' })
+    expect(await within(chat).findByRole('button', { name: 'Dictate' })).toBeTruthy()
+    expect(client.startTask).not.toHaveBeenCalled()
   })
 
   it('sends words written before its chat started to that artifact’s own chat, even after going to another', async () => {
