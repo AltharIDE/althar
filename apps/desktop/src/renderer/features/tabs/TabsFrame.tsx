@@ -21,6 +21,7 @@ import type { Destination } from '../../shared/dictation/sessions'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
+import { setLoadPeek, useLoadPeek } from '../../shared/loadPeek'
 import { SLOTS, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
 
@@ -113,6 +114,10 @@ function TabsBar({
   const update = useUpdate()
   const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
+  // Its popover opens from the meter, or from what else says how this computer's agents stand (Up next, held back). The bar
+  // gone, it is closed: a bar that comes back opens without it.
+  const peek = useLoadPeek()
+  useEffect(() => () => setLoadPeek(false), [])
   const { select, current } = tabs
   // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and its tab takes the window back to where it came from.
   const navigate = useNavigate()
@@ -151,6 +156,8 @@ function TabsBar({
           <HomeButton />
           {load.glance !== null && (
             <LoadMeter
+              open={peek}
+              onOpenChange={setLoadPeek}
               load={load.glance}
               agents={load.agents}
               workers={load.workers}

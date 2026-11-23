@@ -56,7 +56,7 @@ import {
 import { isAnswered, isSettleable, kindWords, takesDone, takesKeep } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, heldWhyWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { CarriedOver } from '../../shared/dictation/Carried'
@@ -300,7 +300,11 @@ export const statusOf = (
       // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
       return { status, state: text.kept }
     case TaskStatus.Queued:
-      if (queued !== null) return { status, state: queuedWords(queued) }
+      // Held back for now, it says so and until when; why at length on hover.
+      if (queued !== null) {
+        const why = heldWhyWords(queued)
+        return { status, state: queuedWords(queued), ...(why === undefined ? {} : { why }) }
+      }
       // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-096).
       return {
         status,
@@ -1468,6 +1472,8 @@ export function TaskView({
                   }}
                   // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
                   {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
+                  // Held back while the computer lets fewer work than the number: it starts now, as the person's own start.
+                  {...(snapshot.task.queued?.held === undefined ? {} : { onStartAnyway: () => void model.startAnyway() })}
                   processes={pillOf(left, snapshot.task.launches, now)}
                   onStop={(id) => {
                     const run = runIdOf(id)
