@@ -56,6 +56,12 @@ interface Session {
 }
 
 const error = (message: string): ComputerDone => ({ error: message })
+/** What the system hasn't let Althar do, said so a task can pass it on: without both, every window comes back nameless and empty. */
+const missingGrants = (grants: { readonly screen: boolean; readonly access: boolean } | undefined) => {
+  if (grants === undefined || (grants.screen && grants.access)) return undefined
+  const off = [...(grants.screen ? [] : ['Screen Recording']), ...(grants.access ? [] : ['Accessibility'])].join(' and ')
+  return `macOS hasn’t let Althar see or use other apps: ${off} ${off.includes(' and ') ? 'are' : 'is'} off for Althar in System Settings › Privacy & Security. Tell the person: they switch it on once, then reopen Althar, and you can request again.`
+}
 const done = (text: string): ComputerDone => ({ value: { text } })
 const publicWindows = (windows: ReadonlyMap<string, NativeWindow>) =>
   [...windows].map(([id, one]) => ({ id, app: one.app, title: one.title }))
@@ -92,6 +98,8 @@ export const computerSessions = (options: {
   readonly canAsk: () => boolean
   readonly canShareDisplay: () => boolean
   readonly available: () => boolean
+  /** Which of the system's grants Althar has, where the system has them (macOS): seeing the screen, and using apps. */
+  readonly grants?: () => { readonly screen: boolean; readonly access: boolean }
   /** What keeps an input to the whole display off Althar’s own window, where something does. */
   readonly desktopInputProblem?: (action: NativeAction, frame: NativeFrame | undefined) => string | undefined
 }) => {
@@ -301,6 +309,10 @@ export const computerSessions = (options: {
       return error('A different task turn owns this computer session. Wait for its access to end.')
     if (command.op === 'status')
       return session === undefined ? done('Computer use is available. Request access for this turn.') : summary(session)
+    if (command.op === 'request' && session === undefined) {
+      const missing = missingGrants(options.grants?.())
+      if (missing !== undefined) return error(missing)
+    }
     if (command.op === 'release') {
       stop(owner.taskId)
       return done('Computer access released.')

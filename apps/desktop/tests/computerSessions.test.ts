@@ -10,7 +10,11 @@ const TASK = `task_${'a'.repeat(32)}`
 const OWNER: ComputerOwner = { taskId: TASK, sessionId: 'lead', turnId: 'turn', threadId: 'thread', title: 'Verify computer access' }
 const signal = () => new AbortController().signal
 
-const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDisplay = () => true) => {
+const setup = (
+  worker: () => ComputerWorker = testComputerWorker,
+  canShareDisplay = () => true,
+  grants?: () => { readonly screen: boolean; readonly access: boolean },
+) => {
   const states: Array<ComputerState> = []
   const sessions = computerSessions({
     worker,
@@ -18,6 +22,7 @@ const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDispla
     canAsk: () => true,
     canShareDisplay,
     available: () => true,
+    ...(grants === undefined ? {} : { grants }),
   })
   const ask = async (owner = OWNER) => {
     const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader' }, signal())
@@ -114,6 +119,28 @@ describe('desktop access for a task', () => {
     expect(await sessions.call(OWNER, { op: 'observe', target: unknown }, signal())).toMatchObject({
       error: expect.stringContaining(`No window has the id ${unknown} in this turn.`),
     })
+    sessions.stopAll('Done.')
+  })
+
+  it('says which of the system’s grants Althar lacks, rather than finding every window nameless and empty', async () => {
+    let grants = { screen: false, access: true }
+    const { sessions, states, allowed } = setup(
+      testComputerWorker,
+      () => true,
+      () => grants,
+    )
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toEqual({
+      error:
+        'macOS hasn’t let Althar see or use other apps: Screen Recording is off for Althar in System Settings › Privacy & Security. Tell the person: they switch it on once, then reopen Althar, and you can request again.',
+    })
+    grants = { screen: false, access: false }
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toMatchObject({
+      error: expect.stringContaining('Screen Recording and Accessibility are off for Althar'),
+    })
+    // Nothing was asked of the person.
+    expect(states.filter((one) => one.request !== undefined)).toHaveLength(0)
+    grants = { screen: true, access: true }
+    expect(await allowed()).toHaveProperty('Writer')
     sessions.stopAll('Done.')
   })
 

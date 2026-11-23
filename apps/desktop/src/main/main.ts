@@ -629,6 +629,15 @@ const computers = computerSessions({
   canAsk: () => !quitting && localWindows().size > 0,
   // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
   canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
+  // macOS lets Althar see and use other apps only once the person switches these on for it.
+  ...(process.platform === 'darwin' && !(__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1')
+    ? {
+        grants: () => ({
+          screen: systemPreferences.getMediaAccessStatus('screen') === 'granted',
+          access: systemPreferences.isTrustedAccessibilityClient(false),
+        }),
+      }
+    : {}),
   desktopInputProblem: (action, frame) => {
     const focused = BrowserWindow.getFocusedWindow()
     const protectedWindows = BrowserWindow.getAllWindows()
