@@ -128,7 +128,7 @@ describe('an agent taking a thread over', () => {
 })
 
 describe("a lead's context filling up", () => {
-  it.live('compacts a small window without replaying a fresh-session brief', () =>
+  it.live('answers on a full small window without replaying a fresh-session brief', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const { task: created } = yield* task('Small window')
@@ -138,7 +138,8 @@ describe("a lead's context filling up", () => {
       yield* say(created.threadId, 'Look around. [context:85/1000]')
       yield* settled(created.threadId, 2)
       yield* say(created.threadId, 'And again.')
-      yield* settled(created.threadId, 4)
+      yield* settled(created.threadId, 3)
+      assert.strictEqual((yield* turns(created.threadId))[2]?.prompt, 'And again.')
       assert.lengthOf(yield* sessionsOn(created.threadId), 1)
     }).pipe(Effect.provide(runtime())),
   )

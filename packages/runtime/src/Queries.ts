@@ -1,5 +1,6 @@
 import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
+import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
@@ -872,7 +873,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           name: text(content, 'name'),
           title: text(content, 'title'),
           canvasKind:
-            canvasKind === 'markdown' || canvasKind === 'mermaid' || canvasKind === 'svg' || canvasKind === 'picture' ? canvasKind : 'html',
+            canvasKind === 'markdown' ||
+            canvasKind === 'mermaid' ||
+            canvasKind === 'svg' ||
+            canvasKind === 'picture' ||
+            canvasKind === 'boards'
+              ? canvasKind
+              : 'html',
           version: typeof version === 'number' ? version : 1,
           note: note === '' ? null : note,
           action: text(content, 'action') === 'opened' ? 'opened' : 'published',
@@ -1067,6 +1074,7 @@ type Store =
   | Instance
   | Agents
   | ModelFacts
+  | Limits
   | PlanUsage
   | Sessions
   | Coordinator
@@ -1439,7 +1447,7 @@ export class Queries extends Context.Service<
             : undefined
           const values = field(modelOption, 'values')
           // Handed the thread by a usage limit, it stands in for the lead the task was given, which takes over again at its reset.
-          const standsIn = Option.getOrUndefined(yield* standInOf(session.id))
+          const standsIn = Option.getOrUndefined(yield* standInOf(session.id, (yield* Limits).sameModel))
           return {
             id: session.id,
             agentId: session.agentId,
@@ -2345,7 +2353,7 @@ export class Queries extends Context.Service<
         return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
       })
 
-      /** A task never waits behind itself. Its own places are shown in the board's machine-wide total. */
+      /** A task never waits behind itself: its own places aren't among those it waits for. */
       const queuedNow = (taskId: string) =>
         Effect.map(workPlaces, (now) => {
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
@@ -3643,7 +3651,6 @@ export class Queries extends Context.Service<
           return {
             cursor: at,
             tasks: cards,
-            ...(cards.some((task) => task.queued !== null) ? { workPlaces: yield* workPlaces } : {}),
             calls: calls.map((one) => one.call),
             settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot
@@ -4441,6 +4448,9 @@ export class Queries extends Context.Service<
               SELECT max(x.rowid) FROM record_events x
               WHERE x.aggregate_type = 'workspace' AND x.aggregate_id = w.id AND x.type = 'workspace.move_waits')
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
+          // An artifact's own chat opens as the artifact (ADR-104, "Talking to an artifact"): the canvas it is about.
+          const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+            SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${head.taskId}`
           return {
             threadId,
             accepting,
@@ -4462,6 +4472,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(artifact?.artifactChat === 1 ? { artifact: { canvasId: artifact.artifactCanvasId } } : {}),
               ...(!severalChanges
                 ? {}
                 : {

@@ -7,9 +7,10 @@ import { device } from '../../shared/device'
  * Althar's settings, by what each is about, as the Settings tab lists them
  * down its side and its address names them: the agents and the code hosts
  * Althar works with, and the MCP servers and skills the agents are given;
- * then how its work goes (tasks, pull requests), its own ways (work on this
- * computer, notifications, how it looks, the editor and the pages beside
- * conversations); then which Althar this is. A setting to come goes in the
+ * then how its work goes (tasks, pull requests), where it runs (the home's
+ * computers), its own ways (work on this computer, notifications, how it
+ * looks, the editor and the pages beside conversations); then which Althar
+ * this is. A setting to come goes in the
  * section it is about, and a section to come between those it sits among.
  */
 
@@ -33,7 +34,7 @@ export const FIRST_SECTION: Section = 'agents'
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
   ['agents', 'mcp-servers', 'skills', 'code-hosts'],
-  ['tasks', 'pull-requests', 'this-mac', 'notifications', 'appearance', 'editor-and-browser'],
+  ['tasks', 'pull-requests', 'computers', 'this-mac', 'notifications', 'appearance', 'editor-and-browser'],
   ['about'],
 ]
 
@@ -44,6 +45,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   'code-hosts': { title: 'Code hosts and trackers', icon: 'branch' },
   tasks: { title: 'Tasks', icon: 'work' },
   'pull-requests': { title: 'Pull requests', icon: 'pr' },
+  computers: { title: 'Computers', icon: 'worker' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },
   notifications: { title: 'Notifications', icon: 'bell' },
   appearance: { title: 'Appearance', icon: 'image' },

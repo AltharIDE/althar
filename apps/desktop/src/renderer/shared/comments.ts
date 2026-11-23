@@ -25,7 +25,7 @@ export interface PageSpot {
   readonly viewport: Viewport
 }
 
-/** A spot on one of the project's canvases (ADR-104): a version, and where in it: the whole canvas, or the words selected. */
+/** A spot on one of the project's canvases (ADR-104): a version, and where in it: the whole canvas, the words selected, or a part of a board. */
 export interface CanvasSpot {
   readonly kind: 'canvas'
   readonly canvasId: string
@@ -33,6 +33,8 @@ export interface CanvasSpot {
   readonly title: string
   readonly version: number
   readonly anchor: CanvasAnchor
+  /** A part of a board, as the ground described it: its size, font and colours, for the comment's card. */
+  readonly picked?: Picked
 }
 
 export interface DiffSpot {
@@ -53,7 +55,7 @@ export const canvasPlace = (anchor: CanvasAnchor): string => {
     case 'area':
       return text.area
     case 'element':
-      return anchor.label
+      return anchor.board === undefined ? anchor.label : text.onBoard(anchor.label, anchor.board)
   }
 }
 
@@ -342,7 +344,7 @@ const loadCrop = async (key: string, thread: ThreadComments, one: GatheredCommen
 }
 
 /** Gather the note immediately. Its crop follows when the picture can be read. */
-export const savePageComment = (key: string, id: string | null, note: string, on: PageSpot, captured: string | null) => {
+export const savePageComment = (key: string, id: string | null, note: string, on: PageSpot | CanvasSpot, captured: string | null) => {
   const thread = threadOf(key)
   const before = thread.shown.find((one) => one.id === id)
   if (id !== null && before === undefined) return
@@ -408,6 +410,11 @@ export const text = {
   area: 'An area of it',
   canvasLine: (name: string, version: number, place: string) => `On canvas ${name} v${version}: ${place}`,
   canvasVersion: (name: string, version: number) => `${name} v${version}`,
+  board: 'Board',
+  onBoard: (label: string, board: string) => `${label} on ${board}`,
+  boardLine: (board: string, page: string | undefined, size: string) =>
+    `Board: ${board}${page === undefined ? '' : ` on the page ${page}`}, ${size}`,
+  boardOf: (board: string, page: string | undefined) => (page === undefined ? board : `${board} · ${page}`),
   on: onLine,
   selectorLine,
   pageLine: (address: string, size: string, device: string | null) => `Page: ${address} at ${size}${device === null ? '' : ` (${device})`}`,
@@ -444,6 +451,37 @@ export const composerComment = (comment: GatheredComment, n: number): ComposerCo
   }
   if (comment.on.kind === 'canvas') {
     const spot = comment.on
+    const anchor = spot.anchor
+    const crop =
+      comment.crop === null || comment.crop.width === null || comment.crop.height === null
+        ? {}
+        : { crop: { src: comment.crop.src, width: comment.crop.width, height: comment.crop.height } }
+    if (anchor.kind === 'element') {
+      const picked = spot.picked
+      return {
+        id: comment.id,
+        n,
+        note: comment.note,
+        place: anchor.board === undefined ? spot.title : text.onBoard(anchor.label, anchor.board),
+        ...chipStatus,
+        ...crop,
+        facts: [
+          { label: text.canvas, value: text.canvasVersion(spot.name, spot.version), kind: 'code' },
+          ...(anchor.board === undefined ? [] : [{ label: text.board, value: text.boardOf(anchor.board, anchor.page) }]),
+          { label: text.element, value: anchor.label, kind: 'code' },
+          ...(anchor.text === '' ? [] : [{ label: text.text, value: anchor.text, kind: 'quote' as const }]),
+          ...(picked === undefined
+            ? []
+            : [
+                { label: text.size, value: sizeLine(picked) },
+                ...(picked.font === '' ? [] : [{ label: text.font, value: picked.font }]),
+                ...(picked.colour === '' ? [] : [{ label: text.colour, value: picked.colour, kind: 'colour' as const }]),
+                ...(picked.background === '' ? [] : [{ label: text.background, value: picked.background, kind: 'colour' as const }]),
+              ]),
+          { label: text.selector, value: anchor.selector, kind: 'code' },
+        ],
+      }
+    }
     return {
       id: comment.id,
       n,
@@ -452,7 +490,7 @@ export const composerComment = (comment: GatheredComment, n: number): ComposerCo
       ...chipStatus,
       facts: [
         { label: text.canvas, value: text.canvasVersion(spot.name, spot.version), kind: 'code' },
-        ...(spot.anchor.kind === 'passage' ? [{ label: text.passage, value: spot.anchor.text, kind: 'quote' as const }] : []),
+        ...(anchor.kind === 'passage' ? [{ label: text.passage, value: anchor.text, kind: 'quote' as const }] : []),
       ],
     }
   }
@@ -492,11 +530,25 @@ export const commentsText = (comments: ReadonlyArray<GatheredComment>, before: n
   if (beside.length === 0) return ''
   const each = beside.map((comment, index) => {
     const spot = comment.on
-    if (spot.kind === 'canvas')
-      return [
+    if (spot.kind === 'canvas') {
+      const anchor = spot.anchor
+      const lines = [
         `${index + 1}. ${comment.note.replace(/\n/g, '\n   ')}`,
-        `   - ${text.canvasLine(spot.name, spot.version, canvasPlace(spot.anchor))}`,
-      ].join('\n')
+        `   - ${text.canvasLine(spot.name, spot.version, canvasPlace(anchor))}`,
+      ]
+      // A part of a board: what it is, the selector that finds it, the board it is on and its size, and its crop.
+      if (anchor.kind === 'element') {
+        lines.push(`   - ${onLine(anchor.label, anchor.text, spot.picked === undefined ? '' : sizeLine(spot.picked)).replace(/, $/, '')}`)
+        lines.push(`   - ${selectorLine(anchor.selector)}`)
+        if (anchor.board !== undefined && spot.picked !== undefined)
+          lines.push(`   - ${text.boardLine(anchor.board, anchor.page, sized(spot.picked.page.width, spot.picked.page.height))}`)
+        if (pictures && comment.crop !== null) {
+          picture += 1
+          lines.push(`   - ${text.pictureLine(picture)}`)
+        }
+      }
+      return lines.join('\n')
+    }
     const device = spot.viewport === 'fit' ? null : text.devices[spot.viewport]
     const lines = [
       `${index + 1}. ${comment.note.replace(/\n/g, '\n   ')}`,

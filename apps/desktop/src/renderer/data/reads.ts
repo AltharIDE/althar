@@ -19,6 +19,10 @@ export const keys = {
   /** The agents on this Mac, as the runtime last checked them. */
   status: ['status'] as const,
   home: ['home'] as const,
+  /** The agents this computer runs at once, as they stand (`usePlaces`). */
+  places: ['places'] as const,
+  /** The home's workers, as they stand (`useWorkers`). */
+  workers: ['workers'] as const,
   board: (projectId: string) => ['board', projectId] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,
@@ -67,10 +71,16 @@ export const keys = {
   document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
   /** A project's canvases (ADR-104), each with its latest version. */
   canvases: (projectId: string) => ['canvases', projectId] as const,
+  /** A project's artifacts still drawing their first version, in their own chats. */
+  artifactsDrawing: (projectId: string) => ['artifactsDrawing', projectId] as const,
   /** One canvas whole: its versions and comments, read again as it changes. */
   canvas: (canvasId: string) => ['canvas', canvasId] as const,
   /** A version's words, which never change. */
   canvasText: (canvasId: string, version: number) => ['canvasText', canvasId, version] as const,
+  /** Where the project's artifacts go when saved to a repository. */
+  artifactsPlace: (projectId: string) => ['artifactsPlace', projectId] as const,
+  /** A repository's folders, where an artifact could be saved. */
+  repositoryFolders: (projectId: string, repositoryId: string) => ['repositoryFolders', projectId, repositoryId] as const,
 }
 
 /**
@@ -223,7 +233,18 @@ export const reads = (client: Client) => ({
       gcTime: 5 * 60_000,
     }),
   canvases: (projectId: string) => queryOptions({ queryKey: keys.canvases(projectId), queryFn: () => client.listCanvases(projectId) }),
+  artifactsDrawing: (projectId: string) =>
+    queryOptions({ queryKey: keys.artifactsDrawing(projectId), queryFn: () => client.listArtifactsDrawing(projectId) }),
   canvas: (canvasId: string) => queryOptions({ queryKey: keys.canvas(canvasId), queryFn: () => client.getCanvas(canvasId) }),
+  artifactsPlace: (projectId: string) =>
+    queryOptions({ queryKey: keys.artifactsPlace(projectId), queryFn: () => client.getArtifactsPlace(projectId) }),
+  repositoryFolders: (projectId: string, repositoryId: string) =>
+    queryOptions({
+      queryKey: keys.repositoryFolders(projectId, repositoryId),
+      queryFn: () => client.listRepositoryFolders(projectId, repositoryId),
+      // Read when Save to repo opens; a folder made since shows the next time it opens.
+      staleTime: 60_000,
+    }),
   canvasText: (canvasId: string, version: number) =>
     queryOptions({
       queryKey: keys.canvasText(canvasId, version),

@@ -28,7 +28,10 @@ export const workersForProfile = (paths: WorkerHomePaths, connectionChanged?: Pa
     if (home === undefined) return undefined
     let listener: Effect.Success<ReturnType<typeof listenWorkers>>
     return {
-      execution: home.workerExecution(() => listener?.agentWorkers),
+      execution: home.workerExecution(
+        () => listener?.agentWorkers,
+        () => listener,
+      ),
       listen: (homeId: string) =>
         home.listenWorkers(paths, homeId, connectionChanged).pipe(
           Effect.tap((listening) => {

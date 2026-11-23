@@ -394,46 +394,13 @@ describe('the board’s lanes', () => {
         expect(next.queryByText(/^Continues/)).toBeNull()
       })
 
-      it('lists every machine-wide place while work waits', () => {
-        const lanes = lanesOf(
-          board({
-            tasks: [working, continuing('x', 1)],
-            workPlaces: {
-              busy: 2,
-              atOnce: 2,
-              configured: 5,
-              offline: false,
-              holders: [
-                {
-                  taskId: 'elsewhere',
-                  title: 'An agent in another project',
-                  threadId: 't1',
-                  role: 'lead',
-                  reason: 'turn',
-                  kept: false,
-                  running: [],
-                },
-                {
-                  taskId: 'elsewhere',
-                  title: 'An agent in another project',
-                  threadId: 't2',
-                  role: 'reviewer',
-                  reason: 'starting',
-                  kept: false,
-                  running: [],
-                },
-              ],
-            },
-          }),
-        )
+      it('keeps no line of the machine’s places: the load popover and the slider say them', () => {
+        const lanes = lanesOf(board({ tasks: [working, continuing('x', 1)] }))
         withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
         const next = within(screen.getByRole('region', { name: 'Up next' }))
-        const summary = next.getByText('2 of 5 agent places in use · Temporarily limited to 2')
-        summary.closest('details')!.open = true
-        const holders = within(next.getByRole('list', { name: 'Agents using a place' }))
-        expect(holders.getAllByText('An agent in another project')).toHaveLength(2)
-        expect(holders.getByText('Lead · In a turn')).toBeTruthy()
-        expect(holders.getByText('Reviewer · Starting')).toBeTruthy()
+        expect(next.getByText('Going on x')).toBeTruthy()
+        expect(next.queryByText(/agent places/)).toBeNull()
+        expect(next.queryByRole('list', { name: 'Agents using a place' })).toBeNull()
       })
 
       it('moves into Running on its admission update alone while the pointer is in Up next', async () => {

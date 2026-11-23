@@ -10,6 +10,7 @@ import {
   ConnectionInfo,
   PairingRegistration,
   clientChallengeMessage,
+  pairingLinkOf,
   pairingRegistrationMessage,
   serverProtocol,
 } from '@althar/contracts'
@@ -203,6 +204,8 @@ describe('secure bootstrap and device keys', () => {
         }
         const decoded = decodePairingCode(encodePairingCode(code))
         assert.deepStrictEqual(decoded, code)
+        // The Mac's QR carries it as a link, the code after its #: pasted, it reads the same.
+        assert.deepStrictEqual(decodePairingCode(pairingLinkOf(encodePairingCode(code))), code)
         const target = yield* completeDevicePairing(decoded, device, 'Desktop')
         assert.deepStrictEqual(target, { origin: server.origin, ...trust, homeId, deviceId })
         yield* Effect.flip(completeDevicePairing({ ...code, expiresAt: 0 }, device, 'Desktop'))

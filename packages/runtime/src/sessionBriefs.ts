@@ -224,9 +224,49 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       ].join('\n\n')
     })
 
+  /**
+   * An artifact's own chat's brief (ADR-104, "Talking to an artifact"): the artifact is what the conversation is about, and
+   * changing it is publishing a new version of it. Light, as an aside's is, with the artifact named, or what to draw where it
+   * draws a new one; never a task's, nor anything that waits on the person.
+   */
+  const artifactBrief = (thread: TaskThread, why: Why, canvasId: string | null) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [canvas] =
+        canvasId === null
+          ? []
+          : yield* sql<{ name: string; title: string; kind: string; version: number }>`
+              SELECT c.name, v.title, v.kind, v.number AS version FROM canvases c
+              JOIN canvas_versions v ON v.canvas_id = c.id AND v.number = (SELECT max(number) FROM canvas_versions WHERE canvas_id = c.id)
+              WHERE c.id = ${canvasId}`
+      const [first] = thread.repositories
+      const about =
+        canvas === undefined
+          ? 'The person asked for a new artifact, in the words below: draw it, then publish it with canvas_publish. For design work, lay its designs out as a canvas of boards (canvas.json), as canvas_publish describes; for anything else, the kind that shows it best. Its first version makes it the artifact this conversation is about.'
+          : `The artifact is ${canvas.title} (${canvas.name}, ${canvasId}), a ${canvas.kind === 'boards' ? 'canvas of boards' : canvas.kind} at v${canvas.version}. To change it, get it with canvas_get, which puts its files in .althar/canvases/${canvas.name}/ in your folder, change them there, and publish a new version of the same canvas with canvas_publish, based on the version you got. Read its comments with canvas_read; the person's pointed comments come with their messages, each on a part of a board.`
+      return [
+        why.kind === 'start'
+          ? "You are an artifact's own chat in Althar: the person opened an artifact, a design, a diagram or a page the project's agents drew, and talks to it here, beside it, to ask about it or have it changed. Answer in your reply, briefly. When they ask for a change, make it and publish the artifact again: they see the new version beside the conversation as you publish it. There is no step to finish, no report, no finish_step or evidence to give, and nothing waits on the person: ask in your reply where you must."
+          : `You are carrying on an artifact's own chat in Althar: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer; publishing a new version is how the artifact changes.`,
+        about,
+        ...askedFor(thread),
+        first === undefined
+          ? `Your folder is ${thread.cwd}.`
+          : `Your folder is ${first.worktree}: a copy of ${withRole(first.name, first.role)} at ${first.baseRef}, with no branch and nothing installed, to read the project's own design (its kit, its tokens, its screens) where the artifact draws on it.`,
+        'Change nothing outside .althar/canvases/ in your folder: this conversation makes and changes artifacts, never the project’s code. Where the person wants it built in the product, say in a line that a task builds it, which the coordinator starts.',
+        ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
+        STANDING_DICTATED,
+        ...(why.kind === 'start' ? [] : yield* threadSoFar(thread.threadId)),
+      ].join('\n\n')
+    })
+
   const taskBrief = (thread: TaskThread, why: Why, replayed = true): Effect.Effect<string, SqlError.SqlError, Store> =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // An artifact's own chat is about its artifact, never a task's work, nor an aside of the coordinator's.
+      const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+        SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${thread.taskId}`
+      if (artifact?.artifactChat === 1) return yield* artifactBrief(thread, why, artifact.artifactCanvasId)
       // An aside the person started, still one, is briefed lightly: a quick word, not a task's work.
       if (replayed && (yield* asideState(thread.taskId)).aside) return yield* asideBrief(thread, why)
       // The project's repositories the task doesn't change, which it may read where the person keeps them.
@@ -508,6 +548,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         "- page_snapshot, page_screenshot and page_logs, to read the page beside your conversation with the person, and page_open, page_click, page_type and the other page_ tools to drive it: it is the project's own page, in a session of its own, and the person sees you at work in it; you need not ask.",
         "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
         "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
+        "- start_artifact, when what the person wants is a thing to look at rather than work in the repository: a mockup, design directions, a mood board, a diagram, a page. It is an artifact with its own chat, which draws it (a Claude model for design), never a task on the board nor an aside; it shows in the project's Artifacts at once, where they open it and talk to it to change it. Don't draw it yourself.",
         "- rename_task, whenever a task's scope or shape changes and its title no longer says what it does, including a prototype becoming a change: give it one that does, in a few words. An open pull request Althar opened follows the new title too. What the person asked stays in its thread.",
         '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
         "- find_tasks, when the person asks about a task by what it did rather than its name (the retry fix, PR 143, the task that changed the login page): it finds the project's tasks by words from their titles, what was asked, what their leads reported and built, pull request numbers, branches and files.",

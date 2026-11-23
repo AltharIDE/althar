@@ -19,6 +19,7 @@ import {
   EdgeMini,
   EdgePlaces,
   EdgeSpot,
+  fewerOf,
   Icon,
   KeepAwake,
   LinkButton,
@@ -52,6 +53,7 @@ import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
+import { usePlaces } from '../../shared/usePlaces'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { CHANGELOG, COMMUNITY, WEBSITE } from '../../shared/links'
@@ -64,6 +66,7 @@ import { type ConnectionsModel, useConnections } from '../connections/useConnect
 import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
+import { ComputersSection } from './ComputersSection'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
 import { ChangedBy } from './ChangedBy'
@@ -118,9 +121,24 @@ export interface SettingsPageProps {
   account?: string
   /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
   agent?: string
+  /** The computer opened out in Computers, as the tab's address says it: the home, or a worker by its id. */
+  worker?: string
+  /** Opens a computer out in Computers, or none: all of them. */
+  onComputer?: (id: string | null) => void
 }
 
-export function SettingsPage({ start, section, onSection, focus, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
+export function SettingsPage({
+  start,
+  section,
+  onSection,
+  focus,
+  onTask,
+  signIn,
+  account: meant,
+  agent: shown,
+  worker,
+  onComputer,
+}: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -190,6 +208,8 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
         {...(onTask === undefined ? {} : { onTask })}
         lit={focus === 'task-folders'}
         onFreeUp={() => onSection('this-mac', 'task-folders')}
+        computer={worker ?? null}
+        onComputer={onComputer ?? (() => onSection('computers'))}
       />
       <div hidden={section !== 'agents'}>
         <AgentCatalogSection start={start} active={section === 'agents'} />
@@ -214,6 +234,8 @@ function SectionBody({
   onTask,
   lit,
   onFreeUp,
+  computer,
+  onComputer,
 }: {
   section: Section
   start: StartModel
@@ -227,6 +249,9 @@ function SectionBody({
   lit: boolean
   /** Sends the person to the task folders' row, from About's storage. */
   onFreeUp: () => void
+  /** The computer opened out in Computers. */
+  computer: string | null
+  onComputer: (id: string | null) => void
 }) {
   switch (section) {
     case 'agents':
@@ -237,6 +262,8 @@ function SectionBody({
       return <SkillsSection start={start} />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
+    case 'computers':
+      return <ComputersSection start={start} opened={computer} onOpen={onComputer} onTask={onTask} />
     case 'this-mac':
       return <ThisMacSection lit={lit} {...(onTask === undefined ? {} : { onTask })} />
     case 'tasks':
@@ -365,6 +392,7 @@ const opensAtLogin = platform === 'darwin' || platform === 'win32'
 function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const places = usePlaces(true)
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
   return (
@@ -384,6 +412,7 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
             machine={atOnce.atOnce.machine}
             most={MOST_AT_ONCE}
             onChange={atOnce.set}
+            fewer={places === null ? null : fewerOf(places)}
             text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
           />
         )}

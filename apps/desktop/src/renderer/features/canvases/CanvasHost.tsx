@@ -1,16 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { CanvasAnchor, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
-import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, Markdown } from '@althar/ui'
+import type { CanvasAnchor, CanvasBoards, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
+import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, CommentBox, Markdown, Room } from '@althar/ui'
 
+import { sized } from '../../../main/browser/elementWords'
+import type { CanvasPointed } from '../../../main/canvases/boards'
 import { pictureUrl } from '../../../main/pictureAddress'
 import { messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { canvasPlace, gather } from '../../shared/comments'
-import { ago } from '../../shared/time'
+import { type CanvasSpot, canvasPlace, drop, gather, rewrite, savePageComment, useComments } from '../../shared/comments'
 import { useCovered } from '../browser/cover'
+import { boardsOfText, pinsOf, useGround } from './boards'
+import { DownloadCanvas } from './DownloadCanvas'
+import { askToOpen } from './opening'
+import { SaveCanvas } from './SaveCanvas'
 
 /*
  * One of the project's canvases beside a conversation (ADR-104), on its
@@ -23,6 +29,11 @@ import { useCovered } from '../browser/cover'
  * published, unless it follows the latest (opened by the agent at work
  * beside it). A comment waits in the conversation's draft, with the
  * version and the words it is on, until the person sends their message.
+ *
+ * A canvas of boards is a page view too, on Althar's ground (ADR-104): its
+ * bar along the bottom changes how it shows, and pointing at a part of a
+ * board writes a comment on it over a picture of the canvas, which waits in
+ * the draft as any comment does; sent ones are numbered pins on their parts.
  */
 
 /** A canvas open beside a conversation: which, at which version (null for the latest), and whether it follows the latest. */
@@ -40,19 +51,19 @@ export interface CanvasHostProps {
   readonly draft: string | null
   readonly onVersion: (version: number) => void
   readonly onClose: () => void
+  /** Back to where it was opened from: every artifact of the project. */
+  readonly onBack?: () => void
+  /**
+   * In an artifact's room, whose one top row is the artifact's: where its versions and actions go, the panel drawing no head
+   * of its own (null while the row is laid out).
+   */
+  readonly actionsIn?: Element | null
 }
 
 const LONGEST_SELECTION = 240
 
-/** Who published a version, as the panel says it. */
-export const byWords = (version: CanvasVersionFacts, now = new Date()) => {
-  const who = version.by.role === 'coordinator' ? 'The coordinator' : `The lead of ${version.by.taskTitle ?? 'a task'}`
-  const when = ago(version.at, now)
-  return when === '' ? who : `${who} · ${when}`
-}
-
 /** The comments sent on a canvas, open first, as its panel lists them. */
-export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelComment> =>
+export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelComment & { readonly anchor: CanvasAnchor }> =>
   detail.comments
     .map((comment) => ({
       id: comment.id,
@@ -61,6 +72,7 @@ export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelCo
       place: canvasPlace(comment.anchor),
       answered: comment.resolved !== null,
       answer: comment.resolved?.note ?? null,
+      anchor: comment.anchor,
     }))
     .toSorted((a, b) => Number(a.answered) - Number(b.answered))
 
@@ -96,13 +108,15 @@ export const svgAddress = (svg: string) => {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-export function CanvasHost({ threadId, open, draft, onVersion, onClose }: CanvasHostProps) {
+export function CanvasHost({ threadId, open, draft, onVersion, onClose, onBack, actionsIn }: CanvasHostProps) {
+  const navigate = useNavigate()
   const { client, host } = useServices()
   const detail = useQuery(reads(client).canvas(open.canvasId))
   const version = detail.data === undefined ? null : shownVersion(detail.data, open)
   const latest = detail.data?.versions.at(-1)?.number ?? 0
   const kind = version?.kind ?? 'markdown'
-  const drawsText = kind === 'markdown' || kind === 'mermaid' || kind === 'svg'
+  // A canvas of boards' entry is read too: its pages and boards are what its bar steps through.
+  const drawsText = kind === 'markdown' || kind === 'mermaid' || kind === 'svg' || kind === 'boards'
   const text = useQuery({
     ...reads(client).canvasText(open.canvasId, version?.number ?? 0),
     enabled: version !== null && drawsText,
@@ -137,7 +151,34 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose }: Canvas
   }, [step])
 
   const summary = detail.data?.summary
-  const comments = useMemo(() => (detail.data === undefined ? [] : commentsShown(detail.data)), [detail.data])
+  const sent = useMemo(() => (detail.data === undefined ? [] : commentsShown(detail.data)), [detail.data])
+  const boards = useMemo(() => (kind === 'boards' && text.data !== undefined ? boardsOfText(text.data.text) : null), [kind, text.data])
+  const drafts = useComments(draft ?? '')
+  const pinned = useMemo(() => pinsOf(sent, draft === null ? [] : drafts, open.canvasId), [sent, drafts, draft, open.canvasId])
+  const comments = useMemo(
+    () => (kind === 'boards' ? sent.map((one) => ({ ...one, n: pinned.numbers.get(one.id) ?? null })) : sent),
+    [kind, sent, pinned],
+  )
+  // Its chip's Open and close, beside a conversation, as the view that draws it says them.
+  const pressed = useRef<{ readonly open: (() => void) | undefined; readonly close: () => void; readonly comment: () => void }>({
+    open: undefined,
+    close: onClose,
+    comment: () => undefined,
+  })
+  const ground = useBoards({
+    threadId,
+    canvasId: open.canvasId,
+    boards,
+    draft,
+    pinned,
+    titleOf: (number) => detail.data?.versions.find((one) => one.number === number)?.title ?? null,
+    onChip: (key) => (key === 'open' ? pressed.current.open?.() : key === 'comment' ? pressed.current.comment() : pressed.current.close()),
+    onVersion: (step) => {
+      if (version === null) return
+      const to = version.number + step
+      if (to >= 1 && to <= latest) onVersion(to)
+    },
+  })
   // The last words selected, with the heading they are under: what a comment pressed on them is on.
   const lastPassage = useRef<{ readonly text: string; readonly heading: string | null } | null>(null)
   useEffect(() => {
@@ -158,36 +199,322 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose }: Canvas
           window.getSelection()?.removeAllRanges()
         }
 
+  // A canvas of boards' keys, as its ground takes them, from anywhere on the panel but a field: the tools, and the zoom.
+  const change = ground.change
+  useEffect(() => {
+    if (kind !== 'boards') return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (!(target instanceof Node) || body?.closest('aside')?.contains(target) !== true) return
+      const key = event.key.toLowerCase()
+      const asked =
+        key === 'v'
+          ? { tool: 'point' as const }
+          : key === 'h'
+            ? { tool: 'hand' as const }
+            : key === 'u'
+              ? { tool: 'use' as const }
+              : event.key === '!' || (event.key === '1' && event.shiftKey)
+                ? { zoom: 'fit' as const }
+                : event.key === ')' || (event.key === '0' && event.shiftKey)
+                  ? { zoom: 1 }
+                  : event.key === '=' || event.key === '+'
+                    ? { zoom: 'in' as const }
+                    : event.key === '-'
+                      ? { zoom: 'out' as const }
+                      : null
+      if (asked === null) return
+      event.preventDefault()
+      change(asked)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [kind, body, change])
+
   // Its words are only waited for once there is a version to read them from: a canvas that can't be read says why.
+  // To the artifact itself, opened as itself in its project's Artifacts.
+  const toArtifact = useMemo(
+    () =>
+      summary === undefined
+        ? undefined
+        : () => {
+            askToOpen(summary.projectId, summary.id)
+            void navigate({ to: '/projects/$projectId', params: { projectId: summary.projectId }, search: { room: Room.Artifacts } })
+          },
+    [summary, navigate],
+  )
+  // Beside a conversation, a canvas of boards or a page draws what it is in its own view: told its name, and whether it takes a
+  // comment on all of it into the conversation's draft, and heard back.
+  const chipTitle = actionsIn === undefined && (kind === 'boards' || kind === 'html') ? (version?.title ?? null) : null
+  // It takes one where the conversation has a draft to keep it in, as the panel's own Comment does.
+  const chipComments = draft !== null && summary !== undefined && version !== null && !detail.isError
+  useEffect(() => {
+    if (chipTitle === null) return
+    host.canvases?.chip?.(threadId, { title: chipTitle, comment: chipComments })
+    return () => host.canvases?.chip?.(threadId, null)
+  }, [host.canvases, threadId, chipTitle, chipComments])
+  // Comment pressed on a chip its own view draws: the panel's comment on all of it opens, for the conversation's draft.
+  const [commentAsked, setCommentAsked] = useState(0)
+  useEffect(() => {
+    pressed.current = { open: toArtifact, close: onClose, comment: () => setCommentAsked((n) => n + 1) }
+  })
+  // A page's chip is heard here; a canvas of boards' through its ground's keys.
+  const page = kind === 'html'
+  useEffect(
+    () =>
+      page
+        ? host.canvases?.onGround?.((key, news) => {
+            if (key !== threadId || news.kind !== 'key') return
+            if (news.key === 'open') pressed.current.open?.()
+            if (news.key === 'close') pressed.current.close()
+            if (news.key === 'comment') pressed.current.comment()
+          })
+        : undefined,
+    [host.canvases, threadId, page],
+  )
   const loading = detail.isPending || (drawsText && version !== null && text.isPending)
   const error = detail.isError ? messageOf(detail.error) : drawsText && text.isError ? messageOf(text.error) : undefined
-  const fill = kind === 'html' || kind === 'picture' || kind === 'svg'
+  const fill = kind === 'html' || kind === 'boards' || kind === 'picture' || kind === 'svg'
+  // In its own room, what is for the whole artifact is there: its versions, saving it, downloading it. Beside a conversation,
+  // the canvas is what it is, floating on it, with a way to the artifact itself, where those are; never in the conversation's
+  // header. A canvas of boards and a page draw that in their own view, which nothing of the window can be drawn over.
+  const inRoom = actionsIn !== undefined
+  const drawnByView = kind === 'boards' || kind === 'html'
   return (
     <CanvasPanel
       name={summary?.name ?? ''}
       title={version?.title ?? ''}
-      kind={kind}
       version={version?.number ?? 1}
       latest={latest}
-      by={version === null ? '' : byWords(version)}
-      note={version?.note ?? null}
       onVersion={onVersion}
       newer={!open.follow && version !== null && version.number < latest ? latest : null}
       selected={passage?.text ?? null}
       comments={comments}
       onClose={onClose}
+      {...(onBack === undefined ? {} : { onBack })}
+      {...(actionsIn === undefined
+        ? { chip: { ...(toArtifact === undefined ? {} : { onOpen: toArtifact }), drawnByView } }
+        : { actionsIn })}
+      {...(summary === undefined || version === null || error !== undefined || !inRoom
+        ? {}
+        : {
+            extra: (
+              <>
+                <SaveCanvas summary={summary} version={latest} />
+                <DownloadCanvas
+                  projectId={summary.projectId}
+                  canvasId={summary.id}
+                  name={summary.name}
+                  kind={kind}
+                  version={version.number}
+                  manifest={version.manifest}
+                  body={body}
+                />
+              </>
+            ),
+          })}
       fill={fill}
       loading={loading}
-      {...(comment === undefined ? {} : { onComment: comment })}
+      {...(comment === undefined ? {} : { onComment: comment, commentAsked })}
       {...(error === undefined ? {} : { error })}
-      {...(kind === 'html' && host.canvases !== undefined ? { onReload: () => host.canvases?.reload(threadId) } : {})}
+      {...(inRoom && (kind === 'html' || kind === 'boards') && host.canvases !== undefined
+        ? { onReload: () => host.canvases?.reload(threadId) }
+        : {})}
+      {...(kind === 'boards' && boards !== null && !loading && error === undefined
+        ? {
+            onCommentPick: (id: string) => {
+              const one = sent.find((c) => c.id === id)
+              if (one?.anchor.kind === 'element' && one.anchor.page !== undefined && one.anchor.board !== undefined)
+                void host.canvases?.find?.(threadId, { page: one.anchor.page, board: one.anchor.board, selector: one.anchor.selector })
+            },
+          }
+        : {})}
     >
       {version !== null && summary !== undefined && (
         <div ref={setBody} style={{ display: 'contents' }}>
-          <Drawn threadId={threadId} projectId={summary.projectId} canvasId={summary.id} version={version} text={text.data?.text ?? ''} />
+          {kind === 'boards' ? (
+            <CanvasPage
+              threadId={threadId}
+              target={{
+                projectId: summary.projectId,
+                canvasId: summary.id,
+                version: version.number,
+                manifest: version.manifest,
+                boards: true,
+              }}
+              writing={ground.writing}
+              onShown={ground.restore}
+              onPlace={ground.setRoom}
+            >
+              {ground.writing !== null && draft !== null && (
+                <BoardComment
+                  writing={ground.writing}
+                  room={ground.room}
+                  n={pinned.numbers.size + (ground.writing.comment === null ? 1 : 0)}
+                  onSubmit={(note) => {
+                    const { pointed, comment: was } = ground.writing ?? { pointed: null, comment: null }
+                    if (pointed === null) return
+                    // A draft's comment opened again changes its words alone: it stays on the part, version and picture it was made on.
+                    if (was !== null) {
+                      rewrite(draft, was.id, note)
+                      return ground.done()
+                    }
+                    const on = ground.writing?.on ?? { version: version.number, title: version.title }
+                    const spot: CanvasSpot = {
+                      kind: 'canvas',
+                      canvasId: summary.id,
+                      name: summary.name,
+                      title: on.title,
+                      version: on.version,
+                      anchor: {
+                        kind: 'element',
+                        selector: pointed.picked.selector,
+                        label: pointed.picked.label,
+                        text: pointed.picked.text,
+                        page: pointed.page,
+                        board: pointed.board,
+                      },
+                      picked: pointed.picked,
+                    }
+                    savePageComment(draft, null, note, spot, pointed.crop)
+                    ground.done()
+                  }}
+                  onCancel={ground.done}
+                  onRemove={() => {
+                    const was = ground.writing?.comment
+                    if (was !== null && was !== undefined) drop(draft, was.id)
+                    ground.done()
+                  }}
+                />
+              )}
+            </CanvasPage>
+          ) : (
+            <Drawn threadId={threadId} projectId={summary.projectId} canvasId={summary.id} version={version} text={text.data?.text ?? ''} />
+          )}
         </div>
       )}
     </CanvasPanel>
+  )
+}
+
+/** A comment being written on a part of a board: the part pointed at, and the comment it changes, where it is one in the draft. */
+interface Writing {
+  readonly pointed: CanvasPointed
+  readonly comment: { readonly id: string; readonly note: string } | null
+  /** The version the part was pointed at on, as the view had it loaded: the comment is on it, whatever shows by the time it is written. */
+  readonly on: { readonly version: number; readonly title: string }
+}
+
+/**
+ * A canvas of boards beside a thread: how its ground shows it, changed at
+ * once by its bar; the comment being written on a part pointed at (or on a
+ * draft comment's pin, pressed again); the keys pressed in it the window acts
+ * on; and the pins of the comments on its parts, drawn whenever they change.
+ */
+function useBoards({
+  threadId,
+  canvasId,
+  boards,
+  draft,
+  pinned,
+  titleOf,
+  onChip,
+  onVersion,
+}: {
+  threadId: string
+  canvasId: string
+  boards: CanvasBoards | null
+  draft: string | null
+  pinned: ReturnType<typeof pinsOf>
+  /** A version's title, by its number, where the canvas has it. */
+  titleOf: (version: number) => string | null
+  /** Its chip's Open and close, beside a conversation, drawn by the ground beside its zoom. */
+  onChip: (key: 'open' | 'close' | 'comment') => void
+  onVersion: (step: -1 | 1) => void
+}) {
+  const views = useServices().host.canvases
+  const [writing, setWriting] = useState<Writing | null>(null)
+  const [room, setRoom] = useState({ width: 0, height: 0 })
+  const drafts = useComments(draft ?? '')
+  const ground = useGround(threadId, canvasId, boards, {
+    // A part pointed at opens its comment, where there is a draft to keep it in. It is on the version the view had loaded
+    // as it was pointed at, which the point carries: neither the window moving on before it hears of it, nor a version
+    // published while it is written, moves it.
+    pointed: (pointed) => {
+      const title = pointed.canvasId === canvasId ? titleOf(pointed.version) : null
+      if (draft !== null && title !== null) setWriting({ pointed, comment: null, on: { version: pointed.version, title } })
+      else views?.clear?.(threadId)
+    },
+    pin: (n) => {
+      const id = [...pinned.numbers].find(([, number]) => number === n)?.[0]
+      const mine = drafts.find((one) => one.id === id)
+      // A sent comment's pin shows it in the list under the canvas; a draft's opens it again, to change or remove.
+      if (mine === undefined) return document.querySelector(`[data-comment="${id ?? ''}"]`)?.scrollIntoView({ block: 'nearest' })
+      if (mine.on.kind !== 'canvas' || mine.on.anchor.kind !== 'element') return
+      const { page, board, selector } = mine.on.anchor
+      if (page === undefined || board === undefined) return
+      // Opened again where its part shows now, to change its words: it stays on the version, part and picture it was made on.
+      const on = { version: mine.on.version, title: mine.on.title }
+      void views?.find?.(threadId, { page, board, selector }).then((pointed) => {
+        if (pointed !== null) setWriting({ pointed, comment: { id: mine.id, note: mine.note }, on })
+      })
+    },
+    key: (key) => {
+      if (key === 'escape') return setWriting(null)
+      if (key === 'open' || key === 'close' || key === 'comment') return onChip(key)
+      onVersion(key === 'older' ? -1 : 1)
+    },
+  })
+  const { change, state, wanted } = ground
+  // The pins go to the ground as they change; it keeps them for every load after.
+  useEffect(() => {
+    if (boards !== null) void views?.pins?.(threadId, pinned.pins)
+  }, [views, threadId, boards, pinned.pins])
+  const done = useCallback(() => {
+    setWriting(null)
+    views?.clear?.(threadId)
+  }, [views, threadId])
+  const restore = useCallback(() => {
+    const was = wanted()
+    if (was !== null) views?.ground?.(threadId, was)
+  }, [wanted, views, threadId])
+  return { state, change, writing, done, restore, room, setRoom }
+}
+
+/** The comment being written on a part of a board, over the picture of the canvas. */
+function BoardComment({
+  writing,
+  room,
+  n,
+  onSubmit,
+  onCancel,
+  onRemove,
+}: {
+  writing: Writing
+  room: { readonly width: number; readonly height: number }
+  n: number
+  onSubmit: (note: string) => void
+  onCancel: () => void
+  onRemove: () => void
+}) {
+  const { pointed, comment } = writing
+  const label = pointed.picked.label === 'the board' ? pointed.board : pointed.picked.label
+  return (
+    <CommentBox
+      key={`${comment?.id ?? 'new'}:${pointed.picked.selector}`}
+      at={pointed.at}
+      room={room}
+      n={n}
+      element={label}
+      size={sized(pointed.picked.rect.width, pointed.picked.rect.height)}
+      defaultValue={comment?.note ?? ''}
+      existing={comment !== null}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+      {...(comment === null ? {} : { onRemove })}
+    />
   )
 }
 
@@ -223,9 +550,27 @@ function Drawn({
 function CanvasPage({
   threadId,
   target,
+  writing = null,
+  onShown,
+  onPlace,
+  children,
 }: {
   threadId: string
-  target: { readonly projectId: string; readonly canvasId: string; readonly version: number; readonly manifest: string }
+  target: {
+    readonly projectId: string
+    readonly canvasId: string
+    readonly version: number
+    readonly manifest: string
+    readonly boards?: boolean
+  }
+  /** A comment being written over it: the view steps aside for the picture taken as it was pointed at. */
+  writing?: { readonly pointed: { readonly still: string } } | null
+  /** Once it is first shown: a canvas of boards shows as it last did. */
+  onShown?: () => void
+  /** The size of its place, as it changes. */
+  onPlace?: (room: { width: number; height: number }) => void
+  /** What the window draws over it, such as the comment being written. */
+  children?: ReactNode
 }) {
   const { host } = useServices()
   const views = host.canvases
@@ -257,9 +602,20 @@ function CanvasPage({
   }, [place, measure])
   useLayoutEffect(measure)
   const { projectId, canvasId, version, manifest } = target
+  const boards = target.boards === true
   useEffect(() => {
-    views?.show(threadId, { projectId, canvasId, version, manifest }, panel)
-  }, [views, threadId, projectId, canvasId, version, manifest, panel])
+    views?.show(threadId, { projectId, canvasId, version, manifest, ...(boards ? { boards } : {}) }, panel)
+  }, [views, threadId, projectId, canvasId, version, manifest, boards, panel])
+  // Shown for the first time, after the view is made (an effect declared after the one above runs after it).
+  const shown = useRef(false)
+  useEffect(() => {
+    if (shown.current || panel === null) return
+    shown.current = true
+    onShown?.()
+  }, [panel, onShown])
+  useEffect(() => {
+    if (panel !== null) onPlace?.({ width: panel.width, height: panel.height })
+  }, [panel, onPlace])
   // Closed, or another kind shown in its place, the view goes with its process.
   useEffect(() => () => views?.close(threadId), [views, threadId])
 
@@ -269,12 +625,18 @@ function CanvasPage({
   const [still, setStill] = useState<string | null>(null)
   // Whether the view should be aside now: a picture that finishes drawing after what was over it went must not hide it again.
   const aside = useRef(false)
+  const pictured = writing?.pointed.still ?? null
   useLayoutEffect(() => {
-    aside.current = covered
-  }, [covered])
+    aside.current = covered || pictured !== null
+  }, [covered, pictured])
   useEffect(() => {
     if (views === undefined) return
     let live = true
+    // A comment written over the canvas: its picture shows in the view's place, and the view steps aside once it has drawn.
+    if (pictured !== null) {
+      if (pictured === '') void views.cover(threadId, true)
+      return
+    }
     if (covered) {
       void views
         .still(threadId)
@@ -296,17 +658,19 @@ function CanvasPage({
       live = false
       cancelAnimationFrame(frame)
     }
-  }, [views, threadId, covered])
+  }, [views, threadId, covered, pictured])
   // Closing or leaving, the view comes back for whoever shows it next.
   useEffect(() => () => void views?.cover(threadId, false), [views, threadId])
   return (
     <CanvasPagePlace
       ref={setPlace}
       canvas={canvasId}
-      still={still}
+      still={pictured !== null && pictured !== '' ? pictured : still}
       onStill={() => {
         if (aside.current) void views?.cover(threadId, true)
       }}
-    />
+    >
+      {children}
+    </CanvasPagePlace>
   )
 }

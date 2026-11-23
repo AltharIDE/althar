@@ -239,6 +239,10 @@ export const gitOutcomeWith = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/** A git command with text on stdin, for lists too large to pass in its arguments. */
+export const gitWithInput = (cwd: string, input: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+  run(60_000, cwd, args, {}, false, input)
+
 /** A blob's bytes, as base64, every byte as it was: a picture at a commit, which text would spoil. */
 export const blobBase64 = (cwd: string, object: string): Effect.Effect<string, GitFailed> =>
   runProcess(60_000, cwd, ['cat-file', 'blob', object], {}, undefined, true).pipe(

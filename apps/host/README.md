@@ -85,6 +85,8 @@ systemctl --user restart althar-host.service
 althar-host pair --profile /path/to/profile
 ```
 
+It prints the code and its `link`. To pair a phone, show the link as a QR (any QR tool does): a phone's camera opens it in Althar, or sends a phone without Althar to its store first. A window on the home, over SSH or this computer's own, shows the same from **Homes → Pair a phone…**.
+
 In the desktop, open **Homes → Connect a home… → Pairing code**. Paste the code, check the destination, give the home a name and choose **Pair and open**. The home opens in its own window. Its projects stay on the server.
 
 A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. The paired connection opens existing projects and tasks, and makes a project on the home, from a repository cloned there, one the home finds in `~/code`, `~/projects` and the like, or a new one. Set up a security key separately when you want to answer permission requests from that desktop.

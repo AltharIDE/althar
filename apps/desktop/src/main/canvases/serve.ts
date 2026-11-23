@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 
-import { canvasAddressOf, CanvasManifest } from '@althar/contracts'
+import { BOARDS_GROUND, canvasAddressOf, CanvasManifest } from '@althar/contracts'
 import { artifactPath, isDigest } from '@althar/runtime/artifacts'
 import { Schema } from 'effect'
+
+import { BOARD_PRINT, boardPrintAt } from './downloadFiles'
 
 /*
  * An HTML canvas's files (ADR-104), served at its address: the canvas is the
@@ -33,10 +35,19 @@ const decode = Schema.decodeUnknownSync(Schema.fromJsonString(CanvasManifest))
 
 const missing = () => new Response(null, { status: 404 })
 
+/**
+ * The ground of a canvas of boards, Althar's own empty page: what the ground's
+ * script (src/overlay/ground.ts) builds the boards on, at the version's own
+ * origin so it reaches into them. It has no script of its own.
+ */
+export const GROUND_PAGE =
+  '<!doctype html><html><head><meta charset="utf-8"><title></title><link rel="stylesheet" href="tokens.css"></head><body></body></html>'
+
 /** The manifests read so far, by digest: a digest's bytes never change. */
 const manifests = new Map<string, CanvasManifest>()
 
-const manifestAt = async (root: string, digest: string): Promise<CanvasManifest | null> => {
+export const manifestAt = async (root: string, digest: string): Promise<CanvasManifest | null> => {
+  if (!isDigest(digest)) return null
   const known = manifests.get(digest)
   if (known !== undefined) return known
   const bytes = await readFile(artifactPath(root, digest)).catch(() => null)
@@ -75,8 +86,23 @@ export const serveCanvas =
     if (digest === null || !isDigest(digest)) return missing()
     if (asked.path === '.althar/tokens.css')
       return new Response(tokens(), { headers: { ...CANVAS_HEADERS, 'content-type': 'text/css; charset=utf-8' } })
+    if (asked.path === BOARDS_GROUND)
+      return new Response(request.method === 'HEAD' ? null : GROUND_PAGE, {
+        headers: { ...CANVAS_HEADERS, 'content-type': 'text/html; charset=utf-8' },
+      })
     const manifest = await manifestAt(root, digest)
     if (manifest === null) return missing()
+    if (asked.path === BOARD_PRINT) {
+      const html = await boardPrintAt(root, manifest, asked, request.url)
+      if (html === null) return missing()
+      return new Response(request.method === 'HEAD' ? null : html, {
+        headers: {
+          ...CANVAS_HEADERS,
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': `${CANVAS_HEADERS['content-security-policy']}; default-src 'none'; frame-src 'self'; img-src 'self'; style-src 'unsafe-inline'`,
+        },
+      })
+    }
     const file = fileIn(manifest, asked.path)
     if (file === null || !isDigest(file.sha256)) return missing()
     const bytes = await readFile(artifactPath(root, file.sha256)).catch(() => null)

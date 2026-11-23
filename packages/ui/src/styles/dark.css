@@ -198,6 +198,7 @@
   --logo-tile: var(--pressed-paper); /* a source's logo on an issue: its own dark tile, light mark */
   --logo-ink: var(--t-1);
   --logo-edge: var(--line-2);
+  --qr-tile: #e8e4da; /* a pairing QR's tile: a little dimmer, still light enough for a camera */
   --linear-tile: #5e6ad2; /* Linear keeps its brand indigo, with white */
   --linear-tile-ink: #ffffff;
   --icon-edge: drop-shadow(0 0 0.6px rgba(255, 240, 215, 0.5)); /* a dark app's icon keeps its edge */

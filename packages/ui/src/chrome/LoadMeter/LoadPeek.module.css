@@ -247,3 +247,47 @@
     transition: none;
   }
 }
+
+/* ---- the readings alone, as Settings › Computers has the home's: laid along a row, the trace and a column a figure ---- */
+.readings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.along {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) repeat(3, minmax(0, 1fr));
+  column-gap: 30px;
+  row-gap: 18px;
+  align-items: start;
+}
+.along > .machine {
+  display: contents;
+}
+.along .row {
+  min-width: 0;
+  column-gap: 10px;
+}
+/* the trace as wide as its column */
+.along .spark {
+  width: 100%;
+  height: auto;
+}
+@container (width < 720px) {
+  .along {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .along > .trace {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- a worker's row: where it stands at its end, in the danger colour where it is off ---- */
+.standing {
+  margin-top: 1px;
+  color: var(--t-2);
+}
+.troubled {
+  color: var(--danger);
+}

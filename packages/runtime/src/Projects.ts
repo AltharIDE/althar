@@ -515,6 +515,8 @@ export class Projects extends Context.Service<
       readonly taskId?: string
       /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
       readonly shelf?: 'scratch'
+      /** With `shelf`, an artifact's own chat rather than an aside: about the canvas by its id, or one it draws first with null. */
+      readonly artifact?: { readonly canvasId: string | null }
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure | ChangeRefused>
     /**
      * Starts another change in a task (a task is a conversation plus parts,
@@ -945,6 +947,11 @@ export class Projects extends Context.Service<
         readonly taskId?: string
         /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
         readonly shelf?: 'scratch'
+        /**
+         * With `shelf`, an artifact's own chat rather than an aside (ADR-104, "Talking to an artifact"): about the canvas by its
+         * id, or one it draws first with null. Never listed as a task or an aside, even for a moment.
+         */
+        readonly artifact?: { readonly canvasId: string | null }
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1033,6 +1040,9 @@ export class Projects extends Context.Service<
                 slug,
                 state: input.draft === true ? 'draft' : 'open',
                 ...(input.shelf === undefined ? {} : { shelf: input.shelf }),
+                ...(input.shelf === 'scratch' && input.artifact !== undefined
+                  ? { artifactChat: 1, artifactCanvasId: input.artifact.canvasId }
+                  : {}),
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`

@@ -261,6 +261,8 @@ export interface ConnectivityOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface IdleOptions {
+  /** How long to let a full session's prompt cache cool before compacting: one hour. */
+  readonly compaction?: Duration.Duration
   /** How long an idle coordinator keeps its provider session: 30 minutes. */
   readonly coordinator?: Duration.Duration
   /** Holds retirement just before provider shutdown in a race test. */

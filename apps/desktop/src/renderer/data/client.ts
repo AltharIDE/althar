@@ -10,16 +10,20 @@ import {
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
-import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection, ClientPage, PairingCodeMade, PairingStatus, PhoneAccess, ShipRoute } from '@althar/contracts'
 
 import {
   type ShownTerminal,
   type TerminalChunk,
   type PlaceId,
   type StorageSize,
+  type ArtifactsHow,
+  type ArtifactsPlace,
   type CanvasDetail,
+  type ArtifactDrawing,
   type CanvasSummary,
   type CanvasText,
+  type RepositoryFolders,
   type SentCanvasComment,
   type CheckoutAnswer,
   type MoveOutcome,
@@ -98,6 +102,8 @@ import {
   type NewProjectDefaultsChange,
   type IssueList,
   type Load,
+  type Places,
+  type HomeWorkers,
   type MissedReports,
   type ModelRoom,
   type PlanUsage,
@@ -269,10 +275,32 @@ export interface Client {
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
   readonly listCanvases: (projectId: string, archived?: boolean) => Promise<ReadonlyArray<CanvasSummary>>
+  /** A project's artifacts whose own chat draws their first version, newest first. */
+  readonly listArtifactsDrawing: (projectId: string) => Promise<ReadonlyArray<ArtifactDrawing>>
   /** One of a project's canvases whole: its versions and the comments sent on it. */
   readonly getCanvas: (canvasId: string) => Promise<CanvasDetail>
   /** A version's entry, as the window draws a document, a diagram or an SVG. */
   readonly readCanvasText: (canvasId: string, version: number) => Promise<CanvasText>
+  /** Where a project's artifacts go when saved to a repository: its place for them, or Althar's pick for the first save. */
+  readonly getArtifactsPlace: (projectId: string) => Promise<ArtifactsPlace>
+  /** One of a project's repositories' folders, where an artifact could be saved. */
+  readonly listRepositoryFolders: (projectId: string, repositoryId: string) => Promise<RepositoryFolders>
+  /** Sets the project's place for artifacts, or clears it. */
+  readonly setArtifactsHome: (
+    projectId: string,
+    home: { readonly repositoryId: string; readonly folder: string; readonly how: ArtifactsHow; readonly follow: boolean } | null,
+  ) => Promise<void>
+  /** Saves a canvas to a folder of its own in one of the project's repositories, or moves it there; its commit follows. */
+  readonly saveCanvas: (save: {
+    readonly canvasId: string
+    readonly repositoryId: string
+    readonly path: string
+    readonly how: ArtifactsHow
+    readonly follow: boolean
+    readonly makeHome?: boolean
+  }) => Promise<void>
+  /** Stops saving a canvas to its repository; what was committed stays there. */
+  readonly stopSavingCanvas: (canvasId: string) => Promise<void>
   /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
@@ -354,6 +382,16 @@ export interface Client {
   readonly signInToolServer: (agent: SyncedAgent, name: string) => Promise<void>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
+  /** Whether phones reach the home, and whether this window can let them in (This Mac's own). */
+  readonly phoneAccess: () => Promise<PhoneAccess>
+  readonly setPhoneAccess: (on: boolean) => Promise<PhoneAccess>
+  /** A pairing code for a phone, its link, and what to ask after. */
+  readonly createPairingCode: () => Promise<PairingCodeMade>
+  readonly pairingStatus: (tokenHash: string) => Promise<PairingStatus>
+  /** The devices paired with the home, a page at a time. */
+  readonly pairedDevices: (after?: string) => Promise<ClientPage>
+  /** Takes a paired device off: the home no longer accepts its key. */
+  readonly removePairedDevice: (deviceId: string) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-056). */
@@ -576,6 +614,11 @@ export interface Client {
     readonly chat?: boolean
     /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
     readonly taskId?: string
+    /**
+     * With `chat`, an artifact's own chat rather than an aside (ADR-104, "Talking to an artifact"): about the canvas by its
+     * id, or a new artifact it draws first with null. A canvas whose chat is open answers with that one.
+     */
+    readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string, workerId?: string) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
@@ -747,6 +790,12 @@ export interface Client {
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
   readonly getLoad: () => Promise<Load>
+  /** The agents this computer runs at once as they stand: at work, the number, fewer for now and why, what waits. */
+  readonly getPlaces: () => Promise<Places>
+  /** The workers this home enrolled, connected or not, what each runs and reported (Settings › Computers, the load popover). */
+  readonly getWorkers: () => Promise<HomeWorkers>
+  /** Takes a worker out of this home: its certificate is no longer accepted. */
+  readonly removeWorker: (workerId: string) => Promise<void>
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
@@ -1125,8 +1174,25 @@ export const connect = async (
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
+    listArtifactsDrawing: (projectId) => settle(api.ListArtifactsDrawing({ projectId })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
+    getArtifactsPlace: (projectId) => settle(api.GetArtifactsPlace({ projectId })),
+    listRepositoryFolders: (projectId, repositoryId) => settle(api.ListRepositoryFolders({ projectId, repositoryId })),
+    setArtifactsHome: (projectId, home) => command((commandId) => api.SetArtifactsHome({ commandId, projectId, home })),
+    saveCanvas: (save) =>
+      command((commandId) =>
+        api.SaveCanvas({
+          commandId,
+          canvasId: save.canvasId,
+          repositoryId: save.repositoryId,
+          path: save.path,
+          how: save.how,
+          follow: save.follow,
+          ...(save.makeHome === true ? { makeHome: true } : {}),
+        }),
+      ),
+    stopSavingCanvas: (canvasId) => command((commandId) => api.StopSavingCanvas({ commandId, canvasId })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
@@ -1228,6 +1294,12 @@ export const connect = async (
     rollBackSkill: (id) => command((commandId) => api.RollBackSkill({ commandId, id })),
     uninstallSkill: (id) => command((commandId) => api.UninstallSkill({ commandId, id })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    phoneAccess: () => settle(api.GetPhoneAccess({})),
+    setPhoneAccess: (on) => command((commandId) => api.SetPhoneAccess({ commandId, on })),
+    createPairingCode: () => settle(api.CreatePairingCode({})),
+    pairingStatus: (tokenHash) => settle(api.GetPairingStatus({ tokenHash })),
+    pairedDevices: (after) => settle(api.ListClientDevices({ limit: 100, ...(after === undefined ? {} : { after }) })),
+    removePairedDevice: (deviceId) => command((commandId) => api.RevokeConnectionDevice({ commandId, deviceId })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
@@ -1370,6 +1442,9 @@ export const connect = async (
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
+    getPlaces: () => settle(api.GetPlaces({})),
+    getWorkers: () => settle(api.GetWorkers({})),
+    removeWorker: (workerId) => command((commandId) => api.RemoveWorker({ commandId, workerId })),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     dismissSignInEnding: (accountId, endsAt, stage) =>
       command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),

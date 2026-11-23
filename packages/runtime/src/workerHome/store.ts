@@ -47,6 +47,11 @@ const schema = `
 `
 
 type Active = { id: string; fence: string; state: 'queued' | 'offered' | 'claimed'; lease_until: number | null }
+/** A worker the home enrolled and hasn't revoked, and the projects it may work on. */
+export interface EnrolledWorker {
+  readonly workerId: string
+  readonly projectIds: ReadonlyArray<string>
+}
 type Project = { projectId: string; commandName: string }
 const projectAttempt = (attemptId: string) => validWorkerProtocolId(attemptId, 'wpr_')
 
@@ -172,6 +177,8 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
     const project = attempts('project_attempt', 'project_log')
     const forAttempt = (attemptId: string) => (projectAttempt(attemptId) ? project : diagnostic)
     const enrolled = db.prepare('SELECT id FROM worker_enrollment WHERE fingerprint = ? AND revoked = 0')
+    const listed = db.prepare(`SELECT w.id AS workerId, p.project_id AS projectId FROM worker_enrollment w
+      LEFT JOIN agent_worker_project p ON p.worker_id = w.id WHERE w.revoked = 0 ORDER BY w.rowid, p.project_id`)
     const projectDetails = db.prepare('SELECT project_id AS projectId, command_name AS commandName FROM project_attempt WHERE id = ?')
     const cancellable = db.prepare(
       "SELECT 1 FROM project_attempt WHERE worker_id = ? AND id = ? AND fence = ? AND state = 'claimed' AND cancel_requested = 1",
@@ -242,6 +249,16 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       agents,
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
+      /** Every worker enrolled and not revoked, in the order it was enrolled, with the projects it may work on. */
+      workers(): ReadonlyArray<EnrolledWorker> {
+        const byId = new Map<string, string[]>()
+        for (const row of listed.all() as Array<{ workerId: string; projectId: string | null }>) {
+          const projects = byId.get(row.workerId) ?? []
+          if (row.projectId !== null) projects.push(row.projectId)
+          byId.set(row.workerId, projects)
+        }
+        return [...byId].map(([workerId, projectIds]) => ({ workerId, projectIds }))
+      },
       enroll(fingerprint: string, projectId?: string) {
         db.exec('BEGIN IMMEDIATE')
         try {
