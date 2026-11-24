@@ -108,10 +108,15 @@ let screen: Xvfb | undefined
 let busFolder: string | undefined
 const dropBus = () => busFolder !== undefined && rmSync(busFolder, { recursive: true, force: true })
 
+// Off Windows, what the run starts gets a process group of its own, which a signal to the run ends whole and the run waits
+// out before it gives up its slot: dbus-run-session, which wraps Playwright on a virtual display, passes no signal on, so
+// signalling only the child would leave Playwright, its workers and the app running in the worktree another run takes.
+const grouped = process.platform !== 'win32'
+
 const run = (command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = process.env) =>
   new Promise<number>((resolve) => {
     // Windows finds bun and playwright as .cmd files, which only a shell runs.
-    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', env })
+    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', env, detached: grouped })
     child.once('exit', (code, signal) => resolve(code ?? (signal === null ? 1 : 128)))
     child.once('error', (error) => {
       console.error(`Could not start ${command}: ${error.message}`)
@@ -119,10 +124,46 @@ const run = (command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEn
     })
   })
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const)
-  process.on(signal, () => {
+/** Whether anything of the group the run started is still running. */
+const groupAlive = (pid: number) => {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Sends `signal` to all the run started and waits until it is gone, ending it outright after `grace` ms. */
+const endGroup = async (signal: NodeJS.Signals, grace = 10_000) => {
+  const pid = child?.pid
+  if (pid === undefined) return
+  if (!grouped) {
     child?.kill(signal)
+    return
+  }
+  const send = (what: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, what)
+    } catch {
+      // Gone already.
+    }
+  }
+  send(signal)
+  for (const end = Date.now() + grace; groupAlive(pid) && Date.now() < end;) await sleep(100)
+  if (groupAlive(pid)) send('SIGKILL')
+  for (const end = Date.now() + 2_000; groupAlive(pid) && Date.now() < end;) await sleep(50)
+}
+
+let ending = false
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.on(signal, async () => {
+    // A second Ctrl-C while it ends ends it at once.
+    const again = ending
+    ending = true
+    await endGroup(again ? 'SIGKILL' : signal, again ? 0 : undefined)
     screen?.stop()
+    dropBus()
     release(slot)
     process.exit(130)
   })
@@ -179,6 +220,8 @@ try {
   console.error((error as Error).message)
   process.exitCode = 1
 } finally {
+  // What Playwright left behind (a worker, the app) goes before the slot does.
+  await endGroup('SIGTERM')
   screen?.stop()
   dropBus()
   release(slot)
