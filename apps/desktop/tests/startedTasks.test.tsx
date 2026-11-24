@@ -76,6 +76,19 @@ describe('where a started task stands, in the board’s words', () => {
     if (phase === 'planned') expect(state.detail).toBe('Starts when you say')
     if (phase === 'waiting' || phase === 'ready') expect(state.detail).toBeUndefined()
   })
+  it('says only the reason where its parent’s lead stopped it, and Folded in where its work went into another task', () => {
+    const parent = { threadId: 'thp1', title: 'Prototype: the small change card' }
+    const stopped = (more: Partial<NonNullable<BoardTask['stopped']>>) =>
+      standsOf(child({ phase: 'stopped', stopped: { by: 'althar', at: NOW, ...more } }), undefined, NOW, name)
+    expect(stopped({ who: 'lead', lead: parent, why: 'Done in this task instead.' })).toEqual({
+      tone: TaskStatus.Stopped,
+      word: 'Stopped',
+      detail: 'Done in this task instead',
+    })
+    expect(stopped({ who: 'lead', lead: parent, why: 'Asked to.', into: parent })).toEqual({ tone: TaskStatus.Done, word: 'Folded in' })
+    // Another task's lead is named, as the board names it.
+    expect(stopped({ who: 'lead', lead: { threadId: 'tho', title: 'Other' }, why: 'Asked to.' }).detail).toBe('Stopped by Other: Asked to')
+  })
   it('counts down while its plan waits to start, and says it is held when it does not', () => {
     const startsAt = new Date(Date.parse(NOW) + 18_000).toISOString()
     const planned = child({ phase: 'planned', plan: { ...card().plan!, startsAt } })

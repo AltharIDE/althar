@@ -2951,6 +2951,26 @@ export const CardIssue = Schema.Struct({
 })
 export type CardIssue = typeof CardIssue.Type
 
+/** Another task, as a stopped task's card names it: by its title, and its thread, which opens it. */
+export const TaskNamed = Schema.Struct({ threadId: Schema.String, title: Schema.String })
+export type TaskNamed = typeof TaskNamed.Type
+
+/**
+ * What stopped a task's lead, and when. `by` is what its lead's turn ended in: the person declining a call or interrupting it,
+ * else Althar, or null where nothing says. `who` is who stopped it, where it is on record: the person, the coordinator, or a
+ * lead (another task's, named in `lead`); with `why`, the reason they gave, and `into`, the task its work went on in, where it
+ * was folded into another. A task folded into another is settled in all but name: Resume still carries it on.
+ */
+export const TaskStopped = Schema.Struct({
+  by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])),
+  at: Schema.NullOr(Schema.String),
+  who: Schema.optional(Schema.Literals(['person', 'coordinator', 'lead'])),
+  lead: Schema.optional(TaskNamed),
+  why: Schema.optional(Schema.String),
+  into: Schema.optional(TaskNamed),
+})
+export type TaskStopped = typeof TaskStopped.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2964,11 +2984,7 @@ export const TaskCard = Schema.Struct({
    * `at` where nothing says when. Only a task an agent worked on is stopped, or one drafted whose plan never came: one whose
    * lead is on its way is under way.
    */
-  stopped: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-    ),
-  ),
+  stopped: Schema.optional(Schema.NullOr(TaskStopped)),
   /**
    * Stopped, with its open pull request ready to merge as it stands (not a draft, no conflict, every check passed): the
    * person can accept it all the same, next to Carry on. Absent otherwise.
@@ -4456,11 +4472,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
     /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
-    stopped: Schema.optional(
-      Schema.NullOr(
-        Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-      ),
-    ),
+    stopped: Schema.optional(Schema.NullOr(TaskStopped)),
     /** Stopped, with its open pull request ready to merge as it stands: it can be accepted all the same, as its card says. */
     mergeable: Schema.optional(Schema.Literal(true)),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
