@@ -94,10 +94,40 @@ export const quickIn = (task: string) =>
  */
 export const issueCardsWaiting = (task: string) => `(${issueDraftsWaiting(task)} + ${issueChangesWaiting(task)})`
 
-/** How many issues a task's lead drafted wait for the person to file, as SQL over a task row aliased `task`. */
+/**
+ * How many issues a task's lead drafted wait for the person to file, as SQL over a task row aliased `task`. Only while the
+ * task is open: a settled one (done, merged, abandoned) never waits on its drafts. What it left is the person's to file or
+ * discard from the project's list of drafts (`settledDrafts`), not a decision that holds the task.
+ */
 export const issueDraftsWaiting = (task: string) =>
   `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
-    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
+    WHERE wt.task_id = ${task}.id AND ${task}.state NOT IN ('done', 'abandoned') AND wd.state IN ('pending', 'failed', 'uncertain'))`
+
+/** Where an issue draft a settled task left still stands before the person: not yet filed or discarded, or being filed. */
+export const DRAFT_LEFT = ['pending', 'filing', 'failed', 'uncertain'] as const
+
+/**
+ * The issue drafts a settled task left unfiled, oldest first, by id and title, as a JSON array in SQL over a task row aliased
+ * `task`; null while it is open, or left none. Its card carries them, so filing or discarding one changes it, and every
+ * window reads the project's list of drafts again.
+ */
+export const issueDraftsLeft = (task: string) =>
+  `(CASE WHEN ${task}.state IN ('done', 'abandoned') THEN (SELECT CASE WHEN count(*) = 0 THEN NULL
+      ELSE json_group_array(json_object('draftId', id, 'title', title, 'state', state)) END
+    FROM (SELECT ld.id, ld.title, ld.state FROM issue_drafts ld JOIN threads lt ON lt.id = ld.thread_id
+      WHERE lt.task_id = ${task}.id AND ld.state IN (${DRAFT_LEFT.map((one) => `'${one}'`).join(', ')}) ORDER BY ld.created_at, ld.rowid)) END)`
+
+/** A settled task's card's drafts left (`issueDraftsLeft`), from the JSON SQL gives: none where it left none. */
+export const draftsLeftOf = (json: string | null) => {
+  const read: unknown = json === null ? [] : JSON.parse(json)
+  const left = (Array.isArray(read) ? read : []).flatMap((one: unknown) => {
+    const draftId = field(one, 'draftId')
+    const title = field(one, 'title')
+    const state = field(one, 'state')
+    return typeof draftId === 'string' && typeof title === 'string' && typeof state === 'string' ? [{ draftId, title, state }] : []
+  })
+  return left.length === 0 ? {} : { draftsLeft: left }
+}
 
 /** How many changes a task's lead proposed to its issue wait for the person to apply, as SQL over a task row aliased `task`. */
 export const issueChangesWaiting = (task: string) =>

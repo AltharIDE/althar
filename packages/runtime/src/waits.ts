@@ -1,3 +1,4 @@
+import type { BlockerStanding, TaskCard } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -155,3 +156,26 @@ const touched = (taskId: string, others: ReadonlyArray<string>) =>
     yield* touchTask(taskId)
     yield* Effect.forEach(others, touchCard, { discard: true })
   })
+
+/**
+ * How a task another waits for stands, from its card (waits.ts): before its lead starts, under way (in review once its pull
+ * request is open), stuck where it waits on the person or stopped, and in review once it is the person's to merge.
+ */
+export const blockerStands = (card: Pick<TaskCard, 'phase' | 'change'>): BlockerStanding => {
+  switch (card.phase) {
+    case 'drafting':
+    case 'planned':
+    case 'held':
+      return 'planned'
+    case 'running':
+      return card.change?.state === 'open' ? 'review' : 'working'
+    case 'waiting':
+    case 'stopped':
+      return 'stuck'
+    case 'ready':
+    case 'kept':
+      return 'review'
+    case 'settled':
+      return 'merged'
+  }
+}
