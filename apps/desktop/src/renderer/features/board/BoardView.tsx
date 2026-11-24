@@ -82,7 +82,8 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
+import { type Lanes, movesInLine, runningIn, type Waiting, yoursOf } from './lanes'
+import { useRunningOrder } from './runningOrder'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -201,6 +202,8 @@ export const text = {
   keepHint: 'Take it out of Needs you as it is, with its page still up. Writing to it brings it back.',
   /** The two the Settled lane's head names, while something is kept for later; the one showing in ink. */
   settledOrKept: 'Settled or kept for later',
+  /** Running's orders, from the menu on its head: the oldest first, as it is until the person picks, or by where each stands. */
+  runningOrder: { label: 'Order', oldest: 'Oldest first', status: 'Status' },
   settledShelf: 'Settled',
   keptShelf: 'Kept',
   /** When a kept task was kept, under its title. */
@@ -1163,6 +1166,8 @@ export function BoardView({
   const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
+  const [order, setOrder] = useRunningOrder()
+  const running = runningIn(lanes.running, order)
   // What Settled draws has moved into it: once drawn, it arrives there no more, whatever the board does next. What is drawn
   // outside it is watched: only a task that settles while watched moves in.
   const settledShown = shelf === 'settled' || lanes.kept.length === 0
@@ -1308,6 +1313,7 @@ export function BoardView({
       version={[
         lanes,
         shelf,
+        order,
         starting,
         closing?.busy,
         closing?.failed,
@@ -1449,8 +1455,21 @@ export function BoardView({
         )}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Running} count={lanes.atWork} filled={lanes.running.length > 0}>
-        {lanes.running.map((work) => (
+      <BoardColumn
+        lane={BoardLane.Running}
+        count={lanes.atWork}
+        filled={lanes.running.length > 0}
+        order={{
+          label: text.runningOrder.label,
+          options: [
+            { value: 'oldest', label: text.runningOrder.oldest },
+            { value: 'status', label: text.runningOrder.status },
+          ],
+          value: order,
+          onChange: (value: string) => setOrder(value === 'status' ? 'status' : 'oldest'),
+        }}
+      >
+        {running.map((work) => (
           <BoardCard
             taskId={work.taskId}
             key={work.taskId}

@@ -71,6 +71,7 @@ import {
   Settings,
   ShieldCheck,
   SidebarExpand,
+  Sort,
   SoundHigh,
   Sparks,
   Square,
@@ -211,6 +212,8 @@ export const ICONS = {
   conflict: GitCompare,
   /** A tracker's issues, moving through its statuses as their tasks go. */
   issues: KanbanBoard,
+  /** The order a list is in, and choosing another. */
+  sort: Sort,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
