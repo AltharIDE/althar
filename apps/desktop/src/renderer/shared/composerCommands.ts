@@ -96,20 +96,11 @@ export const goalCommandOf = (goal: ThreadGoal | null, onGoal: (body: string) =>
             body: goal.objective,
             ...((goal.detail ?? goal.progress) === null ? {} : { note: (goal.detail ?? goal.progress)! }),
           },
+    // A new objective or an edit says what Enter does; the rest are done as they are picked.
     action: (words) => {
-      const asked = goalCommand(body(words))
-      switch (asked?.action) {
-        case 'set':
-          return goal === null ? t.set : t.replace
-        case 'edit':
-          return t.save
-        case 'pause':
-        case 'resume':
-        case 'clear':
-          return null
-        default:
-          return null
-      }
+      const asked = goalCommand(body(words))?.action
+      if (asked === 'set') return goal === null ? t.set : t.replace
+      return asked === 'edit' ? t.save : null
     },
     run: (words) => onGoal(body(words)),
   }
