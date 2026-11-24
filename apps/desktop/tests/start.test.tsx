@@ -503,7 +503,7 @@ describe('the start', () => {
     const { client, emit, watching } = fakeClient()
     withServices(<Start onProject={onProject} />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    await userEvent.click(await within(projects).findByRole('button', { name: /meridian/ }))
+    await userEvent.click(await within(projects).findByRole('button', { name: /^meridian/ }))
     expect(onProject).toHaveBeenCalledWith('p1')
 
     // A change to a project reads the list again; a change to anything else doesn't.

@@ -480,7 +480,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     // A task ready while the person is elsewhere: it waits, but nothing says so outside the window.
     await page
       .getByRole('complementary', { name: 'Projects' })
-      .getByRole('button', { name: /meridian/ })
+      .getByRole('button', { name: /^meridian/ })
       .click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, 'Add a retry to the checkout call')
