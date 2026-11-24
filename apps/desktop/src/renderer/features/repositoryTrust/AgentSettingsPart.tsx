@@ -1,4 +1,4 @@
-import { RepositoryTrustKept, SettingGroup } from '@althar/ui'
+import { RepositoryTrustKept, repositoryTrustText, SettingGroup } from '@althar/ui'
 
 import { HEADING } from '../projectSettings/sections'
 import s from './RepositoryTrust.module.css'
@@ -22,18 +22,41 @@ export function AgentSettingsPart({ projectId }: { projectId: string }) {
   return (
     <SettingGroup title={text.title} note={text.note} headingLevel={HEADING.part}>
       <div className={s.kept}>
-        {model.repositories.map((repository) => (
-          <RepositoryTrustKept
-            key={repository.repositoryId}
-            repository={repository.name}
-            files={repository.files.map(trustFileOf)}
-            decided={decidedOf(repository)}
-            onTrust={() => void model.decide(repository, true)}
-            onWithout={() => void model.decide(repository, false)}
-            headingLevel={4}
-            {...(model.failed?.repositoryId === repository.repositoryId ? { error: model.failed.said } : {})}
-          />
-        ))}
+        {model.repositories.flatMap((repository) => {
+          const error = model.failed?.repositoryId === repository.repositoryId ? { error: model.failed.said } : {}
+          const elsewhere = repository.elsewhere ?? []
+          return [
+            ...(repository.files.length === 0
+              ? []
+              : [
+                  <RepositoryTrustKept
+                    key={repository.repositoryId}
+                    repository={repository.name}
+                    files={repository.files.map(trustFileOf)}
+                    decided={decidedOf(repository.files)}
+                    onTrust={() => void model.decide(repository, true)}
+                    onWithout={() => void model.decide(repository, false)}
+                    headingLevel={4}
+                    {...error}
+                  />,
+                ]),
+            // What was decided of versions its checkout here doesn't have, such as a task branch's from its line: to take back too.
+            ...(elsewhere.length === 0
+              ? []
+              : [
+                  <RepositoryTrustKept
+                    key={`${repository.repositoryId}:elsewhere`}
+                    repository={repositoryTrustText.elsewhere(repository.name)}
+                    files={elsewhere.map(trustFileOf)}
+                    decided={decidedOf(elsewhere)}
+                    onTrust={() => void model.decide(repository, true, elsewhere)}
+                    onWithout={() => void model.decide(repository, false, elsewhere)}
+                    headingLevel={4}
+                    {...(repository.files.length === 0 ? error : {})}
+                  />,
+                ]),
+          ]
+        })}
       </div>
     </SettingGroup>
   )

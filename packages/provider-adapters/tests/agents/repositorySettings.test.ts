@@ -48,7 +48,7 @@ const optionsFor = async (agent: SettingsAgent, worktree: string, trusted: Reado
   const options: SessionOptions =
     untrustedOf(files, trusted).length === 0 || agents[agent].untrustedRepositories !== undefined
       ? {}
-      : { withoutRepositorySettings: { folder: worktree } }
+      : { withoutRepositorySettings: { folders: [worktree] } }
   return { options, files }
 }
 
@@ -58,9 +58,9 @@ describe.skipIf(claude === null)('Claude Code and a repository’s hooks', () =>
   /** Claude Code as its lead's session would start it, by the CLI flags its session options stand for. */
   const run = (worktree: string, home: string, options: SessionOptions) => {
     const meta = agents['claude-code'].sessionMeta?.('lead', options) as {
-      claudeCode: { options: { settingSources?: Array<string>; additionalDirectories?: Array<string> } }
+      claudeCode: { options: { settingSources?: Array<string>; additionalDirectories?: Array<string>; env?: Record<string, string> } }
     }
-    const { settingSources, additionalDirectories } = meta.claudeCode.options
+    const { settingSources, additionalDirectories, env } = meta.claudeCode.options
     spawnSync(
       claude ?? 'claude',
       [
@@ -75,7 +75,7 @@ describe.skipIf(claude === null)('Claude Code and a repository’s hooks', () =>
         timeout: 60_000,
         env: {
           ...process.env,
-          ...agents['claude-code'].sessionEnv?.({}, options),
+          ...env,
           CLAUDE_CONFIG_DIR: home,
           ANTHROPIC_API_KEY: 'sk-ant-not-a-key',
         },

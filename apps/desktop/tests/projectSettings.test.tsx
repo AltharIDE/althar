@@ -657,6 +657,29 @@ describe('a project’s settings', () => {
     )
   })
 
+  it('shows in Rules what was trusted of a version the checkout here doesn’t have, and takes it back', async () => {
+    const branch = {
+      agent: 'claude-code' as const,
+      agentName: 'Claude Code',
+      file: '.claude/settings.json',
+      hash: 'h2',
+      runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command: './notify.sh --loud' }],
+      trusted: true,
+      changed: false,
+      loadsAnyway: false,
+    }
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [{ repositoryId: 'rb_1', name: 'refunds', files: [], elsewhere: [branch] }]),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const kept = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them' }))
+    expect(kept.getByText('./notify.sh --loud')).toBeTruthy()
+    await userEvent.click(kept.getByRole('button', { name: 'Take back' }))
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: [branch] }),
+    )
+  })
+
   it('has no part for agent settings where no repository brings any', async () => {
     windowAt('/projects/p1?room=settings&section=rules')
     expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()

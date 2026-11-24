@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
+import type { AgentSettingsFile } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -116,6 +117,94 @@ describe('a repository’s agent settings', () => {
       const declined = yield* lead(projectId, 'Run without them')
       assert.isDefined(declined.without)
       assert.deepStrictEqual(declined.lines, [])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('hold back what its root has from a project of a folder in it, where its lead starts', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const path = repository()
+      mkdirSync(join(path, 'app'))
+      writeFileSync(join(path, 'app', 'README.md'), 'app')
+      hooked(path, 'touch outside')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: join(path, 'app') })
+      const [listed] = yield* agentSettingsOf(project.projectId)
+      assert.deepStrictEqual(
+        listed?.files.map((file) => file.file),
+        ['.claude/settings.json'],
+      )
+      yield* decideAgentSettings({
+        envelope: yield* Runtime.envelope('project.agent_settings.decide', {}),
+        projectId: project.projectId as ProjectId,
+        repositoryId: listed?.repositoryId ?? '',
+        trusted: false,
+        files: (listed?.files ?? []).map(({ agent, file, hash, runs }) => ({ agent, file, hash, runs })),
+      })
+      const started = yield* lead(project.projectId, 'In the folder')
+      // Without them, still reading the instructions of the root and of the folder it starts in.
+      assert.strictEqual(started.without?.folders.length, 2)
+      assert.isTrue(started.without?.folders[1]?.endsWith(`${sep}app`))
+      assert.deepStrictEqual(started.lines, [])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keep in Rules what was trusted from a task’s line, which the checkout here doesn’t have, to take back', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const path = repository()
+      hooked(path, 'echo first')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const projectId = project.projectId as ProjectId
+      const [first] = yield* agentSettingsOf(projectId)
+      // A version only a task's branch has, trusted from its line.
+      hooked(path, 'echo from a branch')
+      const branch = yield* lead(projectId, 'On a branch')
+      const offered = (branch.lines[0]?.offer as unknown as { files: ReadonlyArray<AgentSettingsFile> } | undefined)?.files ?? []
+      const decide = (trusted: boolean, files: ReadonlyArray<AgentSettingsFile>) =>
+        Effect.gen(function* () {
+          yield* decideAgentSettings({
+            envelope: yield* Runtime.envelope('project.agent_settings.decide', {}),
+            projectId,
+            repositoryId: first?.repositoryId ?? '',
+            trusted,
+            files: files.map(({ agent, file, hash, runs }) => ({ agent, file, hash, runs })),
+          })
+        })
+      yield* decide(true, offered)
+      hooked(path, 'echo first')
+      const [kept] = yield* agentSettingsOf(projectId)
+      assert.deepInclude(kept?.files[0], { hash: first?.files[0]?.hash ?? '', trusted: null, changed: true })
+      assert.strictEqual(kept?.elsewhere?.length, 1)
+      assert.deepInclude(kept?.elsewhere?.[0], { hash: offered[0]?.hash ?? '', trusted: true })
+      assert.strictEqual(kept?.elsewhere?.[0]?.runs[0]?.command, 'echo from a branch')
+      // Taken back without that version checked out.
+      yield* decide(false, kept?.elsewhere ?? [])
+      assert.deepInclude((yield* agentSettingsOf(projectId))[0]?.elsewhere?.[0], { hash: offered[0]?.hash ?? '', trusted: false })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('never trust a file it couldn’t read, and hold it back', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const path = repository()
+      mkdirSync(join(path, '.claude'), { recursive: true })
+      writeFileSync(join(path, '.claude', 'settings.json'), '{ "hooks": ')
+      git(path, 'add', '.claude')
+      git(path, 'commit', '-q', '-m', 'Broken')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const [listed] = yield* agentSettingsOf(project.projectId)
+      assert.strictEqual(listed?.files[0]?.unread, 'It couldn’t be read as JSON')
+      yield* decideAgentSettings({
+        envelope: yield* Runtime.envelope('project.agent_settings.decide', {}),
+        projectId: project.projectId as ProjectId,
+        repositoryId: listed?.repositoryId ?? '',
+        trusted: true,
+        files: (listed?.files ?? []).map(({ agent, file, hash, runs }) => ({ agent, file, hash, runs })),
+      })
+      assert.strictEqual((yield* agentSettingsOf(project.projectId))[0]?.files[0]?.trusted, null)
+      const started = yield* lead(project.projectId, 'Unread')
+      assert.isDefined(started.without)
+      assert.strictEqual(started.lines.length, 1)
     }).pipe(Effect.provide(runtime())),
   )
 

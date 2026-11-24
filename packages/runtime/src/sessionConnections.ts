@@ -62,7 +62,7 @@ import {
 } from './sessionState'
 import { type RunSkills, refusalOf, runSkills } from './Skills'
 import { blockGoalAfterDisconnect } from './threadGoals'
-import { settingsHoldFor, settingsLine } from './repositoryTrust'
+import { type SettingsHold, settingsHoldFor, settingsLine, withoutSettings } from './repositoryTrust'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
@@ -381,22 +381,33 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           : {}
       const web = !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
       // A lead in a repository whose agent settings the person hasn't trusted, or whose branch changed them since, starts
-      // without them where its agent can; its task says so once, quietly (DEV-280). A worker's checkout isn't read here.
+      // without them where its agent can; its task says so once, quietly (DEV-280). Its agent reads them up from where it
+      // starts, a folder in the repository where the project is of one, so the repository is the one that holds it, read
+      // from its root down to there. Among several, it starts in the folder that holds them, where none of theirs load.
+      // On a worker, the checkout it is sent is this worktree, so this one is read; what holds them back there is its
+      // session's settings alone, and an agent that holds them back only through its environment doesn't start there.
+      const startsIn = cwdOf(thread)
       const startingIn =
-        thread.role === 'task' ? thread.repositories.find((repository) => repository.worktree === cwdOf(thread)) : undefined
-      const settingsHold =
-        thread.role === 'task' && !reads && thread.review === null && selectedWorker === null && startingIn?.bindingId !== undefined
-          ? yield* settingsHoldFor(definition, thread.projectId, {
+        thread.role === 'task'
+          ? thread.repositories.find((repository) => repository.worktree === startsIn || startsIn.startsWith(repository.worktree + sep))
+          : undefined
+      const starting =
+        startingIn?.bindingId === undefined
+          ? undefined
+          : {
               bindingId: startingIn.bindingId,
               name: startingIn.name,
-              folder: startingIn.worktree,
-            }).pipe(
+              root: startingIn.worktree,
+              within: relative(startingIn.worktree, startsIn),
+            }
+      const settingsHold: SettingsHold =
+        thread.role === 'task' && !reads && thread.review === null && starting !== undefined
+          ? yield* settingsHoldFor(definition, thread.projectId, starting, selectedWorker !== null).pipe(
               Effect.provideService(SqlClient.SqlClient, sessionsSql),
               Effect.catchCause((cause) =>
                 Effect.as(Effect.logWarning('Could not read the repository’s agent settings', cause), {
                   // Unread, nothing of them is known to be trusted: it starts without them, as for one never seen.
-                  options:
-                    definition.untrustedRepositories === undefined ? { withoutRepositorySettings: { folder: startingIn.worktree } } : {},
+                  ...withoutSettings(definition, starting, selectedWorker !== null),
                   offer: undefined,
                 }),
               ),
@@ -603,6 +614,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               message:
                 'This custom agent has not been configured to ignore untrusted repository hooks and settings. Choose another agent for this review.',
             })
+          // Its agent can't start here without its repository's settings the person hasn't trusted: it doesn't start.
+          if (settingsHold.refused !== undefined)
+            return yield* new AgentStartFailed({ command: definition.name, reason: settingsHold.refused })
           let agentCwd = cwdOf(thread)
           let homeWorktree: string | undefined
           if (selectedWorker !== null) {
@@ -752,7 +766,18 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               : { ...localTools, url: 'http://127.0.0.1:' + activeWorker.toolPort + '/mcp' }
           const effectiveSkills = activeWorker === undefined ? skills?.folder : activeWorker.skillsPath
           const { skills: _homeSkills, ...otherOptions } = sessionOptions
-          const effectiveSessionOptions = { ...otherOptions, ...(effectiveSkills === undefined ? {} : { skills: effectiveSkills }) }
+          // On a worker, the folders whose instructions it still reads are where the worker has them.
+          const workerFolder = (folder: string) =>
+            activeWorker === undefined || localRoot === undefined
+              ? folder
+              : posix.join(activeWorker.path, ...relative(localRoot, folder).split(sep).filter(Boolean))
+          const effectiveSessionOptions = {
+            ...otherOptions,
+            ...(otherOptions.withoutRepositorySettings === undefined
+              ? {}
+              : { withoutRepositorySettings: { folders: otherOptions.withoutRepositorySettings.folders.map(workerFolder) } }),
+            ...(effectiveSkills === undefined ? {} : { skills: effectiveSkills }),
+          }
           const agent = yield* connection.newSession({
             cwd: agentCwd,
             // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call

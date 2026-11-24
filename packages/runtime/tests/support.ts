@@ -212,6 +212,8 @@ export const definition = (
         contains: () => fakeSandbox.contains,
         ready: () => fakeSandbox.ready(),
         upFront: true as const,
+        // Holds a repository's untrusted settings back through its session's settings, as Claude Code does: on a worker too.
+        withoutRepositoryOnWorker: true as const,
       }
     : {}),
   // Given a run's skills as the registry's agents of the same id are, by their own entries: in its session (Claude Code's

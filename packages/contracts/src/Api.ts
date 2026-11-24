@@ -1122,6 +1122,8 @@ export const AgentSettingsFile = Schema.Struct({
   /** Not decided as it is now, but trusted as it was before: its repository changed it since. */
   changed: Schema.Boolean,
   loadsAnyway: Schema.Boolean,
+  /** There, but not read as its agent would read it, and why: never trusted, since it may run anything. */
+  unread: Schema.optional(Schema.String),
 })
 export type AgentSettingsFile = typeof AgentSettingsFile.Type
 
@@ -1130,6 +1132,11 @@ export const RepositoryAgentSettings = Schema.Struct({
   repositoryId: Schema.String,
   name: Schema.String,
   files: Schema.Array(AgentSettingsFile),
+  /**
+   * What the person decided of its settings as they were somewhere else, such as a task's branch from its line, and
+   * not as its checkout here has them: as they were shown then, to take back or trust again.
+   */
+  elsewhere: Schema.optional(Schema.Array(AgentSettingsFile)),
 })
 export type RepositoryAgentSettings = typeof RepositoryAgentSettings.Type
 

@@ -315,6 +315,12 @@ export interface AgentDefinition<Id extends string = string> {
    */
   readonly untrustedRepositories?: false | 'loads'
   /**
+   * It starts without a repository's untrusted settings through its session's own settings alone (`sessionMeta`), so
+   * on a worker too, which starts it with none of Althar's environment. Without it, where it holds them back only
+   * through its environment (`sessionEnv`), a worker can't start it without them.
+   */
+  readonly withoutRepositoryOnWorker?: true
+  /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
    * it reaches without asking. Without it, none are worked out for its
@@ -433,10 +439,10 @@ export interface SessionOptions {
   readonly untrusted?: boolean
   /**
    * A lead that starts without its repository's own agent settings, which the person hasn't trusted, or which its
-   * branch changed since (DEV-280): `folder`, where its session starts, whose instructions it still reads. The
-   * person's own settings and hooks load as ever.
+   * branch changed since (DEV-280): `folders`, the repository's root and each folder down to where its session starts,
+   * whose instructions it still reads. The person's own settings and hooks load as ever.
    */
-  readonly withoutRepositorySettings?: { readonly folder: string }
+  readonly withoutRepositorySettings?: { readonly folders: ReadonlyArray<string> }
   /**
    * Where a trusted reader, the coordinator, may reach (ADR-058): where the
    * agent has a sandbox Althar can hold to it, its commands run there without
@@ -1081,8 +1087,9 @@ const claudeContains = (
  * (`settingSources: ['user']`, which claude-agent-acp passes over its default of user, project and local), so their
  * hooks run and the repository's `.claude/settings.json` and `.claude/settings.local.json` don't, hooks, helpers and
  * all. Without the project source Claude Code reads no CLAUDE.md either, so the folder is added to the session again,
- * whose CLAUDE.md, imports and `.claude/rules` it reads with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` (its
- * `sessionEnv`). `disableAllHooks` would stop the person's own hooks too, as it does those given in a session's own
+ * whose CLAUDE.md, imports and `.claude/rules` it reads with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, given in
+ * the session's own `env`, which claude-agent-acp lays over its process's: all of it in the session's settings, so a
+ * worker starts it so too. `disableAllHooks` would stop the person's own hooks too, as it does those given in a session's own
  * settings or a plugin, and hooks given in a parent's policy settings are dropped: neither keeps theirs.
  */
 const claudeWithoutRepository = <Meta extends { readonly claudeCode: { readonly options: object } }>(
@@ -1095,7 +1102,15 @@ const claudeWithoutRepository = <Meta extends { readonly claudeCode: { readonly 
         ...meta,
         claudeCode: {
           ...meta.claudeCode,
-          options: { ...meta.claudeCode.options, settingSources: ['user'], additionalDirectories: [without.folder] },
+          options: {
+            ...meta.claudeCode.options,
+            settingSources: ['user'],
+            additionalDirectories: [...without.folders],
+            env: {
+              ...('env' in meta.claudeCode.options ? (meta.claudeCode.options.env as object) : {}),
+              CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+            },
+          },
         },
       }
 
@@ -1213,9 +1228,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
         options.heldSkills,
       ),
     contains: claudeSandboxStarts,
-    // Without the repository's settings, its instructions still load from the folder added again (claudeWithoutRepository).
-    sessionEnv: (_own, options) =>
-      options.withoutRepositorySettings === undefined ? {} : { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' },
+    // Without the repository's settings all through its session's settings (claudeWithoutRepository), on a worker too.
+    withoutRepositoryOnWorker: true,
     // Its sandbox probe, once a launch, which its hold and its settings both read (ADR-071).
     ready: () => (sandboxProbed() ? undefined : probeClaudeSandbox()),
     upFront: true,

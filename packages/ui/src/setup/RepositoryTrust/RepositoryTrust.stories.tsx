@@ -27,6 +27,22 @@ const CODEX: TrustFile = {
   loadsAnyway: true,
 }
 
+/* A file there that Althar couldn't read as its agent would: never trusted, and said why. */
+const UNREAD: TrustFile = {
+  agent: 'opencode',
+  agentName: 'OpenCode',
+  file: 'opencode.json',
+  runs: [{ key: '', when: 'Not read', command: 'Larger than Althar reads (1 MB)' }],
+}
+
+/* A hook only a task's branch has, trusted from its line. */
+const BRANCH: TrustFile = {
+  agent: 'claude-code',
+  agentName: 'Claude Code',
+  file: '.claude/settings.json',
+  runs: [{ key: 'hooks.Stop[0].hooks[0]', when: 'When it finishes a turn', command: './scripts/notify.sh --channel agents' }],
+}
+
 /* As wide as a new project's side, or a section of the project's settings. */
 function Side({ children }: { children: ReactNode }) {
   return <div style={{ width: 560 }}>{children}</div>
@@ -188,6 +204,40 @@ export const AddingAProject: Story = {
   parameters: { layout: 'fullscreen' },
 }
 
+/* An answer that didn't save: its card stands again, with why, to answer again. */
+export const AddingAProjectNotSaved: Story = {
+  render: (args) => (
+    <div style={{ minHeight: '100vh', background: 'var(--n-2)' }}>
+      <RepositoryTrustStep
+        project="Refunds"
+        repositories={[{ id: 'rb_1', name: 'refunds', files: args.files, error: 'Althar couldn’t save that. Try again.' }]}
+        onAnswer={(id, trusted) => (trusted ? args.onTrust() : args.onWithout())}
+      />
+    </div>
+  ),
+  parameters: { layout: 'fullscreen' },
+}
+
+/* What its repositories run couldn't be read: not taken for none. Try again, or open the project, its leads starting without them. */
+const retried = fn()
+export const AddingAProjectUnreadable: Story = {
+  render: () => (
+    <div style={{ minHeight: '100vh', background: 'var(--n-2)' }}>
+      <RepositoryTrustStep
+        project="Refunds"
+        repositories={[]}
+        onAnswer={() => undefined}
+        unreadable={{ error: 'The runtime didn’t answer in time.', onRetry: retried, onOpen: fn() }}
+      />
+    </div>
+  ),
+  parameters: { layout: 'fullscreen' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Try again' }))
+    await expect(retried).toHaveBeenCalled()
+  },
+}
+
 /* In the project's Rules: what each repository's settings run, and what was decided of them. */
 export const InSettings: Story = {
   render: (args) => (
@@ -207,8 +257,16 @@ export const InSettings: Story = {
             headingLevel={4}
           />
           <RepositoryTrustKept
+            repository="refunds, as a task’s branch had them"
+            files={[BRANCH]}
+            decided="trusted"
+            onTrust={args.onTrust}
+            onWithout={args.onWithout}
+            headingLevel={4}
+          />
+          <RepositoryTrustKept
             repository="refunds-web"
-            files={[CODEX]}
+            files={[CODEX, UNREAD]}
             decided="changed"
             onTrust={args.onTrust}
             onWithout={args.onWithout}

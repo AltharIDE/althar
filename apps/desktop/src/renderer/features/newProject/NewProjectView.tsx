@@ -15,6 +15,7 @@ import { words as elsewhereWords } from '../elsewhere/tiles'
 import { useElsewhere } from '../elsewhere/useElsewhere'
 import { useHomeName, useHomeUpdating } from '../homes/useHomes'
 import { factsOf, useFound } from '../../shared/found'
+import { messageOf } from '../../data/client'
 import { keys as readKeys } from '../../data/reads'
 import { TrustStep } from '../repositoryTrust/TrustStep'
 import type { DraftError } from './draft'
@@ -117,7 +118,23 @@ export function NewProjectView({
   const [trusting, setTrusting] = useState<{
     readonly projectId: string
     readonly repositories: ReadonlyArray<RepositoryAgentSettings>
+    /** Why what they run couldn't be read, where it couldn't. */
+    readonly unreadable?: string
   } | null>(null)
+  // What a made project's repositories' agent settings run, asked where any isn't decided on; a failed read said, not taken for none.
+  const askTrust = async (projectId: string) => {
+    let settings: ReadonlyArray<RepositoryAgentSettings>
+    try {
+      settings = await client.getAgentSettings(projectId)
+    } catch (failure) {
+      setTrusting({ projectId, repositories: [], unreadable: messageOf(failure) })
+      return
+    }
+    const undecided = settings.filter((repository) => repository.files.some((file) => file.trusted === null))
+    if (undecided.length === 0) return onCreated(projectId)
+    cache.setQueryData(readKeys.agentSettings(projectId), settings)
+    setTrusting({ projectId, repositories: undecided })
+  }
   const { draft, setup } = model
   // What other tools left in the folders chosen, read before the project is made and brought in once it is.
   // Not on another computer's home, where other tools' work isn't read.
@@ -146,9 +163,13 @@ export function NewProjectView({
     return (
       <div className={s.window}>
         <TrustStep
+          key={trusting.unreadable === undefined ? 'read' : 'unreadable'}
           projectId={trusting.projectId}
           project={draft?.name ?? ''}
           repositories={trusting.repositories}
+          {...(trusting.unreadable === undefined
+            ? {}
+            : { unreadable: { error: trusting.unreadable, onRetry: () => void askTrust(trusting.projectId) } })}
           onDone={() => onCreated(trusting.projectId)}
         />
       </div>
@@ -258,13 +279,9 @@ export function NewProjectView({
             if (made === null) return
             // What was picked comes in behind the tab, which opens on the project at once: its board shows each as it comes.
             if (setup.way === 'folder') void elsewhere.bring(made.id)
-            // What its repositories' own agent settings run is asked first, where any runs something (DEV-280). Unread,
-            // nothing of them is trusted, and a task's line offers them later.
-            const settings = await client.getAgentSettings(made.id).catch((): ReadonlyArray<RepositoryAgentSettings> => [])
-            const undecided = settings.filter((repository) => repository.files.some((file) => file.trusted === null))
-            if (undecided.length === 0) return onCreated(made.id)
-            cache.setQueryData(readKeys.agentSettings(made.id), settings)
-            setTrusting({ projectId: made.id, repositories: undecided })
+            // What its repositories' own agent settings run is asked first, where any runs something (DEV-280): a clone is
+            // only there once made. Until answered, nothing of them is trusted, and a task's line offers them later.
+            await askTrust(made.id)
           })
         }
         onCancel={onClose}

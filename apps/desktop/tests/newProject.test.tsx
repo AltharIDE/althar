@@ -575,6 +575,57 @@ describe('a new project whose repository brings agent settings', () => {
     )
   })
 
+  it('opens the project only once the answer is saved, and asks again, saying why, where it wasn’t', async () => {
+    let fails = true
+    const { client, draft, onCreated } = opened(
+      {
+        getAgentSettings: vi.fn(async () => SETTINGS),
+        openProject: vi.fn(async () => ({ ...project, id: draft.id })),
+        decideAgentSettings: vi.fn(async () => {
+          if (fails) throw new Error('The runtime is busy.')
+        }),
+      },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    await userEvent.click(await screen.findByRole('button', { name: 'Run without them' }))
+    expect(await screen.findByText(/Althar's runtime didn't answer/)).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Run without them' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(draft.id))
+    expect(client.decideAgentSettings).toHaveBeenCalledTimes(2)
+  })
+
+  it('says where what they run couldn’t be read, rather than ask nothing, and asks once read', async () => {
+    let fails = true
+    const { draft, onCreated } = opened(
+      {
+        getAgentSettings: vi.fn(async () => {
+          if (fails) throw new Error('The runtime didn’t answer.')
+          return SETTINGS
+        }),
+        openProject: vi.fn(async () => ({ ...project, id: draft.id })),
+      },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    expect(await screen.findByText(/Althar's runtime didn't answer/)).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('./guard.sh')).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
   it('asks nothing of a repository without any', async () => {
     const { client, draft, onCreated } = opened(
       { openProject: vi.fn(async () => ({ ...project, id: draft.id })) },

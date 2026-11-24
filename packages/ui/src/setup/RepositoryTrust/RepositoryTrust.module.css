@@ -136,3 +136,15 @@
   font-weight: 600;
   color: var(--t-1);
 }
+
+/* adding a project: what its repositories run couldn't be read */
+.unreadable {
+  display: grid;
+  gap: 10px;
+}
+.unreadableLine {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}

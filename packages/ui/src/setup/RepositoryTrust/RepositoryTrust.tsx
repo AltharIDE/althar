@@ -50,6 +50,12 @@ export interface RepositoryTrustText {
   stepTitle: (project: string) => string
   /** The task's line once answered from it. */
   answered: { trusted: string; without: string }
+  /** In the project's settings: what was decided of versions its checkout here doesn't have, of a repository. */
+  elsewhere: (repository: string) => string
+  /** Adding a project, where what its repositories run couldn't be read. */
+  unreadable: string
+  tryAgain: string
+  openWithout: string
 }
 
 export const repositoryTrustText: RepositoryTrustText = {
@@ -68,6 +74,10 @@ export const repositoryTrustText: RepositoryTrustText = {
   reviewLine: 'Agents run these on this computer as they work.',
   stepTitle: (project) => `Before ${project}’s agents start`,
   answered: { trusted: 'Trusted: its next session starts with them.', without: 'Its leads start without them.' },
+  elsewhere: (repository) => `${repository}, as a task’s branch had them`,
+  unreadable: 'Althar couldn’t read what its repositories’ agent settings run. Until it can, its leads start without them.',
+  tryAgain: 'Try again',
+  openWithout: 'Open the project',
 }
 
 /** One thing a settings file runs: where in the file, when its agent runs it, and the command. */
@@ -300,9 +310,16 @@ export type RepositoryTrustStepProps = RootProps<
   'main',
   {
     project: string
-    /** Each repository whose settings run something not decided on yet, still to answer. */
-    repositories: ReadonlyArray<{ readonly id: string; readonly name: string; readonly files: ReadonlyArray<TrustFile> }>
+    /** Each repository whose settings run something not decided on yet, still to answer, with why its last answer didn't hold. */
+    repositories: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly files: ReadonlyArray<TrustFile>
+      readonly error?: string
+    }>
     onAnswer: (repositoryId: string, trusted: boolean) => void
+    /** What its repositories run couldn't be read: why, to try again or open the project as it is. */
+    unreadable?: { readonly error: string; readonly onRetry: () => void; readonly onOpen: () => void }
     text?: Partial<RepositoryTrustText>
   }
 >
@@ -311,11 +328,25 @@ export type RepositoryTrustStepProps = RootProps<
  * Adding a project, once it is made and before its tab opens on it: each repository whose own agent settings run
  * something, asked once. A repository with none isn't here, and a project with none never comes here.
  */
-export function RepositoryTrustStep({ project, repositories, onAnswer, text, className, ...rest }: RepositoryTrustStepProps) {
+export function RepositoryTrustStep({ project, repositories, onAnswer, unreadable, text, className, ...rest }: RepositoryTrustStepProps) {
   const t = { ...repositoryTrustText, ...text }
   return (
     <main className={cx(s.step, className)} {...rest}>
       <h1 className={s.stepTitle}>{t.stepTitle(project)}</h1>
+      {unreadable !== undefined && (
+        <div className={s.unreadable}>
+          <p className={s.unreadableLine}>{t.unreadable}</p>
+          <Problem size="small">{unreadable.error}</Problem>
+          <AskFoot>
+            <Button size="small" variant="quiet" onClick={unreadable.onOpen}>
+              {t.openWithout}
+            </Button>
+            <Button size="small" onClick={unreadable.onRetry}>
+              {t.tryAgain}
+            </Button>
+          </AskFoot>
+        </div>
+      )}
       {repositories.map((repository) => (
         <RepositoryTrustAsk
           key={repository.id}
@@ -323,6 +354,7 @@ export function RepositoryTrustStep({ project, repositories, onAnswer, text, cla
           files={repository.files}
           onTrust={() => onAnswer(repository.id, true)}
           onWithout={() => onAnswer(repository.id, false)}
+          {...(repository.error === undefined ? {} : { error: repository.error })}
           {...(text === undefined ? {} : { text })}
         />
       ))}

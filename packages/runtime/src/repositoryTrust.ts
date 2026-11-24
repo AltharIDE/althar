@@ -9,6 +9,8 @@ import {
   untrustedOf,
 } from '@althar/provider-adapters'
 import { Commands } from '@althar/persistence-sqlite'
+import { join } from 'node:path'
+
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -24,26 +26,49 @@ import { change, fact, timestamp } from './records'
  * (its `untrustedRepositories`), and says so.
  */
 
-/** What the person decided of a repository's settings files: each by its file, the hash decided on, and whether trusted. */
+/**
+ * What the person decided of a repository's settings files: each by its file, the hash decided on, whether trusted,
+ * and what it ran as they were shown it.
+ */
 interface Decision {
+  readonly agent: SettingsAgent
   readonly file: string
   readonly hash: string
   readonly trusted: boolean
+  readonly runs: ReadonlyArray<RepositoryRun>
+}
+
+const AGENTS: ReadonlyArray<string> = ['claude-code', 'codex', 'opencode']
+
+const runsOf = (text: string): ReadonlyArray<RepositoryRun> => {
+  try {
+    const runs: unknown = JSON.parse(text)
+    return Array.isArray(runs) ? (runs as ReadonlyArray<RepositoryRun>) : []
+  } catch {
+    return []
+  }
 }
 
 const decisionsOf = (bindingId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ file: string; hash: string; trusted: number }>`
-      SELECT file, hash, trusted FROM repository_trust WHERE binding_id = ${bindingId}`
-    return rows.map((row): Decision => ({ file: row.file, hash: row.hash, trusted: row.trusted === 1 }))
+    const rows = yield* sql<{ agent: string; file: string; hash: string; trusted: number; runs: string }>`
+      SELECT agent, file, hash, trusted, runs FROM repository_trust WHERE binding_id = ${bindingId} ORDER BY file`
+    return rows.flatMap((row): ReadonlyArray<Decision> =>
+      AGENTS.includes(row.agent)
+        ? [{ agent: row.agent as SettingsAgent, file: row.file, hash: row.hash, trusted: row.trusted === 1, runs: runsOf(row.runs) }]
+        : [],
+    )
   })
+
+/** A hash Althar gives a file it couldn't read: never trusted, so never kept as trusted. */
+const unreadHash = (hash: string) => hash.startsWith('unread:')
 
 const definitionOf = (agent: SettingsAgent): AgentDefinition => agents[agent]
 
 /** A file as the person is shown it: its runs, and what they decided of the hash it has now (null for one never decided on). */
 const shown = (file: RepositorySettingsFile, decisions: ReadonlyArray<Decision>): AgentSettingsFile => {
-  const decided = decisions.find((one) => one.file === file.file && one.hash === file.hash)
+  const decided = file.unread === undefined ? decisions.find((one) => one.file === file.file && one.hash === file.hash) : undefined
   return {
     agent: file.agent,
     agentName: definitionOf(file.agent).name,
@@ -53,12 +78,27 @@ const shown = (file: RepositorySettingsFile, decisions: ReadonlyArray<Decision>)
     trusted: decided?.trusted ?? null,
     changed: decided === undefined && decisions.some((one) => one.file === file.file && one.trusted),
     loadsAnyway: definitionOf(file.agent).untrustedRepositories !== undefined,
+    ...(file.unread === undefined ? {} : { unread: file.unread }),
   }
 }
 
+/** A decision on a version of a file its checkout here doesn't have, as the person was shown it then. */
+const shownElsewhere = (decision: Decision): AgentSettingsFile => ({
+  agent: decision.agent,
+  agentName: definitionOf(decision.agent).name,
+  file: decision.file,
+  hash: decision.hash,
+  runs: decision.runs,
+  trusted: decision.trusted,
+  changed: false,
+  loadsAnyway: definitionOf(decision.agent).untrustedRepositories !== undefined,
+})
+
 /**
- * A project's repositories' agent settings that run something, as each checkout on this computer has them, with what
- * the person decided of each; only the repositories that have any. Read off the thread.
+ * A project's repositories' agent settings that run something, as each checkout on this computer has them, from its root
+ * down to the project's folder in it, with what the person decided of each; and what they decided of versions the
+ * checkout doesn't have, such as a task branch's from its line, so those can be taken back too. Only the repositories
+ * with either. Read off the thread.
  */
 export const agentSettingsOf = (projectId: string) =>
   Effect.gen(function* () {
@@ -66,18 +106,23 @@ export const agentSettingsOf = (projectId: string) =>
     const instance = yield* Instance
     const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
     if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-    const repositories = yield* sql<{ id: string; name: string; path: string | null }>`
-      SELECT b.id, b.display_name AS name, l.path FROM repository_bindings b
+    const repositories = yield* sql<{ id: string; name: string; path: string | null; within: string | null }>`
+      SELECT b.id, b.display_name AS name, l.path, b.folder AS within FROM repository_bindings b
       LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
     const read = yield* Effect.forEach(repositories, (repository) =>
       Effect.gen(function* () {
-        if (repository.path === null) return null
-        const folder = repository.path
-        const files = yield* Effect.promise(() => readRepositorySettings(folder))
-        if (files.length === 0) return null
+        const root = repository.path
+        const files = root === null ? [] : yield* Effect.promise(() => readRepositorySettings(root, repository.within))
         const decisions = yield* decisionsOf(repository.id)
-        return { repositoryId: repository.id, name: repository.name, files: files.map((file) => shown(file, decisions)) }
+        const elsewhere = decisions.filter((one) => !files.some((file) => file.file === one.file && file.hash === one.hash))
+        if (files.length === 0 && elsewhere.length === 0) return null
+        return {
+          repositoryId: repository.id,
+          name: repository.name,
+          files: files.map((file) => shown(file, decisions)),
+          ...(elsewhere.length === 0 ? {} : { elsewhere: elsewhere.map(shownElsewhere) }),
+        }
       }),
     )
     const found: ReadonlyArray<RepositoryAgentSettings> = read.filter((one) => one !== null)
@@ -114,6 +159,8 @@ export const decideAgentSettings = (input: {
         input.files,
         (file) =>
           Effect.gen(function* () {
+            // One that couldn't be read is never trusted: what it runs wasn't seen.
+            if (unreadHash(file.hash)) return
             const decidedAt = yield* timestamp
             const said = {
               agent: file.agent,
@@ -153,47 +200,99 @@ export const decideAgentSettings = (input: {
     })
   })
 
-/** A repository a lead's session starts in: its binding, and its folder, the task's worktree of it. */
+/**
+ * A repository a lead's session starts in: its binding, its folder, the task's worktree of it, and the folder in it the
+ * session starts in, where a project is of a folder in it ('' for its root).
+ */
 export interface StartingIn {
   readonly bindingId: string
   readonly name: string
-  readonly folder: string
+  readonly root: string
+  readonly within: string
+}
+
+/** The folders, from the repository's root down to where its session starts, whose instructions a lead still reads. */
+export const foldersOf = (starting: StartingIn): ReadonlyArray<string> => {
+  const parts = starting.within.split(/[\\/]+/).filter((part) => part !== '' && part !== '.')
+  return [starting.root, ...parts.map((_, index) => join(starting.root, ...parts.slice(0, index + 1)))]
+}
+
+/** The line's offer: the files a lead started without, or loads untrusted, as its folder has them. */
+export interface SettingsOffer {
+  readonly kind: 'agent_settings'
+  readonly projectId: string
+  readonly repositoryId: string
+  readonly repository: string
+  readonly files: ReadonlyArray<AgentSettingsFile>
+}
+
+/** How a lead's session starts with its repository's agent settings, and the line its task gets, if any. */
+export interface SettingsHold {
+  readonly options: Pick<SessionOptions, 'withoutRepositorySettings'>
+  readonly offer: SettingsOffer | undefined
+  /** Why it can't start at all: where it runs, its agent can't start without what isn't trusted. */
+  readonly refused?: string
 }
 
 /**
- * How a lead's session starts with its repository's agent settings: without them, where its agent can start without
- * them and a file of its agent's that its worktree has isn't trusted; and the line its task gets, where one of them
- * isn't something the person already said no to (one never seen, or changed since). Codex, which loads them all the
- * same, gets the line too, so the person knows.
+ * How a lead's session starts without its repository's agent settings, where its agent can: on the home through its
+ * environment or its session's settings, on a worker only through its session's settings, since a worker starts it
+ * with none of Althar's environment. An agent that can do neither there doesn't start.
  */
-export const settingsHoldFor = (definition: AgentDefinition, projectId: string, starting: StartingIn) =>
+export const withoutSettings = (
+  definition: AgentDefinition,
+  starting: StartingIn,
+  onWorker: boolean,
+): Pick<SettingsHold, 'options' | 'refused'> =>
+  definition.untrustedRepositories !== undefined
+    ? { options: {} }
+    : onWorker && definition.withoutRepositoryOnWorker !== true
+      ? {
+          options: {},
+          refused: `${definition.name} can’t start on a worker without ${starting.name}’s agent settings, which aren’t trusted. Trust them in the project’s settings, under Rules, or run it on this computer.`,
+        }
+      : { options: { withoutRepositorySettings: { folders: foldersOf(starting) } } }
+
+/**
+ * How a lead's session starts with its repository's agent settings: without them, where its agent can start without
+ * them and a file of its agent's that its worktree has, from its root to where it starts, isn't trusted or couldn't
+ * be read; and the line its task gets, where one of them isn't something the person already said no to (one never
+ * seen, or changed since). Codex, which loads them all the same, gets the line too, so the person knows. On a worker,
+ * its checkout is the worktree here as it was sent, so this reads that.
+ */
+export const settingsHoldFor = (definition: AgentDefinition, projectId: string, starting: StartingIn, onWorker = false) =>
   Effect.gen(function* () {
     const agent = definition.id as SettingsAgent
-    if (!(['claude-code', 'codex', 'opencode'] as ReadonlyArray<string>).includes(agent)) return { options: {}, offer: undefined }
-    const files = (yield* Effect.promise(() => readRepositorySettings(starting.folder))).filter((file) => file.agent === agent)
+    const none: SettingsHold = { options: {}, offer: undefined }
+    if (!AGENTS.includes(agent)) return none
+    const files = (yield* Effect.promise(() => readRepositorySettings(starting.root, starting.within))).filter(
+      (file) => file.agent === agent,
+    )
     const decisions = yield* decisionsOf(starting.bindingId)
     const untrusted = untrustedOf(
       files,
       decisions.filter((one) => one.trusted),
     )
-    if (untrusted.length === 0) return { options: {}, offer: undefined }
-    const options: Pick<SessionOptions, 'withoutRepositorySettings'> =
-      definition.untrustedRepositories === undefined ? { withoutRepositorySettings: { folder: starting.folder } } : {}
+    if (untrusted.length === 0) return none
+    const without = withoutSettings(definition, starting, onWorker)
     // What the person already said no to, as it stands, is no news: the lead starts without it quietly.
-    const news = untrusted.filter((file) => !decisions.some((one) => !one.trusted && one.file === file.file && one.hash === file.hash))
-    return {
-      options,
+    const news = untrusted.filter(
+      (file) => file.unread !== undefined || !decisions.some((one) => !one.trusted && one.file === file.file && one.hash === file.hash),
+    )
+    const hold: SettingsHold = {
+      ...without,
       offer:
-        news.length === 0
+        news.length === 0 || without.refused !== undefined
           ? undefined
           : {
-              kind: 'agent_settings' as const,
+              kind: 'agent_settings',
               projectId,
               repositoryId: starting.bindingId,
               repository: starting.name,
               files: news.map((file) => shown(file, decisions)),
             },
     }
+    return hold
   })
 
 /** The line a task's thread gets for `offer`: what its lead started without, or, for Codex, what it loads all the same. */

@@ -20,7 +20,15 @@ export interface AgentSettingsModel {
   readonly repositories: ReadonlyArray<RepositoryAgentSettings> | null
   /** Those with a file not decided on as it is now: what adding a project asks. */
   readonly undecided: ReadonlyArray<RepositoryAgentSettings>
-  readonly decide: (repository: RepositoryAgentSettings, trusted: boolean) => Promise<void>
+  /**
+   * The person's word on `files` of a repository's (all it has here, unless said): shown at once; answers why where it
+   * didn't hold, and nothing where it did.
+   */
+  readonly decide: (
+    repository: RepositoryAgentSettings,
+    trusted: boolean,
+    files?: RepositoryAgentSettings['files'],
+  ) => Promise<string | undefined>
   /** Why the last word on a repository's didn't hold, by its id. */
   readonly failed: { readonly repositoryId: string; readonly said: string } | null
 }
@@ -34,13 +42,13 @@ export const trustFileOf = (file: AgentSettingsFile): TrustFile => ({
   ...(file.loadsAnyway ? { loadsAnyway: true } : {}),
 })
 
-/** What was decided of a repository's settings as they are now, all its files taken together. */
-export const decidedOf = (repository: RepositoryAgentSettings): TrustDecided =>
-  repository.files.every((file) => file.trusted === true)
+/** What was decided of a repository's settings files, all taken together. */
+export const decidedOf = (files: RepositoryAgentSettings['files']): TrustDecided =>
+  files.every((file) => file.trusted === true)
     ? 'trusted'
-    : repository.files.some((file) => file.trusted === null && file.changed)
+    : files.some((file) => file.trusted === null && file.changed)
       ? 'changed'
-      : repository.files.some((file) => file.trusted === null)
+      : files.some((file) => file.trusted === null)
         ? 'undecided'
         : 'declined'
 
@@ -50,23 +58,30 @@ export const useAgentSettings = (projectId: string | null): AgentSettingsModel =
   const repositories = useQuery({ ...read.agentSettings(projectId ?? ''), enabled: projectId !== null }).data ?? null
   const [failed, setFailed] = useState<AgentSettingsModel['failed']>(null)
   const decide = useCallback(
-    async (repository: RepositoryAgentSettings, trusted: boolean) => {
-      if (projectId === null) return
+    async (repository: RepositoryAgentSettings, trusted: boolean, files: RepositoryAgentSettings['files'] = repository.files) => {
+      if (projectId === null) return undefined
       const key = keys.agentSettings(projectId)
+      const deciding = (file: AgentSettingsFile) => files.some((one) => one.file === file.file && one.hash === file.hash)
+      // One that couldn't be read is never trusted, so shows as it was.
+      const decided = (file: AgentSettingsFile) =>
+        deciding(file) && file.unread === undefined ? { ...file, trusted, changed: false } : file
       setFailed(null)
       cache.setQueryData<ReadonlyArray<RepositoryAgentSettings>>(key, (was) =>
         was?.map((one) =>
           one.repositoryId === repository.repositoryId
-            ? { ...one, files: one.files.map((file) => ({ ...file, trusted, changed: false })) }
+            ? { ...one, files: one.files.map(decided), ...(one.elsewhere === undefined ? {} : { elsewhere: one.elsewhere.map(decided) }) }
             : one,
         ),
       )
+      let said: string | undefined
       try {
-        await client.decideAgentSettings({ projectId, repositoryId: repository.repositoryId, trusted, files: repository.files })
+        await client.decideAgentSettings({ projectId, repositoryId: repository.repositoryId, trusted, files })
       } catch (failure) {
-        setFailed({ repositoryId: repository.repositoryId, said: messageOf(failure) })
+        said = messageOf(failure)
+        setFailed({ repositoryId: repository.repositoryId, said })
       }
       await cache.invalidateQueries({ queryKey: key, exact: true })
+      return said
     },
     [cache, client, projectId],
   )
