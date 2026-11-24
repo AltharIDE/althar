@@ -49,7 +49,7 @@ export type AccountSignInStep =
   | { kind: 'named'; name: string; who?: string; paid?: string; placed?: string; saving?: boolean }
   /** Signed in as an account already there, by its name: nothing was added. */
   | { kind: 'same'; name: string }
-  /** The agent stopped, in its own words. */
+  /** Why it stopped, in one short line. */
   | { kind: 'failed'; said: string }
 
 /** The ways an agent offers in. Each shows only when given. */
@@ -122,7 +122,6 @@ export interface AccountSignInText {
   done: string
   same: (name: string) => string
   sameHow: string
-  stopped: (agent: string) => string
   tryAgain: string
 }
 
@@ -176,7 +175,6 @@ export const accountSignInText: AccountSignInText = {
   done: 'Done',
   same: (name) => `That’s ${name} again`,
   sameHow: 'Use another browser profile, or a code.',
-  stopped: (agent) => `${agent} stopped:`,
   tryAgain: 'Try again',
 }
 
@@ -492,9 +490,7 @@ function Under({
     case 'failed':
       return (
         <div className={s.under}>
-          <Problem action={onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}>
-            {t.stopped(agent)} <span className={s.said}>{step.said}</span>
-          </Problem>
+          <Problem action={onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}>{step.said}</Problem>
         </div>
       )
     default:

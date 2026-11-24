@@ -185,6 +185,11 @@ export class PlanUsage extends Context.Service<
      * read this run (none before it is); and why
      * a plan has no reading, where it reports none.
      */
+    /**
+     * Whether the account's usage was last read as needing its sign-in again (refused, or its sign-in expired), without asking
+     * again: an agent's own status may still say it is signed in where its token has expired (Codex's `login status`).
+     */
+    readonly signInFault: (accountId: string) => Effect.Effect<boolean>
     readonly paidBy: (accountId: string) => Effect.Effect<
       {
         readonly paidBy: 'plan' | 'key'
@@ -775,6 +780,14 @@ export class PlanUsage extends Context.Service<
                 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
               yield* told
             }),
+          signInFault: (accountId) =>
+            Effect.map(
+              Effect.orElseSucceed(hydrate, () => undefined),
+              () => {
+                const kind = held.get(accountId)?.fault?.kind
+                return kind === 'sign_in_again' || kind === 'expired'
+              },
+            ),
           paidBy: (accountId) =>
             Effect.map(hydrate, () => {
               const one = held.get(accountId)

@@ -82,13 +82,13 @@ ipcRenderer.on('althar:chrome', (_event, next: unknown) => {
   for (const listener of chromes) listener(next)
 })
 
-/* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
-let pending: string | undefined
-const opening = new Set<(threadId: string) => void>()
-ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
+/* A thread to open, because the person clicked its notification or because it raised a prompt itself (`asked`): held until the page listens, as a window that just opened doesn't yet. */
+let pending: { threadId: string; asked: boolean } | undefined
+const opening = new Set<(threadId: string, asked: boolean) => void>()
+ipcRenderer.on('althar:open', (_event, threadId: unknown, asked: unknown) => {
   if (typeof threadId !== 'string') return
-  if (opening.size === 0) pending = threadId
-  for (const listener of opening) listener(threadId)
+  if (opening.size === 0) pending = { threadId, asked: asked === true }
+  for (const listener of opening) listener(threadId, asked === true)
 })
 
 /* A store the runtime can't serve (an update that couldn't move it, a profile in use), as the main process says: held for a page that listens later. */
@@ -460,10 +460,10 @@ contextBridge.exposeInMainWorld('althar', {
     ipcRenderer.send('althar:window-error', error),
   // What made the page slow, for main's log: its long frames and slow presses, by what they were on, never what it shows.
   logFrames: (frames: unknown): void => ipcRenderer.send('althar:window-frames', frames),
-  onOpen: (listener: (threadId: string) => void): (() => void) => {
+  onOpen: (listener: (threadId: string, asked: boolean) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {
-      listener(pending)
+      listener(pending.threadId, pending.asked)
       pending = undefined
     }
     return () => void opening.delete(listener)

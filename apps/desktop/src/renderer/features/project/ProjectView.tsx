@@ -119,6 +119,7 @@ import {
   useAsides,
   withOpenAside,
 } from './Asides'
+import { showingAside } from './asked'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -613,6 +614,9 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // Its prompts (a computer-use permission) show here while the conversation does, so the window need not go to the thread.
+  const asideThread = aside.kind === 'coordinator' ? null : aside.threadId
+  useEffect(() => (asideThread !== null && talkShown ? showingAside(asideThread) : undefined), [asideThread, talkShown])
   // Words put in the coordinator's composer from elsewhere (Run's Ask): its own conversation shows, over any aside.
   useCoordinatorWanted(about, () => {
     asides.back()
@@ -1095,6 +1099,7 @@ export function ProjectView({
             projectId={projectId}
             header={header}
             threadId={coordinator?.threadId ?? null}
+            agents={model.agents}
             // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
             lead={
               chosen === null

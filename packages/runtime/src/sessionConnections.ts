@@ -8,6 +8,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import {
   AgentRequestFailed,
   AgentStartFailed,
+  OptionUnavailable,
   type Question,
   type SessionEvent,
   type SessionOptions,
@@ -67,7 +68,7 @@ import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
-import { folderGoneWords, summarize } from './words'
+import { folderGoneWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
   readonly accounts: Accounts['Service']
@@ -103,6 +104,8 @@ export interface SessionConnectionsDependencies {
   readonly sessionsScope: Scope.Closeable
   readonly sessionsSql: SqlClient.SqlClient
   readonly setups: Setups['Service']
+  /** Whether the account's usage was last read as needing its sign-in again (PlanUsage). */
+  readonly signInFault: (accountId: string) => Effect.Effect<boolean>
   readonly skillsConfig: RuntimeOptions['skills']
   readonly stopGrace: Duration.Duration
   readonly stopTrees: (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) => Effect.Effect<void>
@@ -134,6 +137,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     sessionsScope,
     sessionsSql,
     setups,
+    signInFault,
     skillsConfig,
     stopGrace,
     stopTrees,
@@ -142,6 +146,18 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     treeOfLeft,
     wakeFor,
   } = dependencies
+
+  /**
+   * Whether a start failed because the agent doesn't offer the step's model while its account's usage reads as needing its
+   * sign-in again: a signed-out Codex lists fewer models, and its `login status` may still say it is signed in, so the model
+   * missing is how its ended sign-in shows. Said as the sign-in, whose call offers signing in again, not as the model.
+   */
+  const signedOutRefusal = (cause: Cause.Cause<unknown>, definition: AgentEntry['definition'], account: Account) => {
+    const error = Cause.findErrorOption(cause)
+    return Option.isSome(error) && error.value instanceof OptionUnavailable && error.value.configId === definition.options.model
+      ? signInFault(account.id)
+      : Effect.succeed(false)
+  }
 
   /**
    * Ends a session: closes it and its process, and records how both ended.
@@ -759,7 +775,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         // A folder gone from under it fails its start as a missing command would (ENOENT): said as the folder, never
         // that an agent that is there isn't installed.
         const folder = cwdOf(thread)
-        const summary = existsSync(folder) ? summarize(started.cause) : folderGoneWords(folder)
+        const summary = existsSync(folder)
+          ? (yield* signedOutRefusal(started.cause, entry.definition, account))
+            ? signInEndedWords
+            : summarize(started.cause)
+          : folderGoneWords(folder)
         yield* sql.withTransaction(
           Effect.gen(function* () {
             if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })

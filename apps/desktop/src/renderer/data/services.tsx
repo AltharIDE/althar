@@ -270,8 +270,11 @@ export interface Host {
   readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
-  /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
-  readonly onOpen: (listener: (threadId: string) => void) => () => void
+  /**
+   * Calls `listener` with the thread a notification the person clicked is about, until the returned function is called; `asked`
+   * where the thread raised a prompt itself, rather than the person clicking.
+   */
+  readonly onOpen: (listener: (threadId: string, asked: boolean) => void) => () => void
   /**
    * Where Althar shows while the person is in another app (`shared/edge`): the place chosen, whether a screen has a notch to
    * choose the island by, the system, and whether it has a tray to put the mark in; null before the main process knows.
