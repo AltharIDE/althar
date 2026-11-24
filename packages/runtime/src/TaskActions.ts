@@ -1883,6 +1883,16 @@ export class TaskActions extends Context.Service<
             : `${task.slug} is first in line now: it goes on when the next agent's place frees.`
         })
 
+      const startAnyway = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(Named, input)
+          const task = yield* named(access, asked.task)
+          if (!(yield* busy.startNow(task.id)))
+            return `Nothing changed: nothing of ${task.slug} waits for a place among the agents at work.`
+          yield* did(access, input, task, `Started “${task.title}” anyway`, 'started this task anyway, whatever places are free')
+          return `${task.slug} starts now, as the person's own start does, whatever places are free.`
+        })
+
       const stopFollowing = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(Following, input)
@@ -2270,6 +2280,12 @@ export class TaskActions extends Context.Service<
           'Moves a task that waits for a place among the agents at work to the front of the line, as its card’s Move to front does: it starts when the next place frees.',
           { type: 'object', properties: { task: optionalTask, why } },
           moveToFront,
+        ),
+        tool(
+          'start_anyway',
+          'Starts a task that waits for a place among the agents at work now, whatever places are free, as its card’s Start anyway does on a task held back while this computer’s memory or CPU lets fewer agents work than the number: as the person’s own start, which never waits.',
+          { type: 'object', properties: { task: optionalTask, why } },
+          startAnyway,
         ),
         tool(
           'stop_following',

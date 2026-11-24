@@ -15,7 +15,8 @@ import { productBrand } from '../../shared/products'
 import { remoteOf } from '../../shared/remotes'
 import { hostsCode, serviceOfProduct } from '../connections/ways'
 import { type Draft, draftsOf } from '../newProject/draft'
-import { updateOf, useHomeState } from '../homes/useHomes'
+import { useHomeState, useHomeUpdating } from '../homes/useHomes'
+import { useSettingsWays } from '../settings/open'
 
 /*
  * A home with no projects, on another computer: what its welcome reads from
@@ -105,6 +106,9 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
   const found = useFound(makes)
   const { repositories } = useHostRepositories(list, '')
   const [toured] = useState(touredHere)
+  // Updated from here, the window reconnects onto the ways in: the tour is for another visit.
+  const updating = useHomeUpdating(!makes, markTouredHere)
+  const settings = useSettingsWays()
   const home = here !== null && here.current.kind !== 'local' ? here.current.home : null
 
   /** The New project tab, its draft on the way chosen. */
@@ -125,7 +129,14 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
     needs: needsOf(status, machine, list),
     repositories: (repositories ?? []).slice(0, 5).map((one) => ({ id: one.id, ink: kitInk(inkFor(one.id, [])) })),
     found: found.isError ? 'failed' : (found.data?.repositories.map((one) => one.where) ?? null),
-    ...(makes ? {} : { update: updateOf(here?.current) }),
+    ...(makes
+      ? {}
+      : {
+          update: updating.offer,
+          ...(updating.onUpdate === undefined ? {} : { onUpdate: updating.onUpdate }),
+          onCheckAgain: updating.onCheckAgain,
+        }),
+    onSignIn: (agentId) => settings.signIn(agentId),
     onDoor: (door) => enter((now) => ({ ...now, way: way[door] })),
     onPaste: (text) => {
       const ref = pastedRepository(text)

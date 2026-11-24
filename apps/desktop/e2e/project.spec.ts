@@ -199,7 +199,8 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Scratch/ })).toHaveCount(0)
-    await expect(tabs.getByRole('listitem')).toHaveCount(3)
+    // Home's, Althar's own, and the projects': meridian and Northwind.
+    await expect(tabs.getByRole('listitem')).toHaveCount(4)
   } finally {
     await electronApp.close()
   }

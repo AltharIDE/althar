@@ -149,18 +149,16 @@ describe('ModelBrowser', () => {
     })
 
     it('has no "no reading", "in use", "not used" or "signed in" beside a name; the model in use is marked by the row', () => {
-      const { dialog, rows } = open({ blocked: ['kimi-k2'], room: () => null })
+      const { dialog, rows } = open({ blocked: ['kimi-k2'] })
       expect(dialog).not.toHaveTextContent(/no reading|in use|not used|signed in/)
       expect(within(dialog).getByRole('button', { name: 'Use Claude Opus 5, in use' })).toHaveAttribute('aria-current', 'true')
       expect(rows().filter((r) => r.querySelector('[aria-current]'))).toHaveLength(1)
     })
 
-    it('keeps account usage out of the model browser even when an older caller supplies it', () => {
+    it('says where an agent is signed out, and no account usage', () => {
       const runtimes = RUNTIMES.map((r) => (r.id === 'codex' ? { ...r, how: 'signed out' } : r))
-      const room = (m: { id: string }) => (m.id === 'claude-opus-5' ? { left: 19, until: null, account: null } : null)
-      const { dialog } = open({ runtimes, room })
+      const { dialog } = open({ runtimes })
       expect(within(dialog).queryByText('Usage')).toBeNull()
-      expect(within(dialog).queryByText('19%')).toBeNull()
       expect(within(dialog).getAllByText('signed out').length).toBeGreaterThan(0)
     })
 

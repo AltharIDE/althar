@@ -28,6 +28,16 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import {
+  asideCommandOf,
+  commandsOf,
+  commandText,
+  compactCommandOf,
+  coordinatorGoalOf,
+  interruptCommandOf,
+  modelCommandOf,
+  pressOf,
+} from '../../shared/composerCommands'
 import { useModels } from '../../data/models'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -109,6 +119,7 @@ import {
   useAsides,
   withOpenAside,
 } from './Asides'
+import { showingAside } from './asked'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -118,6 +129,8 @@ import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { setLoadPeek } from '../../shared/loadPeek'
+import { usePreferences } from '../../shared/usePreferences'
 
 /*
  * A project: its header across the top, the bar a task has, then its home:
@@ -340,6 +353,8 @@ export function ProjectView({
   ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
+  // Whether the bar shows this computer's load: Up next's line over what is held back opens it there.
+  const { preferences } = usePreferences()
   // The home as it was last laid out, for coming back to it from another view.
   const [home, setHome] = useState<HomeRoom>(asked !== undefined && isHome(asked) ? asked : Room.Both)
   if (isHome(room) && room !== home) setHome(room)
@@ -603,6 +618,9 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // Its prompts (a computer-use permission) show here while the conversation does, so the window need not go to the thread.
+  const asideThread = aside.kind === 'coordinator' ? null : aside.threadId
+  useEffect(() => (asideThread !== null && talkShown ? showingAside(asideThread) : undefined), [asideThread, talkShown])
   // Words put in the coordinator's composer from elsewhere (Run's Ask): its own conversation shows, over any aside.
   useCoordinatorWanted(about, () => {
     asides.back()
@@ -701,6 +719,22 @@ export function ProjectView({
       },
     )
   }
+  /*
+   * /aside with words from the coordinator's composer: a new aside opens, and the words are its first, as + and then typing
+   * them would do; they wait here until it is open.
+   */
+  const asideFirst = useRef<string | null>(null)
+  const startAsideFrom = (words: string) => {
+    asideFirst.current = words
+    asides.begin(null)
+  }
+  const opened = talkingTo.kind
+  useEffect(() => {
+    const words = asideFirst.current
+    if (opened !== 'new' || words === null) return
+    asideFirst.current = null
+    startAside(words)
+  })
   const send = (body: string, now: boolean) => {
     // Asking to clear the chat is not said to the coordinator.
     if (clearing.command(body)) {
@@ -814,10 +848,26 @@ export function ProjectView({
       </>
     ) : null
 
+  // What a slash in the coordinator's composer offers; a new aside's is only its first words. A goal is said to it, for a task.
+  const commands =
+    talkingTo.kind === 'new'
+      ? []
+      : commandsOf(
+          asideCommandOf((words) => startAsideFrom(words)),
+          coordinatorGoalOf((body) => send(body, false)),
+          model.agents.length > 0 &&
+            picking !== null &&
+            modelCommandOf(models, text.coordinator.toLowerCase(), model.agents, picking, choose),
+          compactCommandOf(session, () => void model.compact()),
+          interruptCommandOf(busy, text.coordinator.toLowerCase(), () => void model.interrupt()),
+          clearing.ask !== null && pressOf('clear', commandText.clear.does, 'remove', clearing.ask),
+        )
+
   const composer = (
     <div className={s.composer}>
       <DraftComposer
         draft={draftOf}
+        commands={commands}
         {...(helpMe.suggestion === undefined ? {} : { suggestion: helpMe.suggestion })}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
@@ -1053,6 +1103,7 @@ export function ProjectView({
             projectId={projectId}
             header={header}
             threadId={coordinator?.threadId ?? null}
+            agents={model.agents}
             // An artifact's chat started there is answered as a new aside would be: by the coordinator's composer's pick.
             lead={
               chosen === null
@@ -1277,6 +1328,8 @@ export function ProjectView({
                             change: setTeamFor,
                           }}
                           {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+                          // Where the bar shows this computer's load, Up next's line over what is held back opens it there.
+                          {...(preferences.showLoad ? { onPlaces: () => setLoadPeek(true) } : {})}
                         />
                       )}
                     </Now>

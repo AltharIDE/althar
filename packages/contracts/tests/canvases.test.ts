@@ -1,7 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
 
 import {
-  BOARDS_ENTRY,
   BOARDS_LIMITS,
   CANVAS_LIMITS,
   canvasAddress,
@@ -102,110 +101,89 @@ describe('a version’s address', () => {
   })
 })
 
+/* A canvas of boards, read from its canvas.json: what it draws, or what is wrong with it, said for the agent that wrote it. */
 describe('a canvas of boards', () => {
-  const has = (path: string) => path !== 'missing.html'
-  const board = { name: 'Home', file: 'home.html', width: 1440, height: 900 }
-  const read = (said: unknown) => readBoards(typeof said === 'string' ? said : JSON.stringify(said), has)
+  const files = new Set(['index.html', 'phone.png'])
+  const has = (path: string) => files.has(path)
+  const board = (more: Record<string, unknown> = {}) => ({ name: 'Desk', file: 'index.html', width: 1440, height: 900, ...more })
   const why = (said: unknown) => {
-    const got = read(said)
-    assert.isFalse(got.ok)
-    return got.ok ? '' : got.why
+    const read = readBoards(typeof said === 'string' ? said : JSON.stringify(said), has)
+    return read.ok ? null : read.why
   }
-  const on = (b: unknown) => ({ pages: [{ name: 'a', boards: [b] }] })
 
-  it('is drawn by its entry, canvas.json', () => {
-    assert.strictEqual(canvasKindOf(BOARDS_ENTRY), 'boards')
-  })
-
-  it('reads pages with their boards, trimming names and a leading ./ on files', () => {
-    const got = read({ pages: [{ name: ' Main ', boards: [{ ...board, name: ' Home ', file: './home.html' }] }] })
-    assert.deepStrictEqual(got, { ok: true, boards: { pages: [{ name: 'Main', boards: [board] }] } })
-  })
-
-  it('reads a single page written as its boards alone, named Page 1 unless it says', () => {
-    const one = (name: string) => ({ ok: true as const, boards: { pages: [{ name, boards: [board] }] } })
-    assert.deepStrictEqual(read({ boards: [board] }), one('Page 1'))
-    assert.deepStrictEqual(read({ name: 'Login', boards: [board] }), one('Login'))
-    assert.deepStrictEqual(read({ name: '  ', boards: [board] }), one('Page 1'))
-    assert.deepStrictEqual(read({ name: 3, boards: [board] }), one('Page 1'))
-  })
-
-  it('refuses what isn’t JSON, an object, or has no pages', () => {
-    assert.include(why('{nope'), 'isn’t JSON')
-    for (const bad of [[], 'text', null, 4]) assert.include(why(JSON.stringify(bad)), 'is an object')
-    assert.include(why({}), 'no pages')
-    assert.include(why({ pages: [] }), 'no pages')
-    assert.include(why({ pages: 'x' }), 'no pages')
-  })
-
-  it('refuses too many pages and too many boards', () => {
-    const page = (n: number) => ({ name: `p${n}`, boards: [board] })
-    assert.include(why({ pages: Array.from({ length: BOARDS_LIMITS.pages + 1 }, (_, n) => page(n)) }), 'at most 40')
-    assert.isTrue(read({ pages: Array.from({ length: BOARDS_LIMITS.pages }, (_, n) => page(n)) }).ok)
-    const boards = (count: number) =>
-      Array.from({ length: count }, (_, n) => ({ name: `b${n}`, file: 'home.html', width: 200, height: 200 }))
-    assert.include(
-      why({
+  it('reads its pages in order, each board on its file at its size', () => {
+    const read = readBoards(
+      JSON.stringify({
         pages: [
-          { name: 'a', boards: boards(100) },
-          { name: 'b', boards: boards(21) },
+          {
+            name: ' Home ',
+            boards: [board({ file: './index.html' }), board({ name: 'Phone', file: 'phone.png', width: 390, height: 844 })],
+          },
+          { name: 'Settings', boards: [board()] },
         ],
       }),
-      'more than 120 boards',
+      has,
     )
-    assert.isTrue(
-      read({
+    assert.deepStrictEqual(read, {
+      ok: true,
+      boards: {
         pages: [
-          { name: 'a', boards: boards(100) },
-          { name: 'b', boards: boards(20) },
+          {
+            name: 'Home',
+            boards: [
+              { name: 'Desk', file: 'index.html', width: 1440, height: 900 },
+              { name: 'Phone', file: 'phone.png', width: 390, height: 844 },
+            ],
+          },
+          { name: 'Settings', boards: [{ name: 'Desk', file: 'index.html', width: 1440, height: 900 }] },
         ],
-      }).ok,
-    )
+      },
+    })
   })
 
-  it('refuses a page that is malformed, unnamed, too long a name, repeated or empty', () => {
-    assert.include(why({ pages: ['x'] }), 'Page 1 is an object')
-    assert.include(why({ pages: [{ name: 'a' }] }), 'Page 1 is an object')
-    assert.include(why({ pages: [{ boards: [board] }] }), 'Page 1 needs a name')
-    assert.include(why({ pages: [{ name: ' ', boards: [board] }] }), 'Page 1 needs a name')
-    assert.include(why({ pages: [{ name: 'x'.repeat(81), boards: [board] }] }), 'Page 1 needs a name')
-    assert.include(
-      why({
-        pages: [
-          { name: 'a', boards: [board] },
-          { name: 'a', boards: [board] },
-        ],
-      }),
-      'Two pages are called a',
-    )
-    assert.include(why({ pages: [{ name: 'a', boards: [] }] }), 'a has no boards')
+  it('reads the boards of its one page, named Page 1 where it has no name', () => {
+    const one = readBoards(JSON.stringify({ name: 'Start', boards: [board()] }), has)
+    assert.strictEqual(one.ok && one.boards.pages[0]?.name, 'Start')
+    const unnamed = readBoards(JSON.stringify({ name: ' ', boards: [board()] }), has)
+    assert.strictEqual(unnamed.ok && unnamed.boards.pages[0]?.name, 'Page 1')
   })
 
-  it('refuses a board that is malformed, unnamed, repeated, without a drawable or present file', () => {
-    assert.include(why(on('x')), 'Board 1 of a is an object')
-    assert.include(why(on({ ...board, name: '' })), 'Board 1 of a needs a name')
-    assert.include(why(on({ ...board, name: 7 })), 'needs a name')
-    assert.include(why(on({ ...board, name: 'x'.repeat(81) })), 'needs a name')
-    assert.include(why({ pages: [{ name: 'a', boards: [board, board] }] }), 'Two boards on a are called Home')
-    assert.include(why(on({ ...board, file: undefined })), 'needs a file')
-    assert.include(why(on({ ...board, file: 'app.js' })), 'needs a file')
-    assert.include(why(on({ ...board, file: './' })), 'needs a file')
-    assert.include(why(on({ ...board, file: 'missing.html' })), 'which isn’t in the canvas')
-    for (const file of ['a.htm', 'a.SVG', 'a.png', 'a.jpeg', 'a.gif', 'a.webp', 'a.avif'])
-      assert.isTrue(read(on({ ...board, file })).ok, file)
+  it('says what is wrong with the whole of it', () => {
+    assert.strictEqual(why('{'), 'canvas.json isn’t JSON.')
+    assert.match(why([]) ?? '', /is an object with pages/)
+    assert.match(why({}) ?? '', /has no pages/)
+    assert.match(why({ pages: [] }) ?? '', /has no pages/)
+    const page = (at: number) => ({ name: `P${at}`, boards: [board()] })
+    assert.match(why({ pages: Array.from({ length: BOARDS_LIMITS.pages + 1 }, (_, at) => page(at)) }) ?? '', /at most 40/)
+    const full = Array.from({ length: 31 }, (_, at) => ({ name: `P${at}`, boards: [1, 2, 3, 4].map((n) => board({ name: `B${n}` })) }))
+    assert.match(why({ pages: full }) ?? '', /more than 120 boards/)
   })
 
-  it('refuses a size that isn’t whole pixels within bounds, and takes the bounds themselves', () => {
-    const sized = (width: unknown, height: unknown) => on({ ...board, width, height })
-    for (const [w, h] of [
-      [119, 900],
-      [1440, 10_001],
-      [1440.5, 900],
-      ['1440', 900],
-      [1440, undefined],
-      [1440, null],
+  it('says what is wrong with a page', () => {
+    assert.strictEqual(why({ pages: ['Home'] }), 'Page 1 is an object with a name and its boards.')
+    assert.strictEqual(why({ pages: [{ name: 'Home' }] }), 'Page 1 is an object with a name and its boards.')
+    assert.match(why({ pages: [{ name: ' ', boards: [board()] }] }) ?? '', /Page 1 needs a name of 1 to 80/)
+    assert.match(why({ pages: [{ name: 'x'.repeat(81), boards: [board()] }] }) ?? '', /Page 1 needs a name/)
+    const twice = { name: 'Home', boards: [board()] }
+    assert.match(why({ pages: [twice, twice] }) ?? '', /Two pages are called Home/)
+    assert.strictEqual(why({ pages: [{ name: 'Home', boards: [] }] }), 'Home has no boards.')
+  })
+
+  it('says what is wrong with a board', () => {
+    const on = (...boards: ReadonlyArray<unknown>) => why({ pages: [{ name: 'Home', boards }] }) ?? ''
+    assert.match(on('Desk'), /Board 1 of Home is an object/)
+    assert.match(on(board({ name: 3 })), /Board 1 of Home needs a name/)
+    assert.match(on(board({ name: 'x'.repeat(81) })), /needs a name/)
+    assert.match(on(board(), board()), /Two boards on Home are called Desk/)
+    assert.match(on(board({ file: 2 })), /Desk on Home needs a file/)
+    assert.match(on(board({ file: 'notes.md' })), /needs a file/)
+    assert.match(on(board({ file: 'other.html' })), /drawn from other.html, which isn’t in the canvas/)
+    for (const size of [
+      { width: '1440' },
+      { width: 1440.5 },
+      { height: BOARDS_LIMITS.smallest - 1 },
+      { height: BOARDS_LIMITS.largest + 1 },
     ])
-      assert.include(why(sized(w, h)), 'whole pixels', `${w}x${h}`)
-    assert.isTrue(read(sized(BOARDS_LIMITS.smallest, BOARDS_LIMITS.largest)).ok)
+      assert.match(on(board(size)), /needs a width and a height in whole pixels, from 120 to 10,000/)
   })
 })

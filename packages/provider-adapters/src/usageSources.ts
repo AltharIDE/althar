@@ -576,7 +576,7 @@ export const openCodeCannotList = (name: string, major: number | undefined): str
 export type CredentialsRead =
   | { readonly kind: 'credentials'; readonly credentials: ReadonlyArray<OpenCodeCredential> }
   /** It could not be listed, or the listing is not the shape known (OpenCode 1.x prints a count only): a fault, never "no sign-ins". */
-  | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'failed'; readonly message: string; readonly detail?: string }
 
 /**
  * Runs the agent's own listing of sign-ins in an account's home and reads it.
@@ -598,11 +598,12 @@ export const readOpenCodeCredentials = (
       execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
         if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
         if (error !== null) {
-          // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
+          // Its own last words go to the log (`detail`), not on screen: a missing command, an unknown flag, a timeout.
           const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
           return resolve({
             kind: 'failed',
-            message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+            message: `${agent.name} would not list its sign-ins.`,
+            ...(why === '' ? {} : { detail: why }),
           })
         }
         const found = openCodeCredentials(stdout)
@@ -668,7 +669,7 @@ export const openCodeGoUsage = (output: string, now: Date): UsageRead => {
 
 /**
  * Asks OpenCode's own server for an account's OpenCode Go limits, in the account's home. It reads the answer; the
- * sign-in it is read with stays OpenCode's. A command that fails is a fault, in its own last words.
+ * sign-in it is read with stays OpenCode's. A command that fails is a fault, in its own last words, which the runtime words for the person (`usageFailureOf`).
  */
 export const readOpenCodeGoUsage = (
   agent: AgentDefinition,
@@ -692,10 +693,7 @@ export const readOpenCodeGoUsage = (
         if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
         if (error !== null) {
           const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
-          return resolve({
-            kind: 'failed',
-            message: `OpenCode couldn’t read Go’s usage${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
-          })
+          return resolve({ kind: 'failed', message: why === '' ? 'OpenCode couldn’t read Go’s usage.' : why })
         }
         resolve(openCodeGoUsage(String(stdout), options.now()))
       })

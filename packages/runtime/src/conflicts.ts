@@ -186,12 +186,6 @@ export const fixNoteFor = (place: Place, failed: { readonly failing: ReadonlyArr
     `Fix what broke and commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to ${changeOf(place)} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
   ].join('\n\n')
 
-/** Why a repository's conflict isn't resolved, in a sentence; and whether all that is left is to commit the merge. */
-export interface Unresolved {
-  readonly why: string
-  readonly uncommitted: boolean
-}
-
 /** What stands in the way of a repository's conflict being resolved; null where nothing does. */
 export const unresolved = (worktree: string, conflict: Conflict) =>
   Effect.gen(function* () {

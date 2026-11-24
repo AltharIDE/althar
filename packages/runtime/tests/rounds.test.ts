@@ -385,7 +385,7 @@ describe('a task that goes back to work', () => {
   })
 
   it.live('withdraws what the reviewer asked when its review is skipped, so the task doesn’t wait on it', () => {
-    const { working, bare, github } = onGitHub()
+    const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const questions = yield* Questions

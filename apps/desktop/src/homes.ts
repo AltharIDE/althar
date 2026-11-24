@@ -109,7 +109,46 @@ export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   )
 }
 
+/** A home updated from its window: the release it runs now, where it said. */
+export interface HomeUpdated {
+  readonly state: 'applied'
+  readonly version?: string
+}
+
+/**
+ * The newest host release published, by its version: null where none is. The window offers a home's update by it,
+ * and the home's own updater still authenticates whatever it takes.
+ */
+export interface HostReleaseNews {
+  readonly newest: string | null
+}
+
+/**
+ * The newest host release that can't make projects from a window: #1150 brought that after it. An older home's update
+ * helps only once a release past it is out.
+ */
+export const LAST_WITHOUT_MAKING_PROJECTS = '0.1.0'
+
+const newer = (left: string, right: string) => {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0)
+  return false
+}
+/** Whether a published release brings making projects from a window: one past the last without it. */
+export const releaseMakesProjects = (news: HostReleaseNews) => news.newest !== null && newer(news.newest, LAST_WITHOUT_MAKING_PROJECTS)
+
 export interface HomesHost {
+  /**
+   * The newest host release published, as main last found it (a few minutes ago at most), or found afresh where
+   * `fresh`; fails where it couldn't be found out.
+   */
+  readonly release?: (fresh?: boolean) => Promise<HostReleaseNews>
+  /**
+   * The window's home, reached over SSH, updated by its own managed updater: answers once the new release runs, or
+   * fails with a line saying why. The window's connection drops while the home restarts.
+   */
+  readonly update?: () => Promise<HomeUpdated>
   /** A home being set up over SSH, or none; with the calls that start and steer it. */
   readonly setup?: () => Promise<HomeSetup | null>
   readonly setUp?: (target: SshHomeTarget) => Promise<void>

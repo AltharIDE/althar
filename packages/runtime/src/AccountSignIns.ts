@@ -1,5 +1,5 @@
 import { signInHost } from '@althar/contracts'
-import { type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
+import { openSignInProxy, type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
 import { Clock, Context, Effect, Fiber, Layer, Schema, Scope } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -160,6 +160,11 @@ export class AccountSignIns extends Context.Service<
                 return { flowId, state: flow.state }
               }
               const holder: { flow?: Flow } = {}
+              // The runtime's own services, its logger among them, for what the flow's events log: runtime.log, not the console.
+              const context = yield* Effect.context<never>()
+              // Codex's login on macOS goes out through a proxy of its own that finds addresses itself: a system resolver
+              // that stalls on a name can't fail the token exchange that ends it (provider-adapters' signInProxy).
+              const proxy = yield* Effect.promise(() => openSignInProxy(entry.definition).catch(() => null))
               const handle = startSignInFlow(
                 entry.definition,
                 (event) => {
@@ -182,6 +187,12 @@ export class AccountSignIns extends Context.Service<
                       return
                     case 'failed':
                       flow.state = { state: 'failed', message: event.message }
+                      // The person reads the short line; what the agent said goes to the log.
+                      Effect.runForkWith(context)(
+                        Effect.logWarning('A sign-in failed').pipe(
+                          Effect.annotateLogs({ agent: account.agentId, account: accountId, error: event.detail ?? event.message }),
+                        ),
+                      )
                       return
                     case 'done':
                       // Signed in: checked again, so every screen shows it, before the window hears it; plan usage told again
@@ -206,6 +217,7 @@ export class AccountSignIns extends Context.Service<
                   way,
                   ...(host === undefined ? {} : { host }),
                   home: accounts.env(account),
+                  proxy,
                   ...(config.openUrl === undefined
                     ? {}
                     : { openUrl: (url: string) => void Effect.runFork(config.openUrl?.(url) ?? Effect.void) }),

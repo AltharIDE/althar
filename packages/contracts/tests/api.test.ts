@@ -640,6 +640,7 @@ describe('the API', () => {
               RemoveTaskFolder: () => Effect.die('unused'),
               MoveInLine: () => Effect.die('unused'),
               LineOldestFirst: () => Effect.die('unused'),
+              StartAnyway: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
               PasteAccountSignInCode: () => Effect.die('unused'),

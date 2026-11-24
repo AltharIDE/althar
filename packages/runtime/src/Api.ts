@@ -1,4 +1,4 @@
-import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
+import { controlGoal, goalLine, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { taskWorker } from './workerExecution'
 import { WorkerSnapshots } from './WorkerSnapshots'
@@ -542,6 +542,15 @@ export const handlers = apiLayer(
               }
         const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
+        // What changed is said in the thread, as Althar's line: the person sees it there, as the lead and anyone reading after do.
+        yield* Effect.provideContext(
+          addItem({ projectId: result.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: goalLine(control, result.before, result.goal),
+          }),
+          store,
+        )
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
         if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal
@@ -1624,6 +1633,7 @@ export const handlers = apiLayer(
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
+      StartAnyway: ({ commandId, taskId }) => once(commandId, api(busy.startNow(taskId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),

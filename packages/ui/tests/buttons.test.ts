@@ -14,7 +14,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'screens/HomeWelcome/HomeWelcome.tsx': 'a way in, a card with its picture, the whole of which starts it',
-  'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
   'outputs/ChangeSet/MergeNeeds.tsx':
     'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
@@ -56,6 +55,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
+  'screens/WhatsNew/Releases.tsx': 'a release’s row, which folds its notes under it',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
   'thread/ReviewLine/ReviewLine.tsx': 'the line that folds a review round’s findings and words',
