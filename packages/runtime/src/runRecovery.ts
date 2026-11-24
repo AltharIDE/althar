@@ -1419,7 +1419,7 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
     ) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const gone = causeGone(local.key, local.path)
+        const gone = yield* causeGone(local.key, local.path)
         const [card] = yield* sql<{ id: string }>`
             SELECT id FROM attention_requests WHERE project_id = ${step.projectId} AND kind = 'stuck' AND state = 'open'
               AND json_extract(payload, '$.cause.key') = ${local.key} LIMIT 1`
@@ -1449,7 +1449,7 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
     const lookAtCause = (card: { readonly id: string; readonly agentId: string; readonly key: string; readonly path: string }) =>
       Effect.gen(function* () {
         causeLooked.set(card.id, yield* Clock.currentTimeMillis)
-        if (!causeGone(card.key, card.path)) return
+        if (!(yield* causeGone(card.key, card.path))) return
         yield* answerStuck({
           envelope: yield* envelope('attention.answer_stuck', { attentionId: card.id, causeGone: true }, undefined, instance.systemId),
           attentionId: card.id,

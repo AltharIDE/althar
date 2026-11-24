@@ -407,9 +407,9 @@ describe('an agent that something on this computer stops (DEV-285)', () => {
     cause: { path: '~/projects/ai-teacher/.codex' },
   })
 
-  const showLocal = (step: StuckStep) => {
+  const showLocal = (step: StuckStep, through = true) => {
     const { client } = fakeClient()
-    const onFix = vi.fn()
+    const onFix = vi.fn(async () => through)
     const onAnswer = vi.fn()
     withServices(
       <StuckCall
@@ -445,5 +445,12 @@ describe('an agent that something on this computer stops (DEV-285)', () => {
     expect(await screen.findByText(stuckWords.coordinator.asked)).toBeTruthy()
     expect(screen.queryByRole('button', { name: stuckWords.coordinator.fix })).toBeNull()
     expect(screen.getByRole('button', { name: /Try again/ })).toBeTruthy()
+  })
+
+  it('offers it again where asking didn’t go through', async () => {
+    showLocal(local, false)
+    await userEvent.click(await screen.findByRole('button', { name: stuckWords.coordinator.fix }))
+    expect(await screen.findByRole('button', { name: stuckWords.coordinator.fix })).toBeTruthy()
+    expect(screen.queryByText(stuckWords.coordinator.asked)).toBeNull()
   })
 })

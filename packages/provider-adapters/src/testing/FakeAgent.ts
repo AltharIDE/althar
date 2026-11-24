@@ -22,14 +22,15 @@ import { recorded } from './recorded'
 const codexLogs = (thread: string, body: string) => {
   const home = process.env['CODEX_HOME']
   if (home === undefined) return
+  const now = Date.now()
   const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
   const db = new DatabaseSync(join(home, 'logs_2.sqlite'))
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, ts_nanos INTEGER NOT NULL,
       level TEXT NOT NULL, target TEXT NOT NULL, feedback_log_body TEXT, thread_id TEXT)`)
     db.prepare(
-      `INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (?, 0, 'WARN', 'codex_core::responses_retry', ?, ?)`,
-    ).run(Math.floor(Date.now() / 1000), body, thread)
+      `INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (?, ?, 'WARN', 'codex_core::responses_retry', ?, ?)`,
+    ).run(Math.floor(now / 1000), (now % 1000) * 1_000_000, body, thread)
   } finally {
     db.close()
   }

@@ -2,6 +2,7 @@ import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +13,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries, stuckOf } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { askToFix } from '../src/startCause'
+import { askToFix, codexHomeOf } from '../src/startCause'
 import { items, repository, runtime, until } from './support'
 
 /*
@@ -28,13 +29,13 @@ import { items, repository, runtime, until } from './support'
 
 /** The fake Codex fails as in ai-teacher while `state.local` is set; its log goes to a `CODEX_HOME` of the test's own. */
 const setUp = () => {
-  const state: { local: boolean; answers: boolean } = { local: true, answers: true }
+  const state: { local: boolean; server: boolean; answers: boolean } = { local: true, server: false, answers: true }
   process.env['CODEX_HOME'] = mkdtempSync(join(tmpdir(), 'althar-codex-home-'))
   const layer = Queries.layer.pipe(
     Layer.provideMerge(
       runtime(
         ':memory:',
-        { connection: () => (state.local ? 'local' : undefined) },
+        { connection: () => (state.local ? 'local' : state.server ? 'server' : undefined) },
         {
           connectivity: {
             answers: () => Effect.sync(() => state.answers),
@@ -52,6 +53,17 @@ const setUp = () => {
 const strayProject = () => {
   const path = repository()
   writeFileSync(join(path, '.codex'), 'left here by something else\n')
+  return path
+}
+
+/** A project whose repository tracks a file named `.codex`: every task's worktree holds its own copy. */
+const trackedStray = () => {
+  const path = repository()
+  writeFileSync(join(path, '.codex'), 'committed by mistake\n')
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd: path })
+  git('add', '.codex')
+  git('commit', '-q', '-m', 'Add .codex')
   return path
 }
 
@@ -81,7 +93,7 @@ const planned = (path: string, title: string) =>
     return { projectId: project.projectId, ...task }
   })
 
-const implementOf = (taskId: string, stands: (attempt: { state: string; holdReason: string | null }) => boolean) =>
+const implementOf = (taskId: string, stands: (attempt: { state: string; holdReason: string | null; output: string | null }) => boolean) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [attempt] = yield* until(
@@ -103,6 +115,19 @@ const openCalls = (taskId: string) =>
 
 const notices = (threadId: string) =>
   Effect.map(items(threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [(item.content as { title: string }).title] : [])))
+
+/** Held after its next turn failed, rather than still waiting on the cause. */
+const turnsSettled = (attempt: { output?: string | null }) =>
+  (JSON.parse(attempt.output ?? '{}') as { local?: unknown }).local === undefined
+
+/** The agent sessions a thread had. */
+const sessionsOf = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return (yield* sql<{ id: string }>`SELECT external_session_id AS id FROM provider_sessions WHERE thread_id = ${threadId}`).map(
+      (row) => row.id,
+    )
+  })
 
 const turnsOf = (threadId: string) =>
   Effect.gen(function* () {
@@ -154,9 +179,10 @@ describe('a step whose agent fails for a reason on this computer', () => {
         1,
       )
       // The file goes, and a folder takes its place: Codex works again, and both steps carry on with no one pressing anything.
+      // Codex works again as the file goes: it fails for nothing else.
+      state.local = false
       rmSync(join(path, '.codex'))
       mkdirSync(join(path, '.codex'))
-      state.local = false
       yield* implementOf(first.taskId, (one) => one.state === 'succeeded')
       yield* implementOf(second.taskId, (one) => one.state === 'succeeded')
       assert.lengthOf(yield* openCalls(first.taskId), 0)
@@ -182,4 +208,68 @@ describe('a step whose agent fails for a reason on this computer', () => {
       assert.include(yield* notices(task.threadId), 'Asked the coordinator to fix it.')
     }).pipe(Effect.provide(layer))
   })
+
+  it.live('says it once for a tracked file every worktree holds: the tasks share one card, keyed by its path in the repository', () => {
+    const { layer } = setUp()
+    const path = trackedStray()
+    return Effect.gen(function* () {
+      const first = yield* planned(path, 'Retry the checkout')
+      const [call] = yield* until(openCalls(first.taskId), (calls) => calls.length > 0)
+      // The file in the task's own worktree, not the checkout's.
+      const cause = (JSON.parse(call?.payload ?? '{}') as { cause: { key: string; path: string } }).cause
+      assert.strictEqual(cause.key, 'not_a_folder:.codex')
+      const second = yield* planned(path, 'Tidy the header')
+      const held = yield* implementOf(second.taskId, (one) => one.state === 'held')
+      assert.strictEqual((JSON.parse(held.output ?? '{}') as { local: { key: string } }).local.key, 'not_a_folder:.codex')
+      assert.lengthOf(yield* openCalls(second.taskId), 0)
+      // The coordinator is told to fix it on an agent the file doesn't stop, and to bring main into the tasks after.
+      const asked = yield* askToFix(call?.id ?? '', yield* Runtime.envelope('attention.fix_with_coordinator', {}))
+      assert.include(asked.body, 'update_branch')
+      assert.include(asked.body, 'not codex')
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.live(
+    'still backs off for a provider that fails on a later turn of the same session, its log’s earlier local error put right since',
+    () => {
+      const { state, layer } = setUp()
+      const path = strayProject()
+      return Effect.gen(function* () {
+        const first = yield* planned(path, 'Retry the checkout')
+        yield* until(openCalls(first.taskId), (calls) => calls.length > 0)
+        // The second waits on the first's card, in its own session, whose log now holds the local error.
+        const second = yield* planned(path, 'Tidy the header')
+        yield* implementOf(second.taskId, (one) => one.state === 'held')
+        const sessions = yield* sessionsOf(second.threadId)
+        // The file is put right, and OpenAI fails the next turn: the second carries on in the same session, and backs off.
+        state.local = false
+        state.server = true
+        rmSync(join(path, '.codex'))
+        mkdirSync(join(path, '.codex'))
+        yield* until(turnsOf(second.threadId), (turns) => turns.length >= 2)
+        const held = yield* implementOf(second.taskId, (one) => one.state === 'held' && turnsSettled(one))
+        const hold = JSON.parse(held.output ?? '{}') as { local?: unknown; service: string; tries: number }
+        assert.isUndefined(hold.local)
+        assert.strictEqual(hold.service, 'OpenAI')
+        assert.deepStrictEqual(yield* sessionsOf(second.threadId), sessions)
+        assert.lengthOf(yield* openCalls(second.taskId), 0)
+      }).pipe(Effect.provide(layer))
+    },
+  )
+})
+
+describe('the Codex home a cause is read from', () => {
+  it.effect('is the account’s own, as its sessions run with it, else the usual one', () =>
+    Effect.gen(function* () {
+      const account = { id: 'acc_work', agentId: 'codex', name: 'Work', home: null, position: 1 } as never
+      const homeOf = codexHomeOf({
+        get: (id) => (id === 'acc_work' ? Effect.succeed(account) : Effect.fail('missing')),
+        env: () => ({ CODEX_HOME: '/accounts/codex-work' }),
+      })
+      assert.strictEqual(yield* homeOf('acc_work'), '/accounts/codex-work')
+      process.env['CODEX_HOME'] = '/usual/codex'
+      assert.strictEqual(yield* homeOf(null), '/usual/codex')
+      assert.strictEqual(yield* homeOf('acc_gone'), '/usual/codex')
+    }),
+  )
 })

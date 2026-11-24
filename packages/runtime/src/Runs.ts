@@ -9,6 +9,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Busy, type Order } from './Busy'
 import { touchCard } from './cards'
 import { Changes, type Published } from './Changes'
+import { Accounts } from './Accounts'
 import { Agents, RuntimeConfig } from './Config'
 import { NotConnected } from './Connections'
 import { Connectivity } from './Connectivity'
@@ -78,7 +79,7 @@ import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
-import { diagnose } from './startCause'
+import { codexHomeOf, diagnose } from './startCause'
 import { type StandIn, standInOf } from './standIn'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
@@ -344,6 +345,8 @@ export class Runs extends Context.Service<
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
+      // The Codex home each account's sessions run with, where Codex's own log of them is (DEV-285).
+      const homeOf = codexHomeOf(yield* Accounts)
       const sessions = yield* Sessions
       const leftBehind = yield* LeftBehind
       const mergeReviews = yield* MergeReviews
@@ -1030,7 +1033,13 @@ export class Runs extends Context.Service<
           // One that couldn't start, or whose service seemed to fail, for a reason on this computer stops for that (DEV-285).
           const local =
             (classed.why === 'failed_to_start' || classed.why === 'transient') && classed.agentId !== null && classed.step !== 'publish'
-              ? yield* diagnose({ taskId: run.taskId, agentId: classed.agentId, deviceId: instance.deviceId, said: classed.detail ?? '' })
+              ? yield* diagnose({
+                  taskId: run.taskId,
+                  agentId: classed.agentId,
+                  deviceId: instance.deviceId,
+                  said: classed.detail ?? '',
+                  homeOf,
+                })
               : undefined
           const told: StuckInfo =
             local === undefined
@@ -2572,6 +2581,7 @@ export class Runs extends Context.Service<
         unavailable,
       } = makeRunCapacity({
         agentsHere,
+        homeOf,
         autoModels,
         get carryOn(): RunCapacityDependencies['carryOn'] {
           return carryOn

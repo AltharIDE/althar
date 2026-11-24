@@ -209,7 +209,7 @@ interface StuckCallProps {
   /** Opens the code hosts in Settings, for a pull request whose host isn't connected: Connect. */
   onConnect?: () => void
   /** Asks the coordinator to fix what stops its agent on this computer: Let the coordinator fix it. */
-  onFixWithCoordinator?: (attentionId: string) => void
+  onFixWithCoordinator?: (attentionId: string) => void | Promise<boolean>
 }
 
 /**
@@ -365,7 +365,11 @@ function StuckCard({
                   label: text.coordinator.fix,
                   onFix: () => {
                     setAsking(true)
-                    onFixWithCoordinator(request.id)
+                    // Offered again where it didn't go through: the coordinator wasn't asked.
+                    void Promise.resolve(onFixWithCoordinator(request.id)).then(
+                      (through) => through === false && setAsking(false),
+                      () => setAsking(false),
+                    )
                   },
                 },
               }

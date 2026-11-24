@@ -4,6 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, type Crypto, Deferred, Duration, Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
+import type { Accounts } from './Accounts'
 import type { Artifacts } from './Artifacts'
 import { Busy, type Order } from './Busy'
 import { Changes, type Published } from './Changes'
@@ -486,6 +487,7 @@ export type Store =
   | MergeReviews
   | Setups
   | Connections
+  | Accounts
 
 /**
  * Whether a publish step's failure may pass if tried again (DEV-173): the

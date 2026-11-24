@@ -79,7 +79,7 @@ export interface WorkActions {
   /** Answers a call; with `always`, kept in the project's rules by that scope. Whether it went through. */
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
-  readonly fixWithCoordinator: (attentionId: string) => Promise<void>
+  readonly fixWithCoordinator: (attentionId: string) => Promise<boolean>
   /** Says what went wrong reading what the actions act on. */
   readonly fail: (failure: unknown) => void
   readonly dismissError: () => void
@@ -349,7 +349,17 @@ export const useWorkActions = (
       [client, fail, pressed],
     ),
     answerStuck: useCallback((attentionId, answer) => client.answerStuck({ attentionId, answer }).catch(fail), [client, fail]),
-    fixWithCoordinator: useCallback((attentionId) => client.fixWithCoordinator(attentionId).catch(fail), [client, fail]),
+    fixWithCoordinator: useCallback(
+      (attentionId) =>
+        client.fixWithCoordinator(attentionId).then(
+          () => true,
+          (failure: unknown) => {
+            fail(failure)
+            return false
+          },
+        ),
+      [client, fail],
+    ),
     fail,
     dismissError: useCallback(() => setError(null), []),
   }

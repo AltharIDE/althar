@@ -246,7 +246,8 @@ export interface TaskModel {
   /** Answers a step that needs the person. */
   /** Whether it went through: a stuck step whose answer didn't is answerable again. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
-  readonly fixWithCoordinator: (attentionId: string) => Promise<void>
+  /** False where asking didn't go through, and the card offers it again. */
+  readonly fixWithCoordinator: (attentionId: string) => Promise<boolean>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
   /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, as they saw it, Switch it. */
@@ -1132,7 +1133,16 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return through
     },
-    fixWithCoordinator: (attentionId) => act(() => client.fixWithCoordinator(attentionId)),
+    fixWithCoordinator: async (attentionId) => {
+      let through = true
+      await act(() =>
+        client.fixWithCoordinator(attentionId).catch((failure: unknown) => {
+          through = false
+          throw failure
+        }),
+      )
+      return through
+    },
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
     move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
     dropMove: () => onTask((taskId) => client.dropMove(taskId)),

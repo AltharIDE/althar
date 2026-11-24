@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { codexLogSaid, localCauseOf, stillThere, strayIn } from '../src/localCause'
+import { codexLogSaid, inRepository, localCauseOf, stillThere, strayIn } from '../src/localCause'
 
 /*
  * A local reason an agent couldn't go on (DEV-285), read from what each agent
@@ -40,6 +40,9 @@ describe('Codex', () => {
     'unexpected status 500 Internal Server Error: {"error":{"message":"The server had an error"}}',
     'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
     'exceeded retry limit, last status: 429 Too Many Requests',
+    // A gateway's HTML error page, read as JSON: the provider's trouble, which backs off as one.
+    'SyntaxError: Unexpected token < in JSON at position 0',
+    'SyntaxError: Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON',
   ])('finds nothing local in %s', (said) => {
     expect(localCauseOf(said)).toBeUndefined()
   })
@@ -102,6 +105,12 @@ describe('OpenCode', () => {
     expect(localCauseOf(said)).toMatchObject({ kind, path })
   })
 
+  it('reads a settings file that doesn’t parse as one, where the line names it', () => {
+    expect(
+      localCauseOf("SyntaxError: Unexpected token } in JSON at position 88 while parsing '/home/me/app/.claude/settings.json'")?.kind,
+    ).toBe('config')
+  })
+
   it('finds nothing local in its provider failing', () => {
     expect(localCauseOf('AI_APICallError: Service Unavailable')).toBeUndefined()
     expect(localCauseOf('ProviderModelNotFoundError: model not found')).toBeUndefined()
@@ -127,28 +136,35 @@ describe('the checkout', () => {
     return { main, worktree }
   }
 
-  it('finds the file at the repository’s own root that every worktree shares, where Codex reads a folder', () => {
+  it('finds the file at the repository’s own root that every worktree shares, where Codex reads a folder', async () => {
     const { main, worktree } = repository()
     writeFileSync(join(main, '.codex'), '')
-    expect(strayIn('codex', join(worktree, 'src'))).toBe(join(main, '.codex'))
-    expect(stillThere({ kind: 'not_a_folder', path: join(main, '.codex'), said: '' })).toBe(true)
+    expect(await strayIn('codex', join(worktree, 'src'))).toBe(join(main, '.codex'))
+    expect(await stillThere({ kind: 'not_a_folder', path: join(main, '.codex'), said: '' })).toBe(true)
     rmSync(join(main, '.codex'))
     mkdirSync(join(main, '.codex'))
-    expect(stillThere({ kind: 'not_a_folder', path: join(main, '.codex'), said: '' })).toBe(false)
-    expect(strayIn('codex', worktree)).toBeUndefined()
+    expect(await stillThere({ kind: 'not_a_folder', path: join(main, '.codex'), said: '' })).toBe(false)
+    expect(await strayIn('codex', worktree)).toBeUndefined()
   })
 
-  it('finds the one in the worktree itself, and the file along a path the agent named', () => {
+  it('finds the one in the worktree itself, and the file along a path the agent named', async () => {
     const { worktree } = repository()
     writeFileSync(join(worktree, '.claude'), '')
-    expect(strayIn('claude-code', worktree)).toBe(join(worktree, '.claude'))
-    expect(strayIn('opencode', worktree, join(worktree, '.claude', 'settings.json'))).toBe(join(worktree, '.claude'))
+    expect(await strayIn('claude-code', worktree)).toBe(join(worktree, '.claude'))
+    expect(await strayIn('opencode', worktree, join(worktree, '.claude', 'settings.json'))).toBe(join(worktree, '.claude'))
   })
 
-  it('says nothing for an agent with no folder of its own, or a checkout with nothing out of place', () => {
+  it('says nothing for an agent with no folder of its own, or a checkout with nothing out of place', async () => {
     const { worktree } = repository()
-    expect(strayIn('codex', worktree)).toBeUndefined()
-    expect(strayIn('grok', worktree)).toBeUndefined()
+    expect(await strayIn('codex', worktree)).toBeUndefined()
+    expect(await strayIn('grok', worktree)).toBeUndefined()
+  })
+
+  it('names a path the same within the repository, in a worktree or the checkout they share, so tasks share one cause', async () => {
+    const { main, worktree } = repository()
+    expect(await inRepository(worktree, join(worktree, '.codex'))).toBe('.codex')
+    expect(await inRepository(join(worktree, 'src'), join(main, '.codex'))).toBe('.codex')
+    expect(await inRepository(worktree, join(tmpdir(), 'elsewhere', '.codex'))).toBeUndefined()
   })
 })
 
@@ -171,14 +187,14 @@ describe('Codex’s own log', () => {
     return home
   }
 
-  it('reads what it kept of a thread, newest first, and the cause in it', () => {
+  it('reads what its retries and its turn kept of a thread since the turn began, newest first, and the cause in it', async () => {
     const thread = '01a20c81-3b02-7313-af80-a091aa0fa922'
     const home = log([
       { ts: 100, level: 'WARN', target: 'codex_core::responses_retry', thread, body: codexRetry },
       { ts: 101, level: 'INFO', target: 'codex_core::session::turn', thread, body: codexTurn },
       { ts: 102, level: 'WARN', target: 'codex_core::responses_retry', thread: 'another', body: 'sampling_error=unexpected status 500' },
     ])
-    const said = codexLogSaid(home, { id: thread })
+    const said = await codexLogSaid(home, { id: thread, since: 99_000 })
     expect(said.split('\n')).toEqual([
       'failed to load workspace requirements: not a directory',
       'failed to load workspace requirements: not a directory',
@@ -186,23 +202,27 @@ describe('Codex’s own log', () => {
     expect(localCauseOf(said)?.kind).toBe('not_a_folder')
   })
 
-  it('reads what it wrote since a start, where there was no thread yet', () => {
+  it('leaves out an earlier turn’s error, put right since, and what other parts of Codex logged', async () => {
+    const thread = 'thread-1'
     const home = log([
-      { ts: 10, level: 'ERROR', target: 'codex_core', thread: null, body: 'old: Error loading config.toml: nothing' },
+      { ts: 100, level: 'WARN', target: 'codex_core::responses_retry', thread, body: codexRetry },
+      { ts: 300, level: 'ERROR', target: 'codex_core::exec', thread, body: 'Permission denied (os error 13)' },
       {
-        ts: 200,
-        level: 'ERROR',
-        target: 'codex_app_server',
-        thread: null,
-        body: 'failed to load configuration: Not a directory (os error 20)',
+        ts: 301,
+        level: 'WARN',
+        target: 'codex_core::responses_retry',
+        thread,
+        body: 'sampling_error=unexpected status 500 Internal Server Error',
       },
     ])
-    expect(codexLogSaid(home, { since: 150_000 })).toBe('failed to load configuration: Not a directory (os error 20)')
+    const said = await codexLogSaid(home, { id: thread, since: 300_000 })
+    expect(said).toBe('unexpected status 500 Internal Server Error')
+    expect(localCauseOf(said)).toBeUndefined()
   })
 
-  it('is empty without a log', () => {
+  it('is empty without a log', async () => {
     const home = mkdtempSync(join(tmpdir(), 'codex-home-'))
     made.push(home)
-    expect(codexLogSaid(home, { id: 'x' })).toBe('')
+    expect(await codexLogSaid(home, { id: 'x', since: 0 })).toBe('')
   })
 })

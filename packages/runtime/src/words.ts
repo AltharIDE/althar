@@ -179,9 +179,9 @@ export const agentSaid = (error: unknown): string | undefined => {
       // hook's "command not found", is no reason it stopped.
       const classWord = classWords(closingFailureOf(stderr), '')
       if (classWord !== undefined) return classWord
-      // A reason on this computer, wherever it wrote it, such as `ENOTDIR` above a stack: kept in its own words, which the
-      // step's call reads again for the path in the way (DEV-285).
-      const local = localCauseOf(stderr)
+      // A reason on this computer in the error it stopped on, such as `ENOTDIR` above its stack: kept in its own words,
+      // which the step's call reads again for the path in the way (DEV-285). What it warned of further up is no reason.
+      const local = localCauseOf(closingErrorLine(stderr))
       if (local !== undefined) return sentence(`The agent stopped: ${own(local.said)}`)
       const said = own(closingErrorLine(stderr))
       return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)

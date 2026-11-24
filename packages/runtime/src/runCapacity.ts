@@ -44,6 +44,8 @@ export interface LimitedStep {
 }
 
 export interface RunCapacityDependencies {
+  /** The Codex home an account's sessions run with, where its log says why a turn failed (DEV-285). */
+  readonly homeOf: (accountId: string | null) => Effect.Effect<string>
   readonly agentsHere: Agents['Service']
   readonly autoModels: AutoModels['Service']
   readonly carryOn: (
@@ -102,6 +104,7 @@ export interface RunCapacityDependencies {
 export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
   const {
     agentsHere,
+    homeOf,
     autoModels,
     connectivity,
     going,
@@ -682,7 +685,7 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
    */
   const stopsHere = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, said: string) =>
     Effect.gen(function* () {
-      const local = yield* diagnose({ taskId: on.run.taskId, agentId, deviceId: instance.deviceId, said })
+      const local = yield* diagnose({ taskId: on.run.taskId, agentId, deviceId: instance.deviceId, said, homeOf })
       if (local === undefined) return false
       yield* stuck(
         on.run,

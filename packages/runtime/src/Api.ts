@@ -2175,7 +2175,6 @@ export const handlers = apiLayer(
             Effect.gen(function* () {
               const said = yield* envelope('attention.fix_with_coordinator', { attentionId }, commandId)
               const asked = yield* Effect.provideContext(askToFix(attentionId, said), folderStore)
-              if (asked === undefined) return
               yield* coordinator.say({
                 envelope: said,
                 threadId: asked.threadId,
