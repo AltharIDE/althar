@@ -89,8 +89,9 @@ listed for it; any other form of a listed program, and any program not
 listed, is unsure:
 
 - **Reads, by exact form:**
-  - `systemctl status|is-active|is-enabled|is-failed|list-units|list-timers|cat`,
-    and `show` only with `-p`/`--property`; `journalctl` without
+  - `systemctl status|is-active|is-enabled|is-failed|list-units|list-timers`,
+    and `show` only with `-p`/`--property` naming only listed properties
+    (below); `journalctl` without
     `--vacuum-*`, `--rotate`, `--flush` or `--sync`;
   - `cat`, `less`, `head`, `tail`, `grep`, `zgrep`, `ls`, `stat`, `file`,
     `wc` of paths not in the secret list below; `find` without `-delete`,
@@ -106,17 +107,45 @@ listed, is unsure:
   - `curl` and `wget` with no body, method other than `GET`/`HEAD`,
     upload or output file;
   - `docker ps|images|logs|stats --no-stream`, and `docker inspect` only
-    with `--format`; `crictl ps|logs`, and `crictl inspect` only with
-    `-o go-template`;
+    with a `--format`/`-f` that selects listed fields (below); `crictl
+    ps|logs`, and `crictl inspect` only with `-o go-template` that
+    selects listed fields;
   - `nginx -t`, `apachectl -t` or `configtest`, `sshd -t`,
     `openssl x509 -noout`, `dpkg -l`, `rpm -q`, `apt list`, `dnf list`;
   - `sudo` (without `-s`, `-i`, `-e` or `-u` of a shell) before any of
     these, as the same form.
+- **Inspections by allowlisted fields, never by "has a format".** A
+  format can select the very values an unformatted inspection leaks, so
+  what narrows a read is the fields it names, matched against a list:
+  - **Container inspection:** accept exact scalar templates. For Docker
+    these are `{{.State.Status}}`, `{{.State.Running}}`,
+    `{{.State.ExitCode}}` and `{{.RestartCount}}`. For crictl these are
+    `{{.status.state}}` and `{{.status.exitCode}}`. Apply each list only
+    to that tool's supported container form.
+  - **Secret:** a template that selects `.Config.Env`, `.Config.Cmd`,
+    `.Config.Entrypoint`, `.Args`, `.Spec`, `.Config` or `.` as a whole,
+    selects container environment entries in the CRI runtime spec,
+    uses `json`, `printf "%v"` or `range` over the whole object (a way
+    of printing what the field list can't see), or `-o json`/`-o yaml`
+    for `crictl`; the same for `docker inspect` of a service, secret or
+    config.
+  - **Unsure:** a template that names a field the list doesn't have, or
+    that the reader can't parse (a function, a nested `with` it can't
+    follow).
+  - **`systemctl show -p`:** read for `ActiveState`, `SubState`,
+    `LoadState`, `UnitFileState`, `Result`, `MainPID`, `NRestarts`,
+    `ExecMainStatus`, `ExecMainStartTimestamp` and `ActiveEnterTimestamp`,
+    with every requested property checked and a secret selection taking precedence;
+    **secret** for `Environment`, `EnvironmentFiles`, `PassEnvironment`,
+    `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `ExecReload`,
+    `LoadCredential`, `SetCredential`, `ImportCredential`; any other
+    property is unsure. `systemctl cat` prints the unit file, including
+    its `Environment=` lines, so it is **unsure**, not a read.
 - **Inspections whose plain output carries credentials** are secret, not
-  read, unless narrowed as above: `env`, `printenv`, `set`, `export -p`,
-  `systemctl show` without a property, `docker inspect` and `crictl
-  inspect` without a format, `ps` with environment forms, `cat
-  /proc/*/environ`.
+  read, unless narrowed to listed fields as above: `env`, `printenv`,
+  `set`, `export -p`, `systemctl show` without a property, `docker
+  inspect` and `crictl inspect` without a format, `ps` with environment
+  forms, `cat /proc/*/environ`.
 - **Secret paths, refused:** `/etc/shadow`, `/etc/gshadow`, `~/.ssh` and
   `/root/.ssh` but `known_hosts` and `authorized_keys`, `*.key`, `*.pem`
   under `/etc/ssl/private` or a `private/` folder, `.env` files,
@@ -128,21 +157,24 @@ listed, is unsure:
 
 ### What a read runs
 
-A read runs the repository's code, and the code is the lead's worktree.
-`terraform plan` runs `data "external"` programs; `ansible-playbook --check`
-runs a task with `check_mode: false` for real, and every `pipe` lookup
-and local action; a role's `library/` module or a filter plugin runs as
-any program does. So, before any `ops_run` starts, with only A as with
-B, Althar compares the files it executes (the playbook, its roles,
-plugins and modules; the `.tf` files and local modules; a chart's
-templates) with the default branch. Where the task changed one, the run
-is **unsure**, whatever its flags say: it is gated as a change, and the
-card says why and names the files, with the lines that matter
-(`check_mode: false`, `delegate_to: localhost`, a `pipe` lookup, a
-`data "external"`) first. Unchanged code, already reviewed and merged,
-runs as its flags say, in its own sandbox with only its target's
-credentials (ADR-114). In the lead's shell, where only `ssh` reads run,
-none of this arises.
+Before classifying a preview as a read, Althar inspects the code and inputs
+it would execute, including dependencies. A playbook can contain a task
+with `check_mode: false` on the default branch. Ansible may change a host
+during that preview. A Terraform external data source or a custom plugin
+can likewise execute a program during planning.
+
+Changed executable inputs still count as unsure. For merged inputs a
+preview qualifies as a read only when all reachable operations have known
+read-only preview behavior. Dynamic includes, unknown plugins and arbitrary
+programs such as a Pulumi stack leave the result unsure. Apply this check
+also to discovery and refreshes. Do not execute repository code to decide
+whether it is safe to execute.
+
+When a preview could change a target or Althar cannot establish that it is
+read-only, show the person the requested command and the reason without
+running a preview. This overrides the ordinary dev and staging defaults.
+Approval covers exactly one execution under the change lock in step B.
+A subsequent apply or retry requires its own approval (ADR-116).
 
 ### Unsure
 
@@ -153,11 +185,11 @@ command the rules can't read on prod is exactly what they want to see.
 So, in the profile only:
 
 - an unreadable remote command, an unknown subcommand of a known tool, an
-  `ops_run` read whose code changed as above, and a script named for
+  `ops_run` read whose preview is preview-unsafe as above, and a script named for
   infra work (`./deploy.sh`, `make apply`, `just provision`: today's
   `deploys()` words, plus `apply`, `provision`, `rollout`, `migrate`) are
   unsure;
-- unsure is gated as a change: with A, it asks; with B, dev goes ahead
+- except for the preview rule above, unsure is gated as a change: with A, it asks; with B, dev goes ahead
   anyway, staging is judged, prod asks.
 
 What isn't an infra command at all (`ls`, `npm test`, an edit) is read as
@@ -243,9 +275,9 @@ prod's keys out of its SSH agent (the plan's B3).
   `sandboxProfile` (`Policies.ts`).
 - `packages/runtime/src/shellCommands.ts`: reading `ssh`'s remote command,
   `kubectl exec --`'s and `ansible -a`'s as lines.
-- `packages/runtime/src/OpsRuns.ts` (ADR-114): the "what a read runs"
-  comparison against the default branch, and the saved plan in the run's
-  folder.
+- `packages/runtime/src/OpsRuns.ts` (ADR-114): the preview-unsafe scan of
+  what a read would run (merged code included), the inspection field
+  lists, and the saved plan in the run's folder.
 - `packages/runtime/src/tally.ts`: `infra` and `unsure` counted, so a kind
   agents keep working around shows in Rules' "Last 14 days".
 - `packages/ui/src/lib/commandGlance.ts` and
@@ -255,4 +287,12 @@ prod's keys out of its SSH agent (the plan's B3).
   spelling; remote lines with pipes and `sudo`; every listed remote
   program in a form that changes something (`hostname web9`, `date -s`)
   read as unsure; the Ops task and Code sibling cases above, through both
-  `decide` and `decideInside`.
+  `decide` and `decideInside`. Inspections: `docker inspect -f
+  '{{.Config.Env}}' web`, `docker inspect --format '{{json .}}' web`,
+  `crictl inspect -o json`, and `systemctl show -p Environment app` are
+  secret; `systemctl cat app` and a template naming an unlisted field are
+  unsure; `docker inspect -f '{{.State.Status}}' web` is a read. Previews:
+  merged, unchanged playbook with a `check_mode: false` task that runs a
+  `command` is preview-unsafe on `--check`, in an Ops task, and
+  its preview isn't started before the decision or again after the lock;
+  a plain merged playbook with none of the constructs is a read.

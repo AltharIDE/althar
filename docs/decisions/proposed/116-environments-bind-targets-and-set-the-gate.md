@@ -76,8 +76,10 @@ narrowed to that context or profile (ADR-114). Neither holds a value.
 
 ### Finding a command's environment
 
-`ops_run` (ADR-114) finds the target before it decides, outside the
-sandbox, where it can read what the agent can't. It resolves where the
+`ops_run` (ADR-114) finds the target before it decides, in the runtime. It parses trusted settings as data. Any helper process
+for discovery needs ADR-114's isolation and ADR-115's read-only check.
+If discovery requires executing unverified repository code, stop and ask
+for a statically resolvable target. It resolves where the
 command would really go, refuses the flags that could send it elsewhere,
 and then **runs it pinned to that target**, so the destination the gate
 and the lock saw is the only one the run can reach:
@@ -118,6 +120,9 @@ read as unsure, so a new override asks rather than slips by.
 | **staging** | Goes ahead | The coordinator's judge decides, with the plan; the person where it can't | Asks the person |
 | **prod** | Goes ahead | **The person, on the prod card. Always.** | Asks the person, on the prod card |
 
+A preview with possible side effects always requires the person's approval,
+even in dev. The no-plan path below applies.
+
 - **A file can tighten a gate, never loosen one.** `gate:` in
   `ops.yaml` takes `go`, `coordinator` or `person`; a value looser than
   the name's default is ignored, with a line in Rules saying so. Only the
@@ -141,20 +146,16 @@ read as unsure, so a new override asks rather than slips by.
 A change against staging or prod runs in steps, so the person sees what
 will happen before it does, and what runs is what they saw:
 
-1. **Is a dry run safe?** A dry run runs the repository's code. Before
-   one starts, the same check as any `ops_run` read applies (ADR-115,
-   "What a read runs"): where the task changed code the dry run would
-   execute, the dry run is itself unsure, and Althar doesn't start it on
-   its own, whether the lead asked for the dry run or the change. The
-   gate decides first, on a card **without a plan**: "No safe plan: the
-   task changed `roles/nginx/tasks/main.yml`, which runs during the dry
-   run (`check_mode: false` on line 12)", the files and lines, the
-   command, the targets and the commit. On staging the judge gets the
-   same and, with no plan, leaves it to the person. Allowing it runs the
-   dry run as a run of its own, in the log, and then step 2's card
-   follows for the change.
-2. **`ops_run` runs the tool's dry run, itself,** where it is safe or was
-   allowed: `terraform plan -out=<run folder>/plan` (the plan stays in
+1. **Check the preview before executing it.** Apply ADR-115 to the actual
+   inputs on every branch. If a merged playbook contains a task with
+   `check_mode: false`, or read-only behavior cannot be established,
+   show a card without a plan. Name the file and line, target, commit and
+   exact requested operation. On every environment the person can decline
+   or approve that single execution, bound to the commit, target, argv and
+   input digests as in step 3. On approval skip to step 4. Record
+   the execution as a change even when the request was for a preview.
+2. **Generate a plan only for a verified read-only preview.** For example,
+   `terraform plan -out=<run folder>/plan` (the plan stays in
    the run's private folder, ADR-115, and `apply` runs that saved plan,
    exactly, and fails if the state moved); `ansible-playbook --check
    --diff` with the same, pinned arguments; `kubectl diff`; `helm diff
@@ -170,14 +171,17 @@ will happen before it does, and what runs is what they saw:
    that binding again: the commit and a clean worktree, the target as
    resolved now, the inputs' digest. For Ansible, kubectl and Helm, whose
    dry run isn't a file the apply uses, it runs the dry run again and
-   compares its plan with the approved one. Terraform's saved plan
+   compares its plan with the approved one, **unless the dry run is
+   preview-unsafe, which is never run again on its own**: there the
+   binding's digests of the code and inputs are the check, and a change
+   in any of them lapses the decision. Terraform's saved plan
    checks itself. **Anything material changed** (another commit, another
    host, a different plan) and the decision lapses: the new plan goes to
    the gate again, with what changed shown first. An approval waiting
    behind another task's lock is checked this way when the lock comes.
 
-A plan older than fifteen minutes is run again before the card shows,
-and checked again at step 4 whatever its age.
+Before refreshing a plan older than fifteen minutes, repeat step 1,
+then check the decision at step 4 whatever its age.
 
 ### The prod card
 
@@ -205,6 +209,9 @@ One card, in the task's thread and in Needs you, in prod's colour:
 - **Buttons:** "Apply to prod" and "Not now". No "always", no Allow all:
   each prod change is its own card. "Not now" sends the lead the
   person's reason, if they wrote one.
+
+When a preview could have side effects, the plan section shows the reason
+and source location instead. The button names the exact execution requested.
 
 From a paired device, the same card, with the plan folded (the plan's
 open question 8).
@@ -258,8 +265,9 @@ open question 8).
   an unbound target in a project that binds only dev waits for the
   person; a looser `gate:` ignored; Helm's `--kube-context` resolved and
   `--kube-apiserver` refused, with dev current and prod named; each
-  tool's run pinned to its resolved target; a dry run whose code the task
-  changed not started before a decision; a decision lapsing when the
+  tool's run pinned to its resolved target; a dry run with a `check_mode:
+  false` task, merged and unchanged, not started before a decision or
+  again after the lock; a decision lapsing when the
   commit, target or plan changes while it waits for a lock; a saved plan
   applied and one whose state moved refused; `ops.yaml` from a branch not
   read.

@@ -95,7 +95,7 @@ Every `ops_run`, read or change, is a run in the log, recorded as facts
 | Field | What |
 |---|---|
 | **Run** | Its id, the task, the lead (agent, model, session) |
-| **Command** | `argv` as it ran, with secrets only as `${secret:NAME}` references (`ops_run` refuses an inline credential before anything is shown or recorded, ADR-114), the pinning flags, the folder, the tool's version |
+| **Command** | `argv` as it ran, with secrets only as `${secret:NAME}` references (`ops_run` refuses an inline credential before anything is shown or recorded, and opaque values require named references, ADR-114), the pinning flags, the folder, the tool's version |
 | **Kind** | Read, change, unsure, and the word that decided it (ADR-115) |
 | **Environment and target** | The environment(s), and the hosts, workspace or context and namespace found (ADR-116) |
 | **Code** | The commit, its branch, whether it's on the default branch, and that the worktree had no uncommitted changes |

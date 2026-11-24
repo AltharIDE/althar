@@ -126,8 +126,8 @@ flowchart TB
   K -->|secret| X["Refused"]
   K -->|read| G["Runs; logged"]
   K -->|"change or unsure"| E["Find its environment, pin<br/>the run to it (ADR-116)"]
-  E --> D{"Dry run safe?"}
-  D -->|"the task changed code it runs"| GATE0["Gate decides first,<br/>with no plan"] --> PL
+  E --> D{"Preview verified read-only?"}
+  D -->|"unsafe or unknown"| GATE0["Person approves one execution<br/>without a preview"] --> L
   D -->|yes| PL["Dry run, the plan"]
   PL --> GATE{"Environment's gate,<br/>on the plan"}
   GATE -->|dev| L
@@ -135,7 +135,7 @@ flowchart TB
   GATE -->|"prod, or unbound"| P["Card for the person:<br/>plan, command, hosts, commit"] --> L
   L{"The task's set of locks<br/>free? (ADR-117)"} -->|"held by another task"| W["Waits, holding<br/>nothing new"]
   L -->|free| F{"Commit, target,<br/>plan unchanged?"}
-  F -->|changed| PL
+  F -->|changed| E
   F -->|same| G2["Runs in its own sandbox; logged"]
   G2 --> OUT["Output live in Outputs,<br/>stoppable; secrets masked"]
 ```
@@ -251,10 +251,11 @@ A3: the gate decides `ops_run`s.
   `check_mode: false` for real, and every `pipe` lookup. The code is the
   lead's worktree, which it can change. So every `ops_run` runs in a
   sandbox of its own with only its target's credentials and executables
-  from caches no lead writes (ADR-114); a run whose code the task changed
-  is unsure, and its dry run isn't started before the gate decides
-  (ADR-115, ADR-116). This is the plan's subtlest rule and needs
-  Balázs's eye.
+  from caches no lead writes (ADR-114). If the sandbox cannot start, only
+  in-process data checks remain available. A preview that may have side
+  effects, including one from a merged playbook, requires the person's
+  approval for each execution. Post-lock validation checks its inputs
+  without repeating that preview (ADR-115, ADR-116).
 - **Check mode isn't a promise.** A module without check support skips in
   `--check`, and a diff can be partial. The prod card says "Ansible's dry
   run", not "what will happen". Terraform's saved plan is exact, and the

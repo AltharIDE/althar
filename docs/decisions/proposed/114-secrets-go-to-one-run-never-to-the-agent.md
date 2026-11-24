@@ -53,8 +53,8 @@ alone; what comes back to the lead is the output, masked.
   no `bash -c`, no pipes: what runs is exactly the words the card and the
   log show, and ADR-115 reads them without guessing.
 - **No secret in `argv`.** A credential is named, never written:
-  `${secret:DB_PASSWORD}` in an argument is replaced by Althar in the
-  run's process only, and the card, the record and the log keep the
+  `${secret:DB_PASSWORD}` in a request selects a descriptor, private file or environment
+  variable for that run. Refuse forms that need the value in process argv, and the card, the record and the log keep the
   reference. `ops_run` refuses, before anything is shown or recorded, an
   argument that carries a value where a credential goes: `-e` and
   `--extra-vars`, `-var`, `--set`, `--set-string`, `-backend-config` and
@@ -63,6 +63,15 @@ alone; what comes back to the lead is the output, masked.
   aside); `--token`, `--password`, `--kube-token`, `--client-key`,
   `--vault-password`; and any argument containing a stored secret's
   value. The refusal says to use a reference.
+- **Opaque values require a reference.** Parse each tool's argument forms
+  before publishing a tool event, card, error or log entry. For free-form
+  values (including Helm settings, extra vars and connection strings), accept
+  only a named secret reference or a field with a known public type and a
+  value that validates against it, such as an integer replica count. Unknown
+  fields, compound values the parser cannot validate and URIs containing
+  credentials require a reference even if the password is absent from the
+  store. A refusal identifies the option and omits its raw argument.
+  Cards, facts and logs all use the same checked argument list.
 
 ### Where it runs, and what it reaches
 
@@ -91,16 +100,24 @@ lead's to change. So a run is not "the person, outside every sandbox":
   default branch, Ansible collections and roles installed by Althar from
   `requirements.yml` as merged, Helm and kubectl plugins the person
   installed (never `HELM_PLUGINS` or a `PATH` from the worktree).
-- **Code the task changed runs only on a decision.** Where the files a run
-  executes (roles, plugins, `library/`, `filter_plugins/`, local Terraform
-  modules, `*.tf` with `external` or `local-exec`, a chart's templates)
-  differ from the default branch, the run is unsure (ADR-115) whatever its
-  flags say, with only A as with B: it asks, and in B goes to its
-  environment's gate. Unchanged, merged code runs as its flags say.
+- **A preview that would change something runs only on a decision.**
+  Where the code a run executes would do something for real during what
+  the person thinks is a dry run (an Ansible task with `check_mode:
+  false`, a local action, a `data "external"`, a plugin or module the
+  repository carries, a chart Althar can't render), whether the task
+  changed it or it was merged long ago, the run is unsure (ADR-115,
+  "What a read runs") whatever its flags say, with only A as with B: it
+  asks, and in B goes to its environment's gate, with no preview taken
+  first. Only a verified read-only preview qualifies as a read.
 - **Where no such sandbox starts** (Windows, the Flatpak, Linux without
-  bubblewrap), `ops_run` runs nothing that needs a credential, and says
-  why. Credential-free reads (`terraform validate`, `ansible-lint`) still
-  run there.
+  bubblewrap), `ops_run` **starts no tool at all,** credential or not,
+  and says why: `terraform validate` loads provider plugins, `ansible-lint`
+  and `ansible-inventory` import the repository's plugins and filters, and
+  withholding an injected credential doesn't stop a process from reading
+  the person's home. What still works is Althar's own checks in its own
+  process, which only parse data: reading `.althar/ops.yaml`, splitting an
+  `argv`, classifying it (ADR-115), finding its environment (ADR-116) from
+  files, showing a card. Running the tool then falls to the person.
 
 Masking (below) is for what the tool prints. It is not this boundary.
 - **Each call is classified (ADR-115) and decided** by the rules, and in
@@ -201,13 +218,13 @@ Masking is best effort, and says so: a secret transformed by a template
   agent is the one way it reaches a host, and B3 takes prod's keys out of
   that.
 - A run's own code, the task's changes included, sees only its target's
-  credentials, and runs at all only on a decision where the task changed
-  it.
+  credentials, and a run whose preview would change something for real,
+  merged code included, runs at all only on a decision.
 - Infra commands and changes to hosts go through one tool, which gives
   step B a single place to classify, gate, lock and log them.
 - `ops_run` needs the OS sandbox the leads use, started by the runtime
-  for a process of its own. Where it can't start, nothing that needs a
-  credential runs, which is stricter than today.
+  for a process of its own. Where it can't start, no tool runs through it
+  at all, which is stricter than today.
 - A Codex, OpenCode or unsandboxed session anywhere on the computer holds
   secret runs back while it runs: a same-user file or descriptor is
   readable without read isolation.
@@ -224,7 +241,8 @@ Masking is best effort, and says so: a secret transformed by a template
   tools, served from `ToolServer.ts` (`POOL`) for leads in Ops, wired in
   `Runtime.ts`; built on `Launches.ts` and `runProcess.ts` (process,
   environment allowlist, live output) and `stopping.ts`; the `argv`
-  check for inline credentials and `${secret:…}` references.
+  check for inline credentials, value shapes and `${secret:…}`
+  references, and the checked arguments shared by the card and log.
 - The run's sandbox: `packages/provider-adapters/src/registry.ts`'s
   sandbox settings (`claudeSandboxStarts`, the deny list) reused for a
   process the runtime starts, with the run's folder, its narrowed
@@ -253,4 +271,10 @@ Masking is best effort, and says so: a secret transformed by a template
   the file is gone after the run, after a stop and after a crash; output
   is masked; `ops_run` refuses a shell as its program, an inline
   credential in `argv`, and a secret while an unsandboxed session runs; a
-  run reads nothing of the home folder beyond what it was given.
+  run reads nothing of the home folder beyond what it was given; where no
+  sandbox starts, `terraform validate` isn't started either. Value shapes:
+  `helm upgrade --set database.url=postgres://app:hunter2@db/prod`, with
+  `hunter2` in no store, is refused; so is `-e 'dsn=host=db password=x'`;
+  neither refusal echoes the argument in an event, card, error or log.
+  A configured public integer field accepts `--set replicas=3`. An unknown
+  field with a short ordinary-looking string still requires a reference.
