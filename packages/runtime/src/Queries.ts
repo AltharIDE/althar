@@ -2939,8 +2939,8 @@ export class Queries extends Context.Service<
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
                   // Null where nothing says when: the card then shows no time.
                   const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? task.createdAt
-                  // The person's own Stop, on its card or in its menu.
-                  const theirs = suspended?.kind === 'person' ? { who: 'person' as const } : {}
+                  // The person's own Stop, on its card or in its menu; a reason or a fold said after it, by whoever said it.
+                  const theirs = { ...(suspended?.kind === 'person' ? { who: 'person' as const } : {}), ...said }
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at, ...theirs }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.

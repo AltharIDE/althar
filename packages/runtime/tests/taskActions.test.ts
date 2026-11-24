@@ -13,6 +13,7 @@ import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Tasks } from '../src/Tasks'
 import { fact, timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -208,17 +209,46 @@ describe('stop_task', () => {
         why: 'the person asked for it here.',
         into: { threadId: other.threadId, title: 'Phone pairs over Wi-Fi' },
       })
-      // Stopped already, the coordinator saying why changes only what its card says.
+      // Stopped already, the coordinator saying why changes only the reason on its card: who stopped it, and where its
+      // work went, stand.
       assert.match(
         yield* callTool(c.access, 'stop_task', { task: task.slug, why: 'done in the pairing task' }),
         /was stopped already: its card now says why/,
       )
-      const after = yield* until(cardOf, (one) => one?.stopped?.who === 'coordinator')
-      assert.strictEqual(after?.stopped?.why, 'done in the pairing task')
-      assert.isUndefined(after?.stopped?.lead)
+      const after = yield* until(cardOf, (one) => one?.stopped?.why === 'done in the pairing task')
+      assert.deepInclude(after?.stopped, {
+        who: 'lead',
+        lead: { threadId: other.threadId, title: 'Phone pairs over Wi-Fi' },
+        into: { threadId: other.threadId, title: 'Phone pairs over Wi-Fi' },
+      })
       // Nothing to say, it changes nothing; and no task's work goes on in itself.
       assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /^Nothing changed/)
       assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug, into: task.slug }), /can’t go on in itself/)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('says on the card of a task the person stopped the reason and the fold said after, still as theirs', () =>
+    Effect.gen(function* () {
+      const c = yield* coordinator
+      const task = yield* started(c.projectId, 'Pull to reload', 'Work on it. [lead:wait]')
+      const other = yield* started(c.projectId, 'Phone pairs over Wi-Fi', 'Work on it. [lead:wait]')
+      yield* until(standing(task.taskId), (row) => row?.run === 'running')
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', { taskId: task.taskId }), taskId: task.taskId })
+      const cardOf = Effect.map(Effect.orDie((yield* Queries).board(c.projectId)), (board) =>
+        board.tasks.find((one) => one.taskId === task.taskId),
+      )
+      const stopped = yield* until(cardOf, (one) => one?.phase === 'stopped')
+      assert.strictEqual(stopped?.stopped?.who, 'person')
+      assert.match(
+        yield* callTool(c.access, 'stop_task', { task: task.slug, why: 'the person asked for it there', into: other.slug }),
+        /was stopped already/,
+      )
+      const after = yield* until(cardOf, (one) => one?.stopped?.into !== undefined)
+      assert.deepInclude(after?.stopped, {
+        who: 'person',
+        why: 'the person asked for it there',
+        into: { threadId: other.threadId, title: 'Phone pairs over Wi-Fi' },
+      })
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 

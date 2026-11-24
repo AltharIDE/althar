@@ -730,6 +730,8 @@ export class TaskActions extends Context.Service<
               ...(words === undefined ? {} : { words }),
               ...(nonEmpty(asked.why) ? { why: asked.why.trim() } : {}),
               ...(into === undefined ? {} : { into: into.id }),
+              // Said of a task stopped already: a reason or a fold, never who stopped it.
+              ...(noted ? { noted: true } : {}),
               by: access.role,
               // The task whose lead did it, so its card can name that task.
               ...(access.role === 'lead' && access.taskId !== null ? { from: access.taskId } : {}),
@@ -1965,7 +1967,7 @@ export class TaskActions extends Context.Service<
               into: {
                 type: 'string',
                 description:
-                  'Where its work goes on instead, as the slug of another task, when the person asked for it to be done there: its card then reads as folded into that task, settled rather than waiting on the person, and Resume still carries it on. On a task stopped already, it and why only change what its card says.',
+                  'Where its work goes on instead, as the slug of another task, when the person asked for it to be done there: its card then reads as folded into that task, settled rather than waiting on the person, and Resume still carries it on. On a task stopped already, it and why only add to what its card says: who stopped it stays, and a fold or reason said before stands until another replaces it.',
               },
             },
             required: ['task'],

@@ -17,6 +17,15 @@ const said = (payload: string, key: string): string => {
   }
 }
 
+/** Whether a stop fact only says why, or where its work went, of a task stopped already. */
+const noted = (payload: string): boolean => {
+  try {
+    return (JSON.parse(payload) as Record<string, unknown> | null)?.['noted'] === true
+  } catch {
+    return false
+  }
+}
+
 /** A task as a stopped card names it: its title and its thread. */
 const namedTask = (taskId: string) =>
   Effect.gen(function* () {
@@ -27,24 +36,29 @@ const namedTask = (taskId: string) =>
   })
 
 /**
- * Who stopped a task, why, and where its work went on, as stop_task recorded it (TaskActions): its latest stop since its run
- * was suspended at `since`, a stop said again on a task stopped already included. A lead's stop recorded before it named its
+ * Who stopped a task, why, and where its work went on, as stop_task recorded it (TaskActions): its stops since its run was
+ * suspended at `since`, those said again on a task stopped already included: who from the latest, a reason or a fold from
+ * the latest that says one. A lead's stop recorded before it named its
  * task names the task that started this one, whose lead it almost always is. Nothing where nothing is on record.
  */
 export const stopSaid = (taskId: string, since: number | null, parentId: string | null) =>
   Effect.gen(function* () {
     if (since === null) return {}
     const sql = yield* SqlClient.SqlClient
-    const [moved] = yield* sql<{ payload: string }>`
+    const stops = yield* sql<{ payload: string }>`
       SELECT payload FROM record_events
       WHERE aggregate_type = 'task' AND aggregate_id = ${taskId} AND type IN ('task.moved', 'task.moved_on_word')
         AND json_extract(payload, '$.move') = 'stop' AND sequence > ${since}
-      ORDER BY sequence DESC LIMIT 1`
-    if (moved === undefined) return {}
-    const role = said(moved.payload, 'by')
-    const why = said(moved.payload, 'why').trim()
-    const from = said(moved.payload, 'from') || (role === 'lead' ? parentId : null)
-    const into = said(moved.payload, 'into')
+      ORDER BY sequence`
+    if (stops.length === 0) return {}
+    // Who is the stop itself; a reason or a fold said after it, on a task stopped already, never changes who stopped it, and
+    // stands until a later one says another.
+    const stop = stops.findLast((one) => !noted(one.payload))
+    const last = (key: string) => stops.reduceRight((found, one) => found || said(one.payload, key), '')
+    const role = stop === undefined ? '' : said(stop.payload, 'by')
+    const why = last('why').trim()
+    const from = (stop === undefined ? '' : said(stop.payload, 'from')) || (role === 'lead' ? parentId : null)
+    const into = last('into')
     const lead = role === 'lead' && from !== null && from !== '' ? yield* namedTask(from) : undefined
     const went = into === '' ? undefined : yield* namedTask(into)
     return {
