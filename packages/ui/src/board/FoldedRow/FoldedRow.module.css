@@ -1,0 +1,65 @@
+/* Two quiet lines: its title and when it stopped; the task its work went on in, and Resume at its end on hover. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'title at'
+    'into resume';
+  align-items: center;
+  gap: 2px 8px;
+  padding: 9px 10px;
+}
+.title {
+  grid-area: title;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.at {
+  grid-area: at;
+  font-size: 11px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+/* One line at any width: the label stays whole, the task's title is cut with "…", its whole on hover. */
+.into {
+  grid-area: into;
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.lead {
+  flex: none;
+  white-space: pre;
+}
+/* above the row's own button, stretched over it */
+.task {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* above the row's own button too; shown as the row is hovered or has the focus, always where nothing hovers, and while it works */
+.resume {
+  grid-area: resume;
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.row:hover .resume,
+.row:focus-within .resume,
+.resume.busy {
+  opacity: 1;
+}
+@media (hover: none) {
+  .resume {
+    opacity: 1;
+  }
+}

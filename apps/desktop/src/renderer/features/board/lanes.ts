@@ -11,6 +11,7 @@ import {
 } from '@althar/contracts'
 
 import { asMerging } from '../../data/merges'
+import { isFolded } from '../../shared/steps'
 
 /*
  * Which lane of the board each task and call goes in (ADR-065). Up next:
@@ -88,7 +89,7 @@ export interface Lanes {
   readonly waiting: ReadonlyArray<Waiting>
   /** Tasks that wait on nothing but issues their lead drafted, or changes to their issue, for the person to file or apply. */
   readonly issues: ReadonlyArray<BoardTask>
-  /** Stopped tasks held Up next for Resume, the latest stopped first; outside Needs you. */
+  /** Stopped tasks held Up next for Resume, the latest stopped first; outside Needs you. Those folded into another task are rows. */
   readonly stopped: ReadonlyArray<BoardTask>
   /** Calls no task on the board waits on: the coordinator's questions, and a held plan's. */
   readonly calls: ReadonlyArray<BoardCall>
@@ -165,7 +166,8 @@ export const lanesOf = (
     // By their latest exchange, the latest first; one with nothing said yet, by when it began.
     scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
     ...arranged,
-    upNext: arranged.upNext + stopped.length,
+    // A task whose work went on in another is settled in all but name: a quiet row, not counted as up next.
+    upNext: arranged.upNext + stopped.filter((task) => !isFolded(task.stopped)).length,
     waiting: waits.waiting,
     issues: waits.issues,
     stopped,

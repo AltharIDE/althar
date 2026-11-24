@@ -26,7 +26,7 @@ import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText, stoppedWords } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
@@ -493,19 +493,22 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now = discarded
     ? undefined
-    : standing !== undefined
-      ? standing
-      : status === TaskStatus.Done
-        ? card.summary?.split('\n')[0]
-        : card.externalWait !== undefined
-          ? externalWaitWords(card.externalWait, clock)
-          : card.queued !== null
-            ? queuedWords(card.queued)
-            : card.waits !== null
-              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-              : card.reconnects != null
-                ? reconnectsWords(card.reconnects, clock)
-                : stepNow(card.step, card.shipAt)
+    : // Stopped: who stopped it and why, or the task its work went on in, rather than the step it was cut short in.
+      status === TaskStatus.Stopped && card.phase === 'stopped'
+      ? stoppedWords(card.stopped)
+      : standing !== undefined
+        ? standing
+        : status === TaskStatus.Done
+          ? card.summary?.split('\n')[0]
+          : card.externalWait !== undefined
+            ? externalWaitWords(card.externalWait, clock)
+            : card.queued !== null
+              ? queuedWords(card.queued)
+              : card.waits !== null
+                ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+                : card.reconnects != null
+                  ? reconnectsWords(card.reconnects, clock)
+                  : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
@@ -582,7 +585,7 @@ function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardA
       case AsideState.Failed:
         return answer
       case AsideState.Stopped:
-        return card.stopped?.by == null ? undefined : stepText.stoppedBy[card.stopped.by]
+        return stoppedWords(card.stopped)
       case AsideState.Waiting:
         return card.queued !== null
           ? queuedWords(card.queued)

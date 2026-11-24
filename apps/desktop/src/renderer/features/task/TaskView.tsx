@@ -73,7 +73,7 @@ import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { stepNow, stepText, trackFor } from '../../shared/steps'
+import { stepNow, stepText, stoppedWords, trackFor } from '../../shared/steps'
 import { MERGE_QUEUE_STEP, queuedToMerge, shownChangeOf } from '../../data/merges'
 import { ago, clock, MINUTE, running, SECOND, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
@@ -311,10 +311,10 @@ export const statusOf = (
       // Abandoned, it says so in place of where it stood, as stopped does.
       return { status, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
     case TaskStatus.Stopped: {
-      const by = snapshot.task.stopped?.by
+      const why = stoppedWords(snapshot.task.stopped)
       // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
       const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
-      return { status, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+      return { status, state, ...(why === undefined ? {} : { why }) }
     }
     case TaskStatus.Running:
       // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.

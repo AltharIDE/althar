@@ -27,6 +27,7 @@ import {
   FactLine,
   FileChips,
   Findings,
+  FoldedRow,
   KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
@@ -74,7 +75,7 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, isFolded, stepNow, stepText, stoppedWords } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -523,7 +524,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
           : status === TaskStatus.Queued
             ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
             : status === TaskStatus.Stopped
-              ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
+              ? { status, word: text.status[status], ...whyStopped(work) }
               : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
                 work.settingUp != null
                 ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
@@ -580,6 +581,47 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   }
 }
 
+/** Who stopped a task and the reason they gave, or the task its work went on in, under its title; nothing where nothing says. */
+const whyStopped = (work: BoardTask): Pick<Card, 'why'> => {
+  const why = stoppedWords(work.stopped)
+  return why === undefined ? {} : { why }
+}
+
+/**
+ * A task stopped because its work went on in another (`stopped.into`): one quiet row, its title, when, and that task, which
+ * opens it; Resume at its end on hover, which tells its lead to go on, as a stopped card's does.
+ */
+function Folded({
+  work,
+  now,
+  actions,
+  onOpen,
+}: {
+  work: BoardTask
+  now: string
+  actions: CardActions | undefined
+  onOpen: (threadId: string) => void
+}) {
+  const into = work.stopped?.into
+  const sendBack = actions?.sendBack
+  return (
+    <FoldedRow
+      data-move={work.taskId}
+      title={useTaskTitle(work.taskId, work.title)}
+      into={into?.title ?? ''}
+      {...(into === undefined ? {} : { onOpenInto: () => onOpen(into.threadId) })}
+      {...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) })}
+      onOpen={() => onOpen(work.threadId)}
+      {...(sendBack === undefined
+        ? {}
+        : {
+            onResume: () => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true),
+            resuming: actions?.sending?.has(work.taskId) ?? false,
+          })}
+    />
+  )
+}
+
 /**
  * A task whose lead stopped with no agent on it: the person's to carry on or abandon. When it stopped, not a running time, and why
  * in plain words, with its branch and what changed in it, and Carry on, which tells the lead to go on. A conflict with the default
@@ -598,8 +640,8 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     status: TaskStatus.Stopped,
     // A draft whose plan never came didn't stop: it has no plan, and nothing stopped it.
     word: work.unplanned === true ? text.unplanned : text.status[TaskStatus.Stopped],
-    // What stopped it, where something says; the word Stopped says the rest.
-    ...(work.stopped?.by == null || work.unplanned === true ? {} : { why: text.stoppedBy[work.stopped.by] }),
+    // Who stopped it and why, where something says; the word Stopped says the rest.
+    ...(work.unplanned === true ? {} : whyStopped(work)),
     // When, where something says; else no time.
     ...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
@@ -1380,19 +1422,28 @@ export function BoardView({
                 })}
           />
         )}
-        {lanes.stopped.length > 0 && (
+        {/* Cards apart, as the lane's others are; a list rules rows, not cards. */}
+        {lanes.stopped
+          .filter((work) => !isFolded(work.stopped))
+          .map((work) => (
+            <BoardCard
+              taskId={work.taskId}
+              key={work.taskId}
+              data-move={work.taskId}
+              {...stoppedCardOf(work, now, actions)}
+              {...parentOf(work, onOpen)}
+              errands={work.errands}
+              onOpen={() => onOpen(work.threadId)}
+            />
+          ))}
+        {/* Its work gone on in another task: settled in all but name, a quiet row, Resume there on hover. */}
+        {lanes.stopped.some((work) => isFolded(work.stopped)) && (
           <BoardList>
-            {lanes.stopped.map((work) => (
-              <BoardCard
-                taskId={work.taskId}
-                key={work.taskId}
-                data-move={work.taskId}
-                {...stoppedCardOf(work, now, actions)}
-                {...parentOf(work, onOpen)}
-                errands={work.errands}
-                onOpen={() => onOpen(work.threadId)}
-              />
-            ))}
+            {lanes.stopped
+              .filter((work) => isFolded(work.stopped))
+              .map((work) => (
+                <Folded key={work.taskId} work={work} now={now} actions={actions} onOpen={onOpen} />
+              ))}
           </BoardList>
         )}
         {[halted, forLocal].map(

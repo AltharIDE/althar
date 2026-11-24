@@ -2549,6 +2549,67 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('says who stopped a task and why, and keeps one folded into another task as a quiet row, Resume on it', async () => {
+    const pairing = { threadId: 'th-pair', title: 'Phone pairs with this Mac over Wi-Fi' }
+    tasks = [
+      task({
+        taskId: 's11',
+        threadId: 'th-s11',
+        title: 'Slow search',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z', who: 'lead', lead: pairing, why: 'It reads the wrong index.' },
+      }),
+      task({
+        taskId: 's12',
+        threadId: 'th-s12',
+        title: 'Crisp pull-to-reload icon',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z', who: 'lead', lead: pairing, why: 'Asked to.', into: pairing },
+      }),
+      task({
+        taskId: 's13',
+        threadId: 'th-s13',
+        title: 'Stopped by hand',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: null, at: '2026-09-29T09:00:00.000Z', who: 'person' },
+      }),
+    ]
+    const send = vi.fn(async () => {})
+    const resumeTask = vi.fn(async () => {})
+    const base = snapshot()
+    const getThread = vi.fn(async () =>
+      snapshot({
+        session: null,
+        task: { ...base.task, actions: ['resume', 'abandon'], lead: { agentId: 'claude-code', model: null, account: null } },
+      }),
+    )
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, resumeTask, getThread, getBoard: getBoard() }).client)
+    // A lead's stop names its task, and the reason it gave; the person's says so.
+    expect(
+      (await cardOf('Slow search')).getByText('Stopped by Phone pairs with this Mac over Wi-Fi: It reads the wrong index'),
+    ).toBeTruthy()
+    expect((await cardOf('Stopped by hand')).getByText('Stopped by you')).toBeTruthy()
+    // Cards stand apart, as the lane's others do, never ruled together in one list.
+    expect(screen.getByRole('button', { name: 'Slow search' }).closest('li')).toBeNull()
+    // Folded into another task: a quiet row, not a card with a track and a violet Resume.
+    const row = await cardOf('Crisp pull-to-reload icon')
+    expect(row.getByText('Folded into')).toBeTruthy()
+    expect(row.queryByText('Stopped')).toBeNull()
+    expect(row.queryByText('Implement')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Crisp pull-to-reload icon' }).closest('li')).not.toBeNull()
+    // The task it went into opens from it.
+    await userEvent.click(row.getByRole('button', { name: 'Phone pairs with this Mac over Wi-Fi' }))
+    expect(onOpen).toHaveBeenCalledWith('th-pair')
+    // Resume is still there, and tells its lead to go on.
+    await userEvent.click(row.getByRole('button', { name: 'Resume' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-s12', body: 'Carry on.', disposition: 'after_current' }))
+    await waitFor(() => expect(resumeTask).toHaveBeenCalledWith({ taskId: 's12' }))
+  })
+
   it('says why the lead couldn’t resolve a conflict, and opens its task rather than asking the lead again (DEV-173)', async () => {
     const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
     tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
