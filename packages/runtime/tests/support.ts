@@ -106,6 +106,9 @@ export const sessionsAsked: Array<{
   readonly params: Parameters<NonNullable<FakeAgentOptions['sessionAsked']>>[0]
 }> = []
 
+/** Each prompt a fake agent in this process received, when and as it read it: what a test says it was asked, failing. */
+export const promptsGot: Array<{ readonly agentId: string; readonly at: string; readonly text: string }> = []
+
 /** What the registry's launch reads of this machine for an agent's own config, set aside while it is made here. */
 const MACHINE_CONFIG = ['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'] as const
 
@@ -266,6 +269,7 @@ export const fakeAgents = (
                 agent: fakeAgent({
                   now: () => clock.currentTimeMillisUnsafe(),
                   sessionAsked: (params) => void sessionsAsked.push({ agentId, params }),
+                  promptAsked: (text) => void promptsGot.push({ agentId, at: new Date().toISOString(), text }),
                   ...options,
                   ...each[agentId],
                   ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],

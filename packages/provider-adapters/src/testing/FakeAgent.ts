@@ -538,6 +538,8 @@ const leaveRunning = async (
     // started, on which port, and how it ended go in a file beside its output (`serverSeen`), for a test to say what it saw.
     const out = openSync(outputPath, 'a')
     const seen = serverSeen(outputPath)
+    // Begun again for each: the folder is shared, and a session's name comes again in the next run.
+    writeFileSync(seen, '')
     const note = (what: Record<string, unknown>) => appendFileSync(seen, `${JSON.stringify({ at: Date.now(), ...what })}\n`)
     const listen = `const s = require('net').createServer(); s.on('error', (e) => require('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ at: Date.now(), server: 'error', message: String(e) }) + '\\n')); s.listen(0, '127.0.0.1', () => require('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ at: Date.now(), server: 'listening', pid: process.pid, port: s.address().port }) + '\\n'))`
     server = spawn(process.execPath, ['-e', listen], { stdio: ['ignore', out, out] })

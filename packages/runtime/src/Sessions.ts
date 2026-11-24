@@ -62,7 +62,7 @@ import { BETWEEN_AGENTS_MS } from './needsYou'
 import { Permissions } from './Permissions'
 import { PlanUsage } from './PlanUsage'
 import { Policies } from './Policies'
-import { holding, portFor, portsSeenBelow } from './ports'
+import { holding, portFor, type PortsPart, portsSeenBelow } from './ports'
 import { Questions } from './Questions'
 import { outputText } from './reading'
 import { change, fact, timestamp } from './records'
@@ -740,12 +740,18 @@ export class Sessions extends Context.Service<
       const notingListening = (running: Running) =>
         Effect.gen(function* () {
           const agent = running.connection.process?.pid
-          const seen = agent === undefined ? Option.none() : yield* portsSeenBelow([agent]).pipe(Effect.timeoutOption(BASELINE_WITHIN))
+          // Each listing as it is read, so one that runs out of time still says what it had.
+          const parts: Array<PortsPart> = []
+          const seen =
+            agent === undefined
+              ? Option.none()
+              : yield* portsSeenBelow([agent], undefined, (part) => void parts.push(part)).pipe(Effect.timeoutOption(BASELINE_WITHIN))
           runtimeConfig.serving?.looked?.({
             kind: 'before',
             at: yield* Clock.currentTimeMillis,
             agent: agent ?? null,
             seen: Option.getOrNull(seen),
+            parts,
           })
           const ports = Option.match(seen, { onNone: () => [], onSome: (one) => one.ports })
           const before = yield* Deferred.make<ReadonlySet<number>>()
@@ -761,25 +767,29 @@ export class Sessions extends Context.Service<
       const watchServing = (running: Running, id: string, before: Deferred.Deferred<ReadonlySet<number>>) =>
         Effect.gen(function* () {
           const known = yield* Deferred.await(before)
+          // Why it stops looking, for whoever watches the looks (`RuntimeOptions.serving`).
+          const stopped = (why: 'gone' | 'ended' | 'found in its output' | 'out of tries') =>
+            Effect.map(Clock.currentTimeMillis, (at) => runtimeConfig.serving?.looked?.({ kind: 'stopped', at, id, why }))
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
-            if (left === undefined || left.ended !== null) return
+            if (left === undefined || left.ended !== null) return yield* stopped(left === undefined ? 'gone' : 'ended')
             const printed = yield* printedBy(left)
             const port =
               left.url === null && servingAt(printed) === null && tries % PORTS_EVERY === PORTS_EVERY - 1
                 ? yield* listeningPort(running, left, known)
                 : null
             const now = running.background.get(id)
-            if (now === undefined || now.ended !== null) return
+            if (now === undefined || now.ended !== null) return yield* stopped(now === undefined ? 'gone' : 'ended')
             const found = addressOf(now, printed, port)
             if (found !== null) {
               now.url = found.url
               now.inferred = found.inferred
               yield* toldBackground(running)
-              if (!found.inferred) return
+              if (!found.inferred) return yield* stopped('found in its output')
             }
             yield* Effect.sleep(SERVING_EVERY)
           }
+          yield* stopped('out of tries')
         })
 
       /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */

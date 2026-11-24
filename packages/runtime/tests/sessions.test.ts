@@ -16,7 +16,7 @@ import { Instance } from '../src/Instance'
 import { Live } from '../src/Live'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
-import type { PortLook, PortsSeen } from '../src/ports'
+import type { PortLook, PortsSeen, Ran } from '../src/ports'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -901,43 +901,77 @@ describe('sessions', () => {
     )
 
     /**
-     * The port search's looks, for a wait's report: what its tree listened on as the turn began, how many looks there
-     * were, and the last few, each with what it was given and answered, every port the machine listed in the tree, and
-     * the commands it ran. A machine lists many listeners: only how many, and those in the tree, are kept.
+     * What the fake quiet server wrote of itself (`serverSeen`): spawned, listening on which port, errored or exited. Read
+     * from where the fake agent puts it, by its session and the command's id, whether or not a port search ran.
      */
-    const lookedAt = (looks: ReadonlyArray<PortLook>) => {
-      const brief = (seen: PortsSeen | null) =>
-        seen === null
-          ? 'ran out of time'
-          : {
-              roots: seen.roots,
-              processes: seen.processes,
-              tree: seen.tree,
-              listening: seen.listening.length,
-              inTree: seen.listening.filter((one) => seen.tree.includes(one.pid)),
-              ran: seen.ran,
-            }
-      const all = looks.filter((one) => one.kind === 'look')
-      return {
-        before: looks.filter((one) => one.kind === 'before').map((one) => ({ at: one.at, agent: one.agent, seen: brief(one.seen) })),
-        looks: all.length,
-        last: all.slice(-3).map((one) => ({ ...one, seen: brief(one.seen) })),
+    const serverSaid = (threadId: string, id: string | undefined) =>
+      Effect.gen(function* () {
+        if (id === undefined) return { said: ['server: nothing shown yet'], lines: [] }
+        const rows = yield* (yield* SqlClient.SqlClient)<{ externalSessionId: string | null }>`
+          SELECT external_session_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY rowid DESC LIMIT 1`
+        const session = rows[0]?.externalSessionId
+        if (session == null) return { said: ['server: no session id'], lines: [] }
+        const path = serverSeen(join(tmpdir(), 'althar-fake-agent', `${session}-${id}.output`))
+        try {
+          const lines = readFileSync(path, 'utf8')
+            .trim()
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => JSON.parse(line) as Record<string, unknown>)
+          const said = lines.map((line) => `server ${Object.values(line).map(String).join(' ')}`.slice(0, 160))
+          return { said: said.length > 0 ? said : ['server: nothing written'], lines }
+        } catch (error) {
+          return { said: [`server: nothing at ${path}: ${String(error)}`.slice(0, 160)], lines: [] }
+        }
+      })
+
+    /**
+     * The port search's looks in short lines (a wait's message cuts each long one), for its message, which leads with what
+     * decides it: how many looks there were and why they stopped, the last ones, each with what it was given and
+     * answered, and whether the machine listed the server's process (`server`), under which parent, and its port; then
+     * what the agent's tree listened on as the turn began. Every look in full goes to stderr.
+     */
+    const looksInBrief = (looks: ReadonlyArray<PortLook>, server: number | undefined) => {
+      const ran = (seen: { readonly ran: ReadonlyArray<Ran> }) =>
+        `  ran ${seen.ran.map((one) => `${one.command} ${one.ms}ms${one.failed === null ? '' : ` failed ${one.failed}`}`).join(', ')}`.slice(
+          0,
+          160,
+        )
+      const of = (seen: PortsSeen) => {
+        const parent = seen.parents.find(([pid]) => pid === server)?.[1]
+        const listed = seen.listening.filter((one) => one.pid === server).map((one) => one.port)
+        return [
+          `  roots ${seen.roots.join(',')} tree ${seen.tree.join(',')}`.slice(0, 160),
+          `  ${seen.parents.length} processes, ${seen.listening.length} listening, found ${seen.ports.join(',') || '-'}`,
+          `  server ${server ?? '?'} ${parent === undefined ? 'not listed' : `under ${parent}`}, ${listed.length > 0 ? `on ${listed.join(',')}` : 'no port listed'}`,
+          ran(seen),
+        ]
       }
+      const all = looks.filter((one) => one.kind === 'look')
+      return [
+        `${all.length} looks`,
+        ...looks.flatMap((one) => (one.kind === 'stopped' ? [`stopped ${one.at} ${one.id}: ${one.why}`] : [])),
+        ...all
+          .slice(-2)
+          .flatMap((one) => [
+            `look ${one.at} ${one.id} held ${one.held.join(',') || '-'} known ${one.known.join(',') || '-'} claimed ${one.claimed.join(',') || '-'} rivals ${one.rivals} -> ${one.port ?? 'null'}`,
+            ...of(one.seen),
+          ]),
+        ...looks.flatMap((one) =>
+          one.kind !== 'before'
+            ? []
+            : [
+                `before ${one.at} agent ${one.agent ?? '-'}${one.seen === null ? ': ran out of time, having read' : ''}`,
+                ...(one.seen === null ? one.parts.map((part) => `  ${part.listing}${ran(part)}`) : of(one.seen)),
+              ],
+        ),
+      ]
     }
 
     it.live('finds where one answers from its port when its output never says, and it keeps its name', () => {
-      // What the port search looked at each time, and what the fake server said of itself: given up on, the wait says both (#595).
+      // Every look the port search took, and what the fake server said of itself: given up on, the wait leads with both in
+      // brief, and stderr, which the job's log keeps even where a retry passes, has them in full (#595).
       const looks: Array<PortLook> = []
-      const server = () => {
-        const look = [...looks].reverse().find((one) => one.kind === 'look' && one.outputPath !== null)
-        const path = look?.kind === 'look' && look.outputPath !== null ? serverSeen(look.outputPath) : null
-        if (path === null) return 'no look had its output file'
-        try {
-          return readFileSync(path, 'utf8').trim().split('\n')
-        } catch (error) {
-          return `nothing at ${path}: ${String(error)}`
-        }
-      }
       return Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
@@ -946,11 +980,33 @@ describe('sessions', () => {
         yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
+        const seenNow = Effect.gen(function* () {
+          const all = yield* shown(created.threadId)
+          const server = yield* serverSaid(created.threadId, all[0]?.id)
+          // The listening server's process, else the one the fake agent spawned.
+          const pid = (server.lines.find((line) => line.server === 'listening') ?? server.lines.find((line) => line.agent === 'spawned'))
+            ?.pid
+          return {
+            shown: all,
+            brief: [
+              `shown ${all.map((one) => `${one.id} ${one.url ?? 'no url'}${one.ended === null ? '' : ' ended'}`).join(', ') || 'nothing'}`,
+              ...server.said,
+              ...looksInBrief(looks, typeof pid === 'number' ? pid : undefined),
+            ],
+            server: server.lines,
+          }
+        })
         const {
           shown: [serving],
         } = yield* until(
-          Effect.map(shown(created.threadId), (all) => ({ shown: all, server: server(), looks: lookedAt(looks) })),
+          Effect.map(seenNow, ({ shown: all, brief }) => ({ brief, shown: all })),
           (seen) => seen.shown[0]?.url != null,
+        ).pipe(
+          Effect.tapCause(() =>
+            Effect.map(seenNow, (now) =>
+              process.stderr.write(`\n#595, finds where one answers from its port:\n${JSON.stringify({ ...now, looks }, null, 1)}\n`),
+            ),
+          ),
         )
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         assert.strictEqual(serving?.name, 'Start the dev server')

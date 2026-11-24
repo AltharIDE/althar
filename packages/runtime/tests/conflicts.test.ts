@@ -20,7 +20,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { fakeConnectors, notices, repository, runtime, until } from './support'
+import { fakeConnectors, notices, promptsGot, repository, runtime, until } from './support'
 import {
   runtimeWith,
   git,
@@ -209,16 +209,31 @@ describe('a conflict merging here', () => {
       )
     /** The waiting round's task's card, by its id. */
     const cardOf = (projectId: string, taskId: string) => Effect.map(cards(projectId), (all) => all.filter((one) => one.taskId === taskId))
-    // The test's own moments, and each time the lead was asked, with what asked it: failing, it says them all (#1158).
+    // The test's own moments, each time the lead was asked and by what, and each prompt it got: failing, it says them all
+    // (#1158). The message leads with what decides it, short enough for the flaky issue; the whole story goes to stderr,
+    // which the job's log keeps even where a retry passes.
     const marks: Array<{ readonly at: string; readonly what: string }> = []
     const mark = (what: string) => void marks.push({ at: new Date().toISOString(), what })
+    const began = new Date().toISOString()
     const askedTimes = (taskId: string, threadId: string, times: number) =>
       Effect.gen(function* () {
         const notes = yield* asked(threadId)
-        if (notes.length !== times)
-          assert.fail(
-            `The lead was asked ${notes.length} times, not ${times}; it saw ${JSON.stringify(yield* story(taskId, threadId, marks))}`,
-          )
+        if (notes.length === times) return
+        const got = promptsGot.filter((one) => one.at >= began)
+        const told = yield* story(taskId, threadId, marks, got)
+        const asks = told.rounds.filter((one) => one.type === 'conflict_resolution.asked')
+        const short = (at: string) => at.slice(11, 23)
+        const summary = [
+          `The lead was asked ${notes.length} times, not ${times}.`,
+          `Asked: ${asks.map((one) => `${short(one.occurredAt)} ${one.payload}`).join('; ')}.`,
+          // Every prompt begins alike: whether it carries the ask, and how long it is, tells them apart.
+          `Prompts the agents got: ${got.map((one) => `${short(one.at)} ${one.agentId} ${one.text.includes('Bring the branch up to date') ? 'with the ask' : 'without'} (${one.text.length})`).join('; ')}.`,
+          `Inputs: ${told.inputs.map((one) => `#${one.sequence} ${short(one.acceptedAt)} ${one.state}`).join('; ')}.`,
+          `Turns: ${told.deliveries.map((one) => `${short(one.requestedAt)} ${one.state} inputs ${one.inputs ?? '-'}`).join('; ')}.`,
+          `Moments: ${marks.map((one) => `${short(one.at)} ${one.what}`).join('; ')}.`,
+        ].join('\n')
+        process.stderr.write(`\n#1158, waits for a place among the agents:\n${summary}\n${JSON.stringify(told, null, 1)}\n`)
+        assert.fail(`${summary}\nThe whole story is on stderr, in the job's log.`)
       })
     return Effect.gen(function* () {
       const before = yield* Effect.gen(function* () {

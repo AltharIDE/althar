@@ -568,7 +568,8 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
         const round = yield* roundOf({ id })
         if (round === undefined || round.state !== 'resolving' || round.waiting === null) return
         const waited = yield* decodeWaiting(round.waiting)
-        yield* askLead(round, 'given a place', waited.attempt, waited.body, waited.why)
+        // Since when it waited says whether it waited from its start, or as a try again after checks failed (`why`).
+        yield* askLead(round, 'given a place', waited.attempt, waited.body, { ...waited.why, waitedSince: waited.since })
       })
 
     /** Changes a round's record, with its fact. */

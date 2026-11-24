@@ -138,11 +138,17 @@ export const asked = (threadId: string) =>
 
 /**
  * Everything the lead's thread was given and did, in order, for a test's failure to say what it saw: each input, when,
- * from what command and what that command recorded; each step of the task's rounds, which says what asked the lead (a
- * place freeing, a restart, a try again), and each of the lead's sessions and turns. `marks` are the test's own moments
- * (a restart, a task stopped), so each can be placed among them.
+ * from what command and what that command recorded, in full; each step of the task's rounds, whose asks say what asked
+ * the lead (`by`, and since when one given a place waited); each of the lead's sessions and turns; and `prompts`, each
+ * prompt the fake lead received, in full. `marks` are the test's own moments (a restart, a task stopped), so each can be
+ * placed among them.
  */
-export const story = (taskId: string, threadId: string, marks: ReadonlyArray<{ readonly at: string; readonly what: string }> = []) =>
+export const story = (
+  taskId: string,
+  threadId: string,
+  marks: ReadonlyArray<{ readonly at: string; readonly what: string }> = [],
+  prompts: ReadonlyArray<{ readonly agentId: string; readonly at: string; readonly text: string }> = [],
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const inputs = yield* sql<{
@@ -154,7 +160,7 @@ export const story = (taskId: string, threadId: string, marks: ReadonlyArray<{ r
       body: string
       recorded: string | null
     }>`
-      SELECT i.sequence, i.accepted_at, i.state, i.disposition, i.input_origin AS origin, substr(i.body, 1, 60) AS body,
+      SELECT i.sequence, i.accepted_at, i.state, i.disposition, i.input_origin AS origin, i.body,
         (SELECT group_concat(e.type || ' ' || e.aggregate_type || ' ' || e.payload, ' | ') FROM record_events e WHERE e.command_id = i.command_id) AS recorded
       FROM user_inputs i WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
     const rounds = yield* sql<{ occurredAt: string; type: string; payload: string }>`
@@ -175,6 +181,7 @@ export const story = (taskId: string, threadId: string, marks: ReadonlyArray<{ r
       FROM turn_deliveries d WHERE d.thread_id = ${threadId} ORDER BY d.requested_at`
     return {
       marks,
+      prompts,
       inputs,
       rounds,
       deliveries,

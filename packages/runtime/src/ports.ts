@@ -106,7 +106,7 @@ const printedRan = (file: string, args: ReadonlyArray<string>): Effect.Effect<{ 
           // `lsof` exits 1 where it finds nothing.
           const kept = error === null || (typeof error.code === 'number' && stdout !== '')
           const why = error?.killed === true ? 'killed (timed out)' : `code ${String(error?.code)}`
-          resume(Effect.succeed({ out: kept ? stdout : null, failed: kept ? null : `${why}: ${error?.message ?? ''}` }))
+          resume(Effect.succeed({ out: kept ? stdout : null, failed: kept ? null : `${why}: ${error?.message ?? ''}`.slice(0, 300) }))
         })
       } catch (error) {
         // Not allowed to run it, as in a sandbox.
@@ -118,6 +118,15 @@ const printedRan = (file: string, args: ReadonlyArray<string>): Effect.Effect<{ 
 
 const printed = (file: string, args: ReadonlyArray<string>): Effect.Effect<string | null> =>
   Effect.map(printedRan(file, args), (result) => result.out)
+
+/**
+ * One listing a lookup read, as soon as it read it: a lookup cut short still
+ * says what it had. `parents` are each process and its parent, `listening`
+ * every port something listened on with its process.
+ */
+export type PortsPart =
+  | { readonly listing: 'processes'; readonly ran: ReadonlyArray<Ran>; readonly parents: ReadonlyArray<readonly [number, number]> }
+  | { readonly listing: 'listeners'; readonly ran: ReadonlyArray<Ran>; readonly listening: ReadonlyArray<Listener> }
 
 const processesRan = (windows: boolean) =>
   (windows
@@ -163,32 +172,51 @@ export const holding = (path: string): Effect.Effect<ReadonlyArray<number>> =>
       )
 
 /**
- * What one lookup of the ports below `roots` saw: how many processes the
- * machine listed, the tree they make from the roots, every port something
- * listened on, and the commands it ran. Kept for whoever watches the lookups
- * (`RuntimeOptions.serving`), as a test does to say what it saw.
+ * What one lookup of the ports below `roots` saw: each process the machine
+ * listed with its parent, the tree they make from the roots, every port
+ * something listened on, the ports in the tree, and the commands it ran.
+ * Kept for whoever watches the lookups (`RuntimeOptions.serving`), as a test
+ * does to say what it saw.
  */
 export interface PortsSeen {
   readonly roots: ReadonlyArray<number>
-  readonly processes: number
+  readonly parents: ReadonlyArray<readonly [number, number]>
   readonly tree: ReadonlyArray<number>
   readonly listening: ReadonlyArray<Listener>
   readonly ports: ReadonlyArray<number>
   readonly ran: ReadonlyArray<Ran>
 }
 
-/** The ports the processes in the trees of `roots` listen on, in the order the machine lists them, with what the lookup saw. */
-export const portsSeenBelow = (roots: ReadonlyArray<number>, windows = process.platform === 'win32'): Effect.Effect<PortsSeen> =>
+/**
+ * The ports the processes in the trees of `roots` listen on, in the order the
+ * machine lists them, with what the lookup saw; `told` hears each listing as
+ * it is read.
+ */
+export const portsSeenBelow = (
+  roots: ReadonlyArray<number>,
+  windows = process.platform === 'win32',
+  told: (part: PortsPart) => void = () => undefined,
+): Effect.Effect<PortsSeen> =>
   Effect.gen(function* () {
-    if (roots.length === 0) return { roots, processes: 0, tree: [], listening: [], ports: [], ran: [] }
+    if (roots.length === 0) return { roots, parents: [], tree: [], listening: [], ports: [], ran: [] }
     // The two listings don't depend on each other, and every agent turn waits on them: read them side by side.
-    const [parents, listening] = yield* Effect.all([processesRan(windows), listenersRan(windows)], { concurrency: 'unbounded' })
+    const [parents, listening] = yield* Effect.all(
+      [
+        Effect.tap(processesRan(windows), ({ parents: all, ran }) =>
+          Effect.sync(() => told({ listing: 'processes', ran, parents: [...all] })),
+        ),
+        Effect.tap(listenersRan(windows), ({ listening: all, ran }) =>
+          Effect.sync(() => told({ listing: 'listeners', ran, listening: all })),
+        ),
+      ],
+      { concurrency: 'unbounded' },
+    )
     const tree = treeOf(parents.parents, roots)
     const ports: Array<number> = []
     for (const { pid, port } of listening.listening) if (tree.has(pid) && !ports.includes(port)) ports.push(port)
     return {
       roots,
-      processes: parents.parents.size,
+      parents: [...parents.parents],
       tree: [...tree],
       listening: listening.listening,
       ports,
@@ -225,11 +253,18 @@ export const portFor = (input: {
 /**
  * One look for where something an agent left running answers: what its tree
  * listened on as the turn began (`before`; `seen` null where that lookup ran
- * out of time), or one look for one command's port, with all `portFor` was
- * given and what it answered.
+ * out of time, `parts` what it had read by then); one look for one command's
+ * port, with all `portFor` was given and what it answered; or why the looks
+ * for one command stopped (`stopped`).
  */
 export type PortLook =
-  | { readonly kind: 'before'; readonly at: number; readonly agent: number | null; readonly seen: PortsSeen | null }
+  | {
+      readonly kind: 'before'
+      readonly at: number
+      readonly agent: number | null
+      readonly seen: PortsSeen | null
+      readonly parts: ReadonlyArray<PortsPart>
+    }
   | {
       readonly kind: 'look'
       readonly at: number
@@ -242,6 +277,12 @@ export type PortLook =
       readonly rivals: number
       readonly own: boolean
       readonly port: number | null
+    }
+  | {
+      readonly kind: 'stopped'
+      readonly at: number
+      readonly id: string
+      readonly why: 'gone' | 'ended' | 'found in its output' | 'out of tries'
     }
 
 /** Where a server on `port` answers, as a browser opens it. */
