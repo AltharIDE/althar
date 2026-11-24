@@ -343,7 +343,7 @@ describe('the board’s lanes', () => {
       })
 
       it('says what continues and why it waits, in the one order with the line and the plans, each with a grip', () => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), startAnyway: vi.fn(), failed: null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -454,7 +454,7 @@ describe('the board’s lanes', () => {
     })
 
     it('heads the plans with Planned under the line, each row saying its place; one alone has nothing to reorder', () => {
-      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
+      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), startAnyway: vi.fn(), failed: null }
       const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
       expect(screen.getByText('Next in line')).toBeTruthy()
@@ -477,7 +477,13 @@ describe('the board’s lanes', () => {
     describe('in the person’s order', () => {
       const three = [waiting('a', 1), waiting('b', 2), waiting('c', 3), planned, held]
       const drawn = (tasks: ReadonlyArray<BoardTask>) => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null as string | null }
+        const line = {
+          move: vi.fn(async () => {}),
+          oldestFirst: vi.fn(),
+          cancelTurn: vi.fn(),
+          startAnyway: vi.fn(),
+          failed: null as string | null,
+        }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,

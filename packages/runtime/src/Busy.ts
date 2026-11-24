@@ -1,6 +1,6 @@
 import { cpus, totalmem } from 'node:os'
 
-import type { Places } from '@althar/contracts'
+import type { Places, PlacesWhy } from '@althar/contracts'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -252,6 +252,16 @@ export class Busy extends Context.Service<
      */
     readonly places: Effect.Effect<Places, SqlError.SqlError>
     /**
+     * The tasks held back for now, each with why: with the person's number they would have a place, but this computer's
+     * memory or CPU lets fewer agents work (`PressureAdmission`). As the queue was last looked at; none while all may work.
+     */
+    readonly held: Effect.Effect<ReadonlyMap<string, PlacesWhy>>
+    /**
+     * Starts a task's work that waits for a place now, as the person's own start, which never waits (ADR-037): their Start
+     * anyway on a task held back. False, and nothing changes, where nothing of the task waits.
+     */
+    startNow(taskId: string): Effect.Effect<boolean>
+    /**
      * Decides, under the queue's lock, whether a task may start work now: one
      * at work already may; another only where a place is free and nothing
      * waits before it. `then` writes what was decided, the work admitted or
@@ -400,6 +410,10 @@ export class Busy extends Context.Service<
       const owed = new Set<string>()
       /* What the cards of waiting tasks last said, so they are read again when it changes. */
       let said = ''
+      /* The tasks the person started anyway: what of theirs waits stands as what the person did, until it has a place. */
+      const anyway = new Set<string>()
+      /* The tasks held back as the queue was last looked at, each with why (`held`). */
+      let heldBack: ReadonlyMap<string, PlacesWhy> = new Map()
       /*
        * What each thread's left running used of the CPU when last read, by thread: the agent's process (what it
        * started is part of its tree), each process in the tree with its CPU time then, when, when it last showed real
@@ -664,8 +678,9 @@ export class Busy extends Context.Service<
           const projectOf = new Map(read.map((row) => [row.id, row.projectId] as const))
           const tasks = yield* automated
           const each = all.map((waiter) => {
-            // A saved aside waiting from an older build starts at once too, outside the task line.
-            const asked = chatting(waiter, scratch) ? 'person' : waiter.order
+            // A saved aside waiting from an older build starts at once too, outside the task line, as does what of a task the
+            // person started anyway.
+            const asked = chatting(waiter, scratch) || anyway.has(waiter.taskId) ? 'person' : waiter.order
             const theirs = asked !== 'person' && waiter.helper === undefined
             const inLine = theirs && waiter.review !== true && line.has(waiter.taskId)
             const owes = asked !== 'person' && owed.has(waiter.taskId)
@@ -814,7 +829,11 @@ export class Busy extends Context.Service<
           const read = yield* readEverything
           const queue = yield* rank(read.waiters)
           // A failed source may hide waiting work. Keep polling even if all the readable sources are empty.
-          if (queue.length === 0) return read.failed
+          if (queue.length === 0) {
+            heldBack = new Map()
+            anyway.clear()
+            return read.failed
+          }
           const { at: busy, holders } = yield* atWork
           const settings = yield* atOnce
           const most = capacity(settings)
@@ -826,6 +845,11 @@ export class Busy extends Context.Service<
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
+          // Fewer may work for now than the person's number: what would have a place with it is held back, and says why.
+          const why = pressure.why(settings.count)
+          const held = new Map<string, PlacesWhy>()
+          // Started anyway, and no longer waiting (stopped meanwhile): nothing of it stands as the person's any more.
+          for (const taskId of anyway) if (!queue.some(({ waiter }) => waiter.taskId === taskId)) anyway.delete(taskId)
           for (const { waiter, order, placed } of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
@@ -853,6 +877,14 @@ export class Busy extends Context.Service<
               !back &&
               (busy.size >= roomUpTo(most, waiter, small) || automationsFull(order, busy, tasks))
             ) {
+              // Kept out only by the number lowered for now: one of the places beyond it, as the person's number has them.
+              if (
+                why !== null &&
+                !automationsFull(order, busy, tasks) &&
+                busy.size + held.size < roomUpTo(settings.count, waiter, small) &&
+                !held.has(waiter.taskId)
+              )
+                held.set(waiter.taskId, why)
               left.push(waiter.taskId)
               continue
             }
@@ -864,8 +896,10 @@ export class Busy extends Context.Service<
             owed.delete(waiter.taskId)
             if (!chatting(waiter, scratch)) busy.add(key)
             hold(key)
+            // Started anyway, it has its place: what of it waits next stands where it would.
+            const started = anyway.delete(waiter.taskId)
             // Out of Up next: where the person put it no longer stands.
-            if (placed) yield* unplace(waiter.taskId)
+            if (placed || started) yield* unplace(waiter.taskId)
             // A turn that waited has its place now: it waits no more, here or on its thread.
             for (const [threadId, turn] of turns)
               if (turn === waiter) {
@@ -888,9 +922,10 @@ export class Busy extends Context.Service<
           const waits = new Set(left)
           for (const taskId of owed) if (!waits.has(taskId)) owed.delete(taskId)
           for (const taskId of waits) if (holders.some((holder) => holder.taskId === taskId)) owed.add(taskId)
-          // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next:
-          // read again when either changes.
-          const shown = `${holders
+          heldBack = held
+          // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next
+          // and whether it is held back: read again when any changes.
+          const shown = `${[...held].join(',')} ${holders
             .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)} ${holder.reason} ${holder.threadId ?? ''}`)
             .toSorted()
             .join(',')} ${most}/${settings.count} ${online} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
@@ -1280,6 +1315,14 @@ export class Busy extends Context.Service<
               }),
             ),
           ),
+        held: Effect.sync(() => heldBack),
+        startNow: (taskId) =>
+          Effect.gen(function* () {
+            if (!(yield* everything).some((waiter) => waiter.taskId === taskId)) return false
+            anyway.add(taskId)
+            yield* wake
+            return true
+          }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not start a task anyway', cause), false))),
         move,
         oldestFirst,
         letGo,

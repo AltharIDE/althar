@@ -253,6 +253,10 @@ span.you {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Its words whole: the lead as wide as they are, the end going under them where the lane has no room for both. */
+.whole .dividerLead {
+  flex-basis: max-content;
+}
 /* What to do with the group, past the rule: a quiet link. */
 .dividerEnd {
   flex: none;

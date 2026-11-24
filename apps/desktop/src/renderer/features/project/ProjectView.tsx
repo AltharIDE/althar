@@ -119,6 +119,8 @@ import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { setLoadPeek } from '../../shared/loadPeek'
+import { usePreferences } from '../../shared/usePreferences'
 
 /*
  * A project: its header across the top, the bar a task has, then its home:
@@ -341,6 +343,8 @@ export function ProjectView({
   ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
+  // Whether the bar shows this computer's load: Up next's line over what is held back opens it there.
+  const { preferences } = usePreferences()
   // The home as it was last laid out, for coming back to it from another view.
   const [home, setHome] = useState<HomeRoom>(asked !== undefined && isHome(asked) ? asked : Room.Both)
   if (isHome(room) && room !== home) setHome(room)
@@ -1282,6 +1286,8 @@ export function ProjectView({
                             change: setTeamFor,
                           }}
                           {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+                          // Where the bar shows this computer's load, Up next's line over what is held back opens it there.
+                          {...(preferences.showLoad ? { onPlaces: () => setLoadPeek(true) } : {})}
                         />
                       )}
                     </Now>

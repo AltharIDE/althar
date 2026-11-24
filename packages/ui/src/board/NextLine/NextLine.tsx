@@ -75,6 +75,12 @@ export interface NextLineProps {
   place?: (id: string, to: number, others: ReadonlyArray<string>) => number | null
   /** A heading by group, over the first of its rows that follows another group's: a quiet divider, such as Planned. */
   heads?: Readonly<Record<string, ReactNode>>
+  /**
+   * A group whose first rows stand apart from the rest of it by their place rather than by which rows they are: the first
+   * `first` of `group`, as the line shows them, stay in it, and those after go in `rest`, so `rest`'s heading moves as a row
+   * is moved past it. Up next's rows held back for now are its first rows waiting, however they are moved.
+   */
+  split?: { readonly group: string; readonly first: number; readonly rest: string }
   /** More of what a row's menu offers, after its moves, as menu items; null for nothing more. A row with more has its grip though nothing moves. */
   more?: (id: string) => ReactNode
   text?: Partial<NextLineText>
@@ -113,10 +119,10 @@ interface Put {
   readonly settled: boolean
 }
 
-export function NextLine({ rows, render, onMove, place, heads, more, text }: NextLineProps) {
+export function NextLine({ rows, render, onMove, place, heads, split, more, text }: NextLineProps) {
   const t = { ...nextLineText, ...text }
   const ids = rows.map((row) => row.id)
-  const byId = new Map(rows.map((row) => [row.id, row]))
+  const given = new Map(rows.map((row) => [row.id, row]))
   const [put, setPut] = useState<Put | null>(null)
   const [menu, setMenu] = useState<string | null>(null)
   const list = useRef<HTMLOListElement>(null)
@@ -126,7 +132,16 @@ export function NextLine({ rows, render, onMove, place, heads, more, text }: Nex
     drawn.current = ids
   })
   // What was put, with what joined since at its end and what left gone.
-  const shown = put === null ? ids : [...put.order.filter((id) => byId.has(id)), ...ids.filter((id) => !put.order.includes(id))]
+  const shown = put === null ? ids : [...put.order.filter((id) => given.has(id)), ...ids.filter((id) => !put.order.includes(id))]
+  // Each row with the group it stands in as shown: a split group's first rows keep it, the rest are its rest.
+  const byId = new Map<string, NextLineRow>()
+  let seen = 0
+  for (const id of shown) {
+    const row = given.get(id)
+    if (row === undefined) continue
+    if (split === undefined || row.group !== split.group) byId.set(id, row)
+    else byId.set(id, seen++ < split.first ? row : { ...row, group: split.rest })
+  }
   // The line given says what is shown, or has changed since the move was acknowledged: it rules again.
   if (put !== null && (same(shown, ids) || (put.settled && !same(ids, put.from)))) setPut(null)
   useEffect(() => {
