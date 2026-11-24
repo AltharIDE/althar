@@ -2848,6 +2848,11 @@ export const HeldForConnection = Schema.Struct({
   /** When it is tried again; null while it waits for the connection. */
   next: Schema.NullOr(Schema.String),
   failure: Schema.NullOr(Schema.String),
+  /**
+   * Waiting on a local cause another task of the project stopped for (DEV-285), rather than on the connection: the
+   * cause, after "<agent> can't start: ". It goes on once the cause is gone.
+   */
+  local: Schema.optional(Schema.String),
 })
 export type HeldForConnection = typeof HeldForConnection.Type
 
@@ -4004,6 +4009,9 @@ export const StuckStep = Schema.Struct({
     'not_installed',
     // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
     'waiting_on_person',
+    // Its agent can't start for a reason on this computer, such as a file where it reads a folder (DEV-285): the detail
+    // says it, the coordinator can be asked to fix it, and it is tried again once the cause is gone.
+    'local_cause',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -4024,6 +4032,8 @@ export const StuckStep = Schema.Struct({
   /** The model it last ran on, where it had one: the one that failed, so handing on can leave it out; for a sign-in refused, the provider within the agent that refused it (OpenCode Go). */
   model: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
+  /** For a local cause: the path in the way, where there is one, and when the coordinator was asked to fix it. */
+  cause: Schema.optional(Schema.Struct({ path: Schema.optional(Schema.String), askedAt: Schema.optional(Schema.String) })),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -6198,6 +6208,11 @@ const WorkApi = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Asks the project's coordinator to fix what stops a step's agent on this computer (DEV-285): it hears the cause in
+   * its news, puts it right or plans a fix, and tries the step again once it is gone. The call stays open meanwhile.
+   */
+  command('FixWithCoordinator', { attentionId: Schema.String }, Schema.Void),
   /**
    * Hands a step held for a usage limit to another agent, on the account and
    * model the person picked, rather than waiting for the reset: as answering

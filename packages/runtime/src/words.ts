@@ -2,7 +2,14 @@ import { basename, dirname } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
-import { closingErrorLine, closingFailureOf, firstErrorLine, type StartFailure, startFailureOf } from '@althar/provider-adapters'
+import {
+  closingErrorLine,
+  closingFailureOf,
+  firstErrorLine,
+  localCauseOf,
+  type StartFailure,
+  startFailureOf,
+} from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
@@ -170,8 +177,14 @@ export const agentSaid = (error: unknown): string | undefined => {
       if (olderOpenCode.test(stderr)) return olderOpenCodeWords
       // Its class from its last lines alone, and the line said from them: what it wrote further up, an MCP server's 401 or a
       // hook's "command not found", is no reason it stopped.
+      const classWord = classWords(closingFailureOf(stderr), '')
+      if (classWord !== undefined) return classWord
+      // A reason on this computer, wherever it wrote it, such as `ENOTDIR` above a stack: kept in its own words, which the
+      // step's call reads again for the path in the way (DEV-285).
+      const local = localCauseOf(stderr)
+      if (local !== undefined) return sentence(`The agent stopped: ${own(local.said)}`)
       const said = own(closingErrorLine(stderr))
-      return classWords(closingFailureOf(stderr), '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
+      return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {

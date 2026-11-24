@@ -28,6 +28,7 @@ import {
   pauseWords,
 } from './runRecords'
 import type { Sessions } from './Sessions'
+import { diagnose } from './startCause'
 import { addItem } from './threads'
 
 export interface LimitedStep {
@@ -675,6 +676,31 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
     })
 
   /**
+   * Whether a step whose agent seemed to fail at its service failed for a reason on this computer instead (DEV-285): a
+   * file where it reads a folder, settings that don't parse. Then it needs the person, or the coordinator for them, with
+   * that reason, and isn't retried: true where it went to them so.
+   */
+  const stopsHere = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, said: string) =>
+    Effect.gen(function* () {
+      const local = yield* diagnose({ taskId: on.run.taskId, agentId, deviceId: instance.deviceId, said })
+      if (local === undefined) return false
+      yield* stuck(
+        on.run,
+        { id: on.attemptId },
+        {
+          step: on.step,
+          why: 'local_cause',
+          detail: local.words,
+          agentId,
+          round: on.iteration,
+          open: 0,
+          cause: { key: local.key, ...(local.path === undefined ? {} : { path: local.path }) },
+        },
+      )
+      return true
+    })
+
+  /**
    * A step's turn failed on its connection or its service (ADR-060).
    * Where the service doesn't answer, the computer offline or the service
    * out of reach, the step waits for the connection, however long that
@@ -689,6 +715,8 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
     failure: string | null,
   ) =>
     Effect.gen(function* () {
+      // A reason on this computer, which no retry helps, stops it at once with that reason (DEV-285).
+      if (yield* stopsHere(on, agentId, failure ?? '')) return
       const service = yield* serviceOf(agentId)
       const answers = yield* connectivity.answers(service?.url)
       const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0
@@ -735,6 +763,8 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
       if (on === undefined || Option.isNone(live)) return
       looking.add(threadId)
       const look = Effect.gen(function* () {
+        // Retrying what fails on this computer, as Codex does five times a turn, never helps: the step stops for it (DEV-285).
+        if (yield* stopsHere(on, live.value.agentId, said)) return yield* Effect.ignore(sessions.interrupt(threadId))
         const service = yield* serviceOf(live.value.agentId)
         if (yield* connectivity.answers(service?.url)) return
         const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0

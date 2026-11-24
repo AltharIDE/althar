@@ -60,6 +60,10 @@ export const CONTINUING = "Your last turn stopped at the agent's own limit on a 
 export const RECONNECTED =
   "Your last turn stopped because the connection to your model's service failed. It's back: carry on from where you were."
 
+/** What it is told, as quietly, when its turn is sent again once what stopped it on this computer is gone (DEV-285). */
+export const CAUSE_GONE =
+  "Your last turn stopped for a problem on this computer, not your model's service. It's put right now: carry on from where you were."
+
 /** A pause before a step tries its service again, as a thread says it. */
 export const pauseWords = (pause: Duration.Duration) => {
   const seconds = Math.round(Duration.toSeconds(pause))
@@ -384,6 +388,12 @@ export const Hold = Schema.Struct({
   tries: Schema.optional(Schema.Int),
   service: Schema.optional(Schema.String),
   failure: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Held for a local cause another task of the project stopped for (DEV-285), rather than the connection: the cause in
+   * words, the key it is known by, and the path in the way. It goes on once the cause is gone, or the other task's call
+   * is answered.
+   */
+  local: Schema.optional(Schema.Struct({ words: Schema.String, key: Schema.String, path: Schema.optional(Schema.String) })),
 })
 
 /** Why a step held for a usage limit waits: its project waits for resets, nothing else was free to move it to, or the person said to. */
@@ -521,6 +531,8 @@ export type StuckWhy =
   | 'not_installed'
   /** The lead stopped to wait for the person's answer, which starts it again. */
   | 'waiting_on_person'
+  /** Its agent can't start for a reason on this computer (DEV-285): retrying can't help; the coordinator can fix it. */
+  | 'local_cause'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -541,6 +553,11 @@ export interface StuckInfo {
   /** The model the step last ran on, where it had a session (the one that failed, so handing on can leave it out), and for a sign-in refused, the provider within the agent whose sign-in it was (`opencode-go`). */
   readonly model?: string
   readonly provider?: string
+  /**
+   * For a local cause (DEV-285): the path in the way, where there is one; the key the same cause is known by on another
+   * task of the project; and when the coordinator was asked to fix it.
+   */
+  readonly cause?: { readonly key: string; readonly path?: string; readonly askedAt?: string }
 }
 
 /**

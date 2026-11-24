@@ -448,6 +448,13 @@ const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 const allowedByOf = (rule: string | null | undefined) =>
   rule === null || rule === undefined ? undefined : Option.getOrUndefined(decodeAllowedBy(rule))?.[0]
 
+/** A local cause's path and when the coordinator was asked, as a stuck call keeps them; its key stays in the runtime. */
+const causeOf = (cause: unknown): NonNullable<StuckStep['cause']> => {
+  const path = field(cause, 'path')
+  const askedAt = field(cause, 'askedAt')
+  return { ...(typeof path === 'string' ? { path } : {}), ...(typeof askedAt === 'string' ? { askedAt } : {}) }
+}
+
 /** A step that needs the person, as its call's payload holds it. */
 export const stuckOf = (payload: unknown): StuckStep => {
   const step = text(payload, 'step')
@@ -478,7 +485,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'signed_out' ||
       why === 'sign_in_ended' ||
       why === 'not_installed' ||
-      why === 'waiting_on_person'
+      why === 'waiting_on_person' ||
+      why === 'local_cause'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
@@ -497,6 +505,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
     ...(typeof service === 'string' ? { service } : {}),
     ...(typeof model === 'string' ? { model } : {}),
     ...(typeof provider === 'string' ? { provider } : {}),
+    ...(why === 'local_cause' ? { cause: causeOf(field(payload, 'cause')) } : {}),
   }
 }
 
@@ -3256,12 +3265,14 @@ export class Queries extends Context.Service<
         if (agentId === '') return null
         const offline = field(output, 'offline') === true
         const failure = field(output, 'failure')
+        const local = field(field(output, 'local'), 'words')
         return {
           agentId,
           service: text(output, 'service') || agentId,
           offline,
           next: offline ? null : text(output, 'until') || null,
           failure: typeof failure === 'string' ? failure : null,
+          ...(typeof local === 'string' ? { local } : {}),
         }
       }
 

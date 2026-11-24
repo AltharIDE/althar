@@ -45,6 +45,7 @@ import {
   CONTINUES,
   CONTINUING,
   Finding,
+  Hold,
   type Lead,
   type Place,
   PlanParameters,
@@ -77,6 +78,7 @@ import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
+import { diagnose } from './startCause'
 import { type StandIn, standInOf } from './standIn'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
@@ -1024,7 +1026,30 @@ export class Runs extends Context.Service<
           // An agent that couldn't start because it is signed out, its sign-in ended or it isn't installed stops for that:
           // signing it in again, or installing it, is the way on, which the call offers.
           const startWhy = asked.why === 'failed_to_start' ? stuckWhyOf(asked.detail) : undefined
-          const told: StuckInfo = startWhy === undefined ? asked : { ...asked, why: startWhy }
+          const classed: StuckInfo = startWhy === undefined ? asked : { ...asked, why: startWhy }
+          // One that couldn't start, or whose service seemed to fail, for a reason on this computer stops for that (DEV-285).
+          const local =
+            (classed.why === 'failed_to_start' || classed.why === 'transient') && classed.agentId !== null && classed.step !== 'publish'
+              ? yield* diagnose({ taskId: run.taskId, agentId: classed.agentId, deviceId: instance.deviceId, said: classed.detail ?? '' })
+              : undefined
+          const told: StuckInfo =
+            local === undefined
+              ? classed
+              : {
+                  ...classed,
+                  why: 'local_cause',
+                  detail: local.words,
+                  cause: { key: local.key, ...(local.path === undefined ? {} : { path: local.path }) },
+                }
+          // The same cause on another task of the project, whose card says it already: this one waits on it, said once.
+          if (told.why === 'local_cause' && told.cause !== undefined && attempt !== null && told.agentId !== null) {
+            const [other] = yield* sql<{ taskId: string; title: string }>`
+              SELECT q.task_id, k.title FROM attention_requests q JOIN tasks k ON k.id = q.task_id
+              WHERE q.project_id = ${run.projectId} AND q.kind = 'stuck' AND q.state = 'open' AND q.task_id <> ${run.taskId}
+                AND json_extract(q.payload, '$.cause.key') = ${told.cause.key}
+              ORDER BY q.created_at LIMIT 1`
+            if (other !== undefined) return yield* waitOnCause(run, attempt.id, told, other)
+          }
           // The model it was on, so handing the step on can leave out the one that failed.
           const on =
             told.agentId === null || told.step === 'publish' || told.model !== undefined
@@ -1082,6 +1107,72 @@ export class Runs extends Context.Service<
             }),
           )
           if (opened) yield* touchCard(run.taskId)
+          // A local cause is said once for the project, in the coordinator's thread, where the person looks across tasks.
+          if (opened && info.why === 'local_cause' && info.agentId !== null) {
+            const [home] = yield* sql<{ id: string }>`
+              SELECT id FROM threads WHERE project_id = ${run.projectId} AND kind = 'coordinator' AND owner_actor_id = ${instance.personId}`
+            const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${run.taskId}`
+            if (home !== undefined)
+              yield* addItem({ projectId: run.projectId, threadId: home.id }, 'notice', {
+                source: 'runtime',
+                severity: 'error',
+                title: `${(yield* limits.named(info.agentId, null)).agent} can't start: ${info.detail ?? ''}`,
+                description: `It stopped “${task?.title ?? 'a task'}” without retrying, and stops any other task here the same way. Its card offers the coordinator’s fix.`,
+              })
+          }
+        })
+
+      /**
+       * A step whose agent can't start for the local cause another task of the project already asks the person about
+       * (DEV-285): it waits on that one, held as for the connection, rather than asking again; its thread says it once.
+       * It goes on once the cause is gone, or the other task's call is answered (runRecovery's `holds`).
+       */
+      const waitOnCause = (run: RunRow, attemptId: string, told: StuckInfo, other: { readonly taskId: string; readonly title: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const agentId = told.agentId ?? ''
+          const agent = (yield* limits.named(agentId, null)).agent
+          const words = told.detail ?? ''
+          const until = new Date(Date.parse(yield* timestamp) + Duration.toMillis(connectivity.every)).toISOString()
+          const held = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [now] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+              if (now === undefined || now.state === 'cancelled' || !(yield* going(run))) return false
+              const revision = yield* change('node_attempts', attemptId, {
+                state: 'held',
+                holdReason: 'agent_unavailable',
+                output: JSON.stringify({
+                  heldFor: agentId,
+                  until,
+                  model: told.model ?? null,
+                  offline: false,
+                  tries: 0,
+                  service: agent,
+                  failure: words,
+                  local: { words, key: told.cause?.key ?? '', ...(told.cause?.path === undefined ? {} : { path: told.cause.path }) },
+                } satisfies typeof Hold.Encoded),
+              })
+              yield* fact({
+                projectId: run.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attemptId,
+                revision,
+                type: 'node_attempt.held',
+                payload: { reason: 'agent_unavailable', agentId, until, local: told.cause?.key },
+                actorId: instance.systemId,
+              })
+              return true
+            }),
+          )
+          if (!held) return
+          yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `${agent} can't start: ${words}`,
+            description: `The same stops “${other.title}”, whose card offers the fix. This task goes on once it’s gone.`,
+          })
+          yield* touchCard(run.taskId)
+          yield* Queue.offer(holdsChanged, undefined)
         })
 
       /** The model and effort a step's agent last ran on, on the step's own thread. */
