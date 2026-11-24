@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type AgentDefinition, type AgentSession, cleanUp, type ConfigOption, connect } from '@althar/provider-adapters'
-import { Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
+import { startsAgain } from './startAgain'
 import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'
 import { blockedModelsOf, clearDefaultEffort, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
@@ -369,7 +370,8 @@ export class Models extends Context.Service<
                         ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
                       })
                       return { session, images: connection.info.images }
-                    }).pipe(Effect.timeout(PROBE_TIMEOUT))
+                      // A start that may pass is made once more, afresh, as a session's is (startAgain.ts): a new process of its adapter.
+                    }).pipe(Effect.retry({ times: 1, while: (error) => startsAgain(Cause.fail(error)) }), Effect.timeout(PROBE_TIMEOUT))
                     return yield* walk(definition, session, images)
                   }),
                 ),

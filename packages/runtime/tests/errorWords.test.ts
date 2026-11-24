@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { AgentExited, AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
+import { AgentExited, AgentRequestFailed, AgentStartFailed, classify } from '@althar/provider-adapters'
 import { Cause, Duration } from 'effect'
 
 import { CliSignedOut } from '../src/Connections'
@@ -415,6 +415,22 @@ describe('the words for an agent that couldn’t start', () => {
     assert.strictEqual(
       said(new SessionFailed({ agentId: 'codex', reason: 'x', summary: summarize(Cause.fail(request('Internal error:'))) })),
       "Codex couldn't start. It gave no reason. What it wrote is in Althar’s agents log.",
+    )
+  })
+
+  it('never says a bare "Internal error" in any class, a classified answer included', () => {
+    // A transient one, as `classify` reads it from words in its data that it can't say: its words are no more than that.
+    const transient = classify({ code: -32603, message: 'Internal error', data: { status: 503 } }, new Date())
+    assert.strictEqual(transient.failure, 'transient')
+    const said = summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', ...transient })))
+    assert.notInclude(said, 'Internal error')
+    assert.strictEqual(said, 'It gave no reason. What it wrote is in Althar’s agents log.')
+    // Its reason in the data is said where it gives one.
+    const reasoned = classify({ code: -32603, message: 'Internal error', data: { reason: 'upstream returned 503' } }, new Date())
+    assert.strictEqual(summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', ...reasoned }))), 'upstream returned 503.')
+    assert.strictEqual(
+      summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', failure: 'auth_required', message: 'Internal error' }))),
+      signedOutWords,
     )
   })
 

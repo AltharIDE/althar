@@ -6,10 +6,8 @@ import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
-  AgentExited,
   AgentRequestFailed,
   AgentStartFailed,
-  closingFailureOf,
   OptionUnavailable,
   type Question,
   type SessionEvent,
@@ -19,7 +17,6 @@ import {
   connect,
   inFlatpakSandbox,
   skillsIn,
-  startFailureOf,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Data, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -27,6 +24,7 @@ import type { Account, Accounts } from './Accounts'
 import { heldSkillsFor, serversFor } from './agentTools'
 import { touchCard } from './cards'
 import { type AgentEntry, RuntimeConfig, type RuntimeOptions, SIGNED_OUT_GIT_CONFIG } from './Config'
+import { redact } from './diagnostics'
 import { SessionFailed } from './errors'
 import type { FailuresService } from './Failures'
 import type { InstanceInfo } from './Instance'
@@ -71,6 +69,7 @@ import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
+import { startsAgain } from './startAgain'
 import { folderGoneWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -123,37 +122,29 @@ export interface SessionConnectionsDependencies {
 /** A first start that failed in a way that may pass: started again, once, afresh (`connectSession`). */
 class StartAgain extends Data.TaggedError('StartAgain')<{}> {}
 
+/** A first start whose agent's own program isn't there yet, or is of another version: looked for again a while (`connectSession`). */
+class ProgramArriving extends Data.TaggedError('ProgramArriving')<{ readonly check: () => string | undefined }> {}
+
+/**
+ * How long a start waits for the program Althar brings for its agent, and
+ * how often it looks: an install of Althar unpacks Claude Code's 364 MB in
+ * minutes, and one under way when a start comes is usually done well within
+ * a minute of it. A start never waits on it longer; a broken install is said
+ * then, as it stands.
+ */
+const PROGRAM_WAIT = { every: Duration.seconds(3), within: Duration.minutes(1) }
+
+/** The agent's whole answer to the request that failed its start, with any credential in it taken out, for the log and the record. */
+const answerOf = (cause: Cause.Cause<unknown>): string | undefined => {
+  const found = Cause.findErrorOption(cause)
+  return Option.isSome(found) && found.value instanceof AgentRequestFailed && found.value.raw !== undefined
+    ? redact(found.value.raw)
+    : undefined
+}
+
 /** The variables a launch inherits from Althar's own environment, as `process.ts` hands them on. */
 const inherited = (names: ReadonlyArray<string> | undefined): Record<string, string> =>
   Object.fromEntries((names ?? []).flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])))
-
-/**
- * Whether a start that failed may pass if it is made again, afresh: its
- * adapter or its agent stopped on the way, it crashed, or it failed for a
- * reason that is no class the person can act on. Not where it is signed out,
- * isn't installed, is out of usage, refused what it was asked, or timed out
- * (it waited long enough already), nor where the network is in the way, which
- * a second start meets as well.
- */
-export const startsAgain = (cause: Cause.Cause<unknown>): boolean => {
-  const found = Cause.findErrorOption(cause)
-  if (Option.isNone(found)) return false
-  const error = found.value
-  if (error instanceof AgentExited) {
-    const why = closingFailureOf(error.stderr)
-    return why === undefined || why === 'crashed'
-  }
-  if (error instanceof AgentRequestFailed) {
-    if (error.failure !== 'unknown' && error.failure !== 'transient') return false
-    const why = startFailureOf(error.message)
-    return why === undefined || why === 'crashed'
-  }
-  if (error instanceof AgentStartFailed) {
-    const why = startFailureOf(error.reason)
-    return (why === undefined || why === 'crashed') && !/\bENOENT\b/.test(error.reason)
-  }
-  return false
-}
 
 export const makeSessionConnections = (dependencies: SessionConnectionsDependencies) => {
   const {
@@ -611,11 +602,13 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 : Effect.mapError(remote.checkpoint, (error) => new ToolRefused({ message: error.message })),
             ),
       )
+      // What the launch's environment holds: whether it drives the person's own copy rather than the one Althar brings.
+      const launchEnv = transport._tag === 'Process' ? { ...inherited(transport.spec.inheritEnv), ...transport.spec.env } : {}
+      const drivenBy = definition.cli?.drivenBy
+      const ownCopy = drivenBy !== undefined && launchEnv[drivenBy] !== undefined
       // The program Althar brings for it, there and of the version its adapter needs, before it is spawned (bundledPrograms.ts).
-      const program =
-        selectedWorker === null && transport._tag === 'Process' && definition.program !== undefined
-          ? definition.program({ ...inherited(transport.spec.inheritEnv), ...transport.spec.env })
-          : undefined
+      const check = selectedWorker === null && definition.program !== undefined ? () => definition.program?.(launchEnv) : undefined
+      const program = check?.()
       const started = yield* Effect.exit(
         Effect.gen(function* () {
           if (program !== undefined) return yield* new AgentStartFailed({ command: definition.name, reason: program })
@@ -816,15 +809,24 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       if (Exit.isFailure(started)) {
         yield* Scope.close(scope, Exit.void)
         yield* tools.revoke
-        // The whole answer, what the agent's data said included (failures.ts), is the log's; the person reads it in words.
+        // The whole answer, its code and all its data (failures.ts' rawOf), is the log's and the record's; the person reads words.
+        const answer = answerOf(started.cause)
         yield* Effect.logWarning(first ? 'Agent could not start' : 'Agent could not start again', started.cause).pipe(
-          Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
+          Effect.annotateLogs({
+            agent: definition.id,
+            session: sessionId,
+            thread: thread.threadId,
+            ...(answer === undefined ? {} : { answer }),
+          }),
         )
-        const reason = Cause.pretty(started.cause)
+        const reason = answer === undefined ? Cause.pretty(started.cause) : `${Cause.pretty(started.cause)}\nIt answered: ${answer}`
         // A folder gone from under it fails its start as a missing command would (ENOENT): said as the folder, never
         // that an agent that is there isn't installed.
         const folder = cwdOf(thread)
         const signInEnded = existsSync(folder) && (yield* signedOutRefusal(started.cause, entry.definition, account))
+        // Its own program missing, or of another version, as while an install of Althar is still under way: looked for again a
+        // while, before anything is said.
+        if (first && program !== undefined && check !== undefined) return yield* new ProgramArriving({ check })
         // One that may pass starts again once, afresh, by itself: what Althar holds of the agent read again first.
         if (first && program === undefined && existsSync(folder) && !signInEnded && startsAgain(started.cause)) {
           if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
@@ -833,7 +835,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         const summary = existsSync(folder)
           ? signInEnded
             ? signInEndedWords
-            : summarize(started.cause, { bundled: definition.source === 'bundled' })
+            : // Whose copy to put right: Althar's, unless this launch drives the person's own (Codex's `CODEX_PATH`).
+              summarize(started.cause, { bundled: definition.source === 'bundled' && !ownCopy })
           : folderGoneWords(folder)
         yield* sql.withTransaction(
           Effect.gen(function* () {
@@ -951,6 +954,20 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     effort: string | undefined,
   ) =>
     connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
+      Effect.catchTag('ProgramArriving', ({ check }) =>
+        Effect.gen(function* () {
+          const { every, within } = runtimeConfig.programWait ?? PROGRAM_WAIT
+          yield* Effect.logInfo('Waiting for the agent’s own program, which isn’t there yet').pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, problem: check() ?? '' }),
+          )
+          // Looked for again every so often, for a bounded while; then started either way, and said as it stands.
+          const tries = Math.max(1, Math.ceil(Duration.toMillis(within) / Math.max(1, Duration.toMillis(every))))
+          for (let tried = 0; tried < tries && check() !== undefined; tried++) yield* Effect.sleep(every)
+          return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
+            Effect.catchTags({ StartAgain: (again) => Effect.die(again), ProgramArriving: (again) => Effect.die(again) }),
+          )
+        }),
+      ),
       Effect.catchTag('StartAgain', () =>
         Effect.gen(function* () {
           yield* Effect.logInfo('Starting the agent again, afresh').pipe(
@@ -958,7 +975,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           )
           yield* refreshAgent(entry.definition.id)
           return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
-            Effect.catchTag('StartAgain', (again) => Effect.die(again)),
+            Effect.catchTags({ StartAgain: (again) => Effect.die(again), ProgramArriving: (again) => Effect.die(again) }),
           )
         }),
       ),

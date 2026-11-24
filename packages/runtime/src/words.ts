@@ -208,13 +208,17 @@ export const agentSaid = (error: unknown, whose?: Whose): string | undefined => 
         (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
       )
     }
-    case 'AgentRequestFailed':
+    case 'AgentRequestFailed': {
+      const message = text(error, 'message')
+      // "Internal error" alone is no reason to show, whatever its class: the log keeps the whole answer.
+      const bare = bareInternal.test(message)
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return classed(text(error, 'message'), '', true, whose) ?? signedOutWords
+          return (bare ? undefined : classed(message, '', true, whose)) ?? signedOutWords
         // A connection that failed, said as what to look at; a server's own trouble stays in its words.
         case 'transient':
-          return classed(text(error, 'message'), '', false, whose) ?? sentence(own(firstErrorLine(text(error, 'message'))))
+          if (bare) return noReasonWords
+          return classed(message, '', false, whose) ?? sentence(own(firstErrorLine(message)))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -223,13 +227,11 @@ export const agentSaid = (error: unknown, whose?: Whose): string | undefined => 
           return "The agent's context is full."
         case 'session_lost':
           return lostWords('The agent')
-        default: {
-          const message = text(error, 'message')
-          // "Internal error" alone is no reason to show: the log keeps the whole answer.
-          if (bareInternal.test(message)) return noReasonWords
+        default:
+          if (bare) return noReasonWords
           return classed(message, '', false, whose) ?? sentence(own(firstErrorLine(message)))
-        }
       }
+    }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`
     case 'TurnInProgress':
