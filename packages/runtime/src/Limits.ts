@@ -310,7 +310,8 @@ export class Limits extends Context.Service<
     nearlyOut(agentId: string, projectId?: string, model?: string): Effect.Effect<Option.Option<Room>, Failure>
     /**
      * The account a session on the agent runs on, of those the project
-     * allows: the one given; else the thread's own, while it can and isn't
+     * allows and, where the model is named, not known not to offer it: the
+     * one given; else the thread's own, while it can and isn't
      * nearly out; else, where the project rotates, follow its account strategy
      * among those not signed out or out of usage; where it doesn't, the first not signed out; else the
      * first. Room is for the model where named, so a model's own window
@@ -959,7 +960,11 @@ export class Limits extends Context.Service<
               return given
             }
             const all = yield* allowed(input.agentId, input.projectId)
-            const list = all
+            // A model named runs on an account offered it: each plan has models of its own, and one known not to offer it
+            // (Models' `lacking`) is passed. One not asked yet may; where every one allowed is known not to, all are as before.
+            const lacking = input.model === undefined ? [] : yield* models.lacking(input.agentId, input.model)
+            const offered = all.filter((account) => !lacking.includes(account.id))
+            const list = offered.length === 0 ? all : offered
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>

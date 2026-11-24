@@ -766,6 +766,7 @@ describe('the API', () => {
               SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
               RemoveAccount: () => Effect.void,
+              SignOutAccount: () => Effect.die('unused'),
               OrderAccounts: () => Effect.void,
               AddAccount: () => Effect.die('unused'),
               FindAccounts: () => Effect.succeed({ found: [] }),

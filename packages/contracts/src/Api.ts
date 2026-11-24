@@ -429,6 +429,8 @@ export const AgentStatus = Schema.Struct({
   accounts: Schema.Array(AccountStatus),
   /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
   addsAccounts: Schema.Boolean,
+  /** Its own command signs an account out, so each can be signed out from Althar, its usual folder's included. */
+  signsOut: Schema.optional(Schema.Boolean),
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
@@ -6343,6 +6345,11 @@ const WorkApi = RpcGroup.make(
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
   /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
   command('RemoveAccount', { accountId: Schema.String, anyway: Schema.optional(Schema.Boolean) }, Schema.Void),
+  /**
+   * Signs an account out with its agent's own tool, and keeps it, to sign in again: the usual folder's too, which signs the
+   * agent's own command out with it. Not for an agent without a command that signs out (AgentStatus' `signsOut`).
+   */
+  command('SignOutAccount', { accountId: Schema.String }, Schema.Void),
   /** Puts an agent's accounts in the person's order: the first that can runs work first. */
   command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
   /** Folders account switchers keep the agent's accounts in, not added yet. */

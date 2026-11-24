@@ -743,6 +743,8 @@ export interface Client {
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   /** Stops using an account; `anyway`, its folder goes even where its sign-out didn't happen. */
   readonly removeAccount: (accountId: string, anyway?: boolean) => Promise<void>
+  /** Signs an account out with its agent's own command, and keeps it, to sign in again: the usual folder's too. */
+  readonly signOutAccount: (accountId: string) => Promise<void>
   readonly orderAccounts: (agentId: string, accountIds: ReadonlyArray<string>) => Promise<void>
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
@@ -1410,6 +1412,7 @@ export const connect = async (
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>
       command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
+    signOutAccount: (accountId) => command((commandId) => api.SignOutAccount({ commandId, accountId })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId, host) =>

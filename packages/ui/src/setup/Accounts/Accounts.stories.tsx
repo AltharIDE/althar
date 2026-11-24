@@ -345,6 +345,29 @@ export const Editing: Story = {
   },
 }
 
+/** The usual folder's account isn't removed but signed out, or signed in as someone else: each says the agent's own command follows. */
+export const UsualSignOut: Story = {
+  args: { onSignOut: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.click(c.getByRole('button', { name: 'More for Personal' }))
+    await expect(page.queryByRole('menuitem', { name: /Remove/ })).toBeNull()
+    await expect(await page.findByRole('menuitem', { name: 'Sign in again' })).toHaveAccessibleDescription(
+      "Codex's own command switches too",
+    )
+    const signOut = await page.findByRole('menuitem', { name: 'Sign out' })
+    await expect(signOut).toHaveAccessibleDescription("Signs out Codex's own command too")
+    await userEvent.click(signOut)
+    await expect(args.onSignOut).toHaveBeenCalledWith('acc_usual')
+    // Any other account is removed, as before: no sign-out of its own.
+    await userEvent.click(c.getByRole('button', { name: 'More for Northwind' }))
+    await expect(await page.findByRole('menuitem', { name: /Remove/ })).toBeInTheDocument()
+    await expect(page.queryByRole('menuitem', { name: 'Sign out' })).toBeNull()
+    await expect(page.getByRole('menuitem', { name: 'Sign in again' })).not.toHaveAccessibleDescription()
+  },
+}
+
 /** Every state, and the list where it is narrow: who moves under the name. */
 export const AllStates: Story = {
   render: (args) => (
