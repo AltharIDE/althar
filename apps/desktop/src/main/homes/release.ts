@@ -8,10 +8,15 @@ import { createHash, createPublicKey, verify } from 'node:crypto'
  */
 
 /**
- * The public halves of the keys host releases are signed with (Ed25519, SPKI PEM). None is pinned yet: no host
- * release has been published, and the key's public half goes here with the first one.
+ * The public halves of the keys host releases are signed with (Ed25519, SPKI PEM). The first is the key host-v0.1.0 was
+ * signed with (keyId 22735d0dc71860e22ab718b88997dcb829d6a46dd5d1a7b219b0f36b99464700, the SHA-256 of its DER).
  */
-export const HOST_RELEASE_KEYS: ReadonlyArray<string> = []
+export const HOST_RELEASE_KEYS: ReadonlyArray<string> = [
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA4IfWro8ZWZWyiGUIqFKQ425o4UKX6QdGIy30aKM7fKY=
+-----END PUBLIC KEY-----
+`,
+]
 const REPOSITORY = 'AltharIDE/althar'
 const MAX_MANIFEST_BYTES = 65_536
 const MAX_ARCHIVE_BYTES = 1_073_741_824
