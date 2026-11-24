@@ -130,16 +130,26 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
    * port is tried again.
    */
   const startListening = async (paired: boolean) => {
-    for (let attempt = 1; ; attempt++) {
+    let started: Awaited<ReturnType<typeof start>> | undefined
+    let fatal: unknown
+    // Tried again as the budget allows, as any wait is: with no time of its own.
+    await expect(async () => {
       try {
-        return await start()
+        started = await start()
       } catch (error) {
-        if (attempt === 5 || !String(error).includes('ConnectionRefused')) throw error
-        progress(`Native pairing: the host could not listen on ${port} (attempt ${attempt}: ${String(error).split('\n')[0]}), trying again`)
-        if (paired) await new Promise((resolve) => setTimeout(resolve, 500))
-        else port = await portNumber()
+        // Anything but the host's refusal to listen is not a port that was taken: it fails at once.
+        if (!String(error).includes('ConnectionRefused')) {
+          fatal = error
+          return
+        }
+        progress(`Native pairing: the host could not listen on ${port} (${String(error).split('\n')[0]}), trying again`)
+        if (!paired) port = await portNumber()
+        throw error
       }
-    }
+    }).toPass()
+    if (fatal !== undefined) throw fatal
+    if (started === undefined) throw new Error('The host fixture did not start')
+    return started
   }
   let host = await startListening(false)
   progress('Native pairing: standalone host ready')
