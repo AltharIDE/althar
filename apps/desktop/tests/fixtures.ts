@@ -1435,6 +1435,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     renameAccount: vi.fn(async () => {}),
     removeAccount: vi.fn(async () => {}),
+    signOutAccount: vi.fn(async () => {}),
     orderAccounts: vi.fn(async () => {}),
     findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
