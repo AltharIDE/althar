@@ -60,7 +60,7 @@ export const useOpener = (owner: string | null, onShow?: () => void): PageOpener
       })
     }
     return {
-      run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outsideThread(address)),
+      run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outside(address)),
       link: (address) => (linkOpensBeside(links, address) ? beside(address) : outsideThread(address)),
       links,
     }
