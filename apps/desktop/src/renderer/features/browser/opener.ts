@@ -28,7 +28,7 @@ const outside = (address: string) => void window.open(address, '_blank')
 /** A link from a thread, marked so the main process may send plain http to the person's browser. */
 const outsideThread = (address: string) => void window.open(address, '_blank', THREAD_LINK_FEATURE)
 
-const OUTSIDE: PageOpener = { run: outside, link: outside, links: 'outside' }
+const OUTSIDE: PageOpener = { run: outside, link: outsideThread, links: 'outside' }
 
 /** Whether a link opens beside the conversation, as the person keeps links. */
 export const linkOpensBeside = (links: PageOpener['links'], address: string): boolean =>
@@ -61,7 +61,7 @@ export const useOpener = (owner: string | null, onShow?: () => void): PageOpener
     }
     return {
       run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outsideThread(address)),
-      link: (address) => (linkOpensBeside(links, address) ? beside(address) : outside(address)),
+      link: (address) => (linkOpensBeside(links, address) ? beside(address) : outsideThread(address)),
       links,
     }
   }, [owner, browser, links, onShow])
