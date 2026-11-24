@@ -472,6 +472,13 @@ const SERVING =
   '\n  \u001b[32mVITE\u001b[39m v7.1.0  ready in 312 ms\n\n  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m\n  ➜  Network: use --host to expose\n'
 
 /**
+ * The file beside a quiet server's output that says, a JSON line each, when
+ * the fake agent spawned it, whether it listened and on which port, and how
+ * it ended: what a test that waits for its port says when it gives up.
+ */
+export const serverSeen = (outputPath: string) => `${outputPath}.seen`
+
+/**
  * Leaves `bun dev` running in the background (`background`), as Claude Code
  * or Codex reports it. Sent as raw notifications: ACP's schema doesn't have
  * these updates yet.
@@ -527,10 +534,17 @@ const leaveRunning = async (
     server.unref()
     closeSync(out)
   } else if (options.quiet === true) {
-    // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
+    // A server whose output says nothing: its own process holds the file open and listens on a port it chose. Where it
+    // started, on which port, and how it ended go in a file beside its output (`serverSeen`), for a test to say what it saw.
     const out = openSync(outputPath, 'a')
-    server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
+    const seen = serverSeen(outputPath)
+    const note = (what: Record<string, unknown>) => appendFileSync(seen, `${JSON.stringify({ at: Date.now(), ...what })}\n`)
+    const listen = `const s = require('net').createServer(); s.on('error', (e) => require('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ at: Date.now(), server: 'error', message: String(e) }) + '\\n')); s.listen(0, '127.0.0.1', () => require('fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ at: Date.now(), server: 'listening', pid: process.pid, port: s.address().port }) + '\\n'))`
+    server = spawn(process.execPath, ['-e', listen], { stdio: ['ignore', out, out] })
     closeSync(out)
+    note({ agent: 'spawned', pid: server.pid ?? null, agentPid: process.pid })
+    server.on('error', (error) => note({ agent: 'spawn failed', message: String(error) }))
+    server.on('exit', (code, signal) => note({ agent: 'server exited', code, signal }))
   }
   session.background.set(id, { toolCallId, outputPath, ...(server === undefined ? {} : { process: server }) })
   await notify({

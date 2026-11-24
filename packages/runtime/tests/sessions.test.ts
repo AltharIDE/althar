@@ -1,12 +1,12 @@
 import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { CommandEnvelope } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { holds, scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios, serverSeen } from '@althar/provider-adapters/testing'
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
@@ -16,6 +16,7 @@ import { Instance } from '../src/Instance'
 import { Live } from '../src/Live'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
+import type { PortLook, PortsSeen } from '../src/ports'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -899,8 +900,45 @@ describe('sessions', () => {
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
-    it.live('finds where one answers from its port when its output never says, and it keeps its name', () =>
-      Effect.gen(function* () {
+    /**
+     * The port search's looks, for a wait's report: what its tree listened on as the turn began, how many looks there
+     * were, and the last few, each with what it was given and answered, every port the machine listed in the tree, and
+     * the commands it ran. A machine lists many listeners: only how many, and those in the tree, are kept.
+     */
+    const lookedAt = (looks: ReadonlyArray<PortLook>) => {
+      const brief = (seen: PortsSeen | null) =>
+        seen === null
+          ? 'ran out of time'
+          : {
+              roots: seen.roots,
+              processes: seen.processes,
+              tree: seen.tree,
+              listening: seen.listening.length,
+              inTree: seen.listening.filter((one) => seen.tree.includes(one.pid)),
+              ran: seen.ran,
+            }
+      const all = looks.filter((one) => one.kind === 'look')
+      return {
+        before: looks.filter((one) => one.kind === 'before').map((one) => ({ at: one.at, agent: one.agent, seen: brief(one.seen) })),
+        looks: all.length,
+        last: all.slice(-3).map((one) => ({ ...one, seen: brief(one.seen) })),
+      }
+    }
+
+    it.live('finds where one answers from its port when its output never says, and it keeps its name', () => {
+      // What the port search looked at each time, and what the fake server said of itself: given up on, the wait says both (#595).
+      const looks: Array<PortLook> = []
+      const server = () => {
+        const look = [...looks].reverse().find((one) => one.kind === 'look' && one.outputPath !== null)
+        const path = look?.kind === 'look' && look.outputPath !== null ? serverSeen(look.outputPath) : null
+        if (path === null) return 'no look had its output file'
+        try {
+          return readFileSync(path, 'utf8').trim().split('\n')
+        } catch (error) {
+          return `nothing at ${path}: ${String(error)}`
+        }
+      }
+      return Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
         // Windows cannot find the owner of an output file with lsof. Give the
@@ -908,12 +946,21 @@ describe('sessions', () => {
         yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
-        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        const {
+          shown: [serving],
+        } = yield* until(
+          Effect.map(shown(created.threadId), (all) => ({ shown: all, server: server(), looks: lookedAt(looks) })),
+          (seen) => seen.shown[0]?.url != null,
+        )
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         assert.strictEqual(serving?.name, 'Start the dev server')
         yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    )
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { serving: { looked: (look) => void looks.push(look) } }))),
+        ),
+      )
+    })
 
     it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>
       Effect.gen(function* () {

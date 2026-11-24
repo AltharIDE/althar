@@ -419,6 +419,8 @@ export const runtime = (
     readonly leftEvery?: Duration.Duration
     /** How often what waits for a checkout is looked at again (ADR-091): every 100 milliseconds unless a test says. */
     readonly localEvery?: Duration.Duration
+    /** Told each look for where something an agent left running answers from its port, to say what a test saw. */
+    readonly serving?: RuntimeOptions['serving']
   } = {},
 ) =>
   Runtime.layer({
@@ -459,6 +461,7 @@ export const runtime = (
     // A round waits a moment, not two seconds, for its lead to report what it left running after its turn: the fake
     // agents report it within the turn, but where a test says.
     idle: { reports: Duration.millis(300), ...more.idle },
+    ...(more.serving === undefined ? {} : { serving: more.serving }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),

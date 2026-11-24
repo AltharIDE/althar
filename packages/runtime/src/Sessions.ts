@@ -62,7 +62,7 @@ import { BETWEEN_AGENTS_MS } from './needsYou'
 import { Permissions } from './Permissions'
 import { PlanUsage } from './PlanUsage'
 import { Policies } from './Policies'
-import { holding, portFor, portsBelow } from './ports'
+import { holding, portFor, portsSeenBelow } from './ports'
 import { Questions } from './Questions'
 import { outputText } from './reading'
 import { change, fact, timestamp } from './records'
@@ -709,12 +709,27 @@ export class Sessions extends Context.Service<
           const held = left.outputPath === null ? [] : yield* holding(left.outputPath)
           const agent = running.connection.process?.pid
           const roots = held.length > 0 ? held : agent === undefined ? [] : [agent]
-          const found = yield* portsBelow(roots)
+          const seen = yield* portsSeenBelow(roots)
           // Taken after the lookup, which others ran at the same time: a port is claimed by one only.
           const others = [...running.background.values()].filter((other) => other !== left)
           const claimed = new Set(others.flatMap((other) => (other.url === null ? [] : [Number(new URL(other.url).port)])))
           const rivals = others.filter((other) => other.ended === null && other.url === null).length
-          return portFor({ found, claimed, own: held.length > 0, known, rivals })
+          const own = held.length > 0
+          const port = portFor({ found: seen.ports, claimed, own, known, rivals })
+          runtimeConfig.serving?.looked?.({
+            kind: 'look',
+            at: yield* Clock.currentTimeMillis,
+            id: left.id,
+            outputPath: left.outputPath,
+            held,
+            seen,
+            known: [...known],
+            claimed: [...claimed],
+            rivals,
+            own,
+            port,
+          })
+          return port
         })
 
       /**
@@ -725,10 +740,14 @@ export class Sessions extends Context.Service<
       const notingListening = (running: Running) =>
         Effect.gen(function* () {
           const agent = running.connection.process?.pid
-          const ports =
-            agent === undefined
-              ? []
-              : yield* portsBelow([agent]).pipe(Effect.timeoutOption(BASELINE_WITHIN), Effect.map(Option.getOrElse(() => [])))
+          const seen = agent === undefined ? Option.none() : yield* portsSeenBelow([agent]).pipe(Effect.timeoutOption(BASELINE_WITHIN))
+          runtimeConfig.serving?.looked?.({
+            kind: 'before',
+            at: yield* Clock.currentTimeMillis,
+            agent: agent ?? null,
+            seen: Option.getOrNull(seen),
+          })
+          const ports = Option.match(seen, { onNone: () => [], onSome: (one) => one.ports })
           const before = yield* Deferred.make<ReadonlySet<number>>()
           yield* Deferred.succeed(before, new Set(ports))
           running.listeningBefore = before

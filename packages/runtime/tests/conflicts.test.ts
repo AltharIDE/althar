@@ -32,6 +32,7 @@ import {
   cantOf,
   rounds,
   asked,
+  story,
   PUSHED_FOR_IT,
   briefOf,
   titled,
@@ -208,6 +209,17 @@ describe('a conflict merging here', () => {
       )
     /** The waiting round's task's card, by its id. */
     const cardOf = (projectId: string, taskId: string) => Effect.map(cards(projectId), (all) => all.filter((one) => one.taskId === taskId))
+    // The test's own moments, and each time the lead was asked, with what asked it: failing, it says them all (#1158).
+    const marks: Array<{ readonly at: string; readonly what: string }> = []
+    const mark = (what: string) => void marks.push({ at: new Date().toISOString(), what })
+    const askedTimes = (taskId: string, threadId: string, times: number) =>
+      Effect.gen(function* () {
+        const notes = yield* asked(threadId)
+        if (notes.length !== times)
+          assert.fail(
+            `The lead was asked ${notes.length} times, not ${times}; it saw ${JSON.stringify(yield* story(taskId, threadId, marks))}`,
+          )
+      })
     return Effect.gen(function* () {
       const before = yield* Effect.gen(function* () {
         const projectId = yield* ask(
@@ -239,6 +251,7 @@ describe('a conflict merging here', () => {
           held: true,
         })
         assert.strictEqual(yield* plans.start(planId, actorId), 'running')
+        mark('the other task started; main moves on')
         moveMainOn(working)
         assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
         // The round is kept, and says it waits; the lead isn't asked yet.
@@ -249,17 +262,19 @@ describe('a conflict merging here', () => {
           (yield* rounds(taskId)).map((round) => round.state),
           ['resolving'],
         )
-        assert.deepStrictEqual(yield* asked(threadId), [])
+        yield* askedTimes(taskId, threadId, 0)
         const [card] = yield* cardOf(projectId, taskId)
         assert.strictEqual(card?.phase, 'running')
         assert.deepStrictEqual(card?.queued && { busy: card.queued.busy, atOnce: card.queued.atOnce }, { busy: 1, atOnce: 1 })
         // Asked to merge again meanwhile, it says the lead is at it.
         assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
+        mark('the first launch ends')
         return { projectId, taskId, threadId, busy }
       }).pipe(Effect.provide(oneAtOnce()))
 
       yield* Effect.gen(function* () {
         const { projectId, taskId, threadId, busy } = before
+        mark('restarted')
         // After a restart, the round still waits, and isn't settled as one a lead was cut short on.
         yield* until(
           Effect.flatMap(
@@ -273,13 +288,15 @@ describe('a conflict merging here', () => {
           (yield* rounds(taskId)).map((round) => round.state),
           ['resolving'],
         )
-        assert.deepStrictEqual(yield* asked(threadId), [])
+        yield* askedTimes(taskId, threadId, 0)
         const [queued] = (yield* cardOf(projectId, taskId)).map((card) => card.queued)
         assert.deepStrictEqual(queued && { busy: queued.busy, atOnce: queued.atOnce }, { busy: 1, atOnce: 1 })
         // The other task is stopped: its place goes to the round, whose lead is asked, and resolves it.
+        mark('the other task is stopped')
         yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
         yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
-        assert.strictEqual((yield* asked(threadId)).length, 1)
+        mark('resolved')
+        yield* askedTimes(taskId, threadId, 1)
         assert.deepStrictEqual(
           (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
           [['resolved', 1]],

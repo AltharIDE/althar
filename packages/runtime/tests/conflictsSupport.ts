@@ -136,6 +136,54 @@ export const asked = (threadId: string) =>
     (rows) => rows.map((row) => row.body).filter((body) => body.includes('Bring the branch up to date')),
   )
 
+/**
+ * Everything the lead's thread was given and did, in order, for a test's failure to say what it saw: each input, when,
+ * from what command and what that command recorded; each step of the task's rounds, which says what asked the lead (a
+ * place freeing, a restart, a try again), and each of the lead's sessions and turns. `marks` are the test's own moments
+ * (a restart, a task stopped), so each can be placed among them.
+ */
+export const story = (taskId: string, threadId: string, marks: ReadonlyArray<{ readonly at: string; readonly what: string }> = []) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const inputs = yield* sql<{
+      sequence: number
+      acceptedAt: string
+      state: string
+      disposition: string
+      origin: string
+      body: string
+      recorded: string | null
+    }>`
+      SELECT i.sequence, i.accepted_at, i.state, i.disposition, i.input_origin AS origin, substr(i.body, 1, 60) AS body,
+        (SELECT group_concat(e.type || ' ' || e.aggregate_type || ' ' || e.payload, ' | ') FROM record_events e WHERE e.command_id = i.command_id) AS recorded
+      FROM user_inputs i WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
+    const rounds = yield* sql<{ occurredAt: string; type: string; payload: string }>`
+      SELECT e.occurred_at, e.type, e.payload FROM record_events e
+      WHERE e.aggregate_type = 'conflict_resolution' AND e.aggregate_id IN (SELECT id FROM conflict_resolutions WHERE task_id = ${taskId})
+      ORDER BY e.sequence`
+    const sessions = yield* sql<Record<string, unknown>>`SELECT * FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY rowid`
+    const deliveries = yield* sql<{
+      id: string
+      state: string
+      origin: string
+      requestedAt: string
+      endedAt: string | null
+      inputs: string | null
+    }>`
+      SELECT d.id, d.state, d.origin, d.requested_at, d.ended_at,
+        (SELECT group_concat(u.sequence) FROM turn_delivery_inputs t JOIN user_inputs u ON u.id = t.user_input_id WHERE t.delivery_id = d.id) AS inputs
+      FROM turn_deliveries d WHERE d.thread_id = ${threadId} ORDER BY d.requested_at`
+    return {
+      marks,
+      inputs,
+      rounds,
+      deliveries,
+      sessions: sessions.map((one) =>
+        Object.fromEntries(Object.entries(one).filter(([key]) => /^(id|state|agentId|startedAt|endedAt|createdAt|updatedAt)$/.test(key))),
+      ),
+    }
+  })
+
 /** What the lead's brief says Althar pushes for it, where the project has it resolve conflicts. */
 export const PUSHED_FOR_IT =
   "Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push."
