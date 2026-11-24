@@ -626,6 +626,8 @@ const openThread = (threadId: string, asked = false) => {
 const computers = computerSessions({
   worker: () => (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1' ? testComputerWorker() : computerWorker(here)),
   available: () =>
+    // The tests' stand-in drives no display, so it runs where there is none, as on Linux headless (scripts/display.ts).
+    (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1') ||
     process.platform === 'darwin' ||
     process.platform === 'win32' ||
     (process.platform === 'linux' && Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)),
@@ -1526,6 +1528,7 @@ void ready.then(() => {
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
     quiet,
+    headless: process.platform === 'linux' && app.commandLine.getSwitchValue('ozone-platform') === 'headless',
   })
   // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
   // Moving between Althar's windows blurs one before the other has focus, so it settles first.
