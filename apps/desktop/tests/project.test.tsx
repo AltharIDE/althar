@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
+import { ApiError, type BoardTask, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -13,6 +13,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import {
   agents,
   card,
+  change,
   changed,
   coordinatorSnapshot,
   efforts,
@@ -585,6 +586,63 @@ describe('the Talk room', () => {
     // Filed: its key, as a link to it; discarded: said so.
     expect(screen.getByRole('link', { name: /MER-240/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-240')
     expect(screen.getByText('Issue draft discarded')).toBeTruthy()
+  })
+
+  it('lists the issue drafts finished tasks left, out of Needs you, to file or discard there, each under its task', async () => {
+    // Merged and settled, its lead's two drafts unfiled: the board has it in Settled, the drafts in the project's list.
+    const merged: BoardTask = {
+      ...card(),
+      taskId: 't_adr',
+      threadId: 'th_adr',
+      title: 'Approval center and action ledger (ADR-010)',
+      state: 'done',
+      phase: 'settled',
+      createdAt: '2026-10-01T09:00:00.000Z',
+      settledAt: '2026-10-02T09:00:00.000Z',
+      changed: null,
+      here: [],
+      change: change({ state: 'merged' }),
+      draftsLeft: [
+        { draftId: 'idr_e2e', title: 'Browser end-to-end tests', state: 'pending' },
+        { draftId: 'idr_pg', title: 'CI: Postgres is slow on the runner', state: 'pending' },
+      ],
+    }
+    const left = (draftId: string, title: string) => {
+      const item = items.draft({ draftId, title })
+      if (item.kind !== 'issue_draft') throw new Error('not a draft')
+      return { taskId: 't_adr', taskTitle: merged.title, threadId: 'th_adr', itemId: `it_${draftId}`, draft: item.content }
+    }
+    const onTask = vi.fn()
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot()),
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [merged],
+        calls: [],
+        settledTotal: 1,
+        drafts: [left('idr_e2e', 'Browser end-to-end tests'), left('idr_pg', 'CI: Postgres is slow on the runner')],
+      })),
+    })
+    withServices(<Project onTask={onTask} />, client)
+    const list = within(
+      (await screen.findByRole('heading', { name: '2 issue drafts from finished tasks' })).closest('section') as HTMLElement,
+    )
+    // Nothing of it waits in Needs you.
+    expect(screen.queryByText('Issues to file')).toBeNull()
+    // Each draft is its card, under the task it came from, which opens it.
+    const [from] = list.getAllByRole('button', { name: 'Approval center and action ledger (ADR-010)' })
+    await userEvent.click(from as HTMLElement)
+    expect(onTask).toHaveBeenCalledWith('th_adr')
+    const e2e = within(list.getByRole('heading', { name: 'Browser end-to-end tests' }).closest('article') as HTMLElement)
+    // Discarded, it leaves the list at once; filed, it shows as being filed at once.
+    await userEvent.click(e2e.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_e2e')
+    expect(list.queryByRole('heading', { name: 'Browser end-to-end tests' })).toBeNull()
+    expect(list.getByRole('heading', { name: '1 issue draft from a finished task' })).toBeTruthy()
+    const pg = within(list.getByRole('heading', { name: 'CI: Postgres is slow on the runner' }).closest('article') as HTMLElement)
+    await userEvent.click(pg.getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_pg')
+    expect(pg.getByText('Filing on Linear…')).toBeTruthy()
   })
 
   it('applies or discards the coordinator’s changes to issues, several on one card, and folds applied ones to a line', async () => {
