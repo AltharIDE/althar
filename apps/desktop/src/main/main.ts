@@ -37,7 +37,7 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, THREAD_LINK_FEATURE, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
@@ -1016,12 +1016,13 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.on('show', windowOpenedForUsage)
   window.on('focus', windowOpenedForUsage)
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url, features }) => {
     if (showWorkerPreview(window, url)) return { action: 'deny' }
     const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
-    // A thread's link to the web, which Settings › Browser sends out, may be plain http; a window's navigation keeps the narrower rule.
-    if (allowed !== null) openOutside(allowed, remote ? outsideAddress(allowed) : threadLinkAddress(allowed))
+    // Only a thread's link, which Settings › Browser sends out, may be plain http to the web; every other caller keeps the narrower rule.
+    const thread = !remote && features.split(',').includes(THREAD_LINK_FEATURE)
+    if (allowed !== null) openOutside(allowed, thread ? threadLinkAddress(allowed) : outsideAddress(allowed))
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {

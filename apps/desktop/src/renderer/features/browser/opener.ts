@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo } from 'react'
-import { isLocalAddress, workerPreviewTarget } from '@althar/contracts'
+import { isLocalAddress, THREAD_LINK_FEATURE, workerPreviewTarget } from '@althar/contracts'
 
 import { useServices } from '../../data/services'
 import { usePreferences } from '../../shared/usePreferences'
@@ -25,6 +25,8 @@ export interface PageOpener {
 
 /* The person's browser, through the main process, which opens only web pages there. */
 const outside = (address: string) => void window.open(address, '_blank')
+/** A link from a thread, marked so the main process may send plain http to the person's browser. */
+const outsideThread = (address: string) => void window.open(address, '_blank', THREAD_LINK_FEATURE)
 
 const OUTSIDE: PageOpener = { run: outside, link: outside, links: 'outside' }
 
@@ -58,7 +60,7 @@ export const useOpener = (owner: string | null, onShow?: () => void): PageOpener
       })
     }
     return {
-      run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outside(address)),
+      run: (address) => (workerPreviewTarget(address) === null ? beside(address) : outsideThread(address)),
       link: (address) => (linkOpensBeside(links, address) ? beside(address) : outside(address)),
       links,
     }

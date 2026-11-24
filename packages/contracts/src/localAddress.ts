@@ -4,6 +4,12 @@
  */
 
 /**
+ * The window feature a thread's link passes to `window.open`, so the main
+ * process can tell it from other callers and apply the thread-link rule.
+ */
+export const THREAD_LINK_FEATURE = 'althar-thread-link'
+
+/**
  * Whether `address` is an http or https page on this computer: localhost
  * (or a name under `.localhost`), 127.0.0.1 or [::1], on any port. Anything
  * else, a file, another scheme, or what isn't an address, is not. A sign-in
