@@ -139,7 +139,8 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
       const at = ids.indexOf(accountId)
       const next = ids.filter((id) => id !== accountId)
       next.splice(Math.max(0, to === 'up' ? at - 1 : at + 1), 0, accountId)
-      return changing(() => client.orderAccounts(agentId, next), {
+      // The models follow the accounts' order (the first's own first), so they are read again once it is kept.
+      return changing(() => client.orderAccounts(agentId, next).then(() => readModelsAgain(client)), {
         of: `order ${agentId}`,
         show: (agent) =>
           agent.id !== agentId
@@ -224,7 +225,10 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     unremoved,
     removeAnyway: () =>
       changing(async () => {
-        if (unremoved !== null) await client.removeAccount(unremoved, true)
+        if (unremoved !== null) {
+          await client.removeAccount(unremoved, true)
+          readModelsAgain(client)
+        }
         setUnremoved(null)
       }),
   }

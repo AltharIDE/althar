@@ -8,11 +8,14 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
+import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { mergeOffers, Models } from '../src/Models'
 import { Projects } from '../src/Projects'
+import { applyRules } from '../src/rulesChange'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { usableModels } from '../src/usableModels'
 import { repository, runtime, until } from './support'
 
 /*
@@ -36,8 +39,24 @@ const codexOf = Effect.gen(function* () {
 
 const ids = (offered: { readonly models: ReadonlyArray<{ readonly id: string }> } | undefined) => offered?.models.map((model) => model.id)
 
-/** A task's thread, for a session to run on. */
-const thread = Effect.gen(function* () {
+/** A session's settings as Codex says them: on `on`, listing `listed`. */
+const offering = (on: { readonly id: string }, listed: ReadonlyArray<{ readonly id: string; readonly name: string }>) =>
+  JSON.stringify({
+    options: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: on.id,
+        values: listed.map((model) => model.id),
+        choices: listed.map((model) => ({ value: model.id, name: model.name })),
+      },
+    ],
+  })
+
+/** A task, for a session to run on: its thread and its project. */
+const taskOf = Effect.gen(function* () {
   const projects = yield* Projects
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
   const created = yield* projects.createTask({
@@ -45,8 +64,20 @@ const thread = Effect.gen(function* () {
     projectId: project.projectId,
     title: 'Retry the checkout',
   })
-  return created.threadId
+  return { threadId: created.threadId, projectId: project.projectId }
 })
+const thread = Effect.map(taskOf, (made) => made.threadId)
+
+/** The usual folder's Codex account and an added Plus one, each asked what it offers: the Plus one Sol too. */
+const mainAndPlus = (each: Record<string, FakeAgentOptions>) =>
+  Effect.gen(function* () {
+    const accounts = yield* Accounts
+    const plus = yield* accounts.add({ agentId: 'codex', name: 'Plus' })
+    each[`codex@${basename(plus.home ?? '')}`] = { models: [SOL, NEW_TERRA, LUNA] }
+    assert.include(ids(yield* codexOf) ?? [], SOL.id)
+    const [main] = yield* accounts.of('codex')
+    return { main: main!, plus }
+  })
 
 describe('the models of an agent with several accounts', () => {
   it.live('are what any of its accounts offers, read again as one is added and removed', () => {
@@ -110,27 +141,47 @@ describe('the models of an agent with several accounts', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
   })
 
-  it.live('never take the model a session was put on as one its account offers', () => {
+  it.live('never take the model a session was put on as one its account offers, until a turn on it goes through', () => {
     // The usual folder's account isn't offered GPT-6.1 Terra any more, but a session put on it lists it all the same.
     const each = accountsOffering()
     return Effect.gen(function* () {
       const accounts = yield* Accounts
-      const sessions = yield* Sessions
       const models = yield* Models
-      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id])
-      each['codex@usual'] = { models: [NEW_TERRA, LUNA, TERRA] }
-      const threadId = yield* thread
-      yield* sessions.start({ threadId, agentId: 'codex', model: NEW_TERRA.id })
-      // It is on Terra, and lists it, but offers nothing else new: Terra isn't the account's.
-      each['codex@usual'] = { models: [LUNA, TERRA] }
       const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id])
       const [main] = yield* accounts.of('codex')
-      const [row] = yield* sql<{ accountId: string | null }>`SELECT account_id FROM provider_sessions WHERE thread_id = ${threadId}`
-      assert.strictEqual(row?.accountId, main!.id)
+      const { threadId, projectId } = yield* taskOf
+      const sessionId = `sess_${'e'.repeat(32)}`
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: sessionId,
+        projectId,
+        threadId,
+        agentId: 'codex',
+        accountId: main!.id,
+        model: NEW_TERRA.id,
+        config: offering(NEW_TERRA, [NEW_TERRA, LUNA, TERRA]),
+        state: 'completed',
+        startedAt: new Date().toISOString(),
+      })}`
       const [codex] = (yield* models.catalog).filter((agent) => agent.agentId === 'codex')
       assert.deepStrictEqual(ids(codex), [LUNA.id, TERRA.id])
       // Nor is it what the agent is said to be on.
       assert.notStrictEqual(codex?.model, NEW_TERRA.id)
+      assert.deepStrictEqual(yield* models.lacking('codex', NEW_TERRA.id), [main!.id])
+      // A turn on it went through: the account is offered it after all.
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+        id: `turn_${'f'.repeat(32)}`,
+        projectId,
+        threadId,
+        providerSessionId: sessionId,
+        controllerGeneration: 1,
+        model: NEW_TERRA.id,
+        state: 'completed',
+        requestedAt: at,
+        endedAt: at,
+      })}`
+      assert.include(ids((yield* models.catalog).find((agent) => agent.agentId === 'codex')) ?? [], NEW_TERRA.id)
     }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
   })
 
@@ -145,6 +196,30 @@ describe('the models of an agent with several accounts', () => {
       const [main] = yield* accounts.of('codex')
       yield* models.forgetAccount(main!.id)
       assert.deepStrictEqual(ids(yield* codexOf), [SOL.id, LUNA.id])
+    }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
+  })
+
+  it.live('are asked afresh as the sign-in is checked again, after it was opened in Terminal, where Althar can’t see it end', () => {
+    const each = accountsOffering()
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const models = yield* Models
+      const [main] = yield* accounts.of('codex')
+      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id])
+      // Opened in Terminal and asked at once, while the old sign-in is still there.
+      yield* models.signingIn(main!.id)
+      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id])
+      // The sign-in done, as the window comes back to the front and checks it again: the new one's models.
+      each['codex@usual'] = { models: [SOL, LUNA] }
+      yield* models.signInChecked(main!.id)
+      assert.deepStrictEqual(ids(yield* codexOf), [SOL.id, LUNA.id])
+      // An account no sign-in was opened for isn't asked again by a check.
+      const plus = yield* accounts.add({ agentId: 'codex', name: 'Plus' })
+      each[`codex@${basename(plus.home ?? '')}`] = { models: [NEW_TERRA] }
+      assert.include(ids(yield* codexOf) ?? [], NEW_TERRA.id)
+      each[`codex@${basename(plus.home ?? '')}`] = { models: [TERRA] }
+      yield* models.signInChecked(plus.id)
+      assert.include(ids(yield* codexOf) ?? [], NEW_TERRA.id)
     }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
   })
 
@@ -171,6 +246,72 @@ describe('the models of an agent with several accounts', () => {
     )
     assert.deepStrictEqual([merged?.model, merged?.images], ['a', true])
     assert.isUndefined(mergeOffers([]))
+  })
+})
+
+describe('a step handed over or moved', () => {
+  it.live('is offered and handed to an account that offers its model, never one known not to', () => {
+    const each = accountsOffering()
+    return Effect.gen(function* () {
+      const limits = yield* Limits
+      const { main, plus } = yield* mainAndPlus(each)
+      const { projectId } = yield* taskOf
+      // The person's choices, as a usage limit asks them: the usual account runs its own default rather than Sol.
+      const offered = yield* limits.choices({ accountId: null, projectId, planned: { agentId: 'codex', model: SOL.id } })
+      assert.deepInclude(offered, { agentId: 'codex', accountId: main.id, model: null })
+      assert.deepInclude(offered, { agentId: 'codex', accountId: plus.id, model: SOL.id })
+      // Handed over by itself, Sol goes with the account that offers it.
+      const free = yield* limits.free({ besides: ['claude-code', 'opencode'], projectId, planned: { agentId: 'codex', model: SOL.id } })
+      assert.deepInclude(free, { agentId: 'codex', model: SOL.id, accountId: plus.id })
+      // An account given that doesn't offer it, as a choice read before it said: the step goes to one that does.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', accountId: main.id, model: SOL.id })).id, plus.id)
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', accountId: main.id, model: LUNA.id })).id, main.id)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
+  })
+
+  it.live('is refused, and its model not listed, where the project keeps out the only account that offers it', () => {
+    const each = accountsOffering()
+    return Effect.gen(function* () {
+      const limits = yield* Limits
+      const { main } = yield* mainAndPlus(each)
+      const { projectId } = yield* taskOf
+      yield* applyRules(projectId, { onlyAccounts: { codex: [main.id] } }, (yield* Instance).personId)
+      const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, model: SOL.id }))
+      assert.deepInclude(refused, { _tag: 'NotFound', kind: 'offered_model' })
+      const listed = yield* usableModels(projectId)
+      assert.isFalse(listed.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.model === SOL.id)))
+      assert.isTrue(listed.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.model === LUNA.id)))
+      // Where no account is known to offer it, as an agent's older list leaves a model out, it runs as before.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId, model: 'gpt-0-unlisted' })).id, main.id)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
+  })
+})
+
+describe('an account that couldn’t say what it offers', () => {
+  it.live('offers what its latest session did, beside another account that said', () => {
+    const each = accountsOffering()
+    const signedOut: Array<string> = []
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id])
+      const plus = yield* accounts.add({ agentId: 'codex', name: 'Plus' })
+      // Its asking can't go through, as with its sign-in being checked; a session on it offered Sol earlier.
+      signedOut.push(plus.home ?? '')
+      const { threadId, projectId } = yield* taskOf
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: `sess_${'d'.repeat(32)}`,
+        projectId,
+        threadId,
+        agentId: 'codex',
+        accountId: plus.id,
+        model: LUNA.id,
+        config: offering(LUNA, [LUNA, SOL]),
+        state: 'completed',
+        startedAt: new Date().toISOString(),
+      })}`
+      assert.deepStrictEqual(ids(yield* codexOf), [LUNA.id, TERRA.id, SOL.id])
+    }).pipe(Effect.provide(runtime(':memory:', {}, { each, signedOut })))
   })
 })
 

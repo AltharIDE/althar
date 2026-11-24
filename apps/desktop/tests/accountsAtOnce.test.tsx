@@ -99,6 +99,16 @@ describe('an account changed', () => {
     await waitFor(() => expect(vi.mocked(client.getModels).mock.calls.length).toBeGreaterThan(read))
   })
 
+  it('reads the models again once an account is moved, as they follow the accounts’ order', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => withTwo) })
+    const { result } = render(() => ({ start: useStart(), models: useModels() }), client)
+    await waitFor(() => expect(result.current.start.status).not.toBeNull())
+    await waitFor(() => expect(result.current.models).not.toBeNull())
+    const read = vi.mocked(client.getModels).mock.calls.length
+    await act(() => result.current.start.moveAccount('claude-code', 'acc_work', 'up'))
+    await waitFor(() => expect(vi.mocked(client.getModels).mock.calls.length).toBeGreaterThan(read))
+  })
+
   it('holds a rename over a read begun before it, as a recheck on focus is, until a read after its answer', async () => {
     const renamed: Status = {
       ...withTwo,

@@ -366,10 +366,15 @@ describe('the models each agent offers', () => {
     const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
     const codex = Effect.flatMap(Models, (models) => Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')))
     return Effect.gen(function* () {
-      // The launch before: its session reached OpenAI, and offered the newer model, besides the one it was put on.
+      // The launch before: its session reached OpenAI, on the newer model, and a turn on it went through.
       yield* Effect.gen(function* () {
         yield* until(codex, (found) => found[0]?.probing === false)
-        yield* (yield* Sessions).start({ threadId: yield* thread, agentId: 'codex', model: 'small' })
+        const threadId = yield* thread
+        yield* (yield* Sessions).start({ threadId, agentId: 'codex', model: 'large' })
+        const sql = yield* SqlClient.SqlClient
+        yield* until(sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`, (rows) =>
+          rows.some((row) => row.state === 'completed'),
+        )
       }).pipe(Effect.provide(codexOnly(database, () => ({}))))
       // Started again, Codex answers the asking with its older list; the session of a moment ago still says what it offers.
       const [asked] = yield* until(codex, (found) => found[0]?.probing === false).pipe(Effect.provide(codexOnly(database, () => older)))

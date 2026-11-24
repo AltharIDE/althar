@@ -113,6 +113,8 @@ export const readsOf = (
 }
 
 const ASK_AGAIN = Duration.minutes(1)
+/** How long after its sign-in was opened in Terminal an account is asked afresh at each check of its sign-in. */
+const SIGNING_IN = 15 * 60 * 1000
 /** How far before an agent's asking its sessions still say what it offers, where the asking got an older list. */
 const RECENT = 24 * 60 * 60 * 1000
 
@@ -263,6 +265,14 @@ export class Models extends Context.Service<
     /** Forgets what asking one account found, as when it is signed in again or removed: it is asked again at the next read. */
     forgetAccount(accountId: string): Effect.Effect<void>
     /**
+     * An account being signed in in Terminal, where Althar can't see the sign-in end: for a while (`SIGNING_IN`), each time its
+     * sign-in is checked again, as the window does coming back to the front, it is asked afresh, so the new sign-in's models
+     * take the place of the old one's, even where it was signed in all along.
+     */
+    signingIn(accountId: string): Effect.Effect<void>
+    /** The account's sign-in was checked again: asked afresh, where it is being signed in in Terminal. */
+    signInChecked(accountId: string): Effect.Effect<void>
+    /**
      * The accounts of the agent known not to offer a model, by its id, or its id and name (`gpt-6.2-sol GPT-6.2 Sol`): those
      * that said what they offer this launch, without it. One not asked yet, or that couldn't say, isn't known not to.
      */
@@ -295,10 +305,23 @@ export class Models extends Context.Service<
        * answers with an older list of its own (Codex, where OpenAI's doesn't come in time), which mustn't hide a model its
        * sessions offer: those of the day before it was asked (a restart's asking may get the older list where the last
        * sessions didn't) and those since. Sessions are read by id once they have said their settings, which is as they start,
-       * not in the order they were made: `from` passes only those that can't say anything any more.
+       * not in the order they were made: `from` passes only those that can't say anything any more. The model a session was
+       * put on is kept aside in `own`, and counts only once a turn on it went through since `start`: an agent lists the model
+       * it is on whether the account is offered it or not, as Codex does.
        */
-      const since = new Map<string, { from: string; readonly read: Map<string, string>; readonly models: Map<string, OfferedModel> }>()
+      const since = new Map<
+        string,
+        {
+          from: string
+          readonly start: string
+          readonly read: Map<string, string>
+          readonly models: Map<string, OfferedModel>
+          readonly own: Map<string, OfferedModel>
+        }
+      >()
       const lastEntries = new Map<string, AgentEntry>()
+      /* When each account's sign-in was opened in Terminal. */
+      const terminal = new Map<string, number>()
       /* When each account that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
       const askAgain = Duration.toMillis(config.modelsAgain ?? ASK_AGAIN)
@@ -327,23 +350,34 @@ export class Models extends Context.Service<
       const forgetAsked = (agentId: string) => {
         for (const accountId of accountsOf(agentId)) forgetOne(accountId)
       }
+      /** The sessions of an account, as SQL: those from before accounts were kept ran in the usual folder. */
+      const ofAccount = (account: Account, column = 'account_id') =>
+        account.home === null
+          ? sql`(${sql.unsafe(column)} = ${account.id} OR ${sql.unsafe(column)} IS NULL)`
+          : sql`${sql.unsafe(column)} = ${account.id}`
+      /** Of the models sessions of an account were put on, since `from`, those a turn on went through. */
+      const ranOn = (definition: AgentDefinition, account: Account, from: string, sessionId?: string) =>
+        Effect.map(
+          sql<{ model: string | null }>`
+            SELECT DISTINCT COALESCE(d.model, s.model) AS model FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+            WHERE s.agent_id = ${definition.id} AND ${ofAccount(account, 's.account_id')} AND s.started_at >= ${from} AND d.state = 'completed'
+              ${sessionId === undefined ? sql`` : sql`AND s.id = ${sessionId}`}`,
+          (rows) => new Set(rows.flatMap((row) => (row.model === null ? [] : [row.model]))),
+        )
       /**
        * What an account offered when asked, and before those, any model one of its sessions offered around the asking that the
-       * asking didn't: never the one a session was put on, which the agent lists whether the account is offered it or not.
+       * asking didn't: the one a session was put on only once a turn on it went through.
        */
       const withLater = (definition: AgentDefinition, account: Account, asked: Offered) =>
         Effect.gen(function* () {
           const later = since.get(account.id)
-          // Sessions from before accounts were kept ran in the usual folder.
-          const usual = account.home === null ? 1 : 0
           if (later === undefined) return asked.models
           // Settings are '{}' until the session has started: those that said them, each read once, and those still starting,
           // all in one statement, so one that says them as this reads is in it one way or the other, never passed between two.
           const seen = yield* sql<{ id: string; startedAt: string; said: number; starting: number }>`
             SELECT id, started_at, config <> '{}' AS said, (config = '{}' AND ended_at IS NULL) AS starting
             FROM provider_sessions
-            WHERE agent_id = ${definition.id} AND (account_id = ${account.id} OR (account_id IS NULL AND ${usual} = 1))
-              AND started_at >= ${later.from}`
+            WHERE agent_id = ${definition.id} AND ${ofAccount(account)} AND started_at >= ${later.from}`
           const { unread, from } = readsOf(seen, later)
           for (const row of unread) {
             const [one] = yield* sql<{ config: string; model: string | null }>`
@@ -352,10 +386,15 @@ export class Models extends Context.Service<
             if (one === undefined) continue
             const said = modelsOf(definition, settingsIn(one.config))
             for (const model of said.models) {
-              if (model.id === one.model || model.id === said.model) continue
-              if (model.efforts.length > 0 || !later.models.has(model.id)) later.models.set(model.id, model)
+              const kept = model.id === one.model || model.id === said.model ? later.own : later.models
+              if (model.efforts.length > 0 || !kept.has(model.id)) kept.set(model.id, model)
             }
           }
+          if (later.own.size > 0)
+            for (const id of yield* ranOn(definition, account, later.start)) {
+              const model = later.own.get(id)
+              if (model !== undefined && !later.models.has(id)) later.models.set(id, model)
+            }
           if (from > later.from) {
             later.from = from
             for (const [id, at] of later.read) if (at < from) later.read.delete(id)
@@ -456,11 +495,8 @@ export class Models extends Context.Service<
               else {
                 failedAt.delete(account.id)
                 // Sessions of the day before it was asked count too, and those since: one may have reached the maker the asking couldn't.
-                since.set(account.id, {
-                  from: new Date(Date.parse(askedAt) - RECENT).toISOString(),
-                  read: new Map(),
-                  models: new Map(),
-                })
+                const from = new Date(Date.parse(askedAt) - RECENT).toISOString()
+                since.set(account.id, { from, start: from, read: new Map(), models: new Map(), own: new Map() })
               }
             }),
           ),
@@ -468,8 +504,26 @@ export class Models extends Context.Service<
         )
 
       /**
+       * What an account's latest session offered, for one that couldn't say when asked: the model it was put on only where a
+       * turn on it went through. None where it has had no session.
+       */
+      const sessionOffer = (definition: AgentDefinition, account: Account) =>
+        Effect.gen(function* () {
+          const [latest] = yield* sql<{ id: string; config: string; model: string | null; startedAt: string }>`
+            SELECT id, config, model, started_at FROM provider_sessions
+            WHERE agent_id = ${definition.id} AND ${ofAccount(account)} AND config IS NOT NULL AND config <> '{}'
+            ORDER BY started_at DESC LIMIT 1`
+          if (latest === undefined) return null
+          const said = modelsOf(definition, settingsIn(latest.config), imagesIn(latest.config))
+          const own = new Set([latest.model, said.model])
+          const ran = yield* ranOn(definition, account, latest.startedAt, latest.id)
+          const models = said.models.filter((model) => !own.has(model.id) || ran.has(model.id))
+          return models.length === 0 ? null : { ...said, models }
+        })
+
+      /**
        * What one account offers, as far as it has said: what it said when asked this launch, with what its sessions offered
-       * since; null where it couldn't say, or hasn't yet. Not asked yet this launch, it is asked now, in the background, if
+       * since; where it couldn't say, what its latest session offered; null where it hasn't yet, or has nothing to say. Not asked yet this launch, it is asked now, in the background, if
        * the agent is installed and the account signed in. Whether it is signed in is its own command's to say, which takes
        * seconds with the computer busy, so that is asked behind too: the read never waits on it (foundations.md, The UI is
        * instant). One signed out counts as one that couldn't say, asked again a while on or once it is found signed in.
@@ -483,7 +537,9 @@ export class Models extends Context.Service<
           if (probed.get(account.id) === null && failed !== undefined && (yield* Clock.currentTimeMillis) - failed >= askAgain)
             forgetFailure(account.id)
           const asked = probed.get(account.id)
-          if (asked === null) return null
+          // One that couldn't say: what its latest session offered, rather than nothing, as one account's failing mustn't hide
+          // a model only it offers while another's list shows as complete.
+          if (asked === null) return yield* sessionOffer(definition, account)
           if (asked !== undefined) return { ...asked, models: yield* withLater(definition, account, asked) }
           if (!probing.has(account.id) && isInstalled(installs, definition)) {
             const reservation = Symbol()
@@ -564,6 +620,23 @@ export class Models extends Context.Service<
           }).pipe(Effect.provide(context)),
         forget: (agentId) => signIns.forget(agentId).pipe(Effect.andThen(Effect.sync(() => forgetAsked(agentId)))),
         forgetAccount: (accountId) => Effect.sync(() => forgetOne(accountId)),
+        signingIn: (accountId) =>
+          Effect.flatMap(Clock.currentTimeMillis, (now) =>
+            Effect.sync(() => {
+              terminal.set(accountId, now)
+              forgetOne(accountId)
+            }),
+          ),
+        signInChecked: (accountId) =>
+          Effect.flatMap(Clock.currentTimeMillis, (now) =>
+            Effect.sync(() => {
+              const opened = terminal.get(accountId)
+              if (opened === undefined) return
+              if (now - opened > SIGNING_IN) terminal.delete(accountId)
+              // Not while it is being asked: that asking reads the sign-in as it is now.
+              else if (!probing.has(accountId)) forgetOne(accountId)
+            }),
+          ),
         lacking: (agentId, model) =>
           Effect.sync(() =>
             accountsOf(agentId).filter((accountId) => {

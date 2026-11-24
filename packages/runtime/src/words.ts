@@ -322,6 +322,9 @@ export const words = (
       case 'NotFound':
         // A push with nowhere to go: none of its repositories has a remote.
         if (text(error, 'kind') === 'remote') return 'Its repositories have no remote to push to. Add one with git, then push again.'
+        // A model only an account the project keeps out offers.
+        if (text(error, 'kind') === 'offered_model')
+          return 'No account this project uses offers that model. Allow the account that does in the project’s settings, or pick another model.'
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
         return `Althar has no agent called ${text(error, 'agentId')}.`
