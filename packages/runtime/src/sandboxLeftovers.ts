@@ -1,5 +1,5 @@
 import { lstat, readdir, readFile, readlink, rmdir, unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -24,14 +24,19 @@ import { commonDirOf } from './worktreeLinks'
  * them. Before an agent's process starts it records which of these paths
  * are missing; once the process has gone, and at the next start after a
  * crash, it takes away what has since appeared there in a placeholder's
- * shape: an empty read-only file, or an empty folder. Nothing else: a path
+ * shape: an empty read-only file, or an empty folder of Codex's where a
+ * Codex process recorded it. Nothing else: a path
  * that was there before it started is never recorded, so the person's own
  * `.codex`, whatever it holds, stays; one that holds something now is
  * theirs; and one still mounted over by any running sandbox, another
  * session's or one of the person's own, is left until that ends.
  */
 
-/** At a worktree's root: Claude Code's protected files and folders, and Codex's protected folders. */
+/**
+ * At a worktree's root: what Claude Code's sandbox protects, which it makes
+ * as an empty read-only file where it is missing, folders such as `.idea`
+ * included.
+ */
 export const ROOT_PLACEHOLDERS: ReadonlyArray<string> = [
   // Claude Code's dangerous files.
   '.gitconfig',
@@ -52,11 +57,16 @@ export const ROOT_PLACEHOLDERS: ReadonlyArray<string> = [
   '.devcontainer',
   '.yarn',
   '.mvn',
-  // Codex's protected folders in a writable root.
-  '.agents',
-  '.aws',
-  '.codex',
 ]
+
+/**
+ * At a worktree's root: the folders Codex's sandbox protects in a writable
+ * root, which it makes as ordinary folders (0755, a read-only one mounted
+ * on each) where they are missing. The only folders a sandbox leaves, so
+ * the only ones ever taken away, and only where a Codex process recorded
+ * them: the mode can't tell them from one the person made.
+ */
+export const CODEX_FOLDERS: ReadonlyArray<string> = ['.agents', '.aws', '.codex']
 
 /** In the git directory the worktrees share: what Claude Code protects there that git may not have made. */
 export const GIT_PLACEHOLDERS: ReadonlyArray<string> = [
@@ -68,11 +78,16 @@ export const GIT_PLACEHOLDERS: ReadonlyArray<string> = [
   'remotes',
 ]
 
-/** Where a sandbox in `folder` may leave a placeholder: at its root, and in its repository's shared git directory. */
-export const placesIn = (folder: string): ReadonlyArray<string> => {
+/**
+ * Where an agent's sandbox in `folder` may leave a placeholder: at its root,
+ * and in its repository's shared git directory; Codex's folders only for
+ * Codex.
+ */
+export const placesIn = (folder: string, agent: string): ReadonlyArray<string> => {
   const common = commonDirOf(folder)
   return [
     ...ROOT_PLACEHOLDERS.map((name) => join(folder, name)),
+    ...(agent === 'codex' ? CODEX_FOLDERS.map((name) => join(folder, name)) : []),
     ...(common === null ? [] : GIT_PLACEHOLDERS.map((name) => join(common, name))),
   ]
 }
@@ -84,9 +99,13 @@ const missing = (path: string) =>
   )
 
 /** Of the places a sandbox in these folders may leave a placeholder, those missing now. Only on Linux, where bubblewrap makes them. */
-export const missingPlaces = async (folders: ReadonlyArray<string>, platform = process.platform): Promise<ReadonlyArray<string>> => {
+export const missingPlaces = async (
+  folders: ReadonlyArray<string>,
+  agent: string,
+  platform = process.platform,
+): Promise<ReadonlyArray<string>> => {
   if (platform !== 'linux') return []
-  const places = [...new Set(folders.flatMap(placesIn))]
+  const places = [...new Set(folders.flatMap((folder) => placesIn(folder, agent)))]
   const absent = await Promise.all(places.map(missing))
   return places.filter((_, index) => absent[index])
 }
@@ -120,7 +139,12 @@ export const mountPoints = async (proc = '/proc'): Promise<ReadonlySet<string>> 
 /** What became of a recorded place: gone already, taken away, left as the person's, or left while a sandbox is mounted on it. */
 export type Settled = 'gone' | 'removed' | 'theirs' | 'mounted'
 
-/** Takes a placeholder away where it is one: an empty read-only file, or an empty folder, that nothing is mounted on. */
+/**
+ * Takes a placeholder away where it is one, and nothing is mounted on it:
+ * an empty read-only file, or an empty folder at one of Codex's names.
+ * Claude Code's names go only as files: an empty `.idea` folder is the
+ * person's.
+ */
 export const settle = async (path: string, mounted: ReadonlySet<string>): Promise<Settled> => {
   const found = await lstat(path).catch(() => undefined)
   if (found === undefined) return 'gone'
@@ -130,7 +154,7 @@ export const settle = async (path: string, mounted: ReadonlySet<string>): Promis
       await unlink(path)
       return 'removed'
     }
-    if (found.isDirectory() && (await readdir(path)).length === 0) {
+    if (found.isDirectory() && CODEX_FOLDERS.includes(basename(path)) && (await readdir(path)).length === 0) {
       // Fails, and so stays, where something was written into it in between.
       // oxlint-disable-next-line althar/one-removal -- Only an empty folder may go: one that isn't is the person's, and stays.
       await rmdir(path)
@@ -143,10 +167,10 @@ export const settle = async (path: string, mounted: ReadonlySet<string>): Promis
 }
 
 /** Records, before an agent's process starts, where its sandbox may leave a placeholder that isn't there now. */
-export const recordPlaces = (processId: string, folders: ReadonlyArray<string>) =>
+export const recordPlaces = (processId: string, folders: ReadonlyArray<string>, agent: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const places = yield* Effect.promise(() => missingPlaces(folders))
+    const places = yield* Effect.promise(() => missingPlaces(folders, agent))
     for (const path of places) yield* sql`INSERT OR IGNORE INTO sandbox_places ${sql.insert({ path, processId })}`
   })
 

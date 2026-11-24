@@ -473,7 +473,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           launchedAt: yield* timestamp,
         })}`
         // Where its sandbox may leave a placeholder that isn't there now, taken away once it has gone (sandboxLeftovers.ts).
-        yield* recordPlaces(processId, foldersOf(thread)).pipe(
+        yield* recordPlaces(processId, foldersOf(thread), definition.id).pipe(
           Effect.catchCause((cause) => Effect.logWarning('Could not record where its sandbox may leave placeholders', cause)),
         )
       }

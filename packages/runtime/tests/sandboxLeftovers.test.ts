@@ -76,7 +76,7 @@ const nothingMounted = new Set<string>()
 describe('placesIn', () => {
   it('names the root of a worktree and the git directory it shares with the checkout', () => {
     const { checkout, worktree } = checkoutAndWorktree()
-    const places = placesIn(worktree)
+    const places = placesIn(worktree, 'codex')
     assert.include(places, join(worktree, '.codex'))
     assert.include(places, join(worktree, '.agents'))
     assert.include(places, join(worktree, '.aws'))
@@ -84,9 +84,17 @@ describe('placesIn', () => {
     assert.notInclude(places, join(worktree, '.git'))
   })
 
+  it("names Codex's folders only for Codex, whose sandbox alone makes them", () => {
+    const { checkout, worktree } = checkoutAndWorktree()
+    const places = placesIn(worktree, 'claude-code')
+    for (const name of ['.agents', '.aws', '.codex']) assert.notInclude(places, join(worktree, name))
+    assert.include(places, join(worktree, '.idea'))
+    assert.include(places, join(checkout, '.git', 'config.lock'))
+  })
+
   it('is nothing to record off Linux, where no sandbox mounts over a missing path', async () => {
     const { worktree } = checkoutAndWorktree()
-    assert.deepStrictEqual(await missingPlaces([worktree], 'darwin'), [])
+    assert.deepStrictEqual(await missingPlaces([worktree], 'codex', 'darwin'), [])
   })
 })
 
@@ -94,11 +102,11 @@ describe.skipIf(!linux)('taking away what a sandbox left', () => {
   it('leaves the checkout and the worktree byte-identical after a killed sandbox', async () => {
     const { checkout, worktree } = checkoutAndWorktree()
     const before = { checkout: snapshot(checkout), worktree: snapshot(worktree) }
-    const recorded = await missingPlaces([worktree])
+    const recorded = await missingPlaces([worktree], 'codex')
     // Claude Code's in the shared .git and at the root, Codex's at the root, as each leaves them when it is killed.
     claudePlaceholder(join(checkout, '.git', 'config.lock'))
     claudePlaceholder(join(worktree, '.idea'))
-    codexPlaceholder(join(checkout, '.git', 'branches'))
+    claudePlaceholder(join(checkout, '.git', 'branches'))
     for (const name of ['.agents', '.aws', '.codex']) codexPlaceholder(join(worktree, name))
     assert.notDeepEqual(snapshot(worktree), before.worktree)
 
@@ -110,7 +118,7 @@ describe.skipIf(!linux)('taking away what a sandbox left', () => {
 
   it("lets the person's git config work again once a left config.lock is taken away", async () => {
     const { checkout, worktree } = checkoutAndWorktree()
-    const recorded = await missingPlaces([worktree])
+    const recorded = await missingPlaces([worktree], 'codex')
     claudePlaceholder(join(checkout, '.git', 'config.lock'))
     const locked = spawnSync('git', ['config', 'user.name', 'Person'], { cwd: checkout, encoding: 'utf8' })
     assert.notStrictEqual(locked.status, 0)
@@ -126,14 +134,14 @@ describe.skipIf(!linux)('taking away what a sandbox left', () => {
     const theirs = join(worktree, '.codex')
     // An empty read-only file, as the one in ai-teacher was: there before the sandbox started, so never recorded.
     claudePlaceholder(theirs)
-    const recorded = await missingPlaces([worktree])
+    const recorded = await missingPlaces([worktree], 'codex')
     assert.notInclude(recorded, theirs)
     await Promise.all(recorded.map((path) => settle(path, nothingMounted)))
     assert.isTrue(lstatSync(theirs).isFile())
 
     const { worktree: other } = checkoutAndWorktree()
     const missing = join(other, '.codex')
-    const places = await missingPlaces([other])
+    const places = await missingPlaces([other], 'codex')
     assert.include(places, missing)
     codexPlaceholder(missing)
     await Promise.all(places.map((path) => settle(path, nothingMounted)))
@@ -154,6 +162,22 @@ describe.skipIf(!linux)('taking away what a sandbox left', () => {
     assert.strictEqual(await settle(mounted, new Set([mounted])), 'mounted')
     assert.isTrue(existsSync(mounted))
     assert.strictEqual(await settle(join(worktree, '.agents'), nothingMounted), 'gone')
+  })
+
+  it('leaves an empty folder the person makes where a sandbox protects a file or a folder of its own', async () => {
+    const { checkout, worktree } = checkoutAndWorktree()
+    // Missing when a Claude Code session started; the person makes them, writable and empty, while it runs.
+    const recorded = await missingPlaces([worktree], 'claude-code')
+    const made = [join(worktree, '.idea'), join(worktree, '.vscode'), join(checkout, '.git', 'branches')]
+    for (const path of made) {
+      assert.include(recorded, path)
+      mkdirSync(path)
+    }
+    // Their .codex is no place Claude Code's sandbox makes: never recorded, so it stays as well.
+    mkdirSync(join(worktree, '.codex'))
+    assert.notInclude(recorded, join(worktree, '.codex'))
+    for (const path of recorded) assert.notStrictEqual(await settle(path, nothingMounted), 'removed')
+    for (const path of [...made, join(worktree, '.codex')]) assert.isTrue(lstatSync(path).isDirectory())
   })
 
   it('reads every mount namespace once, with mountinfo escapes read back', async () => {
@@ -206,8 +230,8 @@ describe.skipIf(!linux)('the record of where sandboxes may leave placeholders', 
       const before = snapshot(checkout)
       const first = yield* agentProcess('running')
       const second = yield* agentProcess('running')
-      yield* recordPlaces(first, [worktree])
-      yield* recordPlaces(second, [worktree])
+      yield* recordPlaces(first, [worktree], 'claude-code')
+      yield* recordPlaces(second, [worktree], 'codex')
       claudePlaceholder(join(checkout, '.git', 'config.lock'))
       yield* ended(first)
       // The second still runs, its sandbox perhaps mounted on it: nothing is taken away yet.
@@ -225,7 +249,7 @@ describe.skipIf(!linux)('the record of where sandboxes may leave placeholders', 
     Effect.gen(function* () {
       const { worktree } = checkoutAndWorktree()
       const agent = yield* agentProcess('running')
-      yield* recordPlaces(agent, [worktree])
+      yield* recordPlaces(agent, [worktree], 'codex')
       const mounted = join(worktree, '.aws')
       codexPlaceholder(mounted)
       writeFileSync(join(worktree, '.mcp.json'), '{}')
@@ -253,7 +277,7 @@ describe.skipIf(!linux)('the record of where sandboxes may leave placeholders', 
         const crashed = yield* newId(Ids.runtimeInstance)
         yield* sql`INSERT INTO runtime_instances ${sql.insert({ id: crashed, deviceId: instance.deviceId, pid: 4242, appVersion: '0.0.0', startedAt: yield* now })}`
         // Recorded before it was spawned; the launch crashed before it heard the process start.
-        yield* recordPlaces(yield* agentProcess('launching', crashed), [worktree])
+        yield* recordPlaces(yield* agentProcess('launching', crashed), [worktree], 'codex')
       }).pipe(Effect.provide(runtime(file)))
       claudePlaceholder(join(checkout, '.git', 'config.lock'))
       for (const name of ['.agents', '.aws', '.codex']) codexPlaceholder(join(worktree, name))
@@ -289,7 +313,7 @@ describe.skipIf(!bubblewrapStarts() || codex === null)("Codex's sandbox, killed"
     const { checkout, worktree } = checkoutAndWorktree()
     const home = mkdtempSync(join(tmpdir(), 'althar-codex-home-'))
     const before = { checkout: snapshot(checkout), worktree: snapshot(worktree) }
-    const recorded = await missingPlaces([worktree])
+    const recorded = await missingPlaces([worktree], 'codex')
 
     // Killed as a whole, as a lead that won't stop in its grace period is: no sandbox of it is left to take its folders away.
     const running = sandboxed(worktree, home, ['sleep', '30'])
