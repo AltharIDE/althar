@@ -967,13 +967,6 @@ export class Limits extends Context.Service<
             const lacking = input.model === undefined ? [] : yield* models.lacking(input.agentId, input.model)
             const all = yield* allowed(input.agentId, input.projectId)
             const offered = all.filter((account) => !lacking.includes(account.id))
-            // One given is the agent's own: another agent's would sign it in as someone else. Given but known not to offer the
-            // model, as a choice read before its account said, the step goes to one of the agent's that may instead.
-            if (input.accountId !== undefined) {
-              const given = yield* accounts.get(input.accountId)
-              if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
-              if (!lacking.includes(given.id) || offered.length === 0) return given
-            }
             // Every account the project allows is known not to offer it, where another of the agent's is known to: it can't run
             // here, as the project keeps that one out. Where none is known to, the model may still be offered, as an agent's
             // older list leaves out what its maker offers now, so every one allowed is as before.
@@ -981,6 +974,13 @@ export class Limits extends Context.Service<
               const every = yield* accounts.of(input.agentId)
               if (every.some((account) => !lacking.includes(account.id)))
                 return yield* new NotFound({ kind: 'offered_model', id: input.model ?? input.agentId })
+            }
+            // One given is the agent's own: another agent's would sign it in as someone else. Given but known not to offer the
+            // model, as a choice read before its account said, the step goes to one of the agent's that may instead.
+            if (input.accountId !== undefined) {
+              const given = yield* accounts.get(input.accountId)
+              if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
+              if (!lacking.includes(given.id) || offered.length === 0) return given
             }
             const list = offered.length === 0 ? all : offered
             const rotate = yield* rotating(input.projectId)

@@ -278,6 +278,12 @@ describe('a step handed over or moved', () => {
       yield* applyRules(projectId, { onlyAccounts: { codex: [main.id] } }, (yield* Instance).personId)
       const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, model: SOL.id }))
       assert.deepInclude(refused, { _tag: 'NotFound', kind: 'offered_model' })
+      // Named with the account, as a stand-in or a choice kept from before is: refused all the same.
+      assert.deepInclude(yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, accountId: main.id, model: SOL.id })), {
+        _tag: 'NotFound',
+        kind: 'offered_model',
+      })
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId, accountId: main.id, model: LUNA.id })).id, main.id)
       const listed = yield* usableModels(projectId)
       assert.isFalse(listed.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.model === SOL.id)))
       assert.isTrue(listed.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.model === LUNA.id)))
