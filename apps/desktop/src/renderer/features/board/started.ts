@@ -3,6 +3,7 @@ import { TaskStatus, type StartedTone } from '@althar/ui'
 
 import { callKindOf } from '../../shared/calls'
 import { factsOf } from '../../shared/standing'
+import { isFolded } from '../../shared/steps'
 import { readyCardOf, runningCardOf, stoppedCardOf, text } from './BoardView'
 
 /*
@@ -28,6 +29,8 @@ export const startedText = {
   needsYou: 'Needs you',
   merged: 'Merged',
   kept: 'Kept for later',
+  /** Stopped, its work gone on in another task. */
+  folded: 'Folded in',
   /** A task that settled, which the board's page doesn't hold any more. */
   settled: 'Settled',
 }
@@ -76,6 +79,12 @@ export const standsOf = (work: BoardTask, call: BoardCall | undefined, now: stri
     case 'kept':
       return { tone: TaskStatus.Done, word: startedText.kept }
     case 'stopped': {
+      // Folded into another task, most often the one whose thread this is: settled in all but name, and nothing more to say.
+      if (isFolded(work.stopped)) return { tone: TaskStatus.Done, word: startedText.folded }
+      // Stopped by the lead of the task whose thread this is: its reason alone, as who stopped it is that lead.
+      const stopped = work.stopped
+      if (stopped?.who === 'lead' && stopped.lead?.threadId === work.startedBy?.threadId && stopped.why !== undefined)
+        return { tone: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], detail: stopped.why.trim().replace(/\.$/, '') }
       const card = stoppedCardOf(work, now)
       return { tone: TaskStatus.Stopped, word: card.word, ...(card.why === undefined ? {} : { detail: card.why }) }
     }

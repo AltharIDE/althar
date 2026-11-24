@@ -491,11 +491,11 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Beside it, why, or what of its pull request stands first, as the board's card says it: a failed check, checks running.
   const standing = said === null ? undefined : (why ?? (card.change === null ? undefined : factsOf(card.change)[0]?.words))
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
-  const now = discarded
-    ? undefined
-    : // Stopped: who stopped it and why, or the task its work went on in, rather than the step it was cut short in.
-      status === TaskStatus.Stopped && card.phase === 'stopped'
-      ? stoppedWords(card.stopped)
+  // Stopped: who stopped it and why, or the task its work went on in, under its title, rather than the step it was cut short in.
+  const stoppedWhy = status === TaskStatus.Stopped && card.phase === 'stopped' ? stoppedWords(card.stopped) : undefined
+  const now =
+    discarded || (status === TaskStatus.Stopped && card.phase === 'stopped')
+      ? undefined
       : standing !== undefined
         ? standing
         : status === TaskStatus.Done
@@ -528,6 +528,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       steps={steps}
       at={status === TaskStatus.Done || said !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
+      {...(stoppedWhy === undefined ? {} : { why: stoppedWhy })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
       {...(effort === null ? {} : { effort })}

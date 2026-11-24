@@ -11,7 +11,6 @@ import {
 } from '@althar/contracts'
 
 import { asMerging } from '../../data/merges'
-import { isFolded } from '../../shared/steps'
 
 /*
  * Which lane of the board each task and call goes in (ADR-065). Up next:
@@ -166,8 +165,8 @@ export const lanesOf = (
     // By their latest exchange, the latest first; one with nothing said yet, by when it began.
     scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
     ...arranged,
-    // A task whose work went on in another is settled in all but name: a quiet row, not counted as up next.
-    upNext: arranged.upNext + stopped.filter((task) => !isFolded(task.stopped)).length,
+    // Every stopped task the lane holds, a folded one's quiet row too: its count is what it shows, collapsed or not.
+    upNext: arranged.upNext + stopped.length,
     waiting: waits.waiting,
     issues: waits.issues,
     stopped,
