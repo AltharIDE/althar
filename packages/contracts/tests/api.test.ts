@@ -673,6 +673,7 @@ describe('the API', () => {
               PostReviewDraft: () => Effect.void,
               DiscardReviewDraft: () => Effect.void,
               AnswerStuck: () => Effect.void,
+              FixWithCoordinator: () => Effect.die('unused'),
               HandOverHeld: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),

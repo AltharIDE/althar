@@ -431,6 +431,7 @@ describe('the client', () => {
           PostReviewDraft: () => Effect.die('unused'),
           DiscardReviewDraft: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
+          FixWithCoordinator: () => Effect.die('unused'),
           ListSkills: () => Effect.die('unused'),
           FindSkills: () => Effect.die('unused'),
           StageSkill: () => Effect.die('unused'),

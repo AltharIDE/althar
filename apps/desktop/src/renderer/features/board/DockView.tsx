@@ -146,6 +146,7 @@ export function DockView({
             agents={agents}
             agentName={name}
             onAnswer={(id, answer) => void model.answerStuck(id, answer)}
+            onFixWithCoordinator={(id) => void model.fixWithCoordinator(id)}
           />
         )}
         {open(call.threadId)}

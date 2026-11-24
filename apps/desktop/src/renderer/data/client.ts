@@ -902,6 +902,8 @@ export interface Client {
   readonly getRunnableRefs: (projectId: string, text?: string) => Promise<ReadonlyArray<OfferedRefs>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** Asks the coordinator to fix what stops a step's agent on this computer (DEV-285); the call stays open meanwhile. */
+  readonly fixWithCoordinator: (attentionId: string) => Promise<void>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (input: { readonly attentionId: string; readonly answer: CheckoutAnswer }) => Promise<void>
   /** Moves a running task between a worktree and Local; `consent` answers what it asked about a checkout on a branch of the person's own. */
@@ -1509,6 +1511,7 @@ export const connect = async (
     resizeTerminal: (id, cols, rows) => settle(api.ResizeTerminal({ id, cols, rows })),
     closeTerminal: (id) => command((commandId) => api.CloseTerminal({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    fixWithCoordinator: (attentionId) => command((commandId) => api.FixWithCoordinator({ commandId, attentionId })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),

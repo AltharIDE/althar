@@ -1565,6 +1565,7 @@ export function TaskView({
         agents={model.agents}
         agentName={agentName}
         onAnswer={model.answerStuck}
+        onFixWithCoordinator={(id) => void model.fixWithCoordinator(id)}
         {...(onSignIn === undefined ? {} : { onSignIn })}
         {...(onInstall === undefined ? {} : { onInstall })}
         {...(onConnections === undefined ? {} : { onConnect: onConnections })}

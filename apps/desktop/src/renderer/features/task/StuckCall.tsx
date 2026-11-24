@@ -1,6 +1,6 @@
 import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts'
-import { type ModelInfo, Stuck, type StuckAttempt, type StuckWay } from '@althar/ui'
-import { useMemo, useState } from 'react'
+import { Code, type ModelInfo, Stuck, type StuckAttempt, type StuckWay } from '@althar/ui'
+import { type ReactNode, useMemo, useState } from 'react'
 
 import type { StuckAnswer } from '../../data/client'
 import { useModels } from '../../data/models'
@@ -32,13 +32,15 @@ type Why = StuckStep['why']
 interface Ways {
   readonly ways: ReadonlyArray<StuckWay>
   readonly primary: StuckWay
-  readonly fix?: 'signIn' | 'install' | 'connect'
+  readonly fix?: 'signIn' | 'install' | 'connect' | 'coordinator'
 }
 
 /** The lead's work went wrong: told what to do instead, first. */
 const tellFirst: Ways = { ways: ['tell', 'retry', 'abandon'], primary: 'tell' }
 /** Althar, the service or the session failed, not the work: started again, first. */
 const againFirst: Ways = { ways: ['again', 'retry', 'abandon'], primary: 'again' }
+/** What stops its agent on this computer: put right, then tried again. */
+const localWays: Ways = { ways: ['again', 'abandon'], primary: 'again' }
 /** The reviewer's own trouble: another reviewer, first. */
 const anotherFirst: Ways = { ways: ['retry', 'again', 'abandon'], primary: 'retry' }
 
@@ -70,6 +72,9 @@ export const waysOn: Record<Why, { readonly lead: Ways; readonly review: Ways }>
   not_installed: { lead: { ...againFirst, fix: 'install' }, review: { ...anotherFirst, fix: 'install' } },
   // The lead stopped to wait for the person's answer: they give it, and it starts again.
   waiting_on_person: { lead: { ways: ['tell'], primary: 'tell' }, review: { ways: ['tell'], primary: 'tell' } },
+  // Something on this computer stops its agent, which no retry or other model helps (DEV-285): the coordinator puts it right,
+  // first; or the person does, and tries again, or stops.
+  local_cause: { lead: { ...localWays, fix: 'coordinator' }, review: { ...localWays, fix: 'coordinator' } },
 }
 
 /** The pull request, which Althar opens itself: tried again as it was, or gone on without; its host connected first, where it isn't. */
@@ -119,7 +124,23 @@ export const text = {
         return `${agent} isn't installed, or isn't on ${device.this}'s PATH.`
       case 'waiting_on_person':
         return stuck.detail ?? 'It needs your answer before it can go on.'
+      case 'local_cause':
+        return `${agent} can't start: ${stuck.detail ?? 'something on this computer is in its way.'}`
     }
+  },
+  /** What stops its agent on this computer, with the path in it as code (DEV-285). */
+  local: (stuck: StuckStep, agent: string): ReactNode => {
+    const parts = (stuck.detail ?? '').split('`')
+    return (
+      <>
+        {`${agent} can't start: `}
+        {parts.map((part, at) => (at % 2 === 1 ? <Code key={at}>{part}</Code> : part))}
+      </>
+    )
+  },
+  coordinator: {
+    fix: 'Let the coordinator fix it',
+    asked: 'The coordinator is looking into it. This step goes on by itself once the cause is gone.',
   },
   /** How many rounds of review the task ran, not today's setting; its last settle changed code no review has seen. */
   reviewed: (rounds: number): string =>
@@ -187,6 +208,8 @@ interface StuckCallProps {
   onInstall?: (agentId: string) => void
   /** Opens the code hosts in Settings, for a pull request whose host isn't connected: Connect. */
   onConnect?: () => void
+  /** Asks the coordinator to fix what stops its agent on this computer: Let the coordinator fix it. */
+  onFixWithCoordinator?: (attentionId: string) => void
 }
 
 /**
@@ -276,8 +299,12 @@ function StuckCard({
   onSignIn,
   onInstall,
   onConnect,
+  onFixWithCoordinator,
 }: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
+  // Asked at once on the press, the card saying so before the runtime does (DEV-285).
+  const [asking, setAsking] = useState(false)
+  const asked = asking || stuck.cause?.askedAt !== undefined
   const providerName = useProviderNames()
   const agent = agentName(stuck.agentId) || 'The agent'
   // A provider within the agent refused it: said by its name and the model's, and signed in to by its name.
@@ -285,8 +312,13 @@ function StuckCard({
     stuck.why === 'signed_out' && stuck.provider !== undefined && stuck.model !== undefined
       ? providerName(stuck.agentId, stuck.model, stuck.provider)
       : undefined
-  // The agent's own words under it, where they say more than the headline.
-  const said = stuck.why === 'signed_out' && saysMore('signed_out', stuck.detail) ? stuck.detail : undefined
+  // The agent's own words under it, where they say more than the headline; or, for a local cause, that the coordinator has it.
+  const said =
+    stuck.why === 'signed_out' && saysMore('signed_out', stuck.detail)
+      ? stuck.detail
+      : stuck.why === 'local_cause' && asked
+        ? text.coordinator.asked
+        : undefined
   const { handOn, browser } = useHandOn(request.id, stuck, agents, onAnswer)
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
   if (stuck.why === 'usage_limit' && stuck.limit !== undefined)
@@ -327,7 +359,17 @@ function StuckCard({
         ? { fix: { label: text.fix.install, onFix: () => onInstall(stuck.agentId ?? '') } }
         : fix === 'connect' && onConnect !== undefined
           ? { fix: { label: text.fix.connect, onFix: onConnect } }
-          : {}
+          : fix === 'coordinator' && onFixWithCoordinator !== undefined && !asked
+            ? {
+                fix: {
+                  label: text.coordinator.fix,
+                  onFix: () => {
+                    setAsking(true)
+                    onFixWithCoordinator(request.id)
+                  },
+                },
+              }
+            : {}
   const reporting = (step: string) => (onReport === undefined ? {} : { onReport: () => onReport(step) })
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
@@ -368,9 +410,11 @@ function StuckCard({
       <Stuck
         step={text.step[stuck.step]}
         what={
-          provider === undefined || stuck.model === undefined
-            ? text.what(stuck, agent)
-            : text.refused(provider, named(stuck.agentId, stuck.model).name)
+          stuck.why === 'local_cause'
+            ? text.local(stuck, agent)
+            : provider === undefined || stuck.model === undefined
+              ? text.what(stuck, agent)
+              : text.refused(provider, named(stuck.agentId, stuck.model).name)
         }
         {...(said === undefined ? {} : { said })}
         tried={tried}
