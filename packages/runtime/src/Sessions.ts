@@ -903,7 +903,7 @@ export class Sessions extends Context.Service<
             } satisfies ThreadContext as ThreadContext
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
-            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+            SELECT b.id AS binding_id, b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
               w.kind IS 'checkout' AS local, w.name AS change
             FROM threads t
@@ -956,7 +956,7 @@ export class Sessions extends Context.Service<
             ORDER BY r.state = 'running' DESC, r.updated_at DESC LIMIT 1`
           if (review === undefined) return undefined
           const repositories = yield* sql<TaskRepository>`
-            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+            SELECT b.id AS binding_id, b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
               w.kind IS 'checkout' AS local
             FROM threads t
@@ -996,7 +996,7 @@ export class Sessions extends Context.Service<
           }>`SELECT name, brief, workspace_id, copy_path, writes FROM helpers WHERE thread_id = ${threadId}`
           if (helper === undefined) return undefined
           const repositories = yield* sql<TaskRepository>`
-            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+            SELECT b.id AS binding_id, b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
               w.kind IS 'checkout' AS local, w.name AS change
             FROM threads t JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'

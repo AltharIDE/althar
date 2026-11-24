@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting, canvas, card
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting, canvas, card, repository_trust
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello, clickup
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -1944,3 +1944,20 @@ CREATE TABLE canvas_saves (
   ) STRICT;
 
 CREATE INDEX tasks_by_artifact ON tasks (artifact_canvas_id) WHERE artifact_canvas_id IS NOT NULL;
+
+CREATE TABLE repository_trust (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'rtr_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  binding_id TEXT NOT NULL,
+  agent TEXT NOT NULL CHECK (agent IN ('claude-code', 'codex', 'opencode')),
+  file TEXT NOT NULL CHECK (length(file) BETWEEN 1 AND 300),
+  hash TEXT NOT NULL CHECK (length(hash) = 64 AND hash NOT GLOB '*[^0-9a-f]*'),
+  trusted INTEGER NOT NULL CHECK (trusted IN (0, 1)),
+  runs TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(runs)),
+  decided_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  decided_at TEXT NOT NULL CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id)
+) STRICT;
+
+CREATE UNIQUE INDEX repository_trust_file ON repository_trust (binding_id, file);

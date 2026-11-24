@@ -62,6 +62,7 @@ import {
 } from './sessionState'
 import { type RunSkills, refusalOf, runSkills } from './Skills'
 import { blockGoalAfterDisconnect } from './threadGoals'
+import { settingsHoldFor, settingsLine } from './repositoryTrust'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
@@ -379,6 +380,28 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             })
           : {}
       const web = !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
+      // A lead in a repository whose agent settings the person hasn't trusted, or whose branch changed them since, starts
+      // without them where its agent can; its task says so once, quietly (DEV-280). A worker's checkout isn't read here.
+      const startingIn =
+        thread.role === 'task' ? thread.repositories.find((repository) => repository.worktree === cwdOf(thread)) : undefined
+      const settingsHold =
+        thread.role === 'task' && !reads && thread.review === null && selectedWorker === null && startingIn?.bindingId !== undefined
+          ? yield* settingsHoldFor(definition, thread.projectId, {
+              bindingId: startingIn.bindingId,
+              name: startingIn.name,
+              folder: startingIn.worktree,
+            }).pipe(
+              Effect.provideService(SqlClient.SqlClient, sessionsSql),
+              Effect.catchCause((cause) =>
+                Effect.as(Effect.logWarning('Could not read the repository’s agent settings', cause), {
+                  // Unread, nothing of them is known to be trusted: it starts without them, as for one never seen.
+                  options:
+                    definition.untrustedRepositories === undefined ? { withoutRepositorySettings: { folder: startingIn.worktree } } : {},
+                  offer: undefined,
+                }),
+              ),
+            )
+          : { options: {}, offer: undefined }
       const transportOptions: SessionOptions = {
         web,
         ...(definition.native === 'copilot'
@@ -445,6 +468,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           : {}),
         ...(untrusted ? { untrusted } : {}),
         ...(untrusted && offline ? { offline } : {}),
+        ...settingsHold.options,
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
       }
@@ -542,6 +566,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             : upFront === undefined
               ? {}
               : { sandbox: upFront }),
+        ...settingsHold.options,
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
       }
@@ -839,6 +864,23 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           description:
             setUp.failed ?? 'It can’t load skills on a worker. To give it its skills, run it on the home, or choose another lead.',
         })
+      }
+      // Its repository's agent settings it started without, or loads untrusted, said once for what they are now, with Review.
+      const settingsOffer = settingsHold.offer
+      if (settingsOffer !== undefined && thread.role === 'task' && thread.helper === undefined) {
+        const hashes = settingsOffer.files.map((file) => file.hash).join(',')
+        const [said] = yield* sql<{ id: string }>`
+          SELECT id FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'notice'
+            AND json_extract(content, '$.offer.kind') = 'agent_settings' AND json_extract(content, '$.offer.said') = ${hashes} LIMIT 1`
+        if (said === undefined)
+          yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            role: 'aside',
+            title: settingsLine(definition.name, settingsOffer),
+            description: null,
+            offer: { ...settingsOffer, said: hashes },
+          })
       }
       // A skill this agent can't use is shown as a difference from the others, not hidden.
       if (skills !== undefined && skills.omitted.length > 0) {
