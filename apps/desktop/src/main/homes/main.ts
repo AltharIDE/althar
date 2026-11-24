@@ -14,7 +14,7 @@ import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { findRelease, HOST_RELEASE_KEYS } from './release'
+import { findRelease, HOST_RELEASE_KEYS, newestHostVersion } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
@@ -309,11 +309,32 @@ export const startHomeConnections = ({
     run: runProgram,
     program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
     signal: quitting.signal,
+    log,
   })
   ipcMain.handle('althar:homes-update', (event) => {
     const { current } = controller.state(owner(event))
     if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
     return updates.update(current.home)
+  })
+  // The newest host release, for an older home's welcome to offer its update by: asked of GitHub a few minutes apart at
+  // most, from here rather than over the home's own network, and afresh on Check again.
+  let news: { readonly at: number; readonly newest: Promise<string | null> } | undefined
+  ipcMain.handle('althar:homes-release', async (event, fresh: unknown) => {
+    owner(event)
+    if (fresh === true || news === undefined || Date.now() - news.at > 10 * 60_000) {
+      const newest = newestHostVersion(source, AbortSignal.any([quitting.signal, AbortSignal.timeout(20_000)]))
+      news = { at: Date.now(), newest }
+      // A failed look isn't kept: the next asks again.
+      newest.catch(() => {
+        if (news?.newest === newest) news = undefined
+      })
+    }
+    try {
+      return { newest: await news.newest }
+    } catch (error) {
+      log(`The newest host release couldn’t be found: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error('Couldn’t find out the newest host release.')
+    }
   })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {

@@ -68,6 +68,31 @@
   pointer-events: none;
 }
 
+/* a command picked, drawn over the field letter for letter, as the words arriving are: the field's own text goes clear under it */
+.commandWords {
+  position: relative;
+  max-height: 200px;
+  overflow: hidden;
+  padding: 1px 4px 0 1px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--t-1);
+  pointer-events: none;
+  align-self: start;
+}
+
+/* the command's name in Althar's colour: what is done is Althar's, not said to the agent */
+.commandName {
+  color: var(--live);
+}
+
+/* what it takes, ahead of the caret, as a placeholder is drawn */
+.ahead {
+  color: var(--t-3);
+}
+
 /* what is written, drawn here while words arrive, since the field's own text goes clear under it */
 .written {
   color: var(--t-1);

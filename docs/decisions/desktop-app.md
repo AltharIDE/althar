@@ -771,6 +771,12 @@ two views: What's new and Coming next (`/althar`, `features/news`).
   reactions on an issue per item, read from GitHub and added with the GitHub
   sign-in Althar already has, with nothing of Althar's own to run.
 
+## Commands in the composer
+
+A slash at the start of a composer opens its commands on the composer's top edge, joined to it as dictation's tray is, with each command saying where it stands now: the goal's state, the model and effort, how full the context is. Typing narrows them; the arrows move, Tab takes one into the field, Enter takes it, and Escape shuts them, the field keeping the focus throughout (a combobox over the list, as the search palette's). A command that takes nothing (`/compact`, `/ship`) is done as it is picked. One that takes something opens into what it acts on: `/goal` shows the goal itself (its objective, its turns, its last progress), then what can be done to it (pause or resume, edit, clear), and the last row says what Enter will do with what is written ("Set the goal", "Replace the goal"). In the field the command reads in cobalt, Althar's colour, since what is done is Althar's and not said to the agent, and what it takes is written ahead of the caret in grey. While `/goal` is open the goal's own line over the composer steps aside, so it isn't shown twice.
+
+Each screen offers what it can already do with a press, at the moment, and does it as that press does: nothing new happens through a command that couldn't happen without it. A task's composer (an aside's and an artifact's chat are tasks) offers `/goal`, `/model`, `/compact`, `/interrupt` while its lead works, `/ship` while it is held for Ship, `/done` and `/keep` where it finished, `/change` where it can be made one, `/board` or `/scratch` for a chat, `/run` where it has a worktree, and `/rename`. The coordinator's offers `/aside` (its words the aside's first), `/model`, `/compact`, `/interrupt`, `/clear`, and `/goal`, which says the objective to the coordinator for a task toward it ([A goal is a task's](coordinator.md#a-goal-is-a-tasks)). A slash that names none of them is sent as words, as is any slash inside ordinary words. The kit's `Composer` takes the commands as data (`commands`), and draws, filters and does them; the screens build them (`shared/composerCommands.ts`).
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
@@ -783,3 +789,5 @@ two views: What's new and Coming next (`/althar`, `features/news`).
 - 14 Nov 2026: markdown files open rendered, with what the task changed marked, and Source a key away ([Code beside the conversation](#code-beside-the-conversation)).
 - 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).
 - 22 Nov 2026: Althar's own tab shows what's new after an update, and what's coming next, from the site's notes and roadmap; the version line opens it in the window ([Althar's own tab](#althars-own-tab)).
+- 23 Nov 2026: a slash in a composer opens its commands on the composer's edge, each with where it stands, `/goal` opening into the goal itself; a task's and the coordinator's composers offer what each can do now ([Commands in the composer](#commands-in-the-composer)).
+- 24 Nov 2026: `/goal` in the coordinator's composer says the objective to the coordinator, which plans a task toward it with the goal on it.

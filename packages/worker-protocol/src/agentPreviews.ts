@@ -152,5 +152,3 @@ export const makePreviewTunnels = () => {
     },
   }
 }
-
-export type PreviewTunnels = ReturnType<typeof makePreviewTunnels>

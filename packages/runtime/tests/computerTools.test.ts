@@ -139,7 +139,7 @@ describe('computer use in a task’s turn', () => {
       )
       assert.strictEqual(
         yield* callTool(lead, 'computer', { op: 'click', target: 'Writer' }),
-        'Give a valid computer operation and its arguments.',
+        'click: target: Expected an id Althar gave (a UUID) or "desktop", got "Writer"; observation is missing; at is missing. For example {"op":"click","target":"<window id>","observation":"<observation id>","at":{"element":"e4"}} or "at":{"x":120,"y":40}.',
       )
       assert.strictEqual(fake.calls.length, calls)
       yield* Effect.sleep('1500 millis')

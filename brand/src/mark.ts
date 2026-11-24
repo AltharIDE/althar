@@ -1,6 +1,6 @@
 import { BORE, BOUNDS, POINT, SECTION } from './geometry'
 import { BLACK, COBALT, COBALT_ON_INK, INK, PAPER, WHITE } from './palette'
-import { type Box, num, svgDocument } from './svg'
+import { type Box, svgDocument } from './svg'
 
 /**
  * How the mark is coloured: its section, and the point in the bore. A point
@@ -41,9 +41,4 @@ const TIGHT: Box = [BOUNDS.x, BOUNDS.y, BOUNDS.width, BOUNDS.height]
 /** The mark on its own, with its box cut to the section. */
 export function markSvg(style: MarkStyle): string {
   return svgDocument(TIGHT, markBody(style), 'Althar')
-}
-
-/** The mark scaled and moved so that its grid lands at `x`, `y` with `scale` units per grid unit. */
-export function placedMark(style: MarkStyle, x: number, y: number, scale: number): string {
-  return `<g transform="translate(${num(x)} ${num(y)}) scale(${num(scale, 4)})">${markBody(style)}</g>`
 }

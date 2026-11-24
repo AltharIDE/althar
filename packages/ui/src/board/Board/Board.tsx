@@ -515,10 +515,13 @@ export function BoardList({ children }: { children: ReactNode }) {
   )
 }
 
-/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free; at its end, what to do with the group. */
-export function BoardDivider({ children, end }: { children: ReactNode; end?: ReactNode }) {
+/**
+ * A quiet line between groups in a lane, naming the group under it: what starts when an agent is free; at its end, what to
+ * do with the group. `whole` keeps its words whole where the lane is narrow, its end going under them, rather than cut.
+ */
+export function BoardDivider({ children, end, whole = false }: { children: ReactNode; end?: ReactNode; whole?: boolean }) {
   return (
-    <p className={s.divider}>
+    <p className={cx(s.divider, whole && s.whole)}>
       <span className={s.dividerLead}>
         <span className={s.dividerLabel} {...(typeof children === 'string' ? { title: children } : {})}>
           {children}

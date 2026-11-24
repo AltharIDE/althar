@@ -88,7 +88,16 @@ export interface HomeUpdateOffer {
   readonly installed?: 'known' | 'custom' | 'unknown'
   /** The window runs it itself, over SSH: how that stands. */
   readonly run?: HomeUpdateRun
+  /**
+   * Whether a published release would help, where the window looks first: being looked for, or none is out yet
+   * (`unreleased`), which says so in place of the update, with Check again.
+   */
+  readonly release?: 'checking' | 'unreleased'
 }
+
+/** The line over an older home's update: that it's older, or, where no release would help yet, what's to come. */
+export const olderLine = (t: Pick<HomeWelcomeText, 'older' | 'unreleased'>, name: string, update: HomeUpdateOffer) =>
+  update.release === 'unreleased' ? t.unreleased.arrival(name) : t.older(name)
 
 /** A way a new project's code comes in. */
 export type HomeDoor = 'clone' | 'folder' | 'fresh'
@@ -132,6 +141,10 @@ export interface HomeWelcomeText {
   folder: { title: (name: string) => string; line: (found: number | 'failed' | null, name: string) => string }
   fresh: { title: string; line: (name: string) => string }
   older: (name: string) => string
+  /** Where no published release makes projects from a window yet. */
+  unreleased: { arrival: (name: string) => string; title: string; line: (name: string) => string }
+  /** While the newest release is looked for. */
+  looking: string
   updateLabel: (name: string) => string
   update: {
     /** What the update brings, over what pressing it does. */
@@ -210,6 +223,12 @@ export const homeWelcomeText: HomeWelcomeText = {
   },
   fresh: { title: 'Start empty', line: (name) => `A new repository, made on ${name}` },
   older: (name) => `${name} runs an older Althar. Once it’s updated, you can bring it projects from here.`,
+  unreleased: {
+    arrival: (name) => `${name} runs an Althar host from before projects could be made from here.`,
+    title: 'No newer release yet',
+    line: (name) => `The next Althar host release brings it. Once it’s out, update ${name} here.`,
+  },
+  looking: 'Looking for the newest release',
   updateLabel: (name) => `Updating ${name}`,
   update: {
     title: 'The newest Althar',
@@ -885,7 +904,7 @@ function Arrival({
           <Letters of={name} />
         </h1>
         <p className={s.arrivalLine} data-morph="line" data-morph-at="center">
-          {update === undefined ? t.arrivalLine(name) : t.older(name)}
+          {update === undefined ? t.arrivalLine(name) : olderLine(t, name, update)}
         </p>
       </div>
       {update === undefined ? (
@@ -958,39 +977,48 @@ export function UpdateHome({
   // Pressed on a busy home: asked first, in the same panel. Anything else under way ends the asking.
   const [asking, setAsking] = useState(false)
   if (asking && (run?.state !== 'idle' || busy === 0)) setAsking(false)
-  const state = run === undefined ? 'there' : asking ? 'asking' : run.state
+  const release = update.release
+  const state = release ?? (run === undefined ? 'there' : asking ? 'asking' : run.state)
   const steps = [t.update.steps.getting, t.update.steps.restarting(name), t.update.steps.reconnecting]
   const at = run?.state === 'running' ? (['getting', 'restarting', 'reconnecting'] as const).indexOf(run.step) : 0
   const title =
-    run === undefined
-      ? t.update.there(name)
-      : asking
-        ? t.update.stop(busy)
-        : run.state === 'idle'
-          ? t.update.title
-          : run.state === 'running'
-            ? t.update.running(name)
-            : t.update.failed(name)
+    release === 'unreleased'
+      ? t.unreleased.title
+      : release === 'checking'
+        ? t.update.title
+        : run === undefined
+          ? t.update.there(name)
+          : asking
+            ? t.update.stop(busy)
+            : run.state === 'idle'
+              ? t.update.title
+              : run.state === 'running'
+                ? t.update.running(name)
+                : t.update.failed(name)
   const line =
-    run === undefined
-      ? t.update.thereLine
-      : asking
-        ? t.update.stopLine(name)
-        : run.state === 'idle'
-          ? busy > 0
-            ? t.update.busy(busy, name)
-            : t.update.line(name)
-          : run.state === 'running'
-            ? steps[at]
-            : run.problem
+    release === 'unreleased'
+      ? t.unreleased.line(name)
+      : release === 'checking'
+        ? t.looking
+        : run === undefined
+          ? t.update.thereLine
+          : asking
+            ? t.update.stopLine(name)
+            : run.state === 'idle'
+              ? busy > 0
+                ? t.update.busy(busy, name)
+                : t.update.line(name)
+              : run.state === 'running'
+                ? steps[at]
+                : run.problem
   return (
     <section className={cx(s.updating, className)} aria-label={t.updateLabel(name)}>
       <div className={s.update} data-state={state}>
         <span className={s.updateTile} aria-hidden="true">
-          {state === 'running' ? (
+          {state === 'running' || state === 'checking' ? (
             <Spinner size="large" />
           ) : (
-            <Icon name={state === 'failed' || state === 'asking' ? 'problem' : 'download'} size={20} />
+            <Icon name={state === 'failed' || state === 'asking' ? 'problem' : state === 'unreleased' ? 'clock' : 'download'} size={20} />
           )}
         </span>
         <span className={s.updateText} aria-live="polite">
@@ -1000,7 +1028,13 @@ export function UpdateHome({
           </span>
         </span>
         <span className={s.updateEnd}>
-          {run?.state === 'running' ? (
+          {release === 'checking' ? null : release === 'unreleased' ? (
+            onCheckAgain !== undefined && (
+              <Button icon="reload" onClick={onCheckAgain}>
+                {t.update.checkAgain}
+              </Button>
+            )
+          ) : run?.state === 'running' ? (
             <StepTrack steps={trackOf(steps, at)} className={s.updateTrack} text={{ label: t.updateLabel(name) }} />
           ) : run === undefined ? (
             onCheckAgain !== undefined && (
@@ -1035,7 +1069,7 @@ export function UpdateHome({
           )}
         </span>
       </div>
-      {(run === undefined || run.state === 'failed') && (
+      {release === undefined && (run === undefined || run.state === 'failed') && (
         <Disclosure className={s.byHand}>
           <DisclosureTrigger>
             <LinkButton className={s.byHandTrigger}>

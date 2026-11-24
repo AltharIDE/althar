@@ -1340,6 +1340,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
+    startAnyway: vi.fn(async () => true),
     interrupt: vi.fn(async () => {}),
     tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),

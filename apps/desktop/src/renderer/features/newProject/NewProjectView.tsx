@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { keys, LinkButton, modKey, OtherTools, RepositoryPick } from '@althar/ui'
-import { homeWelcomeText, NewProject, UpdateHome } from '@althar/ui/screens'
+import { homeWelcomeText, NewProject, olderLine, UpdateHome } from '@althar/ui/screens'
 
 import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -102,7 +102,7 @@ export function NewProjectView({
   const home = useHomeName()
   // A home from before windows made projects there is asked to update: nothing on this page would work on it.
   const older = home.remote && !canCall(client, 'FindHomeFolders')
-  const updating = useHomeUpdating()
+  const updating = useHomeUpdating(older)
   const found = useFound(!older)
   const [copied, setCopied] = useState(false)
   // When each found was last worked on is said from when the page opened.
@@ -118,7 +118,7 @@ export function NewProjectView({
     return (
       <div className={s.window}>
         <main className={s.older}>
-          <p className={s.olderLine}>{homeWelcomeText.older(home.name)}</p>
+          <p className={s.olderLine}>{olderLine(homeWelcomeText, home.name, updating.offer)}</p>
           <UpdateHome
             name={home.name}
             update={updating.offer}

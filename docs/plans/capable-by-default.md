@@ -294,7 +294,7 @@ stays the person's; a test reads the screens' calls against it.
 ### 3. Host tools
 
 The environment part (gh, glab, git credential helpers and the SSH agent)
-is implemented in the [7 November limits sweep](no-arbitrary-limits-audit.md).
+is built ([what stays and why](../decisions/what-agents-may-do.md#what-stays-and-why)).
 The remaining host-tool changes below build on it.
 
 - **The person's own sign-in.** Stop taking `gh`, `glab`, git's credential

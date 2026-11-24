@@ -7,7 +7,6 @@ import {
   AfterMergeRule,
   NewProjectDefaults,
   PlansAndReviews,
-  PROJECT_SETTINGS_SECTIONS,
   ProjectInk,
   ProjectTracker,
   RepositoryFilesSetting,
@@ -15,7 +14,6 @@ import {
   RepositorySetup,
   RuleKind,
   SealStyle,
-  SETTINGS_SECTIONS,
   ShipRoute,
   settingsSectionOf,
   type SettingChangeCard,
@@ -1526,12 +1524,6 @@ export class SettingsTools extends Context.Service<
     }),
   )
 }
-
-/** The sections read_settings covers, by their addresses: every one the Settings screens list. */
-export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
-  ...PROJECT_SETTINGS_SECTIONS.map((id) => `project/${id}`),
-  ...SETTINGS_SECTIONS.map((id) => `althar/${id}`),
-]
 
 /**
  * Every change a Settings screen makes, by the API call or the window's preference it makes it with, and how the
