@@ -201,6 +201,10 @@
   border-radius: 99px;
   background: var(--signal);
 }
+/* something new there, not something waiting on the person: quiet, as Segmented's dot is */
+.news {
+  background: var(--t-3);
+}
 /* the mark's drawing leaves 3px at its side, so the home's tab takes that much less there: the same space round both ends */
 .home .select {
   padding: 0 11px 0 8px;

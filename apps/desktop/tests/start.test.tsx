@@ -974,7 +974,7 @@ it('welcomes an empty remote home with what it found there, and goes into New pr
   expect(draftsOf(client).get()?.way).toBe('new')
 })
 
-it('asks a home from before windows made projects there to update, by the launcher and profile its connection runs, in place of the ways in', async () => {
+it('asks a home from before windows made projects there, on a launcher of its own, to update there: its command folded away, and Check again', async () => {
   window.localStorage.clear()
   const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
   // Installed somewhere of its own: its launcher and profile saved for it, as the connection runs them.
@@ -984,20 +984,112 @@ it('asks a home from before windows made projects there to update, by the launch
     homeId: `home_${'1'.repeat(32)}`,
     ssh: { target: 'althar@runner-1', launcher: '/opt/althar/launcher', profile: '/srv/althar' },
   }
-  const homes = { state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }), onState: () => () => {} }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => ({ state: 'applied' })),
+  }
   const host = fakeHost({ homes: homes as unknown as Host['homes'] })
   const copied = vi.fn(async () => {})
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
   withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
   // No tour: the home can't say what it is.
   expect(await screen.findByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
-  expect(screen.getByText(/runner-1 runs an older Althar, which can’t make projects from this window/)).not.toBeNull()
+  expect(screen.getByText(/runner-1 runs an older Althar. Once it’s updated/)).not.toBeNull()
   expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
-  expect(screen.getByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
+  // A launcher of its own may be a source checkout's: the window doesn't run it.
+  expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+  expect(await screen.findByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
   expect(copied).toHaveBeenCalledWith(`sh '/opt/althar/launcher' update --apply --wait --profile '/srv/althar'`)
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  expect(homes.reconnect).toHaveBeenCalledOnce()
+  expect(homes.update).not.toHaveBeenCalled()
   expect(client.findHomeFolders).not.toHaveBeenCalled()
   expect(client.getMachine).not.toHaveBeenCalled()
+})
+
+it('updates an older home reached over SSH in one press, each step as it stands, and reconnects onto the ways in', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const listeners = new Set<(state: unknown) => void>()
+  const tell = (state: unknown) => listeners.forEach((listener) => listener(state))
+  let done: (value: unknown) => void = () => {}
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: (listener: (state: unknown) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(() => new Promise((resolve) => (done = resolve))),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  // At once, where the press was.
+  expect(screen.getByText('Getting the new release')).not.toBeNull()
+  expect(homes.update).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button', { name: /yourself/ })).toBeNull()
+  // The home restarts into it: the window's connection drops meanwhile.
+  act(() => tell({ current: { kind: 'ssh', home: runner }, connection: 'disconnected', problem: 'The home disconnected.' }))
+  expect(await screen.findByText('Restarting runner-1')).not.toBeNull()
+  act(() => done({ state: 'applied', version: '0.42.0' }))
+  await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+  // Reconnected, it opens on the ways in rather than the tour.
+  expect(window.localStorage.getItem('althar.homeToured')).toBe('1')
+})
+
+it('offers Reconnect where an update failed after the home dropped the window’s connection', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const listeners = new Set<(state: unknown) => void>()
+  let fail: (error: Error) => void = () => {}
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: (listener: (state: unknown) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(() => new Promise((_, reject) => (fail = reject))),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  act(() => listeners.forEach((listener) => listener({ current: { kind: 'ssh', home: runner }, connection: 'disconnected' })))
+  act(() => fail(new Error('The new host did not become ready.')))
+  await userEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  expect(homes.reconnect).toHaveBeenCalledOnce()
+})
+
+it('says why an older home couldn’t update, with Try again and its command folded away', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'althar:homes-update': Error: There’s no newer Althar for runner-1 yet.")
+    }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('There’s no newer Althar for runner-1 yet.')).not.toBeNull()
+  expect(screen.getByText('Couldn’t update runner-1')).not.toBeNull()
+  // Still connected: nothing to reconnect.
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Update it on runner-1 yourself' })).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(homes.update).toHaveBeenCalledTimes(2)
+  expect(homes.reconnect).not.toHaveBeenCalled()
 })
 
 it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {

@@ -1,0 +1,468 @@
+/* Where the work runs now: the machines, drawn, and the work going along their wires. In the picture's own pixels. */
+
+.figure {
+  width: 912px;
+  margin: 0 auto;
+}
+.scene {
+  position: relative;
+  height: 236px;
+}
+
+/* ---- the wires ---- */
+
+.wires {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.wire,
+.flow {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1.5 5;
+}
+.wire {
+  stroke: var(--n-5);
+  transition: opacity 600ms var(--ease);
+}
+.wire[data-gone='true'] {
+  opacity: 0;
+}
+/*
+ * A wire at work: its current reaches along it, from where the work leaves to
+ * where it lands, and keeps flowing that way. Off, it fades, then its reach
+ * goes back to the start, unseen, for the next time.
+ */
+.current {
+  opacity: 0;
+  transition: opacity 600ms var(--ease);
+}
+.current[data-on='true'] {
+  opacity: 1;
+  transition-duration: 120ms;
+}
+.reach {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 12;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0s linear 600ms;
+}
+.current[data-on='true'] .reach {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1000ms var(--ease-out);
+}
+.flow {
+  stroke: var(--live);
+  stroke-width: 2;
+  animation: flow 1.3s linear infinite;
+}
+@keyframes flow {
+  to {
+    stroke-dashoffset: -13;
+  }
+}
+.via {
+  position: absolute;
+  top: 78px;
+  left: 281px;
+  translate: -50% 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--n-2);
+  font: 500 10.5px/1.4 var(--font-label);
+  letter-spacing: 0.02em;
+  color: var(--t-3);
+  transition: opacity 600ms var(--ease);
+}
+.via[data-gone='true'] {
+  opacity: 0;
+}
+
+/* ---- states that change in place ---- */
+
+.swap {
+  display: inline-grid;
+  justify-items: end;
+}
+.swap > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-3px);
+  /* the old one goes first, quicker, so the two never read over each other */
+  transition:
+    opacity var(--exit) var(--ease),
+    transform var(--exit) var(--ease);
+}
+.swap > span[data-on='true'] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 460ms var(--ease) var(--exit),
+    transform 460ms var(--ease) var(--exit);
+}
+
+/* ---- this computer: a laptop, its screen going to sleep as it closes ---- */
+
+.laptop {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  width: 232px;
+}
+.lid {
+  position: relative;
+  width: 212px;
+  height: 136px;
+  margin: 0 auto;
+  padding: 7px;
+  border-radius: 12px 12px 4px 4px;
+  background: var(--n-5);
+}
+.screen {
+  position: relative;
+}
+/* closed, the screen is dark glass: what was on it goes under, a sheen across it */
+.screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.07) 48%, transparent 58%),
+    linear-gradient(160deg, color-mix(in srgb, var(--term) 82%, var(--paper)), var(--term) 60%);
+  opacity: 0;
+  transition: opacity 600ms var(--ease);
+}
+.laptop[data-closed='true'] .screen::after {
+  opacity: 1;
+}
+.base {
+  position: relative;
+  height: 10px;
+  border-radius: 2px 2px 9px 9px;
+  background: var(--n-4);
+  box-shadow:
+    inset 0 1px 0 var(--n-5),
+    0 8px 16px -10px rgba(20, 20, 28, 0.35);
+}
+.base::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  translate: -50% 0;
+  border-radius: 0 0 4px 4px;
+  background: var(--n-5);
+}
+.screen {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  height: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--paper);
+  overflow: hidden;
+}
+.appBar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.appBar i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--n-5);
+}
+.appBar code {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--n-2);
+  font: 500 9px/1.6 var(--mono);
+  color: var(--t-3);
+}
+.appTask {
+  display: grid;
+  gap: 1px;
+}
+.appTask b {
+  font: 620 12px/1.2 var(--font-display);
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.appTask code {
+  font: 500 9px/1.3 var(--mono);
+  color: var(--t-3);
+}
+.appSaid {
+  justify-self: end;
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 7px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--n-2);
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.appState {
+  font-size: 10.5px;
+  color: var(--t-2);
+}
+.appState .swap {
+  justify-items: start;
+}
+.appState svg {
+  color: var(--ok);
+}
+.appState ins {
+  text-decoration: none;
+  color: var(--ok-ink);
+}
+.appState del {
+  text-decoration: none;
+  color: var(--del-ink-2);
+}
+
+/* ---- the home and the workers: machines, in ink ---- */
+
+.server,
+.worker {
+  position: absolute;
+  isolation: isolate;
+  width: 232px;
+  padding: 11px 13px 12px;
+  border-radius: 12px;
+  background: var(--term);
+  box-shadow: var(--lift-pop);
+  color: var(--term-t3);
+  font-size: 11.5px;
+}
+/* at work, the machine's edge lights */
+.server::before,
+.worker::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--term-live) 45%, transparent),
+    0 10px 30px -12px color-mix(in srgb, var(--live) 55%, transparent);
+  opacity: 0;
+  transition: opacity 700ms var(--ease);
+}
+/* it lights as the current reaches it */
+.server[data-busy='true']::before,
+.worker[data-busy='true']::before {
+  opacity: 1;
+  transition-delay: 600ms;
+}
+.server {
+  top: 44px;
+  left: 340px;
+  height: 136px;
+}
+.one {
+  top: -2px;
+  left: 680px;
+  height: 148px;
+}
+.two {
+  top: 172px;
+  left: 680px;
+  height: 44px;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+}
+.head > svg {
+  color: var(--term-t3);
+}
+.head .swap {
+  margin-left: auto;
+}
+.name {
+  font: 560 12.5px/1 var(--mono);
+  color: var(--term-t1);
+}
+.kind {
+  margin-left: auto;
+  font-size: 11px;
+}
+.leds {
+  display: flex;
+  gap: 3px;
+}
+.leds i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--term-t5);
+  opacity: 0.45;
+  transition: opacity 500ms var(--ease);
+}
+.server[data-busy='true'] .leds i {
+  background: var(--term-live);
+  animation: led 1.6s var(--ease) infinite;
+}
+.server[data-busy='true'] .leds i:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.server[data-busy='true'] .leds i:nth-child(3) {
+  animation-delay: 0.6s;
+}
+@keyframes led {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.tasks {
+  display: grid;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tasks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  border-top: 1px solid var(--term-raised);
+  color: var(--term-t2);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 500ms var(--ease),
+    transform 500ms var(--ease);
+}
+.tasks li[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+}
+.tasks li > svg {
+  flex: none;
+  color: var(--term-t3);
+}
+.task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tasks .swap,
+.head .swap {
+  font-size: 11px;
+  color: var(--term-t3);
+}
+.swap svg {
+  color: var(--term-live);
+}
+.log {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--term-raised);
+  list-style: none;
+  font: 500 10.5px/1.45 var(--mono);
+  color: var(--term-t3);
+}
+.log li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 420ms var(--ease),
+    transform 420ms var(--ease);
+}
+.log li[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+}
+.log li[data-typed='true'] {
+  color: var(--term-t1);
+}
+.log li[data-typed='true']::before {
+  content: '$ ';
+  color: var(--term-live);
+}
+
+/* ---- what each is, under it ---- */
+
+.captions {
+  display: grid;
+  grid-template-columns: 232px 108px 232px 108px 232px;
+  margin-top: 22px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.captions > span {
+  display: grid;
+  gap: 2px;
+  text-wrap: pretty;
+}
+.captions > span:nth-child(2) {
+  grid-column: 3;
+}
+.captions > span:nth-child(3) {
+  grid-column: 5;
+}
+.captions b {
+  font: 620 15px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow {
+    animation: none;
+  }
+  .reach,
+  .current,
+  .wire,
+  .via,
+  .server::before,
+  .worker::before,
+  .screen::after,
+  .swap > span,
+  .tasks li,
+  .log li {
+    transition: none;
+  }
+  .server[data-busy='true'] .leds i {
+    animation: none;
+  }
+}
+
+@container news (width < 960px) {
+  .figure {
+    zoom: 0.84;
+  }
+}

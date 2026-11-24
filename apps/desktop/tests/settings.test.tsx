@@ -107,11 +107,9 @@ describe('the quick settings', () => {
     // Nothing else: not the agents, the code hosts, reviews, co-author, the icon. Nor what is running: settings are calm.
     expect(within(panel).queryByText(/Agents\b(?! at once)|Code hosts|Post reviews|Co-author|App icon|In other apps|busy/)).toBeNull()
     expect(within(panel).getByText('Althar 0.0.0')).toBeTruthy()
-    expect(
-      within(panel)
-        .getByRole('link', { name: /What’s new/ })
-        .getAttribute('href'),
-    ).toBe('https://althar.ai/changelog')
+    // What's new is Althar's own page, in the window, not the notes in the browser.
+    expect(within(panel).getByRole('button', { name: 'What’s new' })).toBeTruthy()
+    expect(within(panel).queryByRole('link', { name: /What’s new/ })).toBeNull()
 
     // All settings goes to the Settings tab, where it was last, and leaves the panel.
     await userEvent.click(within(panel).getByRole('button', { name: /^All settings/ }))

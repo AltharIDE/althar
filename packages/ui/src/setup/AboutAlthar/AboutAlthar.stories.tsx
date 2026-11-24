@@ -37,6 +37,17 @@ export const Header: Story = {
   },
 }
 
+/** Where the app shows what's new in the window, What's new opens there, a press like the others, with no arrow out. */
+export const WhatsNewInTheWindow: Story = {
+  args: { onNotes: fn() },
+  play: async ({ canvasElement, args }) => {
+    const view = within(canvasElement)
+    await expect(view.queryByRole('link', { name: /What’s new/ })).toBeNull()
+    await userEvent.click(view.getByRole('button', { name: 'What’s new' }))
+    await expect(args.onNotes).toHaveBeenCalledOnce()
+  },
+}
+
 /** No update ready: Check for updates under the name, and Checking… while it looks. */
 export const CheckForUpdates: Story = {
   args: { onCheck: fn() },

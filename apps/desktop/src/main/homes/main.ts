@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
+import { join } from 'node:path'
 import { decodePairingCode, prepareApprovalKeyEnrollment, preparePermissionApproval, signDeviceMessage } from '@althar/transport-node'
 import { ClientIdentity, PermissionApproval } from '@althar/contracts'
 import { connectionCredentials, type ProtectCredential } from './credentials'
 import { Effect, Schema } from 'effect'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
-import { sshEnvironment } from '@althar/transport-node'
+import { sshEnvironment, sshProgram } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
 import { homeController, type HomeUsageEvent } from './controller'
@@ -14,8 +15,9 @@ import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS } from './release'
-import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
+import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
+import { homeUpdates } from './update'
 import { startWorkerSetups } from './workerMain'
 
 /**
@@ -147,16 +149,14 @@ export const startHomeConnections = ({
   })
   // A home being set up over SSH: one for the whole app, told to every window as it goes.
   const source = releaseSource()
-  const setups = homeSetups(
-    nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
-    (setup) => {
-      for (const window of BrowserWindow.getAllWindows())
-        if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
-    },
-  )
+  const system = nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools)
+  const setups = homeSetups(system, (setup) => {
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+  })
   // Workers added over SSH from Settings › Computers, from the same releases.
   const workers = startWorkerSetups({
-    system: nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
+    system,
     tools: source.tools,
     mine,
     // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
@@ -301,6 +301,20 @@ export const startHomeConnections = ({
       throw new Error('Choose what to do with the setup.')
     void setups.act(action).catch(() => undefined)
   })
+  // A window's home, over SSH, updated by its own updater; the window reconnects once it answers.
+  const quitting = new AbortController()
+  // By the ssh the window's connection runs (connection/bridge.ts): the Flatpak's way out, or a build's own tools.
+  const tools = sshTools()
+  const updates = homeUpdates({
+    run: runProgram,
+    program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
+    signal: quitting.signal,
+  })
+  ipcMain.handle('althar:homes-update', (event) => {
+    const { current } = controller.state(owner(event))
+    if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
+    return updates.update(current.home)
+  })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
     approvals.get(id)?.abort()
@@ -439,6 +453,7 @@ export const startHomeConnections = ({
     stopAll: async () => {
       controller.stopping()
       workers.stop()
+      quitting.abort()
       await setups.stop()
       await keyChanges
       for (const held of forgottenKeys.values()) clearTimeout(held.timer)

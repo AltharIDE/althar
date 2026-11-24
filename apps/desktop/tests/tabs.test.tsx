@@ -149,7 +149,9 @@ describe('the window’s tabs', () => {
   it('open with the projects where something goes on, and go back to where each was', async () => {
     const { go } = windowAt('/')
     // Meridian runs a task; Tessera has a call and a ready task. Halyard is quiet, so it waits under the +.
-    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you']))
+    await waitFor(() =>
+      expect(names()).toEqual(['Home, 2 calls wait on you', 'Althar', 'meridian, work running', 'tessera, 2 calls wait on you']),
+    )
     expect(tab('Home').getAttribute('aria-current')).toBe('page')
 
     // Into a task of Meridian's, then home: Meridian's tab goes back to the task.
@@ -164,7 +166,7 @@ describe('the window’s tabs', () => {
     await userEvent.click(nav().getByRole('button', { name: 'Open a project' }))
     await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'halyard' }))
     expect(where()).toBe('/projects/p2')
-    expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'halyard'])
+    expect(names()).toEqual(['Home, 2 calls wait on you', 'Althar', 'meridian, work running', 'tessera, 2 calls wait on you', 'halyard'])
 
     // Kept for the next launch.
     expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({
@@ -211,7 +213,7 @@ describe('the window’s tabs', () => {
     // ⌥⇧→ moves the focused tab one place along.
     await userEvent.type(tab('meridian'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
     await waitFor(() => expect(order()).toEqual(['p2', 'p1', 'p3']))
-    expect(names().map((name) => name.replace(/, .*/, ''))).toEqual(['Home', 'halyard', 'meridian', 'tessera'])
+    expect(names().map((name) => name.replace(/, .*/, ''))).toEqual(['Home', 'Althar', 'halyard', 'meridian', 'tessera'])
     // The last has nowhere further, and the first none before it: it stays after the home's.
     await userEvent.type(tab('tessera'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
     await userEvent.type(tab('halyard'), '{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}')
@@ -260,20 +262,22 @@ describe('the window’s tabs', () => {
     }))
     windowAt('/', [fnt], fakeHost(), (projects) => home({ projects: [...projects], tasks: running }))
     // Its work runs, so its tab says so; nothing waits on the person, so the tab has no dot and the home counts none.
-    await waitFor(() => expect(names()).toEqual(['Home', 'fnt, work running']))
+    await waitFor(() => expect(names()).toEqual(['Home', 'Althar', 'fnt, work running']))
   })
 
   it('forget projects removed since, and open the busy ones when none of what was kept is left', async () => {
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'p2'], places: { gone: { kind: 'project' } } }))
     windowAt('/')
-    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'halyard']))
+    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'Althar', 'halyard']))
     await waitFor(() => expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({ open: ['p2'], places: {} }))
   })
 
   it('open the busy projects when none of the tabs kept is a project any more', async () => {
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'also-gone'], places: {} }))
     windowAt('/')
-    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you']))
+    await waitFor(() =>
+      expect(names()).toEqual(['Home, 2 calls wait on you', 'Althar', 'meridian, work running', 'tessera, 2 calls wait on you']),
+    )
   })
 
   it('remember the view each project was last on, to open on it again back from a task', async () => {
@@ -297,14 +301,14 @@ describe('the window’s tabs', () => {
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     await waitFor(() => expect(where()).toBe('/new'))
     expect(draftsOf(client).get()).not.toBeNull()
-    expect(names()).toEqual(['Home', 'New project'])
+    expect(names()).toEqual(['Home', 'Althar', 'New project'])
   })
 
   it('open New project where another window’s Manage homes asks for it', async () => {
     let asked: () => void = () => {}
     const homes = { onProject: () => () => {}, onNewProject: (listener: () => void) => ((asked = listener), () => {}) }
     const { client } = windowAt('/projects/p1', [project], fakeHost({ homes: homes as unknown as Host['homes'] }))
-    await waitFor(() => expect(names()).toEqual(['Home', 'meridian, work running']))
+    await waitFor(() => expect(names()).toEqual(['Home', 'Althar', 'meridian, work running']))
     act(() => asked())
     await waitFor(() => expect(where()).toBe('/new'))
     expect(draftsOf(client).get()).not.toBeNull()
@@ -314,15 +318,15 @@ describe('the window’s tabs', () => {
     const { client } = windowAt('/projects/p1', [project])
     const drafts = draftsOf(client)
     // No other project to open: the + is New project itself.
-    await waitFor(() => expect(names()).toEqual(['Home', 'meridian, work running']))
+    await waitFor(() => expect(names()).toEqual(['Home', 'Althar', 'meridian, work running']))
     await userEvent.click(nav().getByRole('button', { name: 'New project' }))
     await waitFor(() => expect(where()).toBe('/new'))
     const id = drafts.get()?.id ?? ''
     expect(id).toMatch(/^proj_[0-9a-f]{32}$/)
-    expect(names()).toEqual(['Home', 'meridian, work running', 'New project'])
+    expect(names()).toEqual(['Home', 'Althar', 'meridian, work running', 'New project'])
     expect(nav().getAllByRole('listitem').at(-1)?.querySelector('[aria-current="page"]')).not.toBeNull()
     act(() => drafts.change(id, (now) => ({ ...now, name: '  Northwind ' })))
-    expect(names()).toEqual(['Home', 'meridian, work running', 'Northwind'])
+    expect(names()).toEqual(['Home', 'Althar', 'meridian, work running', 'Northwind'])
 
     // Away and back, it is the same; ⌘N goes to it rather than starting another.
     await userEvent.click(tab('meridian'))
@@ -337,7 +341,7 @@ describe('the window’s tabs', () => {
     await userEvent.click(nav().getByRole('button', { name: 'Close Northwind' }))
     await waitFor(() => expect(where()).toBe('/projects/p1'))
     expect(drafts.get()).toBeNull()
-    expect(names()).toEqual(['Home', 'meridian, work running'])
+    expect(names()).toEqual(['Home', 'Althar', 'meridian, work running'])
 
     // Closed from another tab, it goes at once; Escape on its page goes back as closing it does.
     await userEvent.click(nav().getByRole('button', { name: 'New project' }))
@@ -370,7 +374,7 @@ describe('the window’s tabs', () => {
     // No view is named: a project with none kept opens on Home.
     expect(router.state.location.search).toEqual({})
     expect(drafts.get()).toBeNull()
-    expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
+    expect(names()).toEqual(['Home, 2 calls wait on you', 'Althar', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
   })
 
@@ -423,7 +427,7 @@ describe('Althar’s settings, in the window', () => {
     await userEvent.click(within(await quick()).getByRole('button', { name: /^All settings/ }))
     await waitFor(() => expect(where()).toBe('/settings/agents'))
     await noQuick()
-    expect(names().map((name) => name.split(',')[0])).toEqual(['Home', 'Settings', 'meridian', 'halyard'])
+    expect(names().map((name) => name.split(',')[0])).toEqual(['Home', 'Settings', 'Althar', 'meridian', 'halyard'])
     expect(tab('Settings').getAttribute('aria-current')).toBe('page')
     expect(tab('halyard').getAttribute('aria-current')).toBeNull()
 
