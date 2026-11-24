@@ -1351,16 +1351,23 @@ step's call show (`words.ts`):
 Before Claude Code or Codex starts, its own program is looked for as its
 adapter finds it and checked against the version its SDK names
 (`bundledPrograms.ts`): a missing platform package, or another copy of it
-that Node finds further up, is said as that before anything is spawned.
+that Node finds further up, is looked for again every few seconds for up to a
+minute, as while an install of Althar is still unpacking it, and the start
+goes on once it is there; past that it is said as it stands, before anything
+is spawned. The advice follows the copy the launch drives: the person's own
+Codex (`CODEX_PATH`) is theirs to update, not Althar to reinstall.
 Every package of the repository pins one exact version of each adapter
 (`adapterPins.test.ts`), so no older copy is hoisted to be found.
 
 A first start that crashed, or failed for no reason the person can act on,
 is made again once by itself: a new adapter process, after Althar forgets
 the agent's sign-in as last checked and the models it offers, so both are
-read again. One signed out, not installed, refused, out of usage, at another
-version, offline or timed out is said at once, as a second start meets the
-same. [The root cause that led here](../research/agent-starts-internal-error.md)
+read again; an asking of its models still under way from before counts for
+nothing. The models probe's own start is made once more the same way. One
+signed out, not installed, refused, out of usage, at another version, offline
+or timed out is said at once, as a second start meets the same. The agent's
+whole answer, its code and all its data, goes in the log and the failed
+start's record. [The root cause that led here](../research/agent-starts-internal-error.md)
 says why.
 
 ## Verification gates

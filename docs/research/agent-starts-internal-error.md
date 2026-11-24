@@ -72,16 +72,19 @@ error, and started cleanly once the package was back.
   checked by `packages/provider-adapters/tests/adapterPins.test.ts`.
 - Before Claude Code or Codex starts, `bundledPrograms.ts` looks for its own
   program as its adapter finds it and checks it against its SDK's version: a
-  missing or older copy is said as that, before anything is spawned, and read
-  afresh at each start, so a program installed meanwhile is found next time.
+  missing or older copy is looked for again every few seconds for up to a
+  minute, so a start made while an install unpacks it goes on once it lands;
+  past that it is said as it stands, before anything is spawned.
 - An error's data is read (`failures.ts`): an "Internal error" says what it
-  carried, in the thread and in the log.
+  carried, and the whole answer, its code and all its data, goes in the log
+  and the failed start's record.
 - Start failures gain the classes a person acts on differently: a version
   mismatch, a part missing, a crash on the way (`startFailure.ts`), each in
   words that say what to do (`words.ts`), never a bare "Internal error".
 - A first start that crashed, or failed for no reason the person can act on,
   starts again once by itself, afresh, after Althar forgets the agent's
-  sign-in as last checked and its models (`sessionConnections.ts`).
+  sign-in as last checked and its models (`sessionConnections.ts`). The
+  models probe's own start does the same (`Models.ts`).
 
 ## Each integration
 
