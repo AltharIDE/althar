@@ -338,7 +338,9 @@ describe('finding the newest release, with no feed of its own', () => {
   const asset = `althar-host-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
   const listing = (releases: ReadonlyArray<Record<string, unknown>>, manifest = '') =>
     (async (input: string) =>
-      input.includes('api.github.com') ? new Response(JSON.stringify(releases)) : new Response(manifest)) as unknown as typeof fetch
+      new URL(input).hostname === 'api.github.com'
+        ? new Response(JSON.stringify(releases))
+        : new Response(manifest)) as unknown as typeof fetch
   const sealed = () => {
     const pair = generateKeyPairSync('ed25519')
     const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
