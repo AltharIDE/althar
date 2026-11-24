@@ -26,7 +26,8 @@ decision):
   A sandbox profile, switched on per project or per task, that lets a lead
   reach the person's SSH agent, `~/.ssh/config` and `known_hosts` but never
   a private key or a cloud credential file. Commands that need credentials
-  run through an Althar tool, `ops_run`, outside the sandbox, with the
+  run through an Althar tool, `ops_run`, in a sandbox of their own that
+  reaches only their target's credentials, with the
   secrets it needs handed to that run alone. Reads go ahead; changes ask.
 - **B, Ops mode** ([DEV-284](https://linear.app/althar/issue/DEV-284)).
   Environments (dev, staging, prod) bound to inventory groups, Terraform
@@ -119,23 +120,29 @@ that should be free fails, and the change that should ask runs.
 ```mermaid
 flowchart TB
   C["A lead's command"] --> S{"In its shell,<br/>or through ops_run?"}
-  S -->|"shell: ssh, scp, ansible-lint…<br/>no credentials of their own"| R
-  S -->|"ops_run: ansible-playbook, terraform,<br/>kubectl, helm, pulumi"| R
+  S -->|"shell: reads over ssh,<br/>ansible-lint… no credentials"| R
+  S -->|"ops_run: ansible-playbook, terraform,<br/>kubectl, helm, pulumi, and<br/>ssh, scp, rsync that change a host"| R
   R["Classify (ADR-115):<br/>read, change, secret or unsure"] --> K{"Which?"}
   K -->|secret| X["Refused"]
   K -->|read| G["Runs; logged"]
-  K -->|"change or unsure"| E["Find its environment<br/>(ADR-116)"]
-  E --> L{"Lock free?<br/>(ADR-117)"}
-  L -->|"held by another task"| W["Waits for it"]
-  L -->|free| GATE{"Environment's gate"}
-  GATE -->|dev| G2["Runs; logged"]
-  GATE -->|staging| J["Coordinator judges<br/>with the plan"] --> G2
-  GATE -->|prod| P["Card for the person:<br/>plan, command, hosts, commit"] --> G2
+  K -->|"change or unsure"| E["Find its environment, pin<br/>the run to it (ADR-116)"]
+  E --> D{"Dry run safe?"}
+  D -->|"the task changed code it runs"| GATE0["Gate decides first,<br/>with no plan"] --> PL
+  D -->|yes| PL["Dry run, the plan"]
+  PL --> GATE{"Environment's gate,<br/>on the plan"}
+  GATE -->|dev| L
+  GATE -->|staging| J["Coordinator judges<br/>with the plan"] --> L
+  GATE -->|"prod, or unbound"| P["Card for the person:<br/>plan, command, hosts, commit"] --> L
+  L{"The task's set of locks<br/>free? (ADR-117)"} -->|"held by another task"| W["Waits, holding<br/>nothing new"]
+  L -->|free| F{"Commit, target,<br/>plan unchanged?"}
+  F -->|changed| PL
+  F -->|same| G2["Runs in its own sandbox; logged"]
   G2 --> OUT["Output live in Outputs,<br/>stoppable; secrets masked"]
 ```
 
-With only A built, the box "Find its environment" is skipped: a change or
-an unsure command asks the person, wherever it points.
+With only A built, environments, the dry run and the lock are skipped: a
+change or an unsure command asks the person, wherever it points. A change
+to a host in the lead's shell is refused there and sent to `ops_run`.
 
 ## A: the Ops profile
 
@@ -150,9 +157,12 @@ Three proposals:
   registry login). How it's switched on per project or task, and the card
   that offers it when a repository looks like infrastructure.
 - [ADR-114, secrets per run](../decisions/proposed/114-secrets-go-to-one-run-never-to-the-agent.md):
-  the `ops_run` tool runs a command outside the sandbox, with a vault
+  the `ops_run` tool runs a command in a sandbox of its own that reaches
+  only its target's credentials and trusted executables, with a vault
   password or a token Althar keeps sealed, handed to that run only, by a
-  file only that run can read, and masked in what comes back.
+  descriptor or a file only that run can read, only while no session
+  without read isolation runs, and masked in what comes back. No secret is
+  written in its `argv`.
 - [ADR-115, read or change](../decisions/proposed/115-a-command-is-read-or-change-per-tool-and-unsure-asks.md):
   per tool, what is a read (`--check`, `plan`, `get`, `status`), what is a
   change, what is a secret read, and that unsure is treated as a change
@@ -199,12 +209,15 @@ flowchart LR
    the card's detection.
 2. **A2, read or change.** A new `opsCommands.ts` beside `rules.ts` reads
    ansible, terraform/tofu/terragrunt, pulumi, kubectl, helm and ssh per
-   ADR-115; a new rule kind, `infra`, that the profile puts on the
-   project's Ask me. *Done when* the classification's table tests pass
-   and `ansible-playbook site.yml` asks with everything allowed.
+   ADR-115; a new rule kind, `infra`, with the profile's own check in
+   `decide` and `decideInside` before any allow. *Done when* the
+   classification's table tests pass, `ansible-playbook site.yml` asks in
+   an Ops task with everything allowed, and a Code sibling on the same
+   project keeps today's verdicts.
 3. **A3, `ops_run` and secrets.** The tool, its card and its live output,
-   on Run's process code; secrets kept per project in the sealed store,
-   given by file to one run, masked in its output. *Done when*
+   on Run's process code; its own sandbox with only the target's
+   credentials and Althar's run-only caches; secrets kept per project in
+   the sealed store, given to one run, masked in its output. *Done when*
    [DEV-283](https://linear.app/althar/issue/DEV-283)'s acceptance holds: a
    check-mode playbook with a vault runs without asking and without the
    password anywhere in the lead's reach.
@@ -236,9 +249,12 @@ A3: the gate decides `ops_run`s.
 - **A read runs the repository's code.** `terraform plan` runs `external`
   data sources; `ansible-playbook --check` runs a task marked
   `check_mode: false` for real, and every `pipe` lookup. The code is the
-  lead's worktree, which it can change. ADR-115 treats a read as a change
-  on staging and prod where the task changed such code. This is the
-  plan's subtlest rule and needs Balázs's eye.
+  lead's worktree, which it can change. So every `ops_run` runs in a
+  sandbox of its own with only its target's credentials and executables
+  from caches no lead writes (ADR-114); a run whose code the task changed
+  is unsure, and its dry run isn't started before the gate decides
+  (ADR-115, ADR-116). This is the plan's subtlest rule and needs
+  Balázs's eye.
 - **Check mode isn't a promise.** A module without check support skips in
   `--check`, and a diff can be partial. The prod card says "Ansible's dry
   run", not "what will happen". Terraform's saved plan is exact, and the
@@ -247,6 +263,12 @@ A3: the gate decides `ops_run`s.
   renders, password included; `no_log` doesn't hide a diff. Masking is
   best effort (ADR-114): Althar masks every value it handed over and every
   vault value it could open for the run.
+- **An approval can go stale while it waits.** A prod card answered an
+  hour later, or a change queued behind another task's lock, would run on
+  whatever the files and the cluster are by then. The decision is bound
+  to the commit, the target, the `argv` and the inputs, and checked again
+  after the lock and just before the run; anything material changed asks
+  again (ADR-116).
 - **The binding file is in the repository an agent writes.** Bindings are
   read from the default branch as merged, never from the worktree, and a
   file can only tighten a gate (ADR-116).

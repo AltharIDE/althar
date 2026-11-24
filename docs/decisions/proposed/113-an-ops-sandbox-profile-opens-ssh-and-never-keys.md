@@ -34,7 +34,8 @@ prod unasked ([the plan's table](../../plans/ops-mode.md#the-problem-today)).
 
 **A named sandbox profile, Ops, beside today's, which becomes Code.** It
 changes what a lead's sandbox reads and writes, and puts one kind of
-command on the project's Ask me (ADR-115). It changes nothing else: the
+command under a check of its own that holds before any allow (ADR-115).
+It changes nothing else: the
 same agent, tools, rules and irreversible list.
 
 ### What it opens
@@ -79,10 +80,16 @@ denies reads: Claude Code on macOS, and on Linux where bubblewrap starts,
 outside the Flatpak. Codex's `workspace-write` and OpenCode don't deny
 reads, and the Flatpak and Windows have no sandbox Althar can hold
 ([what agents may do](../what-agents-may-do.md#the-sandbox-is-the-boundary)).
-There the switch still turns on the rules (ADR-115) and `ops_run`
-(ADR-114), so credentials stay outside, but its line says "This agent's
-sandbox doesn't keep your SSH keys from scripts", and the detection card
-recommends a Claude Code lead.
+There the switch still turns on the rules (ADR-115), but its line says
+"This agent's sandbox doesn't keep your SSH keys from scripts", and the
+detection card recommends a Claude Code lead.
+
+The same holds for the secrets `ops_run` hands to a run (ADR-114): a
+same-user file or descriptor is readable by any session without read
+isolation, this task's or another's, in any project. So no secret is
+handed over while such a session runs anywhere on the computer, and none
+at all where the run's own sandbox can't start; `ops_run` says which
+session stands in the way.
 
 ### Switching it on
 

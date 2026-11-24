@@ -42,13 +42,34 @@ restarting a stuck service, applying an already-merged plan.
   that holds a lock and has been idle for an hour shows "holds prod, idle
   1 h" in Needs you; nothing lets go on its own, since a half-done
   rollout is worse with two hands on it.
-- **A second task's change waits:** its `ops_run` returns "Waits for prod:
+- **A second task's change waits** (holding nothing new, below): its `ops_run` returns "Waits for prod:
   held by ‘Rotate the API certificates’", the task waits as a Local task
   waits for the checkout (`workspace.move_waits`, `local.ts`), and goes on
   when the lock is free. Its lead can do other work meanwhile, or the
   person can move it to the front of the line for that environment.
-- **Several environments, several locks,** taken in a fixed order (by
-  name) so two tasks never hold one each waiting on the other.
+- **Never hold one and wait for another.** Sorting each request's locks
+  isn't enough, since locks outlive runs: a task holding staging that
+  asks for prod, while another holding prod asks for staging, would each
+  wait for ever. So a task's locks are one **set**, taken all at once or
+  not at all:
+  - A change's environments are reserved together, atomically: either
+    every lock in the set is free (or already the task's) and all are
+    taken in one recorded fact, or none is taken and the task waits
+    holding nothing new.
+  - A task that holds a set and needs an environment outside it doesn't
+    wait while holding: its `ops_run` returns "Holds staging; prod is
+    held by ‘Rotate the API certificates’". Between its runs, with
+    nothing of its own running, it may release what it holds and ask for
+    the larger set, which is then reserved atomically as above. A
+    release that would leave a half-done change (the last run in that
+    environment failed or was stopped) asks the person first.
+  - A task's plan may name its environments ahead (`propose_plan`'s
+    `environments`), so the set is reserved at its first change.
+  - The two-task case: A holds staging and asks for prod; B holds prod
+    and asks for staging. Neither waits holding: each is told what holds
+    the other, each can finish, release, or release and wait for both,
+    and whichever asks for the full set when it's free gets it. Waiting
+    tasks are served in the order they asked, so neither starves.
 - **Recorded facts, not memory:** `environment.locked`, `.released`,
   `.waits`, so a lock survives Althar restarting and the record says who
   held what when. `keyedLock.ts` stays for in-process waits.
@@ -58,13 +79,23 @@ restarting a stuck service, applying an already-merged plan.
 
 ### The run log
 
+Every change to an environment goes through `ops_run`: Ansible, Terraform,
+Pulumi, kubectl and Helm by design, and `ssh`, `scp` and `rsync` because
+the rules refuse a change or unsure command to a host in the lead's shell
+and point it there (ADR-115). So one runner owns every change's gate,
+lock, exit code and log entry. After the plan's B3, when the shell's SSH
+agent no longer offers prod's keys, an approved prod `ssh` is an
+`ops_run` whose sandbox gets prod's key from the person's agent for that
+run only. Reads over `ssh` in the shell aren't runs: they are in the
+thread, as any command is.
+
 Every `ops_run`, read or change, is a run in the log, recorded as facts
 (`ops_run.started`, `.decided`, `.ended`) with a row in `ops_runs`:
 
 | Field | What |
 |---|---|
 | **Run** | Its id, the task, the lead (agent, model, session) |
-| **Command** | `argv` as it ran, the folder, the tool's version |
+| **Command** | `argv` as it ran, with secrets only as `${secret:NAME}` references (`ops_run` refuses an inline credential before anything is shown or recorded, ADR-114), the pinning flags, the folder, the tool's version |
 | **Kind** | Read, change, unsure, and the word that decided it (ADR-115) |
 | **Environment and target** | The environment(s), and the hosts, workspace or context and namespace found (ADR-116) |
 | **Code** | The commit, its branch, whether it's on the default branch, and that the worktree had no uncommitted changes |
@@ -126,10 +157,11 @@ Every `ops_run`, read or change, is a run in the log, recorded as facts
 
 ## What an implementation touches
 
-- New `packages/runtime/src/environmentLocks.ts`: take, release, wait, in
-  name order, as recorded facts through `records.ts` (`change`), modelled
-  on `local.ts`'s waits; `stopping.ts` and `settled.ts` release on
-  settling.
+- New `packages/runtime/src/environmentLocks.ts`: a task's set reserved
+  whole or not at all in one recorded fact through `records.ts`
+  (`change`), no wait while holding, release-and-ask-for-more between
+  runs, waiters served in order, modelled on `local.ts`'s waits;
+  `stopping.ts` and `settled.ts` release on settling.
 - `packages/runtime/src/OpsRuns.ts` (ADR-114): the run's facts, its row,
   the plan and output into `Artifacts.ts`, live output as `Launches.ts`
   streams Run's.
@@ -144,6 +176,9 @@ Every `ops_run`, read or change, is a run in the log, recorded as facts
   `packages/ui/src/thread/Evidence/` or Outputs (runs),
   `apps/desktop/src/renderer/features/board/` (a "ran" card and a waiting
   task), and the environment's view.
-- Tests: a second task waits and goes on; a lock survives a restart;
+- Tests: a second task waits and goes on; the two-task, two-environment
+  case never deadlocks, and a set is taken whole or not at all; a change
+  to a host from the shell is refused toward `ops_run` and logged once
+  it runs there; no inline credential reaches a card, a fact or a row; a lock survives a restart;
   settling releases; a stopped run keeps the lock; every run is in the log
   with its commit, target, decision and exit code; a "ran" ending settles.

@@ -53,7 +53,12 @@ environments:
     kube: { contexts: [gke_acme_europe-west1_prod] }
     ssh: { hosts: [bastion.acme.com, "*.prod.internal"] }
     secrets: [ANSIBLE_VAULT_PASSWORD_PROD]
+    credentials: { kube: gke_acme_europe-west1_prod, aws_profile: acme-prod }
 ```
+
+`secrets:` names the secrets a run there is given (ADR-114);
+`credentials:` names which of the person's own a run's sandbox gets,
+narrowed to that context or profile (ADR-114). Neither holds a value.
 
 - **Committed, so the team shares it,** beside #1160's `.althar/flow.yaml`.
   A panel (ADR-112) picks the same environments' kube contexts.
@@ -72,23 +77,36 @@ environments:
 ### Finding a command's environment
 
 `ops_run` (ADR-114) finds the target before it decides, outside the
-sandbox, where it can read what the agent can't:
+sandbox, where it can read what the agent can't. It resolves where the
+command would really go, refuses the flags that could send it elsewhere,
+and then **runs it pinned to that target**, so the destination the gate
+and the lock saw is the only one the run can reach:
 
-| Tool | Its target |
-|---|---|
-| **ansible-playbook, ansible** | The inventory (`-i`, else `ansible.cfg`'s); the hosts `--list-hosts` resolves with `--limit`; each host's groups. Every environment a host is in counts. |
-| **terraform, tofu, terragrunt** | The folder it runs in (`-chdir`), then the workspace (`TF_WORKSPACE`, else `terraform workspace show`), then a `-var-file` named for an environment. |
-| **pulumi** | The stack (`--stack`, else the selected one). |
-| **kubectl, helm, helmfile** | `--context`, else `--kubeconfig`'s or the person's current context, read by Althar from the kubeconfig at the time of the run; helmfile's `-e`. |
-| **ssh, scp, rsync** | The host as written, and as `ssh -G` resolves it (`HostName`, `ProxyJump`'s hosts too), matched against `ssh.hosts` and the inventory's hosts. |
+| Tool | Its target | Refused | Pinned by |
+|---|---|---|---|
+| **ansible-playbook, ansible** | The inventory (`-i`, else `ansible.cfg`'s); the hosts `--list-hosts` resolves with `--limit`; each host's groups. Every environment a host is in counts. | `-i` of a host list written inline (`-i web1,`), `-e ansible_host=…` and other connection variables (`ansible_host`, `ansible_port`, `ansible_user`, `ansible_ssh_common_args`, `ansible_connection`) on the command line | `--limit` set to exactly the hosts resolved, and the inventory files' digests, checked again before it starts |
+| **terraform, tofu, terragrunt** | The folder it runs in (`-chdir`), then the workspace (`TF_WORKSPACE`, else `terraform workspace show`), then a `-var-file` named for an environment. | `-backend-config` overrides, `-state`, `-state-out` | `TF_WORKSPACE` set by Althar; the run's credentials only for that environment's account |
+| **pulumi** | The stack (`--stack`, else the selected one). | `--cwd` outside the worktree | `--stack` set by Althar |
+| **kubectl** | `--context`, else the current context of the config Althar gives it. | `--server`, `-s`, `--cluster`, `--user`, `--token`, `--kubeconfig`, `--insecure-skip-tls-verify`, `--certificate-authority`, `--as` | A config of the one context, minified (ADR-114), and `--context` set to it |
+| **helm** | `--kube-context` (Helm's name for it), else the current context of the config Althar gives it. | `--kube-apiserver`, `--kube-token`, `--kubeconfig`, `--kube-as-user`, `--kube-as-group`, `--kube-ca-file`, `--kube-insecure-skip-tls-verify`, `--kube-tls-server-name` | The same one-context config, and `--kube-context` set to it |
+| **helmfile** | `-e` and each release's `kubeContext` in the rendered state | `--kube-context` overriding a release's, `--kubeconfig` | The one-context config; a helmfile whose releases name more than one context is refused, and the card says to run one environment at a time |
+| **ssh, scp, rsync** | The host as written, and as `ssh -G` resolves it (`HostName`, `ProxyJump`'s hosts too), matched against `ssh.hosts` and the inventory's hosts. | `-o` and `-F` that change `HostName`, `ProxyJump`, `ProxyCommand` or the port; `-J` | `-o HostName=` and `-o ProxyJump=` as resolved |
+
+A flag the table doesn't list for a tool that takes a destination is
+read as unsure, so a new override asks rather than slips by.
 
 - **Several environments:** the strictest gate of them decides, and the
   card names each.
-- **None found:** a target no binding matches is **unbound**, gated as the
-  strictest environment the project has, and the card offers "This is
-  dev" to bind it, which writes to the person's settings (the file is
-  changed by a pull request). With no environments at all, step A holds:
-  every change asks.
+- **None found:** a target no binding matches is **unbound**. A change or
+  unsure command to an unbound target always waits for the person,
+  whatever environments the project has bound: a project that has bound
+  only dev so far doesn't let a change to an unknown production host
+  through as dev's. The card says "web9 isn't in any environment", and
+  offers to bind it ("This is dev", "This is prod", any of the project's)
+  and then decide on it as that environment, or to allow this one run
+  unbound. Binding writes to the person's settings (the file is changed
+  by a pull request). With no environments at all, step A holds: every
+  change asks.
 - **Reads need no target.** They go ahead (ADR-115) and are logged with
   whatever target was found.
 
@@ -105,9 +123,9 @@ sandbox, where it can read what the agent can't:
   the name's default is ignored, with a line in Rules saying so. Only the
   person loosens a gate, in the project's settings, and never prod's: a
   prod change on the person's word is the point of the mode.
-- **Allow everything doesn't open prod.** The gate is the person's Ask me
-  given ahead, which holds with everything allowed (ADR-097); a task's
-  Allow everything (ADR-043) doesn't change it either.
+- **Allow everything doesn't open prod.** The gate is the profile's own
+  check, made before any allow (ADR-115), so neither the project's Allow
+  everything nor a task's (ADR-043) reaches it.
 - **Never and Ask me still win.** A command the project never allows is
   refused on dev too.
 - **Staging's judge** is ADR-019's: a fresh read-only session on the
@@ -120,19 +138,46 @@ sandbox, where it can read what the agent can't:
 
 ### Plan, then apply
 
-A change against staging or prod runs in two steps, so the person sees
-what will happen before it does:
+A change against staging or prod runs in steps, so the person sees what
+will happen before it does, and what runs is what they saw:
 
-1. **`ops_run` runs the tool's dry run first, itself:**
-   `terraform plan -out=<run folder>/plan` (then `apply` runs that saved
-   plan, exactly, and fails if the state moved); `ansible-playbook --check
-   --diff` with the same arguments; `kubectl diff`; `helm diff upgrade`
-   (or `--dry-run` without the plugin); `pulumi preview`. Its output
-   becomes the card's plan, masked (ADR-114).
-2. **The gate decides on that plan,** and the change runs only if allowed.
+1. **Is a dry run safe?** A dry run runs the repository's code. Before
+   one starts, the same check as any `ops_run` read applies (ADR-115,
+   "What a read runs"): where the task changed code the dry run would
+   execute, the dry run is itself unsure, and Althar doesn't start it on
+   its own, whether the lead asked for the dry run or the change. The
+   gate decides first, on a card **without a plan**: "No safe plan: the
+   task changed `roles/nginx/tasks/main.yml`, which runs during the dry
+   run (`check_mode: false` on line 12)", the files and lines, the
+   command, the targets and the commit. On staging the judge gets the
+   same and, with no plan, leaves it to the person. Allowing it runs the
+   dry run as a run of its own, in the log, and then step 2's card
+   follows for the change.
+2. **`ops_run` runs the tool's dry run, itself,** where it is safe or was
+   allowed: `terraform plan -out=<run folder>/plan` (the plan stays in
+   the run's private folder, ADR-115, and `apply` runs that saved plan,
+   exactly, and fails if the state moved); `ansible-playbook --check
+   --diff` with the same, pinned arguments; `kubectl diff`; `helm diff
+   upgrade` (or `--dry-run` without the plugin); `pulumi preview`. Its
+   output becomes the card's plan, masked (ADR-114).
+3. **The gate decides on that plan.** The decision is bound to what the
+   plan was made from: the commit (with a clean worktree), the resolved
+   target and its pinning flags, the `argv`, and a digest of the inputs
+   the tool reads beyond the commit (the inventory files as resolved, a
+   chart's version and values, the rendered manifests, the saved
+   Terraform plan).
+4. **After the lock (ADR-117), immediately before it runs,** Althar checks
+   that binding again: the commit and a clean worktree, the target as
+   resolved now, the inputs' digest. For Ansible, kubectl and Helm, whose
+   dry run isn't a file the apply uses, it runs the dry run again and
+   compares its plan with the approved one. Terraform's saved plan
+   checks itself. **Anything material changed** (another commit, another
+   host, a different plan) and the decision lapses: the new plan goes to
+   the gate again, with what changed shown first. An approval waiting
+   behind another task's lock is checked this way when the lock comes.
 
-A plan older than fifteen minutes, or one whose commit has moved, is run
-again before the card shows.
+A plan older than fifteen minutes is run again before the card shows,
+and checked again at step 4 whatever its age.
 
 ### The prod card
 
@@ -140,8 +185,10 @@ One card, in the task's thread and in Needs you, in prod's colour:
 
 - **What and where:** "Apply to **prod**", the tool, and the environment's
   name as `ops.yaml` gives it.
-- **The exact command,** as `ops_run` will run it, `argv` in full, with
-  the folder it runs from.
+- **The exact command,** as `ops_run` will run it, `argv` in full with
+  its pinning flags, secrets only as `${secret:NAME}` references (an
+  inline credential never gets this far, ADR-114), and the folder it
+  runs from.
 - **The targets:** the hosts (and how many, with the first twenty listed),
   or the workspace and its resources, or the context and namespace.
 - **The plan:** Terraform's `+ add, ~ change, - destroy` counts, then the
@@ -191,9 +238,11 @@ open question 8).
 - New `packages/runtime/src/environments.ts`: reading `.althar/ops.yaml`
   from the default branch's copy (as `repositoryInstructions.ts` reads
   committed files), the person's additions, and `targetOf(argv, folder)`
-  per tool, with `ssh -G` through `sshHosts.ts`.
-- `packages/runtime/src/OpsRuns.ts` (ADR-114): the dry run first, the
-  saved plan, the gate.
+  per tool, with `ssh -G` through `sshHosts.ts`: the resolved target, the
+  refused override flags and the pinning flags.
+- `packages/runtime/src/OpsRuns.ts` (ADR-114): the safe-dry-run check, the
+  dry run, the saved plan, the gate, the decision's binding (commit,
+  target, `argv`, inputs' digest) and its check after the lock.
 - `packages/runtime/src/rules.ts` and `Permissions.ts`: the gate as a
   verdict (`allow`, `judge`, or `ask` with the prod card's kind); the
   task's `allowEverything` doesn't reach it.
@@ -206,5 +255,11 @@ open question 8).
   `apps/desktop/src/renderer/features/projectSettings/` (environments),
   the mobile card.
 - Tests: the gate per environment and per kind; strictest of several;
-  unbound; a looser `gate:` ignored; a saved plan applied and one whose
-  state moved refused; `ops.yaml` from a branch not read.
+  an unbound target in a project that binds only dev waits for the
+  person; a looser `gate:` ignored; Helm's `--kube-context` resolved and
+  `--kube-apiserver` refused, with dev current and prod named; each
+  tool's run pinned to its resolved target; a dry run whose code the task
+  changed not started before a decision; a decision lapsing when the
+  commit, target or plan changes while it waits for a lock; a saved plan
+  applied and one whose state moved refused; `ops.yaml` from a branch not
+  read.

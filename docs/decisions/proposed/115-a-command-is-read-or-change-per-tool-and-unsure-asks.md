@@ -36,16 +36,22 @@ repository the line that matters is another one: does this command
 - **read:** it looks and changes nothing; it goes ahead, in every
   environment;
 - **change:** it changes something; it gets the rule kind `infra`, which
-  the profile puts on the project's Ask me (with only A built), or the
-  environment's gate (with B);
+  the profile's own check holds for the person (with only A built), or
+  the environment's gate (with B);
 - **secret:** it shows a credential; it is refused, as reading `~/.ssh` is;
 - **unsure:** the rules can't tell; it is treated as a change.
+
+A change or unsure command to a host (`ssh`, `scp`, `rsync`, `sftp`) in the
+lead's shell is refused there with "Run it through `ops_run`", so that
+every change has one runner that gates, locks and logs it (ADR-116,
+ADR-117). Reads over `ssh` go ahead in the shell, and are in the thread,
+not the run log.
 
 Teardown stays on the irreversible list, as today, and asks whatever the
 environment. The new module `opsCommands.ts` reads the words; `rules.ts`
 calls it from `kindsOf` beside `deploys()` and `destroys()`, for each
 command of a line, after wrappers (`sudo`, `timeout`, `env`) are taken
-off, as now.
+off, as now, and only where the task's profile is Ops.
 
 ### Per tool
 
@@ -57,7 +63,7 @@ place, never in arguments or quoted text, as `deploys()` does now.
 | **ansible-playbook** | `--check`/`-C` (with or without `--diff`); `--syntax-check`, `--list-hosts`, `--list-tasks`, `--list-tags` | Anything else | `-e @vault.yml` with `--ask-vault-pass` from a lead (it has no password); `ansible-vault view`, `decrypt`, `edit` from a lead |
 | **ansible** (ad hoc) | Modules `ping`, `setup`, `gather_facts`, `stat`, `find`, `slurp`* of a non-secret path, `service_facts`, `package_facts`; `command`/`shell` with an argument the ssh column reads as a read | Any other module; `-b` alone doesn't change it | `slurp`/`fetch` of a secret path |
 | **ansible-inventory, ansible-doc, ansible-config, ansible-lint, ansible-galaxy** | All (Galaxy installs into the caches ADR-113 opens) | | A vault password file they name, read by its path (`secretOf`) |
-| **terraform, tofu, terragrunt** | `plan` (with `-out`, `-destroy` or `-refresh-only`), `validate`, `fmt` (`-check` or not: it only touches the worktree), `show`, `graph`, `providers`, `version`, `init` without `-migrate-state`/`-force-copy`/`-reconfigure`, `workspace list`/`show`/`select`, `state list`, `get`; terragrunt's `run-all` of those | `apply` (and `apply -refresh-only`), `import`, `refresh`, `taint`, `untaint`, `state mv`/`rm`/`push`/`replace-provider`, `force-unlock`, `workspace new`/`delete`, `init -migrate-state` | `output` without a name or with `-json`/`-raw` (shows sensitive values), `state show`, `state pull`, `show -json` of a state, `console` |
+| **terraform, tofu, terragrunt** | `plan` (with `-destroy` or `-refresh-only`; never `-out`, below), `validate`, `fmt` (`-check` or not: it only touches the worktree), `show` of the state in its human form, `graph`, `providers`, `version`, `init` without `-migrate-state`/`-force-copy`/`-reconfigure`, `workspace list`/`show`/`select`, `state list`, `get`; terragrunt's `run-all` of those | `apply` (and `apply -refresh-only`), `import`, `refresh`, `taint`, `untaint`, `state mv`/`rm`/`push`/`replace-provider`, `force-unlock`, `workspace new`/`delete`, `init -migrate-state` | `output` without a name or with `-json`/`-raw` (shows sensitive values), `state show`, `state pull`, `show -json`, `show` of any plan file, `plan -out` with a path of the caller's, `console` |
 | **pulumi** | `preview`, `stack ls`/`select`/`history`, `config` without `--show-secrets`, `about`, `whoami` | `up`, `refresh`, `import`, `cancel`, `stack rm`, `state delete`/`unprotect`, `config set` | `stack output --show-secrets`, `config --show-secrets`, `stack export` |
 | **kubectl** | `get`, `describe`, `logs`, `top`, `explain`, `api-resources`, `api-versions`, `version`, `cluster-info`, `diff`, `auth can-i`, `events`, `rollout status`/`history`, `config get-contexts`/`current-context`/`view` (minified, without `--raw`), any verb with `--dry-run=client\|server` | `apply`, `create`, `replace`, `patch`, `edit`, `set`, `scale`, `autoscale`, `label`, `annotate`, `expose`, `run`, `rollout restart`/`undo`/`pause`/`resume`, `cordon`, `uncordon`, `drain`, `taint`, `certificate approve`, `config use-context`/`set-*` (they write the person's kubeconfig) | `get`/`describe` of `secret(s)` with `-o yaml\|json\|jsonpath\|go-template`, `config view --raw`, `create token` |
 | **kubectl, unsure** | | `exec`, `attach`, `debug`, `cp`, `port-forward`, `proxy`: a shell or a tunnel into the cluster, read like `ssh` below where the words allow (`exec pod -- cat /etc/hosts` is a read) | |
@@ -68,19 +74,49 @@ place, never in arguments or quoted text, as `deploys()` does now.
 
 \* `slurp` returns a file's contents.
 
+**Saved plans are Althar's.** A plan file holds the run's inputs and the
+resources' values in clear, sensitive ones included, whatever the
+streamed output masks. So `ops_run` saves the plan itself, into the run's
+private folder (ADR-114), applies that file, and renders it for the card
+only in Terraform's human form, masked; a caller's `-out`, `show` of a
+plan file and `show -json` are refused. A plan never lands in the
+worktree.
+
 **A remote command over `ssh`** (and `ansible -m command|shell`,
 `kubectl exec … --`) is read with the same shell reader as a local line
-(`shellCommands.ts`), its first word against two lists:
+(`shellCommands.ts`). A program is a read only in the argument forms
+listed for it; any other form of a listed program, and any program not
+listed, is unsure:
 
-- **Reads:** `systemctl status|is-active|is-enabled|is-failed|list-units|list-timers|show|cat`,
-  `journalctl`, `cat`, `less`, `head`, `tail`, `grep`, `zgrep`, `ls`,
-  `find` (without `-delete`, `-exec`, `-fprint`), `stat`, `file`, `df`,
-  `du`, `free`, `uptime`, `w`, `who`, `last`, `ps`, `top -bn1`, `ss`,
-  `netstat`, `ip a|r|link`, `ping`, `curl` and `wget` without a body or
-  output file, `dig`, `host`, `uname`, `hostname`, `id`, `whoami`, `date`,
-  `env` (not `printenv` of a secret), `docker ps|logs|inspect|images|stats --no-stream`,
-  `crictl ps|logs`, `nginx -t`, `apachectl -t`, `sshd -t`, `openssl x509 -noout`,
-  `dpkg -l`, `rpm -q`, `apt list`, `dnf list`; and `sudo` before any of them.
+- **Reads, by exact form:**
+  - `systemctl status|is-active|is-enabled|is-failed|list-units|list-timers|cat`,
+    and `show` only with `-p`/`--property`; `journalctl` without
+    `--vacuum-*`, `--rotate`, `--flush` or `--sync`;
+  - `cat`, `less`, `head`, `tail`, `grep`, `zgrep`, `ls`, `stat`, `file`,
+    `wc` of paths not in the secret list below; `find` without `-delete`,
+    `-exec`, `-execdir`, `-ok`, `-fprint*`, `-fls`;
+  - `df`, `du`, `free`, `uptime`, `w`, `who`, `last`, `id`, `whoami`,
+    `uname`, `ps` without `e`, `-E` or an `eww` form, `top -bn1`, `ss`,
+    `netstat`, `ip` with `a|addr|r|route|link` and `show` or nothing after,
+    `ping` with `-c`, `dig`, `host`;
+  - `hostname` with no argument or only `-f`, `-s`, `-d`, `-i`, `-I`
+    (a name after it sets it); `date` with no argument or only a
+    `+FORMAT`, `-u`, `-R`, `-I…` (`-s`, `--set` or a bare date sets the
+    clock);
+  - `curl` and `wget` with no body, method other than `GET`/`HEAD`,
+    upload or output file;
+  - `docker ps|images|logs|stats --no-stream`, and `docker inspect` only
+    with `--format`; `crictl ps|logs`, and `crictl inspect` only with
+    `-o go-template`;
+  - `nginx -t`, `apachectl -t` or `configtest`, `sshd -t`,
+    `openssl x509 -noout`, `dpkg -l`, `rpm -q`, `apt list`, `dnf list`;
+  - `sudo` (without `-s`, `-i`, `-e` or `-u` of a shell) before any of
+    these, as the same form.
+- **Inspections whose plain output carries credentials** are secret, not
+  read, unless narrowed as above: `env`, `printenv`, `set`, `export -p`,
+  `systemctl show` without a property, `docker inspect` and `crictl
+  inspect` without a format, `ps` with environment forms, `cat
+  /proc/*/environ`.
 - **Secret paths, refused:** `/etc/shadow`, `/etc/gshadow`, `~/.ssh` and
   `/root/.ssh` but `known_hosts` and `authorized_keys`, `*.key`, `*.pem`
   under `/etc/ssl/private` or a `private/` folder, `.env` files,
@@ -95,15 +131,18 @@ place, never in arguments or quoted text, as `deploys()` does now.
 A read runs the repository's code, and the code is the lead's worktree.
 `terraform plan` runs `data "external"` programs; `ansible-playbook --check`
 runs a task with `check_mode: false` for real, and every `pipe` lookup
-and local action. So in `ops_run`, before a read against staging or prod
-(ADR-116) starts, Althar compares the files it runs (the playbook, its
-roles and plugins; the module's `.tf` files and local modules) with the
-default branch. Where the task changed one, and the change adds
-`check_mode: false|no`, `delegate_to: localhost`, a `pipe`/`lines`
-lookup, a `local_action`, or a `data "external"`, the read is **unsure**:
-it is gated as a change, and the card says why. Unchanged code, already
-reviewed and merged, runs as a read. In the lead's shell, where only `ssh`
-runs, none of this arises.
+and local action; a role's `library/` module or a filter plugin runs as
+any program does. So, before any `ops_run` starts, with only A as with
+B, Althar compares the files it executes (the playbook, its roles,
+plugins and modules; the `.tf` files and local modules; a chart's
+templates) with the default branch. Where the task changed one, the run
+is **unsure**, whatever its flags say: it is gated as a change, and the
+card says why and names the files, with the lines that matter
+(`check_mode: false`, `delegate_to: localhost`, a `pipe` lookup, a
+`data "external"`) first. Unchanged code, already reviewed and merged,
+runs as its flags say, in its own sandbox with only its target's
+credentials (ADR-114). In the lead's shell, where only `ssh` reads run,
+none of this arises.
 
 ### Unsure
 
@@ -130,15 +169,34 @@ prod's keys out of its SSH agent (the plan's B3).
 
 - A new rule kind, **`infra`**, joins `RULES` in `ruleContext.ts`, with
   its words in `RULE_WORDS` ("Changing infrastructure").
-- With the profile on, `infra` is on the project's **Ask me**, so it asks
-  with everything allowed, as the person's Ask me does (ADR-097); they
-  can take it off, which the Rules screen shows as "Infrastructure
-  changes go ahead". With the profile off, `infra` is read but goes ahead
-  as a deploy does today.
-- `deploy` stays for what it means now, publishing and deploys outside
-  infra tools (`wrangler deploy`, `npm publish`); `kubectl apply`,
-  `terraform apply`, `helm upgrade`, `pulumi up` move from `deploy` to
-  `infra`. Their teardown stays irreversible.
+- **Its own check, not the Ask me list.** In `rules.ts` today, `decide`
+  returns `ALLOW` in allow mode once the irreversible list and the
+  person's named Ask commands have answered, without reading the
+  project's `ask` kinds, and `decideInside` does the same. A kind on the
+  Ask me list would therefore never ask under Allow everything, every
+  project's default. So `RuleContext` gains the **task's effective
+  profile** (the task's override, else the project's), and both `decide`
+  and `decideInside` check it right after Never, secrets and the
+  irreversible list, before any `ALLOW`: in Ops, an `infra` or unsure
+  infra command gets the profile's verdict (with A, ask the person; with
+  B, the environment's gate). A task's Allow everything (ADR-043) doesn't
+  reach it. The person can loosen it for a project in Rules
+  ("Infrastructure changes go ahead", which with B is every environment
+  set to `go` but prod); an agent can't.
+- **Code keeps today's rules exactly.** In the Code profile `opsCommands.ts`
+  isn't called: `kubectl apply`, `terraform apply`, `helm upgrade` and
+  `pulumi up` stay `deploy`, as `DEPLOYERS` has them, with what a project
+  set for `deploy` (Ask me, Never, an allow rule) holding as it does now.
+  In Ops, those commands are `infra` instead; `deploy` keeps publishing
+  and deploys outside infra tools (`wrangler deploy`, `npm publish`).
+  Teardown stays irreversible in both.
+- **Acceptance cases,** each with Allow everything on, which is the
+  default, and off: on one project, an Ops task's `ops_run terraform
+  apply` waits for the person (with A) while a Code sibling's `terraform
+  apply` in its shell goes ahead as a deploy does today; a project whose
+  rules ask before `deploy` still asks for the Code sibling; switching the
+  Ops task to Code (or the sibling to Ops) changes only that task's
+  verdicts; `decide` and `decideInside` agree on every case.
 - The card for an `infra` ask says which word made it a change: "`terraform
   apply` changes infrastructure"; for unsure, "Althar can't tell whether
   `ssh web1 ./fix.sh` changes web1, so it asks."
@@ -173,20 +231,28 @@ prod's keys out of its SSH agent (the plan's B3).
 - New `packages/runtime/src/opsCommands.ts`: the table above, the remote
   command lists, `classify(words): 'read' | 'change' | 'secret' | 'unsure'`
   with the word that decided it.
-- `packages/runtime/src/rules.ts`: `kindsOf` calls it beside `deploys()`;
-  `DEPLOYERS` loses the infra tools to it; `destroys()` and `DESTROYERS`
-  unchanged; `decide` and `decideInside` refuse `secret` as
-  `credentialReason` does.
-- `packages/runtime/src/ruleContext.ts`: `infra` in `RULES`, `RULE_WORDS`;
-  `Policies.ts`: the profile adds it to `alwaysAsk`.
+- `packages/runtime/src/rules.ts`: `kindsOf` calls it beside `deploys()`
+  where the task's profile is Ops; `DEPLOYERS`, `destroys()` and
+  `DESTROYERS` unchanged, so Code reads as now; `decide` and
+  `decideInside` refuse `secret` as `credentialReason` does, and check
+  the profile's verdict for `infra` and unsure before every `ALLOW`
+  return; a change to a host in the shell is refused toward `ops_run`.
+- `packages/runtime/src/ruleContext.ts`: `infra` in `RULES`, `RULE_WORDS`,
+  and the task's effective profile in `RuleContext`; `Permissions.ts`
+  (`runRules`) fills it from the task's override or the project's
+  `sandboxProfile` (`Policies.ts`).
 - `packages/runtime/src/shellCommands.ts`: reading `ssh`'s remote command,
   `kubectl exec --`'s and `ansible -a`'s as lines.
 - `packages/runtime/src/OpsRuns.ts` (ADR-114): the "what a read runs"
-  comparison against the default branch.
+  comparison against the default branch, and the saved plan in the run's
+  folder.
 - `packages/runtime/src/tally.ts`: `infra` and `unsure` counted, so a kind
   agents keep working around shows in Rules' "Last 14 days".
 - `packages/ui/src/lib/commandGlance.ts` and
   `packages/ui/src/thread/Permission/`: the card's line.
 - Tests: a table test per tool and row, in `packages/runtime/tests/`
   beside `rulesReadings.test.ts`; `--dry-run` and `--check` with every
-  spelling; remote lines with pipes and `sudo`.
+  spelling; remote lines with pipes and `sudo`; every listed remote
+  program in a form that changes something (`hostname web9`, `date -s`)
+  read as unsure; the Ops task and Code sibling cases above, through both
+  `decide` and `decideInside`.
