@@ -80,7 +80,8 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
-  # As post-merge.yml's Windows parts, each test run five times over: where most flakes have been.
+  # As post-merge.yml's Windows parts, each test run five times over: where most flakes have been. The runtime in six
+  # parts, not post-merge's four: five runs of a quarter of it took up to the job's ninety minutes.
   windows:
     name: windows (${{ matrix.part }})
     runs-on: windows-2025
@@ -91,18 +92,24 @@ jobs:
         include:
           - part: desktop
             packages: apps/desktop
-          - part: runtime 1/4
+          - part: runtime 1/6
             packages: packages/runtime
-            shard: 1/4
-          - part: runtime 2/4
+            shard: 1/6
+          - part: runtime 2/6
             packages: packages/runtime
-            shard: 2/4
-          - part: runtime 3/4
+            shard: 2/6
+          - part: runtime 3/6
             packages: packages/runtime
-            shard: 3/4
-          - part: runtime 4/4
+            shard: 3/6
+          - part: runtime 4/6
             packages: packages/runtime
-            shard: 4/4
+            shard: 4/6
+          - part: runtime 5/6
+            packages: packages/runtime
+            shard: 5/6
+          - part: runtime 6/6
+            packages: packages/runtime
+            shard: 6/6
           - part: packages
             packages: packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/ui
     defaults:
