@@ -33,7 +33,7 @@ import {
   commandsOf,
   commandText,
   compactCommandOf,
-  goalElsewhere,
+  coordinatorGoalOf,
   interruptCommandOf,
   modelCommandOf,
   pressOf,
@@ -844,19 +844,19 @@ export function ProjectView({
       </>
     ) : null
 
-  // What a slash in the coordinator's composer offers; a new aside's is only its first words. Goals are a task's: said where.
+  // What a slash in the coordinator's composer offers; a new aside's is only its first words. A goal is said to it, for a task.
   const commands =
     talkingTo.kind === 'new'
       ? []
       : commandsOf(
           asideCommandOf((words) => startAsideFrom(words)),
+          coordinatorGoalOf((body) => send(body, false)),
           model.agents.length > 0 &&
             picking !== null &&
             modelCommandOf(models, text.coordinator.toLowerCase(), model.agents, picking, choose),
           compactCommandOf(session, () => void model.compact()),
           interruptCommandOf(busy, text.coordinator.toLowerCase(), () => void model.interrupt()),
           clearing.ask !== null && pressOf('clear', commandText.clear.does, 'remove', clearing.ask),
-          goalElsewhere,
         )
 
   const composer = (

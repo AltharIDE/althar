@@ -16,7 +16,7 @@ import { useSettingsOf, withServices } from './render'
  * What a slash in a composer offers, by screen: a task's what it can do now
  * (its goal, its model, its title, running it), each done as its own press
  * does it and never sent to the lead; the coordinator's its own, with /goal
- * listed where it can't be done.
+ * said to it, for a task toward the objective.
  */
 
 const names = () =>
@@ -124,7 +124,7 @@ describe('a task’s composer', () => {
 describe('the coordinator’s composer', () => {
   const session = { ...snapshot().session!, id: 'sc', context: { used: 24_000, size: 200_000 } }
 
-  it('offers its own commands, and lists /goal where it can be done', async () => {
+  it('offers its own commands, and says a /goal to it, for a task toward it', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ session })),
       setThreadGoal: vi.fn(async () => null),
@@ -132,12 +132,18 @@ describe('the coordinator’s composer', () => {
     withServices(<Project />, client)
     const composer = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: /Tell the coordinator something/ })
     await userEvent.type(composer, '/')
-    expect(names()).toEqual(['/aside', '/model', '/compact', '/goal'])
-    expect(screen.getByText('In a task’s conversation')).toBeTruthy()
-    await userEvent.clear(composer)
-    await userEvent.type(composer, '/goal Ship it{Enter}')
-    expect(composer.value).toBe('/goal Ship it')
+    expect(names()).toEqual(['/aside', '/goal', '/model', '/compact'])
+    await userEvent.type(composer, 'goal ')
+    expect(screen.getByText('A new task')).toBeTruthy()
+    // Nothing written, Enter does nothing.
+    await userEvent.keyboard('{Enter}')
     expect(client.send).not.toHaveBeenCalled()
+    await userEvent.type(composer, 'Ship it')
+    expect(names()).toEqual(['Start a task toward it'])
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledTimes(1))
+    expect(JSON.stringify(vi.mocked(client.send).mock.calls[0])).toContain('/goal Ship it')
+    expect(composer.value).toBe('')
     expect(client.setThreadGoal).not.toHaveBeenCalled()
   })
 })

@@ -27,6 +27,8 @@ const goalRow = (threadId: string) =>
     const [row] = yield* sql<GoalRow>`
       SELECT g.*, g.generation AS revision,
         (k.state IN ('draft', 'open') AND k.kept_at IS NULL AND p.archived_at IS NULL
+          -- A plan not started yet, counting down or held: the goal waits for it, and its lead takes it up once it starts.
+          AND NOT EXISTS (SELECT 1 FROM task_plans tp WHERE tp.task_id = k.id AND tp.state = 'proposed')
           AND NOT EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
           AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.task_id = k.id AND h.state = 'working')
           AND NOT EXISTS (

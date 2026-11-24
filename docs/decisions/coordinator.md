@@ -234,6 +234,10 @@ Both keep:
 After either, the coordinator says nothing on its own. Its first word answers
 the person's next message.
 
+## A goal is a task's
+
+A goal is never the coordinator's own: it directs tasks, and an objective it kept working toward would hold up everything else the person asks it. A goal the person gives it, in plain words ("set a goal to…") or with `/goal <objective>` in its composer, which is sent to it as words, becomes a task's. It drafts a task for the objective, sets the goal on it with `set_goal`, and plans it as it plans any task, its preset, lead and effort included. The goal waits for the plan: while it is counting down or held nothing starts for it, and the plan's lead takes it up from its first turn, working toward it turn after turn up to the goal's limit. `set_goal` also sets a goal on a task already at work, whose lead takes it up at once. It is done only on the person's word in the turn, as goals are the person's; the task's thread says it as Althar's line ("The coordinator set the goal, as you asked: …"), and the person pauses, edits or clears it from the task.
+
 ## Permission requests
 
 The coordinator answers no permission request by default. A project can
@@ -246,3 +250,4 @@ isn't being extended to more agents ([what-agents-may-do.md](what-agents-may-do.
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: the coordinator's commands go by the project's rules, reach the network and read ordinary files anywhere.
 - 18 Nov 2026: every session of the coordinator starts from the same brief, not only a handover's: it gained what the repositories tell agents (their `AGENTS.md` and `CLAUDE.md`), the tasks finished last and the earlier conversation in short, and is written while the agent starts.
+- 24 Nov 2026: a goal given to the coordinator becomes a task's, through `set_goal` ([A goal is a task's](#a-goal-is-a-tasks)).

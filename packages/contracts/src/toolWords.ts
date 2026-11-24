@@ -223,6 +223,7 @@ const ALTHAR: Readonly<Record<string, string>> = {
   run_it: 'Run it',
   run_project: 'Run the project',
   screenshot: 'Take a screenshot',
+  set_goal: 'Set a goal',
   set_part_of_issue: 'Set what the issue is part of',
   set_run_command: 'Set the run command',
   settle_task: 'Settle the task',

@@ -35,7 +35,10 @@ export const commandText = {
     set: 'Set the goal',
     replace: 'Replace the goal',
     save: 'Save the goal',
-    elsewhere: 'In a task’s conversation',
+    task: 'Start a task that keeps working toward an objective',
+    newTask: 'A new task',
+    taskWhat: `The coordinator plans a task toward it, and its lead keeps working toward it on its own, up to ${GOAL_ROUNDS} turns.`,
+    start: 'Start a task toward it',
   },
   model: { does: (owner: string) => `Change the ${owner}’s model`, takes: 'a model', current: 'Current' },
   compact: { does: 'Compact the conversation', full: (percent: number) => `${percent}% full` },
@@ -112,13 +115,24 @@ export const goalCommandOf = (goal: ThreadGoal | null, onGoal: (body: string) =>
   }
 }
 
-/** /goal where there are no goals, the coordinator's conversation: listed, and said where it is done. */
-export const goalElsewhere: ComposerCommand = {
-  name: 'goal',
-  does: commandText.goal.does,
-  icon: 'goal',
-  unavailable: commandText.goal.elsewhere,
-  run: () => {},
+/**
+ * /goal in the coordinator's conversation: a goal is a task's, so the
+ * objective is said to the coordinator, which plans a task toward it with the
+ * goal on it, as it plans any task (its countdown and Hold included).
+ */
+export const coordinatorGoalOf = (onGoal: (body: string) => void): ComposerCommand => {
+  const t = commandText.goal
+  return {
+    name: 'goal',
+    does: t.task,
+    icon: 'goal',
+    takes: t.takes(false),
+    detail: { title: t.title, now: t.newTask, note: t.taskWhat },
+    action: (words) => (words.trim() === '' ? null : t.start),
+    run: (words) => {
+      if (words.trim() !== '') onGoal(`/goal ${words.trim()}`)
+    },
+  }
 }
 
 /** /compact, where the conversation has a context to compact, said as full as it is. */

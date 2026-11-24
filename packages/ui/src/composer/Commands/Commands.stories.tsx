@@ -108,7 +108,19 @@ const coordinatorCommands: ComposerCommand[] = [
   },
   { name: 'compact', does: 'Compact the conversation', icon: 'compress', now: '12% full', run: fn() },
   { name: 'clear', does: 'Clear the conversation', icon: 'remove', run: fn() },
-  { name: 'goal', does: 'Keep the lead working toward an objective', icon: 'goal', unavailable: 'In a task’s conversation', run: fn() },
+  {
+    name: 'goal',
+    does: 'Start a task that keeps working toward an objective',
+    icon: 'goal',
+    takes: 'what the lead should keep working toward',
+    detail: {
+      title: 'Goal',
+      now: 'A new task',
+      note: 'The coordinator plans a task toward it, and its lead keeps working toward it on its own, up to 12 turns.',
+    },
+    action: (words) => (words.trim() === '' ? null : 'Start a task toward it'),
+    run: fn(),
+  },
 ]
 
 function Picker() {
