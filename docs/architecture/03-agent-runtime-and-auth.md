@@ -1361,9 +1361,10 @@ Every package of the repository pins one exact version of each adapter
 
 A first start that crashed, or failed for no reason the person can act on,
 is made again once by itself: a new adapter process, after Althar forgets
-the agent's sign-in as last checked and the models it offers, so both are
-read again; an asking of its models still under way from before counts for
-nothing. The models probe's own start is made once more the same way. One
+the agent's sign-in as last checked and asks it again for the models it
+offers (`Models.refresh`); an asking of its models still under way from
+before counts for nothing, and what it offered last stays, names and all,
+until it answers anew. The models probe's own start is made once more the same way. One
 signed out, not installed, refused, out of usage, at another version, offline
 or timed out is said at once, as a second start meets the same. The agent's
 whole answer, its code and all its data, goes in the log and the failed

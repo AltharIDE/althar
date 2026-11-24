@@ -83,7 +83,8 @@ error, and started cleanly once the package was back.
   words that say what to do (`words.ts`), never a bare "Internal error".
 - A first start that crashed, or failed for no reason the person can act on,
   starts again once by itself, afresh, after Althar forgets the agent's
-  sign-in as last checked and its models (`sessionConnections.ts`). The
+  sign-in as last checked and asks it again for its models, keeping what it
+  offered last until it answers (`sessionConnections.ts`). The
   models probe's own start does the same (`Models.ts`).
 
 ## Each integration
