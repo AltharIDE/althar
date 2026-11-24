@@ -34,7 +34,7 @@ import { forgetPages, pages } from '../src/renderer/features/browser/pages'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { clock } from '../src/renderer/shared/time'
 import type { Client } from '../src/renderer/data/client'
-import { keys, reads } from '../src/renderer/data/reads'
+import { reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
 

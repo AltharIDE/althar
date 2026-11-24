@@ -69,7 +69,7 @@
       The loop is write, look, fix.
     - **A tool call that waits on the person holds the turn**
       (Claude Code's `openDiff`; Althar's own lesson in
-      [ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
+      [ADR-087](../tasks.md#helpers)).
   - **The research doesn't show another renderer can replace what pages
     already have.** Pages beside the conversation already have the guards,
     point and comment, and the driving machinery leads use (#723). So the
@@ -1248,7 +1248,7 @@ The second slice, on 22 November 2026, for design work:
   partition is reachable by nothing else.
 - **A tool that waits on the person,** like `openDiff`. It holds the turn,
   hides what comes after and holds the person's next message
-  ([ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
+  ([ADR-087](../tasks.md#helpers)).
 - **The publishing session watching its canvases,** like Claude Code. A
   session ends, and a canvas is the project's. The person's comment goes
   where the person is.

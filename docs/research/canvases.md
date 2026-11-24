@@ -498,7 +498,7 @@ in source):
 2. **A tool call that blocks on the person** (`openDiff`). Althar learnt the
    same with helpers: a held turn hides the answer and holds the person's
    next message
-   ([ADR-087](../decisions/proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
+   ([ADR-087](../decisions/tasks.md#helpers)).
 3. **Output that scrolls away** (ChatGPT's writing blocks).
 4. **A canvas only one agent can use** (VS Code canvases only in Copilot's
    harness, MCP Apps only in hosts that render them). Althar's own tools

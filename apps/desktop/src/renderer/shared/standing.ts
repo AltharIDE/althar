@@ -15,7 +15,6 @@ import type { IconName } from '@althar/ui'
 export {
   type Blocker,
   checkFailuresOf,
-  forShip,
   goingUp,
   isBlocked,
   personPushes,
@@ -23,7 +22,6 @@ export {
   ranChecks,
   readyText,
   readyWordOf,
-  requiredChecksOf,
   standingOf,
   type ChangeStanding as Standing,
   type NextThing as Next,

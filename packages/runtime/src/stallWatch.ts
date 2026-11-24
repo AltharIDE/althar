@@ -408,5 +408,3 @@ export const makeStallWatch = (limits: StallLimits) => {
     size: () => watches.size,
   }
 }
-
-export type StallWatch = ReturnType<typeof makeStallWatch>
