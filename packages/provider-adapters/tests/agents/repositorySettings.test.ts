@@ -4,16 +4,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+import { Effect, Stream } from 'effect'
 
+import { connect } from '../../src/AgentConnection'
 import { agents, bundledClaude, type SessionOptions } from '../../src/registry'
 import { readRepositorySettings, type SettingsAgent, untrustedOf } from '../../src/repositorySettings'
 
 /*
- * A repository whose agent settings write a file outside its worktree, run by the real agents (DEV-280): nothing of
- * them runs before the person trusts them, they run once trusted, and stop again once a branch changes them. Claude
- * Code runs its SessionStart hook before it reaches its model, so a key that doesn't work is enough; OpenCode loads
- * its plugins as it reads its config. Neither needs a sign-in, and neither spends usage. Each skips where its agent
- * isn't here.
+ * A repository whose agent settings write a file outside its worktree, run by the real agents through their ACP
+ * adapters, as a lead's session starts them (DEV-280): its `session/new` with the session settings and environment
+ * Althar gives it. Nothing of them runs before the person trusts them, they run once trusted, and stop again once a
+ * branch changes them. Claude Code runs its hooks as its session starts and as a message is sent, before it reaches its
+ * model, so a key that doesn't work is enough; OpenCode loads its plugins as its session starts. Neither needs a
+ * sign-in, and neither spends usage. Codex asks for a sign-in before it runs anything, so it isn't run here: its test
+ * checks only that it says it loads them and is started as ever. Each skips where its agent isn't here.
  */
 
 const git = (cwd: string, ...args: ReadonlyArray<string>) =>
@@ -52,66 +56,66 @@ const optionsFor = async (agent: SettingsAgent, worktree: string, trusted: Reado
   return { options, files }
 }
 
-const claude = bundledClaude()
-
-describe.skipIf(claude === null)('Claude Code and a repository’s hooks', () => {
-  /** Claude Code as its lead's session would start it, by the CLI flags its session options stand for. */
-  const run = (worktree: string, home: string, options: SessionOptions) => {
-    const meta = agents['claude-code'].sessionMeta?.('lead', options) as {
-      claudeCode: { options: { settingSources?: Array<string>; additionalDirectories?: Array<string>; env?: Record<string, string> } }
-    }
-    const { settingSources, additionalDirectories, env } = meta.claudeCode.options
-    spawnSync(
-      claude ?? 'claude',
-      [
-        '-p',
-        'hi',
-        ...(settingSources === undefined ? [] : ['--setting-sources', settingSources.join(',')]),
-        ...(additionalDirectories ?? []).flatMap((folder) => ['--add-dir', folder]),
-      ],
-      {
-        cwd: worktree,
-        input: '',
-        timeout: 60_000,
-        env: {
-          ...process.env,
-          ...env,
-          CLAUDE_CONFIG_DIR: home,
-          ANTHROPIC_API_KEY: 'sk-ant-not-a-key',
-        },
-      },
-    )
-  }
-
-  it('runs none of them before trust, runs them once trusted, and none again once a branch changes them', async () => {
-    const { root, outside, worktree, put } = fixture((outside) => ({
-      '.claude/settings.json': JSON.stringify({
-        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${join(outside, 'repository-hook')}` }] }] },
+/**
+ * A lead's session of `agent` in `worktree`, through its ACP adapter, as Althar starts it: its environment, its
+ * session's settings, `session/new`; with a message sent where `prompt`, then a wait for what it runs to have run.
+ */
+const session = (agent: SettingsAgent, worktree: string, env: Readonly<Record<string, string>>, options: SessionOptions, prompt: boolean) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const definition = agents[agent]
+        const spec = definition.launch(process.execPath)
+        const connection = yield* connect({
+          transport: {
+            _tag: 'Process',
+            cwd: worktree,
+            spec: { ...spec, env: { ...spec.env, ...env, ...definition.sessionEnv?.({ ...spec.env, ...env }, options) } },
+          },
+          permissions: definition.permissions,
+          onPermission: () => Effect.succeed({ decision: 'reject' as const, reason: 'This test permits nothing.' }),
+        })
+        const started = yield* connection.newSession({
+          cwd: worktree,
+          mode: definition.modes.ask,
+          modeOptionId: definition.options.mode,
+          ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
+        })
+        // A key that doesn't work fails the turn once its hooks have run.
+        if (prompt) yield* Effect.ignore(Stream.runDrain(started.prompt('hi')).pipe(Effect.timeout('60 seconds')))
+        yield* Effect.sleep(prompt ? '2 seconds' : '20 seconds')
       }),
+    ),
+  )
+
+describe.skipIf(bundledClaude() === null)('Claude Code and a repository’s hooks, through claude-agent-acp', () => {
+  it('runs none of them before trust, runs them once trusted, and none again once a branch changes them, the person’s own always', async () => {
+    const hook = (outside: string, name: string, more = '') => ({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: `touch ${join(outside, `${name}-start`)}${more}` }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: `touch ${join(outside, `${name}-prompt`)}${more}` }] }],
+      },
+    })
+    const { root, outside, worktree, put } = fixture((outside) => ({
+      '.claude/settings.json': JSON.stringify(hook(outside, 'repository')),
     }))
     const home = join(root, 'home')
     mkdirSync(home)
-    // The person's own hook, which runs whatever the repository's are.
-    writeFileSync(
-      join(home, 'settings.json'),
-      JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${join(outside, 'own-hook')}` }] }] } }),
-    )
+    // The person's own hooks, which run whatever the repository's do.
+    writeFileSync(join(home, 'settings.json'), JSON.stringify(hook(outside, 'own')))
     const ran = async (trusted: ReadonlyArray<{ file: string; hash: string }>) => {
-      rmSync(join(outside, 'repository-hook'), { force: true })
-      rmSync(join(outside, 'own-hook'), { force: true })
-      run(worktree, home, (await optionsFor('claude-code', worktree, trusted)).options)
-      return { repository: existsSync(join(outside, 'repository-hook')), own: existsSync(join(outside, 'own-hook')) }
+      for (const name of ['repository-start', 'repository-prompt', 'own-start', 'own-prompt']) rmSync(join(outside, name), { force: true })
+      const { options } = await optionsFor('claude-code', worktree, trusted)
+      await session('claude-code', worktree, { CLAUDE_CONFIG_DIR: home, ANTHROPIC_API_KEY: 'sk-ant-not-a-key' }, options, true)
+      const fired = (name: string) => existsSync(join(outside, `${name}-start`)) && existsSync(join(outside, `${name}-prompt`))
+      return { repository: fired('repository'), own: fired('own') }
     }
     try {
       expect(await ran([])).toEqual({ repository: false, own: true })
       const trusted = (await optionsFor('claude-code', worktree, [])).files.map(({ file, hash }) => ({ file, hash }))
       expect(await ran(trusted)).toEqual({ repository: true, own: true })
       git(worktree, 'switch', '-qc', 'task')
-      put({
-        '.claude/settings.json': JSON.stringify({
-          hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${join(outside, 'repository-hook')} && echo changed` }] }] },
-        }),
-      })
+      put({ '.claude/settings.json': JSON.stringify(hook(outside, 'repository', ' && echo changed')) })
       expect(await ran(trusted)).toEqual({ repository: false, own: true })
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -121,28 +125,26 @@ describe.skipIf(claude === null)('Claude Code and a repository’s hooks', () =>
 
 const opencode = spawnSync('opencode', ['--version'], { encoding: 'utf8' }).status === 0
 
-describe.skipIf(!opencode)('OpenCode and a repository’s plugins', () => {
+describe.skipIf(!opencode)('OpenCode and a repository’s plugins, through opencode acp', () => {
   it('loads none before trust, loads them once trusted, and none again once a branch changes them', async () => {
-    const { root, outside, worktree, put } = fixture((outside) => ({
-      '.opencode/plugin/mark.js': `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(join(outside, 'plugin'))}, 'x')\nexport const Mark = async () => ({})\n`,
-    }))
+    const plugin = (outside: string, text: string) =>
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(join(outside, 'plugin'))}, ${JSON.stringify(text)})\nexport const Mark = async () => ({})\n`
+    const { root, outside, worktree, put } = fixture((outside) => ({ '.opencode/plugin/mark.js': plugin(outside, 'x') }))
     const ran = async (trusted: ReadonlyArray<{ file: string; hash: string }>) => {
       rmSync(join(outside, 'plugin'), { force: true })
       const { options } = await optionsFor('opencode', worktree, trusted)
-      // After a start without the repository's config, OpenCode waits about a minute on its own setup before it loads it.
-      spawnSync('opencode', ['debug', 'config'], {
-        cwd: worktree,
-        input: '',
-        timeout: 150_000,
-        env: {
-          ...process.env,
-          ...agents.opencode.sessionEnv?.({}, options),
+      await session(
+        'opencode',
+        worktree,
+        {
           XDG_CONFIG_HOME: join(root, 'c'),
           XDG_DATA_HOME: join(root, 'd'),
           XDG_STATE_HOME: join(root, 's'),
           XDG_CACHE_HOME: join(root, 'k'),
         },
-      })
+        options,
+        false,
+      )
       return existsSync(join(outside, 'plugin'))
     }
     try {
@@ -150,9 +152,7 @@ describe.skipIf(!opencode)('OpenCode and a repository’s plugins', () => {
       const trusted = (await optionsFor('opencode', worktree, [])).files.map(({ file, hash }) => ({ file, hash }))
       expect(await ran(trusted)).toBe(true)
       git(worktree, 'switch', '-qc', 'task')
-      put({
-        '.opencode/plugin/mark.js': `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(join(outside, 'plugin'))}, 'changed')\nexport const Mark = async () => ({})\n`,
-      })
+      put({ '.opencode/plugin/mark.js': plugin(outside, 'changed') })
       expect(await ran(trusted)).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -161,7 +161,8 @@ describe.skipIf(!opencode)('OpenCode and a repository’s plugins', () => {
 })
 
 describe('Codex and a repository’s hooks', () => {
-  it('says it loads them whatever the person decided, so its sessions start as they always do', async () => {
+  // Not run: Codex asks for a sign-in before it runs anything of the repository's, so this checks only what Althar does.
+  it('says it loads them whatever the person decided, and is started as ever', async () => {
     const { root, worktree } = fixture(() => ({
       '.codex/hooks.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'touch x' }] }] } }),
     }))
