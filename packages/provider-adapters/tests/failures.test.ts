@@ -41,6 +41,29 @@ describe('classify', () => {
     )
   })
 
+  it('says what an "Internal error" carried in its data, rather than "Internal error"', () => {
+    // What claude-agent-acp 0.110.1 answered session/new on 24 November 2026, driving the hoisted Claude Code 2.1.326: the ACP
+    // SDK's answer to what the adapter threw, with the reason in `data.details`. Althar said "Internal error" alone.
+    const said = {
+      code: -32603,
+      message: 'Internal error',
+      data: { details: "Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'" },
+    }
+    assert.deepStrictEqual(classify(said, now), {
+      failure: 'unknown',
+      message: "Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'",
+    })
+    // claude-agent-acp's own `cause`, and a message of its own kept ahead of what its data adds.
+    assert.strictEqual(classify({ code: -32603, message: 'Internal error', data: { cause: 'spawn EACCES' } }, now).message, 'spawn EACCES')
+    assert.strictEqual(
+      classify({ code: -32603, message: 'Internal error: The session was not started.', data: { details: 'gateway refused' } }, now)
+        .message,
+      'Internal error: The session was not started: gateway refused',
+    )
+    // Nothing more where its data says nothing in words.
+    assert.strictEqual(classify({ code: -32603, message: 'Internal error', data: { errorKind: 1 } }, now).message, 'Internal error')
+  })
+
   it('reads a session the agent no longer has as lost', () => {
     // What claude-agent-acp 0.99.1 answered a prompt on 2 November 2026, once a `pkill -f` had ended its Claude Code process
     // and it had dropped the session: the turn failed with these words alone.

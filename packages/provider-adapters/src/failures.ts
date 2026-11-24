@@ -101,11 +101,34 @@ const authRequired =
 const transient =
   /rate.?limit|too many requests|\b429\b|timed? ?out|econn(reset|refused|aborted)|enotfound|eai_again|etimedout|socket hang up|fetch failed|can'?t reach|(cannot|unable to) connect|connection (refused|dropped|error|lost|reset)|temporar|overloaded|high demand|internal server error|\b50[0234]\b|\b529\b|network/i
 
+/**
+ * What an error's `data` says in words, where it says any: the ACP SDK puts
+ * what an agent threw in `details` and answers "Internal error" (ACP SDK
+ * 2.9.1's `errorToResult`); claude-agent-acp says a stopped Claude Code in
+ * `cause` and a failed command's output in `stderr`.
+ */
+const detailOf = (data: unknown): string | undefined => {
+  if (Predicate.isString(data)) return data.trim() === '' ? undefined : data.trim()
+  if (!Predicate.isObject(data)) return undefined
+  for (const key of ['details', 'message', 'cause', 'stderr', 'error']) {
+    const value = key in data ? (data as Record<string, unknown>)[key] : undefined
+    if (Predicate.isString(value) && value.trim() !== '') return value.trim()
+  }
+  return undefined
+}
+
+/** JSON-RPC's words for an error that says nothing of its own: "Internal error", with nothing or only a colon after. */
+const bare = /^internal error:?$/i
+
 const messageOf = (error: unknown): { readonly code?: number; readonly message: string; readonly data?: unknown } => {
   if (Predicate.isObject(error)) {
     const code = 'code' in error && Predicate.isNumber(error.code) ? error.code : undefined
-    const message = 'message' in error && Predicate.isString(error.message) ? error.message : JSON.stringify(error)
+    const said = 'message' in error && Predicate.isString(error.message) ? error.message : JSON.stringify(error)
     const data = 'data' in error ? error.data : undefined
+    // "Internal error" says nothing: what the agent threw, kept in its data, is the message, so it is said, classed and logged.
+    const detail = detailOf(data)
+    const message =
+      detail === undefined || said.includes(detail) ? said : bare.test(said.trim()) ? detail : `${said.replace(/[.:]\s*$/, '')}: ${detail}`
     return { ...(code === undefined ? {} : { code }), message, ...(data === undefined ? {} : { data }) }
   }
   return { message: String(error) }
