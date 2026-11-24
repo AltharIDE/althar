@@ -1189,7 +1189,7 @@ export function ProjectView({
                                     />
                                   )
                                 }}
-                                draft={(draft, itemId) => <DraftCard draft={draft} itemId={itemId} actions={draftActions} />}
+                                draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                                 automation={(card, itemId) => (
                                   <AutomationInThread
                                     card={card}

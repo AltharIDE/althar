@@ -3030,16 +3030,9 @@ export const TaskCard = Schema.Struct({
   scratch: Schema.optional(Schema.Boolean),
   /**
    * What its lead left for the person to do on a tracker, where something waits: issues it drafted, to file, and changes it
-   * proposed to its issue, to apply; and the issues to file, oldest first, by title and their cards' items in its thread, which
-   * its card names and its thread points at (absent from a runtime before it). Absent where none waits.
+   * proposed to its issue, to apply. Absent where none waits.
    */
-  issues: Schema.optional(
-    Schema.Struct({
-      drafts: Schema.Int,
-      changes: Schema.Int,
-      named: Schema.optional(Schema.Array(Schema.Struct({ title: Schema.String, itemId: Schema.String }))),
-    }),
-  ),
+  issues: Schema.optional(Schema.Struct({ drafts: Schema.Int, changes: Schema.Int })),
   /**
    * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
    * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
@@ -4415,8 +4408,6 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
-    /** What its lead left for the person on a tracker, as its card says: the issues to file it names, and its thread points at. */
-    issues: TaskCard.fields.issues,
     /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
     stopped: Schema.optional(
       Schema.NullOr(

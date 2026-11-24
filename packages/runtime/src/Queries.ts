@@ -103,7 +103,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf } from './lineComments'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { handedOf, issueCardsWaiting, issuesLeft, issuesLeftOf, kindOf } from './kinds'
+import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
 import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
@@ -2535,7 +2535,8 @@ export class Queries extends Context.Service<
             step: string | null
             shipAt: string | null
             waiting: number
-            issuesLeft: string
+            issueDrafts: number
+            issueChanges: number
             review: string | null
             lead: string | null
             leadModel: string | null
@@ -2596,7 +2597,8 @@ export class Queries extends Context.Service<
               (SELECT pk.title FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_title,
               (SELECT pt.id FROM threads pt WHERE pt.task_id = k.parent_task_id AND pt.kind = 'task') AS parent_thread,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
-              ${sql.unsafe(issuesLeft('k'))} AS issues_left,
+              ${sql.unsafe(issueDraftsWaiting('k'))} AS issue_drafts,
+              ${sql.unsafe(issueChangesWaiting('k'))} AS issue_changes,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
@@ -3117,7 +3119,7 @@ export class Queries extends Context.Service<
             ...(afterMerge === undefined ? {} : { afterMerge }),
             ...(changeCount > 1 ? { changeCount, changeMarks: marks } : {}),
             ...(task.shelf === 'scratch' ? { scratch: true } : {}),
-            ...issuesLeftOf(task.issuesLeft),
+            ...(task.issueDrafts + task.issueChanges > 0 ? { issues: { drafts: task.issueDrafts, changes: task.issueChanges } } : {}),
             ...(exchange === undefined ? {} : { latest: exchange }),
             ...(unsaid?.unsaid === 1 ? { unsaid: true } : {}),
             ...(answer === undefined ? {} : { answer }),
@@ -4511,7 +4513,6 @@ export class Queries extends Context.Service<
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
-              ...(card?.issues === undefined ? {} : { issues: card.issues }),
               ...(card?.stopped == null ? {} : { stopped: card.stopped }),
               ...(card?.mergeable === true ? { mergeable: true as const } : {}),
               kind: card?.kind,

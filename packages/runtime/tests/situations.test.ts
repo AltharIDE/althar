@@ -10,7 +10,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { endedNews, heldNews, reportLine, Situations } from '../src/Situations'
+import { endedNews, reportLine, Situations } from '../src/Situations'
 import { Tasks } from '../src/Tasks'
 import { runtime, task, turns, until } from './support'
 
@@ -106,24 +106,6 @@ describe('the words of a situation', () => {
     )
     assert.strictEqual(reportLine(undefined), undefined)
     assert.strictEqual(reportLine('x'.repeat(200))?.length, 158)
-  })
-
-  it('tells the coordinator a merged task waits only on its issue drafts, and to ask the person rather than act', () => {
-    const news = heldNews([
-      {
-        slug: 'approval-center',
-        title: 'Approval center',
-        merged: true,
-        drafts: [{ title: 'Browser end-to-end tests', tracker: 'GitLab', container: 'orchy' }],
-      },
-    ])
-    assert.include(news, "this task stays in the person's Needs you only because of issues its lead drafted")
-    assert.include(
-      news,
-      '- Approval center (approval-center) is merged. An issue its lead drafted waits to be filed: “Browser end-to-end tests” (GitLab, orchy).',
-    )
-    assert.include(news, 'ask what they want of each: file it, discard it, or keep it for later')
-    assert.include(news, 'Never file or discard one yourself')
   })
 
   it('says how a child ended to the lead, in words of its own', () => {

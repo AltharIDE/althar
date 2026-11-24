@@ -6,9 +6,6 @@ import { threadDecorator } from '../../storybook/ThreadFrame'
 import { queueTakeOut } from '../../fixtures/queueTakeOut'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { logLines } from '../FailedLogs/FailedLogs'
-import { DRAFT_LINEAR } from '../../fixtures/coordinator'
-import { IssueDraft } from '../../coordinator/IssueDraft/IssueDraft'
-import { IssueDraftState } from '../../foundations/vocabulary'
 import { AltharLine } from './AltharLine'
 
 const meta = {
@@ -40,40 +37,6 @@ export const StartedATask: Story = {
     await expect(within(canvasElement).getByRole('button', { name: 'Built-in browser beside the conversation' })).toBeVisible()
   },
 }
-
-/**
- * A merged task held in Needs you only by issue drafts its lead left: at its thread's end, a line says so, each draft's title
- * a button that brings its card, with File and Discard, into view.
- */
-export const IssueDraftsHoldIt: Story = {
-  args: {
-    children: (
-      <>
-        Merged. Only this issue draft keeps it in Needs you; filed or discarded, it settles:{' '}
-        <LinkButton onClick={() => undefined}>Browser end-to-end tests</LinkButton>
-      </>
-    ),
-  },
-  render: (args) => (
-    <>
-      <IssueDraft
-        {...DRAFT_LINEAR}
-        title="Browser end-to-end tests"
-        body="The approval center has unit tests only. Add Playwright runs for approving, rejecting and undoing an action."
-        labels={['testing']}
-        state={IssueDraftState.Pending}
-        onFile={() => undefined}
-        onChange={() => undefined}
-        onDiscard={() => undefined}
-      />
-      <AltharLine {...args} />
-    </>
-  ),
-  play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole('button', { name: 'Browser end-to-end tests' })).toBeVisible()
-  },
-}
-export const IssueDraftsHoldItDark: Story = { ...IssueDraftsHoldIt, globals: { theme: 'dark' } }
 
 const RAW = JSON.stringify(
   {

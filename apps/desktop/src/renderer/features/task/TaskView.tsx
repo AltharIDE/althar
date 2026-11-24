@@ -9,8 +9,6 @@ import { type CSSProperties, memo, type ReactNode, useCallback, useEffect, useLa
 import {
   GOAL_LENGTH,
   goalCommand,
-  issuesNamed,
-  issuesWordOf,
   type AttentionRequest,
   type Service,
   type TaskAction,
@@ -21,7 +19,6 @@ import { useQuery } from '@tanstack/react-query'
 import {
   CheckoutAsk,
   AbandonTask,
-  AltharLine,
   AttachPullRequest,
   ChangeView,
   BackCrumb,
@@ -230,18 +227,6 @@ export const text = {
   /** Changes its lead proposed to its issue wait for the person to apply. */
   issueChanges: kindWords.issueChanges,
   fileAll: (count: number) => `File all ${count}`,
-  /**
-   * What says, at a thread's end, that issues its lead drafted are all that keep the task in Needs you, before the drafts it
-   * points at: merged or done, filing or discarding them settles it.
-   */
-  draftsHold: (count: number, ended: 'Merged' | 'Done' | null) =>
-    ended === null
-      ? count === 1
-        ? 'An issue its lead drafted waits for you to file or discard:'
-        : `${count} issues its lead drafted wait for you to file or discard:`
-      : count === 1
-        ? `${ended}. Only this issue draft keeps it in Needs you; filed or discarded, it settles:`
-        : `${ended}. Only these ${count} issue drafts keep it in Needs you; filed or discarded, it settles:`,
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
@@ -286,14 +271,6 @@ export const statusOf = (
     case TaskStatus.Yours: {
       if (snapshot.attention.length > 0) return { status, state: text.needsYou }
       // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
-      if (phase === 'waiting' && snapshot.task.issues !== undefined && snapshot.task.issues.drafts > 0) {
-        const named = issuesNamed(snapshot.task.issues)
-        return {
-          status,
-          state: issuesWordOf(snapshot.task.issues, { state: snapshot.task.state, change: shown }),
-          ...(named === undefined ? {} : { why: named }),
-        }
-      }
       if (phase === 'waiting')
         return {
           status,
@@ -1690,22 +1667,8 @@ export function TaskView({
       />
     </>
   )
-  // Issues its lead drafted, all that keeps it in Needs you: a line at the thread's end that takes the person to each one's card.
-  const holding = snapshot.task.phase === 'waiting' && snapshot.attention.length === 0 ? (snapshot.task.issues?.named ?? []) : []
-  const ended = snapshot.task.state !== 'done' ? null : snapshot.task.changes.some((one) => one.state === 'merged') ? 'Merged' : 'Done'
   const closing = (
     <>
-      {holding.length > 0 && (
-        <AltharLine className={s.holding}>
-          {text.draftsHold(holding.length, ended)}{' '}
-          {holding.map((one, at) => (
-            <span key={one.itemId}>
-              {at > 0 && ', '}
-              <LinkButton onClick={() => showInThread(one.itemId)}>{one.title}</LinkButton>
-            </span>
-          ))}
-        </AltharLine>
-      )}
       {waitingIssues.length > 1 && (
         <div className={s.fileAll}>
           <Button
@@ -2016,10 +1979,9 @@ export function TaskView({
                               />
                             )}
                             // An issue the lead drafted is filed from its card, only when the person says.
-                            draft={(draft, itemId) => (
+                            draft={(draft) => (
                               <DraftCard
                                 draft={draft}
-                                itemId={itemId}
                                 actions={{
                                   onFile: (draftId) => void model.fileIssueDraft(draftId),
                                   onChange: model.changeIssueDraft,

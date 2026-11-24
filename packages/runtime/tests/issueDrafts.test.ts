@@ -23,7 +23,6 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { Situations } from '../src/Situations'
 import { transcript } from '../src/threads'
 import { type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, listTools, repository, runtime, turns, until } from './support'
@@ -867,11 +866,7 @@ describe('issue drafts', () => {
         assert.lengthOf(linear.created, 0)
         // The task waits on the person while drafts do, and the project counts it.
         assert.strictEqual((yield* queries.card(task.id)).phase, 'waiting')
-        assert.deepStrictEqual(
-          (yield* queries.card(task.id)).issues?.named?.map((one) => one.title),
-          ['Refunds skip the limiter', 'Checkout logs no request ids'],
-        )
-        assert.include((yield* queries.card(task.id)).issues, { drafts: 2, changes: 0 })
+        assert.deepStrictEqual((yield* queries.card(task.id)).issues, { drafts: 2, changes: 0 })
         yield* until(yours, (n) => n === 1)
 
         // The person files one, discards the other: the lead hears the key and link of the one filed.
@@ -902,66 +897,6 @@ describe('issue drafts', () => {
           (yield* coordinatorNews((yield* project(repository())).threadId, projectId, yield* modelNamer)) ?? '',
           'Refunds skip the limiter',
         )
-      }).pipe(Effect.provide(withQueries({ linear })))
-    })
-
-    it.live('keep a merged task in Needs you, named, told once to the coordinator, until filed or discarded', () => {
-      const linear = linearWith(MERIDIAN)
-      return Effect.gen(function* () {
-        yield* connect('linear')
-        const queries = yield* Queries
-        const drafts = yield* IssueDrafts
-        const instance = yield* Instance
-        const situations = yield* Situations
-        const sql = yield* SqlClient.SqlClient
-        const { projectId, task, lead } = yield* led('Add a retry')
-        yield* callTool(lead, 'draft_issue', { title: 'CI: Postgres is slow on the runner' })
-        yield* callTool(lead, 'draft_issue', { title: 'Browser end-to-end tests' })
-        yield* (yield* Sessions).stop(task.threadId)
-        // Its work finished: done, and nothing but its drafts waits.
-        yield* sql`UPDATE tasks SET state = 'done', settled_at = ${new Date().toISOString()}, revision = revision + 1 WHERE id = ${task.id}`
-        const card = yield* queries.card(task.id)
-        assert.strictEqual(card.phase, 'waiting')
-        assert.deepStrictEqual(
-          card.issues?.named?.map((one) => one.title),
-          ['CI: Postgres is slow on the runner', 'Browser end-to-end tests'],
-        )
-        // The task's own thread names them too, by the cards its line points at.
-        const thread = yield* queries.thread(task.threadId)
-        assert.deepStrictEqual(thread.task.issues?.named, card.issues?.named)
-        const [cardItem] = yield* sql<{ id: string }>`
-          SELECT id FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'issue_draft' ORDER BY sequence LIMIT 1`
-        assert.strictEqual(card.issues?.named?.[0]?.itemId, cardItem?.id)
-
-        // Its coordinator hears why it is still in Needs you, once: which task, which drafts, and to ask, never to file.
-        const coordinator = yield* (yield* Coordinator).thread(projectId)
-        const told = Effect.map(
-          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${coordinator} ORDER BY sequence`,
-          (rows) => rows.map((row) => row.body).filter((body) => body.includes('Needs you')),
-        )
-        yield* situations.look()
-        const [news, ...more] = yield* told
-        assert.lengthOf(more, 0)
-        assert.include(news, 'Add a retry')
-        assert.include(news, 'is done. 2 issues its lead drafted wait to be filed: “CI: Postgres is slow on the runner” (Linear, Meridian)')
-        assert.include(news, 'Nothing else holds it.')
-        assert.include(news, 'Never file or discard one yourself')
-        yield* situations.look()
-        assert.lengthOf(yield* told, 1)
-
-        // Filed or discarded, each leaves it; with none left, it settles by itself.
-        const [one] = yield* sql<{ id: string }>`SELECT id FROM issue_drafts WHERE title = 'CI: Postgres is slow on the runner'`
-        const [other] = yield* sql<{ id: string }>`SELECT id FROM issue_drafts WHERE title = 'Browser end-to-end tests'`
-        yield* drafts.file(one?.id ?? '', instance.personId)
-        const after = yield* queries.card(task.id)
-        assert.strictEqual(after.phase, 'waiting')
-        assert.deepStrictEqual(
-          after.issues?.named?.map((left) => left.title),
-          ['Browser end-to-end tests'],
-        )
-        yield* drafts.discard(other?.id ?? '', instance.personId)
-        assert.strictEqual((yield* queries.card(task.id)).phase, 'settled')
-        assert.isUndefined((yield* queries.card(task.id)).issues)
       }).pipe(Effect.provide(withQueries({ linear })))
     })
 

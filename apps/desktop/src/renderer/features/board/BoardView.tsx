@@ -4,7 +4,6 @@ import {
   type BoardTask,
   type ChangeSummary,
   type HeldForShip,
-  issuesNamed,
   issuesWordOf,
   type PlanStep,
   type ReviewBrief,
@@ -717,23 +716,16 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   })
 }
 
-/**
- * A task that waits on issues its lead drafted, or changes it proposed to its issue: what to do, in its task, where they are.
- * Merged or done, it says so, and names the issues: they alone keep it here, and it settles once they are filed or discarded.
- */
-export const issuesCardOf = (work: BoardTask): Card => {
-  const named = issuesNamed(work.issues)
-  return {
-    status: TaskStatus.Yours,
-    kind: kindOf(work),
-    ...localOf(work),
-    ...towardOf(work),
-    title: work.title,
-    ...fromOf(work),
-    word: issuesWordOf(work.issues, work),
-    ...(named === undefined ? {} : { why: named }),
-  }
-}
+/** A task that waits on issues its lead drafted, or changes it proposed to its issue: what to do, in its task, where they are. */
+export const issuesCardOf = (work: BoardTask): Card => ({
+  status: TaskStatus.Yours,
+  kind: kindOf(work),
+  ...localOf(work),
+  ...towardOf(work),
+  title: work.title,
+  ...fromOf(work),
+  word: issuesWordOf(work.issues),
+})
 
 /**
  * A plan that waits for a task that was abandoned (tasks wait for their blockers): the person's, in Needs you, saying which;

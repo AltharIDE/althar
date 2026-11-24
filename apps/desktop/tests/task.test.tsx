@@ -661,37 +661,6 @@ describe('a task', () => {
     })
   })
 
-  it('says a merged task waits only on its issue drafts, names them, and points at their cards in the thread', async () => {
-    const base = snapshot()
-    const named = [{ title: 'CI: Postgres is ~30× slower on the runner', itemId: 'it_draft' }]
-    const merged = thread({
-      items: [{ ...items.draft({ draftId: 'idr_1', title: 'CI: Postgres is ~30× slower on the runner' }), id: 'it_draft' }],
-      task: {
-        ...base.task,
-        state: 'done',
-        phase: 'waiting',
-        changes: [change({ state: 'merged' })],
-        issues: { drafts: 1, changes: 0, named },
-      },
-    })
-    expect(statusOf(merged)).toEqual({
-      status: TaskStatus.Yours,
-      state: 'Merged · 1 issue to file',
-      why: 'CI: Postgres is ~30× slower on the runner',
-    })
-    const { client } = fakeClient({ getThread: vi.fn(async () => merged) })
-    withServices(<Task />, client)
-    // At the thread's end, a line says why it is still here, its draft a button that brings its card into view.
-    expect(await screen.findByText('Merged. Only this issue draft keeps it in Needs you; filed or discarded, it settles:')).toBeTruthy()
-    const pointer = screen.getByRole('button', { name: 'CI: Postgres is ~30× slower on the runner' })
-    const card = (await screen.findByRole('heading', { name: 'CI: Postgres is ~30× slower on the runner' })).closest('article')
-    await userEvent.click(pointer)
-    await waitFor(() => expect(document.activeElement?.contains(card)).toBe(true))
-    // File and Discard are on its card.
-    await userEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Discard' }))
-    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
-  })
-
   it('applies or discards a change to its issue from its card, comments show as a line, and the header says it waits', async () => {
     const base = snapshot()
     const one = (key: string, changes: ReadonlyArray<{ field: 'status' | 'comment'; to: string }>) => ({

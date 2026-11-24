@@ -99,46 +99,6 @@ export const issueDraftsWaiting = (task: string) =>
   `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
     WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
 
-/**
- * The issues a task's lead drafted that wait for the person to file, oldest first, each by its title and its card's item
- * in the thread, as a JSON array in SQL over a task row aliased `task`.
- */
-export const issueDraftsNamed = (task: string) =>
-  `(SELECT json_group_array(json_object('title', title, 'itemId', item)) FROM (SELECT wd.title,
-      (SELECT wi.id FROM thread_items wi WHERE wi.thread_id = wd.thread_id AND wi.kind = 'issue_draft'
-        AND json_extract(wi.content, '$.draftId') = wd.id) AS item
-    FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
-    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain') ORDER BY wd.created_at, wd.rowid))`
-
-/**
- * What a task's lead left for the person on a tracker, as a JSON object in SQL over a task row aliased `task`: how many
- * issues to file and changes to apply, and the issues to file by title and card (`issueDraftsNamed`).
- */
-export const issuesLeft = (task: string) =>
-  `json_object('drafts', ${issueDraftsWaiting(task)}, 'changes', ${issueChangesWaiting(task)}, 'named', json(${issueDraftsNamed(task)}))`
-
-/**
- * What a task's card says its lead left for the person on a tracker, from `issuesLeft`: how many issues to file and changes
- * to apply, and the issues to file by title and card, those whose card is in its thread. None where nothing waits.
- */
-export const issuesLeftOf = (json: string) => {
-  const read: unknown = JSON.parse(json)
-  const count = (key: string) => {
-    const n = field(read, key)
-    return typeof n === 'number' ? n : 0
-  }
-  const drafts = count('drafts')
-  const changes = count('changes')
-  if (drafts + changes === 0) return {}
-  const named = field(read, 'named')
-  const each = (Array.isArray(named) ? named : []).flatMap((one: unknown) => {
-    const title = field(one, 'title')
-    const itemId = field(one, 'itemId')
-    return typeof title === 'string' && typeof itemId === 'string' ? [{ title, itemId }] : []
-  })
-  return { issues: { drafts, changes, ...(drafts === 0 ? {} : { named: each }) } }
-}
-
 /** How many changes a task's lead proposed to its issue wait for the person to apply, as SQL over a task row aliased `task`. */
 export const issueChangesWaiting = (task: string) =>
   `(SELECT count(*) FROM issue_changes wc JOIN threads wct ON wct.id = wc.thread_id

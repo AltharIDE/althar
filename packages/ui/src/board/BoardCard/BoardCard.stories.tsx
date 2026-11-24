@@ -495,41 +495,6 @@ export const Permission: Story = {
   },
 }
 export const Question: Story = { args: CHANGE_QUESTION }
-
-/** A task whose lead drafted an issue the person hasn't filed or discarded, as the card said it before it named the issue. */
-export const IssuesToFile: Story = {
-  args: { status: TaskStatus.Yours, word: 'Issues to file', title: 'Approval center and action ledger (ADR-010)', at: undefined },
-}
-export const IssuesToFileDark: Story = { ...IssuesToFile, globals: { theme: 'dark' } }
-
-/**
- * Merged, with only an unfiled issue draft keeping it in Needs you: the card says so, how many, and names the issue. Filed or
- * discarded, it settles by itself.
- */
-export const MergedIssueToFile: Story = {
-  args: {
-    status: TaskStatus.Yours,
-    word: 'Merged · 1 issue to file',
-    title: 'Approval center and action ledger (ADR-010)',
-    why: 'Browser end-to-end tests',
-    at: undefined,
-  },
-  play: async ({ canvasElement }) => {
-    const card = within(canvasElement)
-    await expect(card.getByText('Merged · 1 issue to file')).toBeInTheDocument()
-    await expect(card.getByText('Browser end-to-end tests')).toBeInTheDocument()
-  },
-}
-export const MergedIssueToFileDark: Story = { ...MergedIssueToFile, globals: { theme: 'dark' } }
-
-/** Several drafts: the count, and the oldest named with how many more. */
-export const MergedIssuesToFile: Story = {
-  args: {
-    ...MergedIssueToFile.args,
-    word: 'Merged · 3 issues to file',
-    why: 'CI: Postgres is ~30× slower on the runner, and 2 more',
-  },
-}
 /** A lead's free-form question as the board gives it: the headline as the card's line, and Answer. The paragraph it came with is in the task. */
 export const QuestionNoOptions: Story = {
   args: { ...CHANGE_QUESTION, why: QUESTION_LONG.title, next: <NextStep signal>Answer</NextStep> },

@@ -29,13 +29,6 @@ import { Sessions } from './Sessions'
  * saying the person is away, goes on with what doesn't need it, and is told
  * when the person answers. Allowed, the call goes through once it is made
  * again.
- *
- * A finished task held by its issue drafts. A task merged or otherwise done
- * whose lead drafted issues the person hasn't filed or discarded stays in
- * their Needs you: an unfiled issue is theirs to decide. Where nothing else
- * holds it, Althar tells its project's coordinator, once a draft, which task,
- * which drafts, and that they alone hold it, so it says why to the person and
- * asks what they want of each. Kept in the record (`issue_draft.holding_told`).
  */
 
 type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Permissions | Live | Runs
@@ -63,29 +56,6 @@ export const reportLine = (summary: string | undefined): string | undefined => {
 export const endedNews = (child: { readonly title: string; readonly slug: string }, how: Ended, why?: string): string => {
   const ended = how === 'stopped' ? 'was stopped by the person' : how === 'failed' ? 'failed' : 'is settled without a change'
   return `News from Althar: ${child.title} (${child.slug}), the task you started, ${ended}.${why === undefined ? '' : ` Its report: ${why}`} read_task shows the rest. Take it into your work, and say in your report what it means for it.`
-}
-
-/** A finished task that nothing but its issue drafts keeps in Needs you, as its coordinator hears of it. */
-export interface HeldByDrafts {
-  readonly slug: string
-  readonly title: string
-  readonly merged: boolean
-  readonly drafts: ReadonlyArray<{ readonly title: string; readonly tracker: string; readonly container: string }>
-}
-
-/** What a coordinator is told of finished tasks that only their issue drafts keep in the person's Needs you. */
-export const heldNews = (held: ReadonlyArray<HeldByDrafts>): string => {
-  const one = held.length === 1
-  const lines = held.map((task) => {
-    const drafts = task.drafts.map((draft) => `“${draft.title}” (${draft.tracker}, ${draft.container})`).join('; ')
-    const n = task.drafts.length
-    return `- ${task.title} (${task.slug}) is ${task.merged ? 'merged' : 'done'}. ${n === 1 ? 'An issue its lead drafted waits' : `${n} issues its lead drafted wait`} to be filed: ${drafts}.`
-  })
-  return [
-    `Althar's news (not the person's word): ${one ? 'this task stays' : 'these tasks stay'} in the person's Needs you only because of issues ${one ? 'its' : 'their'} lead drafted that the person hasn't filed or discarded. Nothing else holds ${one ? 'it' : 'them'}.`,
-    ...lines,
-    `Tell the person this is why ${one ? 'it is' : 'they are'} still in Needs you. Judge whether each draft still matters (read_task and read_thread show the work: the merge may have fixed it, or it may be stale), say so in a line, and ask what they want of each: file it, discard it, or keep it for later. Never file or discard one yourself: its card in the task's thread is theirs. Once every draft is filed or discarded, the task settles by itself.`,
-  ].join('\n')
 }
 
 export class Situations extends Context.Service<
@@ -218,82 +188,6 @@ export class Situations extends Context.Service<
           if (Option.isNone(lead)) yield* sessions.startLast(child.parentThreadId)
         })
 
-      /** States of a draft still the person's to file or discard: as `issueDraftsWaiting` counts them. */
-      const UNFILED = ['pending', 'failed', 'uncertain'] as const
-
-      /**
-       * Tells each project's coordinator, once a draft, of its finished tasks that nothing but their issue drafts keeps in
-       * Needs you: done, no call open, no change to an issue waiting, in a project that isn't archived.
-       */
-      const heldByDrafts = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const rows = yield* sql<{
-          draftId: string
-          revision: number
-          draftTitle: string
-          tracker: string
-          container: string
-          projectId: string
-          slug: string
-          title: string
-          merged: number
-          coordinator: string
-        }>`
-          SELECT d.id AS draft_id, d.revision, d.title AS draft_title, d.tracker_name AS tracker, d.container_name AS container,
-            k.project_id, k.slug, k.title,
-            EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
-              AND json_extract(l.snapshot, '$.state') = 'merged') AS merged,
-            c.id AS coordinator
-          FROM issue_drafts d
-          JOIN threads t ON t.id = d.thread_id
-          JOIN tasks k ON k.id = t.task_id
-          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-          JOIN threads c ON c.project_id = k.project_id AND c.kind = 'coordinator' AND c.owner_actor_id = ${instance.personId}
-          WHERE k.state = 'done' AND d.state IN ${sql.in(UNFILED)}
-            AND NOT EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
-            AND NOT EXISTS (SELECT 1 FROM issue_changes wc JOIN threads wct ON wct.id = wc.thread_id
-              WHERE wct.task_id = k.id AND wc.proposed_by = 'lead' AND wc.state IN ('pending', 'failed'))
-            AND NOT EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'issue_draft' AND e.aggregate_id = d.id
-              AND e.type = 'issue_draft.holding_told')
-          ORDER BY k.project_id, k.settled_at, k.id, d.created_at`
-        const byCoordinator = new Map<
-          string,
-          { projectId: string; tasks: Map<string, HeldByDrafts & { drafts: Array<HeldByDrafts['drafts'][number]> }> }
-        >()
-        for (const row of rows) {
-          const found = byCoordinator.get(row.coordinator) ?? { projectId: row.projectId, tasks: new Map() }
-          byCoordinator.set(row.coordinator, found)
-          const task = found.tasks.get(row.slug) ?? { slug: row.slug, title: row.title, merged: row.merged === 1, drafts: [] }
-          found.tasks.set(row.slug, task)
-          task.drafts.push({ title: row.draftTitle, tracker: row.tracker, container: row.container })
-        }
-        for (const [threadId, { projectId, tasks }] of byCoordinator) {
-          for (const row of rows.filter((one) => one.coordinator === threadId))
-            yield* fact({
-              projectId: projectId as ProjectId,
-              aggregateType: 'issue_draft',
-              aggregateId: row.draftId,
-              revision: row.revision,
-              type: 'issue_draft.holding_told',
-              payload: { task: row.slug },
-              actorId: instance.systemId,
-            })
-          const body = heldNews([...tasks.values()])
-          // Althar's words, waking the coordinator, as a lead is woken for a child that ended: after its turn, started if it stopped.
-          yield* sessions.send({
-            envelope: yield* envelope('thread.send', { threadId, body }, undefined, instance.systemId),
-            threadId,
-            body,
-            disposition: 'after_current',
-            quiet: true,
-          })
-          if (Option.isNone(yield* sessions.running(threadId)))
-            yield* sessions
-              .startLast(threadId)
-              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not start the coordinator for a task its drafts hold', cause)))
-        }
-      })
-
       /** Lets the leads of requests that reached the person's device, and waited, go on without the answer. */
       const away = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -312,7 +206,6 @@ export class Situations extends Context.Service<
       const look = Effect.gen(function* () {
         for (const child of yield* provide(ended)) yield* provide(tellParent(child))
         yield* provide(away)
-        yield* provide(heldByDrafts)
       }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at the work around a thread', cause)))
 
       /** The lead of a call it went on without is told what the person answered. */

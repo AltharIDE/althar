@@ -46,7 +46,7 @@ export const needsOf = (
   }),
   ...lanes.issues.map((work) => ({
     id: work.taskId,
-    kind: issuesWordOf(work.issues, work),
+    kind: issuesWordOf(work.issues),
     title: work.title,
     ...(work.threadId === here ? { here: true } : {}),
     onOpen: () => onTask(work.threadId),
