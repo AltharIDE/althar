@@ -67,7 +67,7 @@ export const codexServers = (toml: string): ReadonlyMap<string, CodexTransport |
 }
 
 /** JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; nothing where it isn't JSON after all. */
-const jsonc = (text: string): unknown => {
+export const jsonc = (text: string): unknown => {
   const stripped = text
     .replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, quoted: string | undefined) => quoted ?? '')
     .replace(/,(\s*[}\]])/g, '$1')
