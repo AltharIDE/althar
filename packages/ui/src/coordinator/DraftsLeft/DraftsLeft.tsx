@@ -16,13 +16,16 @@ import s from './DraftsLeft.module.css'
 
 export interface DraftsLeftText {
   heading: (count: number) => string
-  about: string
+  about: (count: number) => string
   from: string
 }
 
 export const draftsLeftText: DraftsLeftText = {
   heading: (count) => (count === 1 ? '1 issue draft from a finished task' : `${count} issue drafts from finished tasks`),
-  about: 'Their tasks are settled. File each one you still want, or discard it.',
+  about: (count) =>
+    count === 1
+      ? 'Its task is settled. File it if you still want it, or discard it.'
+      : 'Their tasks are settled. File each one you still want, or discard it.',
   from: 'From',
 }
 
@@ -52,7 +55,7 @@ export function DraftsLeft({ drafts, headingLevel = 2, className, text }: Drafts
       <Heading level={headingLevel} id={titleId} className={s.title}>
         {t.heading(drafts.length)}
       </Heading>
-      <p className={s.about}>{t.about}</p>
+      <p className={s.about}>{t.about(drafts.length)}</p>
       <ul className={s.list}>
         {drafts.map((draft) => (
           <li key={draft.key} className={s.entry}>
