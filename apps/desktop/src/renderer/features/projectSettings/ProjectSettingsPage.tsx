@@ -13,6 +13,7 @@ import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
 import { NotesSection } from './NotesSection'
+import { AgentSettingsPart } from '../repositoryTrust/AgentSettingsPart'
 import { ProjectQuickCards } from './ProjectQuickCards'
 import { RunningSection } from './RunningSection'
 import { TasksSection } from './TasksSection'
@@ -158,7 +159,12 @@ function SectionBody({
     case 'code':
       return <CodeSection projectId={projectId} trackers={trackers} list={list} onConnect={onConnect} onManage={onConnections} />
     case 'rules':
-      return <RulesSection model={rules} />
+      return (
+        <>
+          <RulesSection model={rules} />
+          <AgentSettingsPart projectId={projectId} />
+        </>
+      )
     case 'running':
       return (
         <RunningSection

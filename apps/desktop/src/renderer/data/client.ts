@@ -56,6 +56,8 @@ import {
   type OnePressAction,
   type FoundAccount,
   type ProjectNote,
+  type RepositoryAgentSettings,
+  type AgentSettingsFile,
   type ProjectRulesView,
   type SandboxEdits,
   type SealStyle,
@@ -728,6 +730,15 @@ export interface Client {
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** A project's notes, oldest first: the decisions its coordinator keeps. */
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
+  /** A project's repositories' own agent settings that run something, with what the person decided of each (DEV-280). */
+  readonly getAgentSettings: (projectId: string) => Promise<ReadonlyArray<RepositoryAgentSettings>>
+  /** The person's word on a repository's agent settings files, as they were shown them. */
+  readonly decideAgentSettings: (input: {
+    readonly projectId: string
+    readonly repositoryId: string
+    readonly trusted: boolean
+    readonly files: ReadonlyArray<AgentSettingsFile>
+  }) => Promise<void>
   /** Drops one of a project's notes: no coordinator session starts with it again. */
   readonly dropProjectNote: (projectId: string, noteId: string) => Promise<void>
   /** Says one of its notes in the person's words. */
@@ -1401,6 +1412,11 @@ export const connect = async (
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
+    getAgentSettings: (projectId) => settle(api.GetAgentSettings({ projectId })),
+    decideAgentSettings: ({ files, ...input }) =>
+      command((commandId) =>
+        api.DecideAgentSettings({ commandId, ...input, files: files.map(({ agent, file, hash, runs }) => ({ agent, file, hash, runs })) }),
+      ),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),

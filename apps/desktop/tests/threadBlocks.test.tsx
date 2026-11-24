@@ -75,6 +75,41 @@ describe('Althar’s lines and a step’s report', () => {
   })
 })
 
+describe('a lead that started without its repository’s agent settings', () => {
+  const offer = {
+    kind: 'agent_settings' as const,
+    projectId: 'p1',
+    repositoryId: 'rb_1',
+    repository: 'meridian',
+    said: 'h2',
+    files: [
+      {
+        agent: 'claude-code' as const,
+        agentName: 'Claude Code',
+        file: '.claude/settings.json',
+        hash: 'h2',
+        runs: [{ file: '.claude/settings.json', key: 'hooks.PreToolUse[0].hooks[0]', when: 'Before a tool (Bash)', command: './guard.sh' }],
+        trusted: null,
+        changed: true,
+        loadsAnyway: false,
+      },
+    ],
+  }
+  const title = 'Claude Code started without meridian’s agent settings, which aren’t trusted.'
+
+  it('says so in one quiet line, and Review shows what they run, to trust them from there', async () => {
+    const client = show([items.notice({ source: 'runtime', role: 'aside', title, offer }, 'claude-code')])
+    expect(screen.getByText(title)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const dialog = screen.getByRole('dialog', { name: 'meridian’s agent settings' })
+    expect(dialog.textContent).toContain('./guard.sh')
+    await userEvent.click(screen.getByRole('button', { name: 'Trust these settings' }))
+    expect(screen.getByText('Trusted: its next session starts with them.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: true, files: offer.files })
+  })
+})
+
 describe('the merge line', () => {
   it('draws the line as one card, each pull request linked with where it stands, and no line of chat', () => {
     show([items.mergeLine()])

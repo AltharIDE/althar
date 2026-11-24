@@ -1,0 +1,138 @@
+/* The files, each its agent and path over the commands it runs. */
+.files {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.file {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.fileHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.mark {
+  flex: none;
+  color: var(--t-2);
+}
+.agent {
+  flex: none;
+  font-weight: 550;
+}
+.path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a command: when it runs, then the command itself, set as code on the card's paper */
+.runs {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run {
+  display: grid;
+  grid-template-columns: minmax(120px, 30%) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.when {
+  font-size: 11.5px;
+  color: var(--t-3);
+  overflow-wrap: anywhere;
+}
+.command {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+/* kept, in the project's settings: the repository and what was decided, its files, then what turns it round */
+.kept {
+  display: grid;
+  gap: 10px;
+  padding: 14px 14px 12px 16px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+  --paper: var(--n-1);
+}
+.keptHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.repository {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.decided {
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-align: right;
+}
+.isTrusted {
+  color: var(--t-2);
+}
+.keptFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* the task's line, answered from it */
+.answered {
+  color: var(--t-3);
+}
+
+/* adding a project: what its repositories' settings run, asked before its tab opens on it */
+.step {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  width: min(640px, 100%);
+  margin: 0 auto;
+  padding: 56px 24px;
+}
+.stepTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--t-1);
+}

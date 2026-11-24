@@ -617,6 +617,52 @@ describe('a project’s settings', () => {
     expect(within(screen.getByRole('region', { name: 'Pull requests and issues' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
+  it('shows in Rules what its repositories’ agent settings run and that they were trusted, and takes it back', async () => {
+    const trusted = {
+      repositoryId: 'rb_1',
+      name: 'refunds',
+      files: [
+        {
+          agent: 'claude-code' as const,
+          agentName: 'Claude Code',
+          file: '.claude/settings.json',
+          hash: 'h1',
+          runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command: './notify.sh' }],
+          trusted: true,
+          changed: false,
+          loadsAnyway: false,
+        },
+      ],
+    }
+    let kept = [trusted]
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => kept),
+      decideAgentSettings: vi.fn(async ({ trusted: now }: { readonly trusted: boolean }) => {
+        kept = kept.map((one) => ({ ...one, files: one.files.map((file) => ({ ...file, trusted: now })) }))
+      }),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const repository = within(part.getByRole('region', { name: 'refunds' }))
+    expect(repository.getByText('./notify.sh')).toBeTruthy()
+    expect(repository.getByText('Trusted')).toBeTruthy()
+    await userEvent.click(repository.getByRole('button', { name: 'Take back' }))
+    expect(await repository.findByText('Leads start without them')).toBeTruthy()
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryId: 'rb_1',
+        trusted: false,
+        files: trusted.files,
+      }),
+    )
+  })
+
+  it('has no part for agent settings where no repository brings any', async () => {
+    windowAt('/projects/p1?room=settings&section=rules')
+    expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Repositories’ agent settings' })).toBeNull()
+  })
+
   it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {
     const notes = [
       {

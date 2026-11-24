@@ -51,6 +51,7 @@ const shown = (file: RepositorySettingsFile, decisions: ReadonlyArray<Decision>)
     hash: file.hash,
     runs: file.runs.map(({ file: at, key, when, command }) => ({ file: at, key, when, command })),
     trusted: decided?.trusted ?? null,
+    changed: decided === undefined && decisions.some((one) => one.file === file.file && one.trusted),
     loadsAnyway: definitionOf(file.agent).untrustedRepositories !== undefined,
   }
 }
@@ -198,5 +199,5 @@ export const settingsHoldFor = (definition: AgentDefinition, projectId: string, 
 /** The line a task's thread gets for `offer`: what its lead started without, or, for Codex, what it loads all the same. */
 export const settingsLine = (agentName: string, offer: { readonly repository: string; readonly files: ReadonlyArray<AgentSettingsFile> }) =>
   offer.files.some((file) => file.loadsAnyway)
-    ? `${agentName} runs ${offer.repository}'s agent settings, which aren't trusted: it can't start without them.`
-    : `${agentName} started without ${offer.repository}'s agent settings, which aren't trusted.`
+    ? `${agentName} runs ${offer.repository}’s agent settings, which aren’t trusted: it can’t start without them.`
+    : `${agentName} started without ${offer.repository}’s agent settings, which aren’t trusted.`

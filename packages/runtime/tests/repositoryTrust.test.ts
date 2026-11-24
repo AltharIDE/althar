@@ -65,6 +65,7 @@ describe('a repository’s agent settings', () => {
         agentName: 'Claude Code',
         file: '.claude/settings.json',
         trusted: null,
+        changed: false,
         loadsAnyway: false,
       })
       assert.deepStrictEqual(file?.runs, [
@@ -82,7 +83,7 @@ describe('a repository’s agent settings', () => {
       assert.strictEqual(before.lines.length, 1)
       assert.strictEqual(
         before.lines[0]?.title,
-        'Fake claude-code started without ' + listed?.name + "'s agent settings, which aren't trusted.",
+        'Fake claude-code started without ' + listed?.name + '’s agent settings, which aren’t trusted.',
       )
       assert.strictEqual(before.lines[0]?.role, 'aside')
 
@@ -108,7 +109,7 @@ describe('a repository’s agent settings', () => {
       const changed = yield* lead(projectId, 'Changed on a branch')
       assert.isDefined(changed.without)
       assert.strictEqual(changed.lines.length, 1)
-      assert.strictEqual((yield* agentSettingsOf(projectId))[0]?.files[0]?.trusted, null)
+      assert.deepInclude((yield* agentSettingsOf(projectId))[0]?.files[0], { trusted: null, changed: true })
 
       // Said no to as it is now: without them, quietly.
       yield* decide(false, (yield* agentSettingsOf(projectId))[0]?.files)

@@ -1,0 +1,5 @@
+/* the repositories' cards, one under another */
+.kept {
+  display: grid;
+  gap: 12px;
+}

@@ -670,16 +670,14 @@ never under running work.
   tool call. What stays open is below, under trusting a repository's agent
   settings. ADR-097 loads the person's own servers in every role, each with
   an ask rule, so their calls still reach Althar.
-- [ ] **Trusting a repository's agent settings.** A repository's hooks
-  (`.claude/settings.json`, `.codex/hooks.json`) and Codex project config run
-  as code on the Mac whenever the agent uses a tool. Claude's SDK loads them
-  without the trust prompt its app shows, and codex-acp marks every session
-  folder trusted. Agent Orchestrator is criticised for exactly this
-  ([AO#3280](https://github.com/Untrivial-ai/agent-orchestrator/issues/3280)).
-  Leaning: opening a project is the trust step, and it says what the
-  repository's agent settings will run; untrusted, Claude sessions get
-  `disableAllHooks`. Codex can't be told not to trust a folder through
-  codex-acp yet.
+- [x] **Trusting a repository's agent settings.** Settled on 24 November
+  2026 (DEV-280): adding a project is the trust step, keyed on a hash of
+  what each settings file runs, and a lead starts without what isn't
+  trusted, or changed on its branch since. Claude keeps the person's own
+  settings and hooks (`settingSources: ['user']`, not `disableAllHooks`,
+  which stops theirs too); OpenCode uses `OPENCODE_DISABLE_PROJECT_CONFIG`;
+  Codex still loads them, and says so
+  ([what agents may do](decisions/what-agents-may-do.md#trusting-a-repositorys-agent-settings)).
 - [x] **Shell commands that write outside the worktree.** Settled on 29
   September 2026: each agent's own sandbox is the boundary where it has one.
   Codex's is on in `workspace-write`; Claude Code's is now switched on for

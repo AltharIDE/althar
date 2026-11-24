@@ -1119,6 +1119,8 @@ export const AgentSettingsFile = Schema.Struct({
   hash: Schema.String,
   runs: Schema.Array(RepositoryRun),
   trusted: Schema.NullOr(Schema.Boolean),
+  /** Not decided as it is now, but trusted as it was before: its repository changed it since. */
+  changed: Schema.Boolean,
   loadsAnyway: Schema.Boolean,
 })
 export type AgentSettingsFile = typeof AgentSettingsFile.Type
