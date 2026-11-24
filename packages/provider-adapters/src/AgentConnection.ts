@@ -14,7 +14,7 @@ import {
   type SessionEvent,
   terminalOutputCapability,
 } from './events'
-import { type Classified, classify, structuredFailure, structuredFailureCapability } from './failures'
+import { type Classified, classify, rawOf, structuredFailure, structuredFailureCapability } from './failures'
 import {
   asyncTasksCapability,
   type BackgroundEvent,
@@ -734,7 +734,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           return yield* new AgentExited({ code: exit.code, signal: exit.signal, stderr: owned?.stderrTail() ?? '' })
         }
         const classified = classify(cause, yield* DateTime.nowAsDate)
-        return yield* new AgentRequestFailed({ method, ...classified })
+        const raw = rawOf(cause)
+        return yield* new AgentRequestFailed({ method, ...classified, ...(raw === undefined ? {} : { raw }) })
       })
 
     /*

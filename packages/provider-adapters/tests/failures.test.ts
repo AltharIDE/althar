@@ -53,12 +53,12 @@ describe('classify', () => {
       failure: 'unknown',
       message: "Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'",
     })
-    // claude-agent-acp's own `cause`, and a message of its own kept ahead of what its data adds.
+    // claude-agent-acp's own `cause`; a message of its own is kept, what its data adds being in the whole answer the log keeps.
     assert.strictEqual(classify({ code: -32603, message: 'Internal error', data: { cause: 'spawn EACCES' } }, now).message, 'spawn EACCES')
     assert.strictEqual(
       classify({ code: -32603, message: 'Internal error: The session was not started.', data: { details: 'gateway refused' } }, now)
         .message,
-      'Internal error: The session was not started: gateway refused',
+      'Internal error: The session was not started.',
     )
     // Nothing more where its data says nothing in words.
     assert.strictEqual(classify({ code: -32603, message: 'Internal error', data: { errorKind: 1 } }, now).message, 'Internal error')

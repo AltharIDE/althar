@@ -105,12 +105,12 @@ const transient =
  * What an error's `data` says in words, where it says any: the ACP SDK puts
  * what an agent threw in `details` and answers "Internal error" (ACP SDK
  * 2.9.1's `errorToResult`); claude-agent-acp says a stopped Claude Code in
- * `cause` and a failed command's output in `stderr`.
+ * `cause` and a failed command's output in `stderr`; others a `reason`.
  */
 const detailOf = (data: unknown): string | undefined => {
   if (Predicate.isString(data)) return data.trim() === '' ? undefined : data.trim()
   if (!Predicate.isObject(data)) return undefined
-  for (const key of ['details', 'message', 'cause', 'stderr', 'error']) {
+  for (const key of ['details', 'message', 'reason', 'cause', 'stderr', 'error', 'title', 'description']) {
     const value = key in data ? (data as Record<string, unknown>)[key] : undefined
     if (Predicate.isString(value) && value.trim() !== '') return value.trim()
   }
@@ -127,8 +127,8 @@ const messageOf = (error: unknown): { readonly code?: number; readonly message: 
     const data = 'data' in error ? error.data : undefined
     // "Internal error" says nothing: what the agent threw, kept in its data, is the message, so it is said, classed and logged.
     const detail = detailOf(data)
-    const message =
-      detail === undefined || said.includes(detail) ? said : bare.test(said.trim()) ? detail : `${said.replace(/[.:]\s*$/, '')}: ${detail}`
+    // A message that says something of its own keeps it: what its data adds is in the whole answer the log keeps (`rawOf`).
+    const message = detail !== undefined && bare.test(said.trim()) ? detail : said
     return { ...(code === undefined ? {} : { code }), message, ...(data === undefined ? {} : { data }) }
   }
   return { message: String(error) }
@@ -283,6 +283,34 @@ export const resetTime = (text: string, now: Date): string | undefined => {
 const withReset = (failure: FailureClass, message: string, text: string, now: Date): Classified => {
   const resetsAt = failure === 'usage_limit' ? resetTime(text, now) : undefined
   return { failure, message, ...(resetsAt === undefined ? {} : { resetsAt }) }
+}
+
+/** How much of an agent's whole answer the log keeps. */
+const RAW_KEPT = 4000
+
+/**
+ * An agent's whole answer to a request that failed, for the log: its code,
+ * its message and all its data, whatever the data holds, as compact JSON,
+ * cut at a few thousand characters. Undefined for what has none of those to
+ * add, such as a thrown string. Not for the person's eyes: `classify` says
+ * it in words.
+ */
+export const rawOf = (error: unknown): string | undefined => {
+  if (!Predicate.isObject(error)) return undefined
+  const record = error as Record<string, unknown>
+  const answer = {
+    ...(Predicate.isNumber(record['code']) ? { code: record['code'] } : {}),
+    ...(Predicate.isString(record['message']) ? { message: record['message'] } : {}),
+    ...('data' in record && record['data'] !== undefined ? { data: record['data'] } : {}),
+  }
+  if (!('code' in answer) && !('data' in answer)) return undefined
+  let said: string
+  try {
+    said = JSON.stringify(answer)
+  } catch {
+    return undefined
+  }
+  return said.length > RAW_KEPT ? `${said.slice(0, RAW_KEPT)}…` : said
 }
 
 /** Classifies an error an agent returned, from its code and text. */
