@@ -423,45 +423,68 @@ names a section and a setting as the screens' addresses do
 ## Trusting a repository's agent settings
 
 A repository can bring settings its agents run as code on the person's
-computer: Claude Code's hooks, status line and helpers in
-`.claude/settings.json` and `.claude/settings.local.json`, Codex's hooks and
-commands in `.codex/`, OpenCode's plugins, commands and servers in
-`opencode.json` and `.opencode/`. A cloned repository's ran on a lead's first
-tool call, with nobody having seen them. Now nothing of them runs until the
-person trusts them (DEV-280, `repositorySettings.ts`, `repositoryTrust.ts`).
+computer: Claude Code's hooks, helpers, status line, plugins and the
+`.mcp.json` servers its settings start, in `.claude/settings.json` and
+`.claude/settings.local.json`; Codex's hooks, `notify` and MCP servers in
+`.codex/`; OpenCode's plugins, formatters, language servers and local MCP
+servers in `opencode.json`, and the plugins and tools it loads as code from
+`.opencode/`. A cloned repository's ran on a lead's first tool call, with
+nobody having seen them. Now nothing of them runs until the person trusts them
+(DEV-280, `repositorySettings.ts`, `repositoryTrust.ts`).
 
-- **Adding a project is the trust step.** Once it is made, and before its tab
-  opens on it, each repository whose settings run something lists each one:
-  the file and key, which agent runs it, when, and the command, with Trust
-  these settings and Run without them. A repository with none asks nothing.
-- **Trust is keyed on content:** a hash of what runs in each agent's file,
-  kept per project and repository (`repository_trust`). A lead's session reads
-  its own worktree's copy as it starts: a file whose hash isn't trusted, never
-  seen or changed on the task's branch since, isn't loaded. The task says so
-  in one quiet line with Review, once for each set of hashes; it doesn't go to
-  Needs you, since nothing waits on it.
-- **Project settings, under Rules, shows what was trusted** and takes it back,
-  or trusts what was declined or changed since.
+- **Adding a project is the trust step.** Once it is made (a clone is only
+  there then), and before its tab opens on it, each repository whose settings
+  run something lists each one: the file and key, which agent runs it, when,
+  and the command, with Trust these settings and Run without them. The tab
+  opens once every answer is saved; one that didn't save asks again, saying
+  why. A repository with none asks nothing; where they couldn't be read, the
+  step says so, with Try again, rather than ask nothing. Until answered,
+  nothing of them is trusted.
+- **Trust is keyed on content:** a hash of the whole of each definition that
+  runs in an agent's file (a hook with its matcher, headers and options, a
+  plugin with its options, a command with its arguments apart), and of the
+  scripts in the repository its commands name, kept per project and
+  repository (`repository_trust`). A lead's session reads its own worktree's
+  copy as it starts, from the repository's root down to the folder it starts
+  in, as its agent reads them up: a file whose hash isn't trusted, never seen
+  or changed on the task's branch since, isn't loaded. A file there that
+  can't be read as its agent would (too large, not JSON or TOML, a folder that
+  can't be listed) is never trusted, and is shown with why. The task says so
+  in one quiet line with Review, once for each set of hashes; it doesn't go
+  to Needs you, since nothing waits on it.
+- **Project settings, under Rules, shows what was trusted** and takes it
+  back, or trusts what was declined or changed since: what the checkout here
+  has, and what was decided of versions it doesn't, such as one trusted from a
+  task's line.
 - **Untrusted, each agent loads only the person's own settings, as far as it
   can:**
   - Claude Code starts with `settingSources: ['user']`, which claude-agent-acp
     passes over its default of user, project and local: the person's own
-    settings and hooks load, the repository's don't. Its CLAUDE.md still
-    loads, from the folder added again
-    (`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`). `disableAllHooks` was
-    the leaning, and is turned down: it stops the person's own hooks too.
+    settings and hooks load, the repository's don't, its own `.claude`
+    skills, agents and commands with them. Its CLAUDE.md still loads, from the
+    folders added again (`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, in
+    the session's own `env`). All of it is in the session's settings, so a
+    lead on a worker starts so too. `disableAllHooks` was the leaning, and is
+    turned down: it stops the person's own hooks too.
   - OpenCode starts with `OPENCODE_DISABLE_PROJECT_CONFIG`, which already
-    held an outside author's review's off.
+    held an outside author's review's off. It is an environment variable,
+    which a worker doesn't take from the home, so an untrusted OpenCode lead
+    doesn't start on a worker: it says so, to trust them or run it here.
   - Codex can't be told through codex-acp not to trust a folder: it marks
     every session's folder trusted, and its `features.hooks` switch stops the
     person's hooks with the repository's. Its adapter says so
     (`untrustedRepositories: 'loads'`), and the add flow and the task's line
     say Codex runs them either way.
-- Checked on 24 November 2026 with a fixture repository whose hook writes a
-  file outside its worktree: it doesn't run before trust, runs after, and
-  stops again once a branch changes it, for Claude Code and OpenCode against
-  their real binaries (`tests/agents/repositorySettings.test.ts`); Codex runs
-  it in every case, as said.
+- A lead on a worker is checked against the worktree here, which is what the
+  worker is sent as its checkout.
+- Checked on 25 November 2026 with a fixture repository whose hook writes a
+  file outside its worktree, Claude Code (through claude-agent-acp) and
+  OpenCode (through `opencode acp`) each started as a lead's session is: it
+  doesn't run before trust, runs after, and stops again once a branch changes
+  it (`tests/agents/repositorySettings.test.ts`). Codex isn't run there: it
+  asks for a sign-in before it runs anything of the repository's, so what it
+  does is taken from codex-acp's code, and only what Althar passes it is
+  checked.
 
 ## What stays, and why
 
