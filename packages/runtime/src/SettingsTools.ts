@@ -1584,6 +1584,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   renameAccount: 'person: an agent’s accounts and their sign-ins',
   orderAccounts: 'person: an agent’s accounts and their sign-ins',
   removeAccount: 'person: an agent’s accounts and their sign-ins',
+  signOutAccount: 'person: an agent’s accounts and their sign-ins',
   // althar/skills
   stageSkill: 'person: installing a skill is the person’s',
   approveSkill: 'person: installing a skill is the person’s',
