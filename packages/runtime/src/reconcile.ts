@@ -78,7 +78,8 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     })
   }
   // What the sandboxes of processes that have gone left in the person's repositories, a crash's included (sandboxLeftovers.ts).
-  yield* sweepPlaces()
+  // Recovering: Althar didn't see these end, so it takes away only what a sandbox can be held to.
+  yield* sweepPlaces({ recovering: true })
 
   // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
   // A Local task's checkout waiting to be taken is the person's, and waits on (ADR-091).

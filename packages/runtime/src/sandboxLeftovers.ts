@@ -177,16 +177,22 @@ export const recordPlaces = (processId: string, folders: ReadonlyArray<string>, 
 /**
  * Takes away the placeholders sandboxes left: at the places recorded for
  * processes that have ended, but for those a running one also recorded.
- * A place is forgotten once settled; one still mounted on is tried again
- * when the next process ends, or Althar starts. What it took away, by path.
+ * Only what a sandbox can be held to: a place none of whose processes was
+ * spawned had no sandbox to leave it, so whatever is there is the person's;
+ * and recovering after a crash, when Althar didn't see the process end,
+ * Codex's folders stay, as one the person made since can't be told from
+ * them (only its read-only files are Claude Code's for certain). A place
+ * is forgotten once settled; one still mounted on is tried again when the
+ * next process ends, or Althar starts. What it took away, by path.
  */
-export const sweepPlaces = (look: { readonly mounted?: () => Promise<ReadonlySet<string>> } = {}) =>
+export const sweepPlaces = (look: { readonly mounted?: () => Promise<ReadonlySet<string>>; readonly recovering?: boolean } = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ path: string; live: number }>`
-      SELECT sandbox_places.path, processes.state IN ('launching', 'running') AS live
+    const rows = yield* sql<{ path: string; live: number; spawned: number }>`
+      SELECT sandbox_places.path, processes.state IN ('launching', 'running') AS live, processes.pid IS NOT NULL AS spawned
       FROM sandbox_places JOIN processes ON processes.id = sandbox_places.process_id`
     const held = new Set(rows.filter((row) => row.live === 1).map((row) => row.path))
+    const spawned = new Set(rows.filter((row) => row.spawned === 1).map((row) => row.path))
     const due = [...new Set(rows.filter((row) => row.live !== 1 && !held.has(row.path)).map((row) => row.path))]
     if (due.length === 0) return []
     const mounted = yield* Effect.promise(
@@ -194,7 +200,8 @@ export const sweepPlaces = (look: { readonly mounted?: () => Promise<ReadonlySet
     )
     const removed: Array<string> = []
     for (const path of due) {
-      const settled = yield* Effect.promise(() => settle(path, mounted))
+      const owned = spawned.has(path) && !(look.recovering === true && CODEX_FOLDERS.includes(basename(path)))
+      const settled = owned ? yield* Effect.promise(() => settle(path, mounted)) : 'theirs'
       if (settled === 'mounted') continue
       if (settled === 'removed') removed.push(path)
       yield* sql`DELETE FROM sandbox_places WHERE path = ${path}`

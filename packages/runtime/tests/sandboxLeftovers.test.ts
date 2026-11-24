@@ -212,7 +212,8 @@ const agentProcess = (state: 'running' | 'exited' | 'launching', runtimeInstance
       executable: 'claude',
       launchedAt: yield* now,
       state,
-      ...(state === 'launching' ? {} : { pid: 4242 }),
+      // Spawned, as a pid above Linux's pid_max no process here has, so recovering never signals one.
+      ...(state === 'launching' ? {} : { pid: 2_147_483_000 }),
     })}`
     return id
   })
@@ -266,27 +267,68 @@ describe.skipIf(!linux)('the record of where sandboxes may leave placeholders', 
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.effect('takes away what a crashed launch left, when Althar starts again', () =>
+  it.effect('keeps what the person makes after a launch that crashed before it spawned anything', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
       const { checkout, worktree } = checkoutAndWorktree()
-      const before = { checkout: snapshot(checkout), worktree: snapshot(worktree) }
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const instance = yield* Instance
         const crashed = yield* newId(Ids.runtimeInstance)
         yield* sql`INSERT INTO runtime_instances ${sql.insert({ id: crashed, deviceId: instance.deviceId, pid: 4242, appVersion: '0.0.0', startedAt: yield* now })}`
-        // Recorded before it was spawned; the launch crashed before it heard the process start.
+        // Recorded before it was spawned; Althar crashed before it spawned it.
         yield* recordPlaces(yield* agentProcess('launching', crashed), [worktree], 'codex')
       }).pipe(Effect.provide(runtime(file)))
-      claudePlaceholder(join(checkout, '.git', 'config.lock'))
-      for (const name of ['.agents', '.aws', '.codex']) codexPlaceholder(join(worktree, name))
+      // Before Althar starts again, the person makes their own: no sandbox ran to make them.
+      mkdirSync(join(worktree, '.codex'))
+      claudePlaceholder(join(worktree, '.idea'))
+      const made = { checkout: snapshot(checkout), worktree: snapshot(worktree) }
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         assert.deepStrictEqual(yield* sql`SELECT * FROM sandbox_places`, [])
       }).pipe(Effect.provide(runtime(file)))
-      assert.deepStrictEqual({ checkout: snapshot(checkout), worktree: snapshot(worktree) }, before)
+      assert.deepStrictEqual({ checkout: snapshot(checkout), worktree: snapshot(worktree) }, made)
     }),
+  )
+
+  it.effect("takes away a crashed session's read-only files when Althar starts again, and keeps folders it can't hold to it", () =>
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
+      const { checkout, worktree } = checkoutAndWorktree()
+      const before = snapshot(checkout)
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        const crashed = yield* newId(Ids.runtimeInstance)
+        yield* sql`INSERT INTO runtime_instances ${sql.insert({ id: crashed, deviceId: instance.deviceId, pid: 4242, appVersion: '0.0.0', startedAt: yield* now })}`
+        // Spawned and running when Althar crashed.
+        yield* recordPlaces(yield* agentProcess('running', crashed), [worktree], 'codex')
+      }).pipe(Effect.provide(runtime(file)))
+      claudePlaceholder(join(checkout, '.git', 'config.lock'))
+      // Codex's shape, or the person's own made after the crash: the same, so it stays.
+      mkdirSync(join(worktree, '.codex'))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        assert.deepStrictEqual(yield* sql`SELECT * FROM sandbox_places`, [])
+      }).pipe(Effect.provide(runtime(file)))
+      assert.deepStrictEqual(snapshot(checkout), before)
+      assert.isTrue(lstatSync(join(worktree, '.codex')).isDirectory())
+    }),
+  )
+
+  it.effect('forgets, without touching, what a process that was never spawned recorded', () =>
+    Effect.gen(function* () {
+      const { worktree } = checkoutAndWorktree()
+      const never = yield* agentProcess('launching')
+      yield* recordPlaces(never, [worktree], 'codex')
+      mkdirSync(join(worktree, '.codex'))
+      // Its launch failed before it was spawned, as a failed start records it.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE processes SET state = 'unknown', ended_at = ${new Date().toISOString()} WHERE id = ${never}`
+      assert.deepStrictEqual(yield* sweepPlaces({ mounted: async () => nothingMounted }), [])
+      assert.isTrue(existsSync(join(worktree, '.codex')))
+      assert.deepStrictEqual(yield* sql`SELECT * FROM sandbox_places`, [])
+    }).pipe(Effect.provide(runtime())),
   )
 })
 
