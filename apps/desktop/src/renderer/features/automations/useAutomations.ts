@@ -120,7 +120,20 @@ export const useAutomation = (automationId: string): AutomationModel => {
   const [pending, setPending] = useState(false)
   // Changes in the order they were made: only the latest failing reads again.
   const made = useRef(0)
-  const view = read.data?.automation ?? null
+  // Hold a review-scope choice over reads that started before the write.
+  const [scope, setScope] = useState<{ readonly requested: boolean } | null>(null)
+  const scopeWrite = useRef(0)
+  const saved = read.data?.automation ?? null
+  const view =
+    saved !== null && saved.definition.work.kind === 'review' && scope !== null
+      ? {
+          ...saved,
+          definition: {
+            ...saved.definition,
+            work: scope.requested ? ({ kind: 'review', reviewRequested: true } as const) : ({ kind: 'review' } as const),
+          },
+        }
+      : saved
 
   /** Shows a change at once, as the window keeps the automation. */
   const shown = useCallback(
@@ -164,6 +177,12 @@ export const useAutomation = (automationId: string): AutomationModel => {
     error: error ?? (read.error === null ? null : failed(read.error)),
     pending,
     change: (definition) => {
+      const requested = definition.work.kind === 'review' && definition.work.reviewRequested === true
+      const previous = view?.definition.work
+      const choice =
+        scope !== null || requested !== (previous?.kind === 'review' && previous.reviewRequested === true) ? { requested } : null
+      const write = ++scopeWrite.current
+      if (choice !== null) setScope(choice)
       shown((was) => ({
         ...was,
         definition,
@@ -172,7 +191,11 @@ export const useAutomation = (automationId: string): AutomationModel => {
         schedule: definition.schedule,
         work: definition.work.kind,
       }))
-      void send(() => client.changeAutomation(automationId, definition))
+      void send(() => client.changeAutomation(automationId, definition)).then(async () => {
+        if (choice === null || write !== scopeWrite.current) return
+        await cache.refetchQueries({ queryKey: keys.automation(automationId), exact: true })
+        if (write === scopeWrite.current) setScope(null)
+      })
     },
     turnOn: () => {
       shown((was) => ({ ...was, ...shownAs.on, pausedBy: null, pauseReason: null }))

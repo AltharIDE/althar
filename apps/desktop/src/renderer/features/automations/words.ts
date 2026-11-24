@@ -49,6 +49,7 @@ export const text = {
   allowEverythingNote: 'Never pushes to the default branch or merges.',
   allowEverythingOff: 'Off: the project’s rules hold.',
   postsReviews: 'Post its reviews without asking',
+  reviewScope: 'Pull requests to review',
   postsReviewsNote: 'Pull requests from outside the team still wait for you.',
   stopsAfter: 'Stops after',
   asleep: `If ${device.the} is asleep`,
@@ -322,7 +323,9 @@ export const endsValueOf = (work: AutomationWork): string => (work.kind === 'rev
 /** What each run does, from a choice of the menu: a review of each new pull request, or a task ending as chosen, its reviewer kept. */
 export const workOf = (value: string, work: AutomationWork): AutomationWork =>
   value === 'review'
-    ? { kind: 'review' }
+    ? work.kind === 'review'
+      ? work
+      : { kind: 'review' }
     : { kind: 'task', review: work.kind === 'task' ? work.review : null, end: value === 'draft' || value === 'ready' ? value : null }
 
 /** What a run ends in, in words. */
@@ -347,11 +350,17 @@ export const LATE = [
   { value: 'skip', label: text.lateSkip },
 ] as const
 
+export const REVIEW_SCOPE = [
+  { value: 'all', label: 'Every pull request' },
+  { value: 'requested', label: 'Only those that ask for my review' },
+] as const
+
 /** A run that makes a change ends in a pull request: at most five of them open. */
 export const endsInPullRequest = (work: AutomationWork) => work.kind === 'task' && work.end !== null
 
 /** Its limits, each named, then said, as the card's "Its limits" folds them out. */
 export const limitWords = (definition: AutomationDefinition): ReadonlyArray<readonly [string, string]> => [
+  ...(definition.work.kind === 'review' ? [[text.reviewScope, REVIEW_SCOPE[definition.work.reviewRequested ? 1 : 0].label] as const] : []),
   [text.allowEverything, definition.allowEverything ? `On. ${text.allowEverythingNote}` : text.allowEverythingOff],
   [text.stopsAfter, text.minutes(definition.minutes)],
   [text.asleep, definition.late === 'once' ? text.lateOnce : text.lateSkip],

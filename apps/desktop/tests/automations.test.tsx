@@ -1,10 +1,12 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@althar/contracts'
 
+import { keys } from '../src/renderer/data/reads'
+import { ServicesProvider } from '../src/renderer/data/services'
 import { AutomationsView } from '../src/renderer/features/automations/AutomationsView'
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import {
@@ -18,7 +20,7 @@ import {
   fakeClient,
   fakeHost,
 } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
 
 /* On this Mac's clock: Tuesday 29 September 2026, at noon. */
 const local = (day: number, hours: number, minutes = 0) => new Date(2026, 8, day, hours, minutes).toISOString()
@@ -293,6 +295,52 @@ describe('an automation’s page', () => {
     expect(screen.queryByText('Open pull requests')).toBeNull()
   })
 
+  it('shows the review scope at once and holds it across an older read', async () => {
+    let saved = definition({ work: { kind: 'review' } })
+    const stale = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    const getAutomation = vi.fn(async () => ({ cursor: 6, automation: automationView({ definition: saved }) }))
+    const { client } = fakeClient({
+      getAutomation,
+      changeAutomation: vi.fn(async (_id, next) => {
+        await writing.promise
+        saved = next
+      }),
+    })
+    const services = servicesFor(client)
+    render(
+      <ServicesProvider value={services}>
+        <Room opening="auto1" />
+      </ServicesProvider>,
+    )
+    const field = await screen.findByRole('combobox', { name: 'Pull requests to review' })
+    expect(field.textContent).toContain('Every pull request')
+    getAutomation.mockImplementationOnce(async () => {
+      await stale.promise
+      return { cursor: 6, automation: automationView({ definition: saved }) }
+    })
+    const reading = services.cache.refetchQueries({ queryKey: keys.automation('auto1') })
+    await userEvent.click(field)
+    await userEvent.click(screen.getByRole('option', { name: 'Only those that ask for my review' }))
+    expect(field.textContent).toContain('Only those that ask for my review')
+    expect(client.changeAutomation).toHaveBeenLastCalledWith(
+      'auto1',
+      expect.objectContaining({ work: { kind: 'review', reviewRequested: true } }),
+    )
+    await act(async () => {
+      stale.resolve()
+      await reading
+    })
+    expect(field.textContent).toContain('Only those that ask for my review')
+    await act(async () => writing.resolve())
+    await waitFor(() =>
+      expect(
+        services.cache.getQueryData<{ automation: { definition: typeof saved } }>(keys.automation('auto1'))?.automation.definition.work,
+      ).toEqual({ kind: 'review', reviewRequested: true }),
+    )
+    expect(field.textContent).toContain('Only those that ask for my review')
+  })
+
   it('changes its lead, adds a reviewer and how its task ends, and how long a run may work', async () => {
     const { client } = fakeClient({
       getAutomation: vi.fn(async () => ({
@@ -303,6 +351,7 @@ describe('an automation’s page', () => {
     withServices(<Room opening="auto1" />, client)
     await screen.findByRole('heading', { name: 'Morning review' })
     expect(screen.getByText('Open pull requests')).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Pull requests to review' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Add a reviewer' }))
     expect(client.changeAutomation).toHaveBeenLastCalledWith(
       'auto1',
@@ -316,6 +365,7 @@ describe('an automation’s page', () => {
     await userEvent.click(screen.getByRole('button', { name: /Open a draft pull request/ }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Review each new pull request' }))
     expect(client.changeAutomation).toHaveBeenLastCalledWith('auto1', expect.objectContaining({ work: { kind: 'review' } }))
+    expect(screen.getByRole('combobox', { name: 'Pull requests to review' }).textContent).toContain('Every pull request')
     await userEvent.click(screen.getByRole('combobox', { name: 'Stops after' }))
     await userEvent.click(await screen.findByRole('option', { name: '1½ hours' }))
     expect(client.changeAutomation).toHaveBeenLastCalledWith('auto1', expect.objectContaining({ minutes: 90 }))

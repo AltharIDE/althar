@@ -271,7 +271,9 @@ dependency bump.
   coordinator. It starts a task from its prompt, which ends in a report, a
   draft pull request or a ready one. Or it reviews pull requests that someone
   other than the person opened and no task reviews yet: up to five a run,
-  oldest first, one review task each. A review run is an ordinary review
+  oldest first, one review task each. By default it takes every eligible open
+  pull request ready for review. It can take only those the host says ask
+  the connected account or its team for review. A review run is an ordinary review
   ([reviews.md](reviews.md)).
 - **It waits its turn and keeps small.** A run's work goes after everything
   else, one automation's task at a time. It is skipped, and says why, in these
