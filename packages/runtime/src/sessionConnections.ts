@@ -6,8 +6,10 @@ import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
+  AgentExited,
   AgentRequestFailed,
   AgentStartFailed,
+  closingFailureOf,
   OptionUnavailable,
   type Question,
   type SessionEvent,
@@ -17,8 +19,9 @@ import {
   connect,
   inFlatpakSandbox,
   skillsIn,
+  startFailureOf,
 } from '@althar/provider-adapters'
-import { Cause, Clock, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
+import { Cause, Clock, Data, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Account, Accounts } from './Accounts'
 import { heldSkillsFor, serversFor } from './agentTools'
@@ -87,6 +90,8 @@ export interface SessionConnectionsDependencies {
   readonly permissions: Permissions['Service']
   readonly policies: Policies['Service']
   readonly questions: Questions['Service']
+  /** Forgets what Althar holds of an agent, its sign-in as last checked and the models it offers, so both are read again. */
+  readonly refreshAgent: (agentId: string) => Effect.Effect<void>
   readonly quietFor: Duration.Duration
   readonly run: <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.Effect<A, E>
   readonly runtimeConfig: RuntimeOptions
@@ -115,6 +120,41 @@ export interface SessionConnectionsDependencies {
   readonly wakeFor: Duration.Duration
 }
 
+/** A first start that failed in a way that may pass: started again, once, afresh (`connectSession`). */
+class StartAgain extends Data.TaggedError('StartAgain')<{}> {}
+
+/** The variables a launch inherits from Althar's own environment, as `process.ts` hands them on. */
+const inherited = (names: ReadonlyArray<string> | undefined): Record<string, string> =>
+  Object.fromEntries((names ?? []).flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])))
+
+/**
+ * Whether a start that failed may pass if it is made again, afresh: its
+ * adapter or its agent stopped on the way, it crashed, or it failed for a
+ * reason that is no class the person can act on. Not where it is signed out,
+ * isn't installed, is out of usage, refused what it was asked, or timed out
+ * (it waited long enough already), nor where the network is in the way, which
+ * a second start meets as well.
+ */
+export const startsAgain = (cause: Cause.Cause<unknown>): boolean => {
+  const found = Cause.findErrorOption(cause)
+  if (Option.isNone(found)) return false
+  const error = found.value
+  if (error instanceof AgentExited) {
+    const why = closingFailureOf(error.stderr)
+    return why === undefined || why === 'crashed'
+  }
+  if (error instanceof AgentRequestFailed) {
+    if (error.failure !== 'unknown' && error.failure !== 'transient') return false
+    const why = startFailureOf(error.message)
+    return why === undefined || why === 'crashed'
+  }
+  if (error instanceof AgentStartFailed) {
+    const why = startFailureOf(error.reason)
+    return (why === undefined || why === 'crashed') && !/\bENOENT\b/.test(error.reason)
+  }
+  return false
+}
+
 export const makeSessionConnections = (dependencies: SessionConnectionsDependencies) => {
   const {
     accounts,
@@ -131,6 +171,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     policies,
     questions,
     quietFor,
+    refreshAgent,
     run,
     runtimeConfig,
     sessionFact,
@@ -305,13 +346,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
    * its process. The session stays `starting`: it takes over the thread
    * only when `activate` runs, so a failed start leaves the thread as it was.
    */
-  const connectSession = (
+  const connectOnce = (
     thread: ThreadContext,
     sessionId: string,
     entry: AgentEntry,
     account: Account,
     model: string | undefined,
     effort: string | undefined,
+    first: boolean,
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -569,8 +611,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 : Effect.mapError(remote.checkpoint, (error) => new ToolRefused({ message: error.message })),
             ),
       )
+      // The program Althar brings for it, there and of the version its adapter needs, before it is spawned (bundledPrograms.ts).
+      const program =
+        selectedWorker === null && transport._tag === 'Process' && definition.program !== undefined
+          ? definition.program({ ...inherited(transport.spec.inheritEnv), ...transport.spec.env })
+          : undefined
       const started = yield* Effect.exit(
         Effect.gen(function* () {
+          if (program !== undefined) return yield* new AgentStartFailed({ command: definition.name, reason: program })
           if (untrusted && definition.untrustedRepositories === false)
             return yield* new AgentRequestFailed({
               method: 'session/new',
@@ -768,17 +816,24 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       if (Exit.isFailure(started)) {
         yield* Scope.close(scope, Exit.void)
         yield* tools.revoke
-        yield* Effect.logWarning('Agent could not start', started.cause).pipe(
+        // The whole answer, what the agent's data said included (failures.ts), is the log's; the person reads it in words.
+        yield* Effect.logWarning(first ? 'Agent could not start' : 'Agent could not start again', started.cause).pipe(
           Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
         )
         const reason = Cause.pretty(started.cause)
         // A folder gone from under it fails its start as a missing command would (ENOENT): said as the folder, never
         // that an agent that is there isn't installed.
         const folder = cwdOf(thread)
+        const signInEnded = existsSync(folder) && (yield* signedOutRefusal(started.cause, entry.definition, account))
+        // One that may pass starts again once, afresh, by itself: what Althar holds of the agent read again first.
+        if (first && program === undefined && existsSync(folder) && !signInEnded && startsAgain(started.cause)) {
+          if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
+          return yield* new StartAgain()
+        }
         const summary = existsSync(folder)
-          ? (yield* signedOutRefusal(started.cause, entry.definition, account))
+          ? signInEnded
             ? signInEndedWords
-            : summarize(started.cause)
+            : summarize(started.cause, { bundled: definition.source === 'bundled' })
           : folderGoneWords(folder)
         yield* sql.withTransaction(
           Effect.gen(function* () {
@@ -877,6 +932,37 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         upFront,
       }
     })
+
+  /**
+   * Starts the agent and its session, as `connectOnce` does, and once more,
+   * afresh, where its first start failed in a way that may pass: its adapter
+   * stopped, or it failed for no reason Althar can act on. Before the second,
+   * what Althar holds of the agent (its sign-in as last checked, the models it
+   * offers) is forgotten, so both are read again, and the second start is a
+   * new process of its adapter, with probes of its own. Nothing waits on the
+   * person: a start that fails again says why, as any does.
+   */
+  const connectSession = (
+    thread: ThreadContext,
+    sessionId: string,
+    entry: AgentEntry,
+    account: Account,
+    model: string | undefined,
+    effort: string | undefined,
+  ) =>
+    connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
+      Effect.catchTag('StartAgain', () =>
+        Effect.gen(function* () {
+          yield* Effect.logInfo('Starting the agent again, afresh').pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId }),
+          )
+          yield* refreshAgent(entry.definition.id)
+          return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
+            Effect.catchTag('StartAgain', (again) => Effect.die(again)),
+          )
+        }),
+      ),
+    )
 
   type Connected = Effect.Success<ReturnType<typeof connectSession>>
 
