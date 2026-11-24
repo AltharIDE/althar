@@ -437,8 +437,9 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   await systemctl('daemon-reload')
   await systemctl('restart', SERVICE)
   // The release before it stays, for a step back; older ones go.
+  // By name: `current` is a real path, which a folder reached through a link doesn't spell the same.
   for (const entry of await fs.readdir(program))
-    if (entry.startsWith('bundle-') && join(program, entry) !== target && join(program, entry) !== current)
+    if (entry.startsWith('bundle-') && entry !== basename(target) && entry !== basename(current))
       await fs.rm(join(program, entry), { recursive: true, force: true })
   say(out, { step: 'update', state: 'done', version: verified.manifest.version })
 }
