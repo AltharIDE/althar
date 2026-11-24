@@ -325,6 +325,16 @@ describe('the API', () => {
       assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
       yield* send('/goal pause')
       assert.strictEqual((yield* goal)[0]?.status, 'paused')
+      // Each change the person made is said in the thread as Althar's line, in order.
+      const lines = (yield* client.GetThread({ threadId: task.threadId, limit: 200 })).items.flatMap((item) =>
+        item.kind === 'notice' && item.content.source === 'runtime' && item.content.title.includes('goal') ? [item.content.title] : [],
+      )
+      assert.deepStrictEqual(lines, [
+        'You set a goal: Keep checking the result',
+        'You cleared the goal.',
+        'You set a goal: Verify the next result',
+        'You paused the goal.',
+      ])
     }).pipe(Effect.scoped),
   )
 

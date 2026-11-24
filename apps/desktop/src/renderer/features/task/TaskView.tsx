@@ -3,6 +3,17 @@ import { blockerText, blockerWords, openBlockers, standsOf } from '../../shared/
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
+import {
+  commandsOf,
+  commandText,
+  compactCommandOf,
+  goalCommandOf,
+  interruptCommandOf,
+  modelCommandOf,
+  pressOf,
+  renameCommandOf,
+  runCommandOf,
+} from '../../shared/composerCommands'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -589,6 +600,8 @@ export function TaskView({
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const steers = useSendMidTurn()?.to === 'steer'
   const [goalExpanded, setGoalExpanded] = useState(false)
+  // The composer's command picked and open: /goal shows the goal itself there, and its line over the composer steps aside.
+  const [commanding, setCommanding] = useState<string | null>(null)
   const [savingWorkerCopy, setSavingWorkerCopy] = useState(false)
   const [goalNote, setGoalNote] = useState<string | null>(null)
   const [pick, setPick] = useState<Choice | null>(null)
@@ -963,32 +976,40 @@ export function TaskView({
    * the composer says why and keeps it all. One Althar doesn't take goes
    * back in the composer, words, images and the agent picked to take over.
    */
-  const submit = (body: string, now: boolean) => {
+  /**
+   * A goal command, typed whole or done from the composer's /goal: set, changed, paused, resumed or cleared at once, never
+   * sent to the lead. With attachments it isn't done, and the words stay to send them with a message. False where the words
+   * aren't one.
+   */
+  const runGoal = (body: string) => {
     const goal = goalCommand(body)
-    if (goal !== undefined) {
-      const attached = images.props(receiver)
-      if (attached.images.length > 0 || attached.files.length > 0 || comments.length > 0) {
-        setGoalNote('Send attachments in a message alongside the goal.')
-        return
-      }
-      setGoalNote(null)
-      if (goal.action === 'show') {
-        if (snapshot.task.goal != null) {
-          setGoalExpanded(true)
-          setDraft('')
-        } else setDraft('/goal ')
-        return
-      }
-      setDraft('')
-      const starts = goal.action === 'set' || goal.action === 'resume'
-      const lead = starts ? (waiting ?? (session?.held === true ? undefined : (chosen ?? undefined))) : undefined
-      if (starts && waiting !== null) setHandover(null)
-      void model.setGoal(goal, lead, () => {
-        setDraft((current) => withQueued(current, body))
-        if (starts && waiting !== null) setHandover((current) => current ?? waiting)
-      })
-      return
+    if (goal === undefined) return false
+    const attached = images.props(receiver)
+    if (attached.images.length > 0 || attached.files.length > 0 || comments.length > 0) {
+      setGoalNote('Send attachments in a message alongside the goal.')
+      setDraft((current) => (current === '' ? body : current))
+      return true
     }
+    setGoalNote(null)
+    if (goal.action === 'show') {
+      if (snapshot.task.goal != null) {
+        setGoalExpanded(true)
+        setDraft('')
+      } else setDraft('/goal ')
+      return true
+    }
+    setDraft('')
+    const starts = goal.action === 'set' || goal.action === 'resume'
+    const lead = starts ? (waiting ?? (session?.held === true ? undefined : (chosen ?? undefined))) : undefined
+    if (starts && waiting !== null) setHandover(null)
+    void model.setGoal(goal, lead, () => {
+      setDraft((current) => withQueued(current, body))
+      if (starts && waiting !== null) setHandover((current) => current ?? waiting)
+    })
+    return true
+  }
+  const submit = (body: string, now: boolean) => {
+    if (runGoal(body)) return
     setGoalNote(null)
     const pictures = receiver.takes !== false
     const own = images.take(receiver, pictures && readingCommentCrops(kept))
@@ -1392,10 +1413,37 @@ export function TaskView({
       text.needsAgent
     ) : null
 
+  // What a slash in the composer offers: what this task can do now, each as its own press does it.
+  const shelfMove =
+    snapshot.task.phase !== 'settled' &&
+    (snapshot.task.scratch === true || (snapshot.task.kind === 'plain' && snapshot.task.changes.length === 0))
+  const reviewed = snapshot.task.steps.some((step) => step.key === 'review' && !step.skipped)
+  const commands = commandsOf(
+    goalCommandOf(snapshot.task.goal ?? null, (body) => void runGoal(body)),
+    model.agents.length > 0 && choice !== null && modelCommandOf(models, text.lead.toLowerCase(), model.agents, choice, choose),
+    compactCommandOf(session, () => void model.compact()),
+    interruptCommandOf(busy, text.lead.toLowerCase(), () => void model.interrupt()),
+    held !== undefined &&
+      pressOf('ship', commandText.ship.does(reviewed), 'up', () => void model.ship(), commandText.ship.commits(held.commits)),
+    settleable && done && pressOf('done', commandText.done.does, 'check', () => void model.markDone()),
+    keeps && pressOf('keep', commandText.keep.does, 'pin', () => void model.keep()),
+    snapshot.task.toChange === true && pressOf('change', commandText.change.does, 'pr', () => void model.makeChange()),
+    shelfMove &&
+      (snapshot.task.scratch === true
+        ? pressOf('board', commandText.board.does, 'board', () => void model.shelve(null))
+        : pressOf('scratch', commandText.scratch.does, 'boards', () => void model.shelve('scratch'))),
+    snapshot.task.worktree !== null &&
+      snapshot.task.review == null &&
+      runCommandOf(snapshot.task.runnables, (runnableId) => void model.runProject(runnableId)),
+    renameCommandOf((title) => void model.rename(title)),
+  )
+
   const composer = (
     <div className={s.composer}>
       <DraftComposer
         draft={kept}
+        commands={commands}
+        onCommand={setCommanding}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
         {...(helpMe.suggestion !== undefined
@@ -1449,7 +1497,7 @@ export function TaskView({
         above={
           <>
             {aside?.bar}
-            {snapshot.task.goal != null && (
+            {snapshot.task.goal != null && commanding !== 'goal' && (
               <Goal
                 goal={snapshot.task.goal}
                 expanded={goalExpanded}

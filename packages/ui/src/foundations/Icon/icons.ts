@@ -77,6 +77,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  TriangleFlag,
   ViewGrid,
   WarningCircle,
   WifiOff,
@@ -187,6 +188,8 @@ export const ICONS = {
   clock: Clock,
   /** An automation: work that starts by itself. */
   automation: ClockRotateRight,
+  /** A goal: what a lead keeps working toward on its own. */
+  goal: TriangleFlag,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */

@@ -1,4 +1,4 @@
-import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
+import { controlGoal, goalLine, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { taskWorker } from './workerExecution'
 import { WorkerSnapshots } from './WorkerSnapshots'
@@ -542,6 +542,15 @@ export const handlers = apiLayer(
               }
         const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
+        // What changed is said in the thread, as Althar's line: the person sees it there, as the lead and anyone reading after do.
+        yield* Effect.provideContext(
+          addItem({ projectId: result.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: goalLine(control, result.before, result.goal),
+          }),
+          store,
+        )
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
         if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal

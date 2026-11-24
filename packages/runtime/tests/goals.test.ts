@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { controlGoal, readGoal } from '../src/threadGoals'
+import { controlGoal, goalLine, readGoal } from '../src/threadGoals'
 import { callTool, repository, runtime, turns, until } from './support'
 
 const newTask = (scratch = false) =>
@@ -346,4 +346,25 @@ describe('thread goals', () => {
       Effect.scoped,
     ),
   )
+})
+
+describe('what the thread says of a goal the person changed', () => {
+  const goal = {
+    revision: 1,
+    objective: 'Ship it',
+    status: 'active' as const,
+    rounds: 0,
+    roundLimit: 12,
+    progress: null,
+    detail: null,
+    waiting: false,
+  }
+  it('says a goal set, replaced, changed, paused, resumed and cleared', () => {
+    assert.strictEqual(goalLine({ action: 'set', objective: ' Ship it ' }, null, goal), 'You set a goal: Ship it')
+    assert.strictEqual(goalLine({ action: 'set', objective: 'Ship it' }, goal, goal), 'You replaced the goal: Ship it')
+    assert.strictEqual(goalLine({ action: 'edit', objective: 'Ship it today' }, goal, null), 'You changed the goal: Ship it today')
+    assert.strictEqual(goalLine({ action: 'pause' }, goal, goal), 'You paused the goal.')
+    assert.strictEqual(goalLine({ action: 'resume' }, goal, goal), 'You resumed the goal.')
+    assert.strictEqual(goalLine({ action: 'clear' }, goal, null), 'You cleared the goal.')
+  })
 })

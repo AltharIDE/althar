@@ -1636,7 +1636,7 @@ describe('a task', () => {
     expect(composer.value).toBe('/goal ')
     expect(setThreadGoal).not.toHaveBeenCalled()
     await userEvent.type(composer, 'Verify staging{Enter}')
-    const goal = within(screen.getByRole('region', { name: 'Goal' }))
+    let goal = within(screen.getByRole('region', { name: 'Goal' }))
     expect(goal.getByRole('status').textContent).toBe('Active')
     expect(setThreadGoal).toHaveBeenLastCalledWith({ threadId: 'th1', control: { action: 'set', objective: 'Verify staging' } })
 
@@ -1646,10 +1646,27 @@ describe('a task', () => {
     expect(goal.getByRole('status').textContent).toBe('Active')
     await act(async () => accept())
 
+    // /goal opens into the goal itself on the composer's edge, its own line stepping aside meanwhile; Enter does its first.
     await userEvent.type(composer, '/goal{Enter}')
+    expect(composer.value).toBe('/goal ')
+    expect(screen.queryByRole('region', { name: 'Goal' })).toBeNull()
+    const commands = within(screen.getByRole('listbox', { name: 'Commands' }))
+    expect(commands.getAllByRole('option').map((row) => row.textContent)).toEqual([
+      'pauseStop working toward it for now',
+      'editChange the objective',
+      'clearRemove the goal',
+    ])
+    expect(screen.getByText('Active · 0 of 12 turns')).toBeTruthy()
+    await userEvent.keyboard('{Enter}')
     expect(composer.value).toBe('')
+    expect(setThreadGoal).toHaveBeenLastCalledWith({ threadId: 'th1', control: { action: 'pause' } })
+    goal = within(screen.getByRole('region', { name: 'Goal' }))
+    expect(goal.getByRole('status').textContent).toBe('Paused')
+    await userEvent.click(goal.getByRole('button', { name: 'Resume' }))
+    expect(goal.getByRole('status').textContent).toBe('Active')
     await userEvent.click(goal.getByRole('button', { name: 'Pause' }))
     expect(goal.getByRole('status').textContent).toBe('Paused')
+    await userEvent.click(goal.getByRole('button', { expanded: false }))
     await userEvent.click(goal.getByRole('button', { name: 'Edit' }))
     const objective = goal.getByRole('textbox', { name: 'Objective' })
     await userEvent.clear(objective)
