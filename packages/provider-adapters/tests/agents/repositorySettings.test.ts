@@ -107,16 +107,23 @@ describe.skipIf(bundledClaude() === null)('Claude Code and a repository’s hook
       for (const name of ['repository-start', 'repository-prompt', 'own-start', 'own-prompt']) rmSync(join(outside, name), { force: true })
       const { options } = await optionsFor('claude-code', worktree, trusted)
       await session('claude-code', worktree, { CLAUDE_CONFIG_DIR: home, ANTHROPIC_API_KEY: 'sk-ant-not-a-key' }, options, true)
-      const fired = (name: string) => existsSync(join(outside, `${name}-start`)) && existsSync(join(outside, `${name}-prompt`))
-      return { repository: fired('repository'), own: fired('own') }
+      // Each hook apart: as its session starts, and as a message is sent.
+      const fired = (name: string) => existsSync(join(outside, name))
+      return {
+        repositoryStart: fired('repository-start'),
+        repositoryPrompt: fired('repository-prompt'),
+        ownStart: fired('own-start'),
+        ownPrompt: fired('own-prompt'),
+      }
     }
+    const held = { repositoryStart: false, repositoryPrompt: false, ownStart: true, ownPrompt: true }
     try {
-      expect(await ran([])).toEqual({ repository: false, own: true })
+      expect(await ran([])).toEqual(held)
       const trusted = (await optionsFor('claude-code', worktree, [])).files.map(({ file, hash }) => ({ file, hash }))
-      expect(await ran(trusted)).toEqual({ repository: true, own: true })
+      expect(await ran(trusted)).toEqual({ repositoryStart: true, repositoryPrompt: true, ownStart: true, ownPrompt: true })
       git(worktree, 'switch', '-qc', 'task')
       put({ '.claude/settings.json': JSON.stringify(hook(outside, 'repository', ' && echo changed')) })
-      expect(await ran(trusted)).toEqual({ repository: false, own: true })
+      expect(await ran(trusted)).toEqual(held)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

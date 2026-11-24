@@ -52,6 +52,8 @@ export interface RepositoryTrustText {
   answered: { trusted: string; without: string }
   /** In the project's settings: what was decided of versions its checkout here doesn't have, of a repository. */
   elsewhere: (repository: string) => string
+  /** The same, those not trusted, where others of them are: shown apart, so each has its own answer. */
+  elsewhereNot: (repository: string) => string
   /** Adding a project, where what its repositories run couldn't be read. */
   unreadable: string
   tryAgain: string
@@ -75,6 +77,7 @@ export const repositoryTrustText: RepositoryTrustText = {
   stepTitle: (project) => `Before ${project}’s agents start`,
   answered: { trusted: 'Trusted: its next session starts with them.', without: 'Its leads start without them.' },
   elsewhere: (repository) => `${repository}, as a task’s branch had them`,
+  elsewhereNot: (repository) => `${repository}, as a task’s branch had them, not trusted`,
   unreadable: 'Althar couldn’t read what its repositories’ agent settings run. Until it can, its leads start without them.',
   tryAgain: 'Try again',
   openWithout: 'Open the project',

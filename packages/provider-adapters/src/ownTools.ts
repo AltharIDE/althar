@@ -66,11 +66,14 @@ export const codexServers = (toml: string): ReadonlyMap<string, CodexTransport |
   )
 }
 
-/** JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; nothing where it isn't JSON after all. */
+/**
+ * JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; nothing where it isn't JSON after all. Each
+ * pass leaves a quoted string as it is, so `"a,]"` or `"//x"` in one stays.
+ */
 export const jsonc = (text: string): unknown => {
   const stripped = text
     .replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, quoted: string | undefined) => quoted ?? '')
-    .replace(/,(\s*[}\]])/g, '$1')
+    .replace(/("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g, (_, quoted: string | undefined, after: string | undefined) => quoted ?? after ?? '')
   try {
     return JSON.parse(stripped)
   } catch {

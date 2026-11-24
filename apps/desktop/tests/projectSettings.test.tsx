@@ -680,6 +680,35 @@ describe('a project’s settings', () => {
     )
   })
 
+  it('shows trusted and declined versions a task’s branch had apart, so the trusted one is taken back on its own', async () => {
+    const version = (file: string, hash: string, command: string, trusted: boolean) => ({
+      agent: 'claude-code' as const,
+      agentName: 'Claude Code',
+      file,
+      hash,
+      runs: [{ file, key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command }],
+      trusted,
+      changed: false,
+      loadsAnyway: false,
+    })
+    const kept = version('.claude/settings.json', 'h2', './notify.sh --loud', true)
+    const declined = version('.claude/settings.local.json', 'h3', './mine.sh', false)
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [{ repositoryId: 'rb_1', name: 'refunds', files: [], elsewhere: [kept, declined] }]),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const trusted = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them' }))
+    expect(trusted.getByText('./notify.sh --loud')).toBeTruthy()
+    expect(trusted.queryByText('./mine.sh')).toBeNull()
+    const not = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them, not trusted' }))
+    expect(not.getByText('./mine.sh')).toBeTruthy()
+    expect(not.getByRole('button', { name: 'Trust these settings' })).toBeTruthy()
+    await userEvent.click(trusted.getByRole('button', { name: 'Take back' }))
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: [kept] }),
+    )
+  })
+
   it('has no part for agent settings where no repository brings any', async () => {
     windowAt('/projects/p1?room=settings&section=rules')
     expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()

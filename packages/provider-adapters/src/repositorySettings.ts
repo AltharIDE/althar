@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { isAbsolute, join, normalize, relative, sep } from 'node:path'
 
@@ -339,6 +340,22 @@ const readText = async (path: string): Promise<Read> => {
 
 const sha = (content: string) => createHash('sha256').update(content).digest('hex')
 
+/**
+ * A script's content hash, read through whatever its size, so a large one that changes still counts as changed: not
+ * there, its hash, or there but not read, and why.
+ */
+const hashOfFile = async (path: string): Promise<{ readonly absent: true } | { readonly hash: string } | { readonly unread: string }> => {
+  try {
+    const found = await stat(path)
+    if (!found.isFile()) return { unread: 'It isn’t a file' }
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer)
+    return { hash: hash.digest('hex') }
+  } catch (error) {
+    return ABSENT.has(codeOf(error) ?? '') ? { absent: true } : { unread: `It couldn’t be read (${codeOf(error) ?? 'unknown'})` }
+  }
+}
+
 /** `value` as JSON with each object's keys in order, so the same definition always hashes the same. */
 const canonical = (value: unknown): string =>
   Array.isArray(value)
@@ -372,8 +389,8 @@ const namedScripts = async (root: string, level: string, command: string): Promi
       const path = normalize(isAbsolute(token) ? token : join(level, token))
       const inside = within(root, path)
       if (inside === null) return null
-      const read = await readText(path)
-      return 'absent' in read ? null : ([inside, 'text' in read ? sha(read.text) : `unread:${read.unread}`] as const)
+      const read = await hashOfFile(path)
+      return 'absent' in read ? null : ([inside, 'hash' in read ? read.hash : `unread:${read.unread}`] as const)
     }),
   )
   return found.filter((one) => one !== null)

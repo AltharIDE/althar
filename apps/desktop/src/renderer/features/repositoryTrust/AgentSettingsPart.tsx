@@ -25,6 +25,9 @@ export function AgentSettingsPart({ projectId }: { projectId: string }) {
         {model.repositories.flatMap((repository) => {
           const error = model.failed?.repositoryId === repository.repositoryId ? { error: model.failed.said } : {}
           const elsewhere = repository.elsewhere ?? []
+          const groups = [elsewhere.filter((file) => file.trusted === true), elsewhere.filter((file) => file.trusted !== true)]
+          // Where the checkout here has none, a failure shows on the first card there is.
+          const errorAt = repository.files.length > 0 ? -1 : groups.findIndex((files) => files.length > 0)
           return [
             ...(repository.files.length === 0
               ? []
@@ -40,21 +43,28 @@ export function AgentSettingsPart({ projectId }: { projectId: string }) {
                     {...error}
                   />,
                 ]),
-            // What was decided of versions its checkout here doesn't have, such as a task branch's from its line: to take back too.
-            ...(elsewhere.length === 0
-              ? []
-              : [
-                  <RepositoryTrustKept
-                    key={`${repository.repositoryId}:elsewhere`}
-                    repository={repositoryTrustText.elsewhere(repository.name)}
-                    files={elsewhere.map(trustFileOf)}
-                    decided={decidedOf(elsewhere)}
-                    onTrust={() => void model.decide(repository, true, elsewhere)}
-                    onWithout={() => void model.decide(repository, false, elsewhere)}
-                    headingLevel={4}
-                    {...(repository.files.length === 0 ? error : {})}
-                  />,
-                ]),
+            // What was decided of versions its checkout here doesn't have, such as a task branch's from its line: to take back
+            // too. Those trusted apart from the rest, so a trusted one is taken back without trusting a declined one first.
+            ...groups.flatMap((files, index) =>
+              files.length === 0
+                ? []
+                : [
+                    <RepositoryTrustKept
+                      key={`${repository.repositoryId}:elsewhere:${index}`}
+                      repository={
+                        index === 1 && files.length < elsewhere.length
+                          ? repositoryTrustText.elsewhereNot(repository.name)
+                          : repositoryTrustText.elsewhere(repository.name)
+                      }
+                      files={files.map(trustFileOf)}
+                      decided={decidedOf(files)}
+                      onTrust={() => void model.decide(repository, true, files)}
+                      onWithout={() => void model.decide(repository, false, files)}
+                      headingLevel={4}
+                      {...(index === errorAt ? error : {})}
+                    />,
+                  ],
+            ),
           ]
         })}
       </div>
