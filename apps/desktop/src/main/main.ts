@@ -42,7 +42,7 @@ import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { computerChannel, handleComputerWindow } from './computer/ipc'
-import { displayInputSafe } from './computer/display'
+import { displayInputProblem } from './computer/display'
 import { computerSessions } from './computer/sessions'
 import { computerWorker } from './computer/worker'
 import { testComputerWorker } from './computer/testNative'
@@ -632,13 +632,25 @@ const computers = computerSessions({
   canAsk: () => !quitting && localWindows().size > 0,
   // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
   canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
-  desktopInputSafe: (action, frame) => {
+  // macOS lets Althar see and use other apps only once the person switches these on for it.
+  ...(process.platform === 'darwin' && !(__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1')
+    ? {
+        grants: () => ({
+          screen: systemPreferences.getMediaAccessStatus('screen') === 'granted',
+          access: systemPreferences.isTrustedAccessibilityClient(false),
+        }),
+      }
+    : {}),
+  desktopInputProblem: (action, frame) => {
     const focused = BrowserWindow.getFocusedWindow()
-    if (focused !== null && mine(focused.webContents)) return false
     const protectedWindows = BrowserWindow.getAllWindows()
       .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
       .map((window) => window.getBounds())
-    return displayInputSafe(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows)
+    const inFront = focused !== null && mine(focused.webContents)
+    const { bounds, workArea } = screen.getPrimaryDisplay()
+    // macOS keeps the menu bar above the work area; elsewhere a top panel there is the system’s too.
+    const menuBar = { x: bounds.x, y: bounds.y, width: bounds.width, height: Math.max(0, workArea.y - bounds.y) }
+    return displayInputProblem(action, frame, bounds, protectedWindows, inFront, menuBar)
   },
   changed: (state) => {
     for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
