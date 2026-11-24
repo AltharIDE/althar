@@ -265,7 +265,7 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
       inFlight++
       let upgraded = false
       // Said before the socket closes, so a phone can tell a refusal from a lost network.
-      let status: 403 | 429 = 403
+      let status: 403 | 429 | 503 = 403
       run(
         Effect.gen(function* () {
           if (!(yield* admit(request))) {
@@ -273,7 +273,12 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
             return yield* rejected()
           }
           const identity = yield* authenticate(request)
-          if (socket.destroyed || active.size >= MAX_CONNECTIONS) return yield* rejected()
+          if (socket.destroyed) return yield* rejected()
+          // Full by now: the phone was let in, so it's told to come back, as at the door.
+          if (active.size >= MAX_CONNECTIONS) {
+            status = 503
+            return yield* rejected()
+          }
           ws.handleUpgrade(request, socket, head, (webSocket) => {
             upgraded = true
             request.socket.setTimeout(0)
