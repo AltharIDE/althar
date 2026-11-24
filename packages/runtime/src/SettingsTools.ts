@@ -1593,6 +1593,13 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   disconnect: 'person: connections and their sign-ins',
   // althar/computers
   removeWorker: "person: taking a worker out of the home revokes its certificate, the person's (althar/computers says so)",
+  // althar/computers: phones
+  pairedDevices: 'person: only reads the phones paired with this computer; pairing and removing one are the person’s',
+  removePairedDevice: 'person: removing a phone takes its key off this computer, the person’s',
+  phoneAccess: 'person: only reads whether phones can reach this computer',
+  setPhoneAccess: 'person: letting phones reach this computer opens it on the network, the person’s',
+  createPairingCode: 'person: pairing a phone takes the phone in the person’s hand',
+  pairingStatus: 'person: only reads how a pairing the person started goes',
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',
