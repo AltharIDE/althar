@@ -128,6 +128,21 @@ export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
   problem: setup.problem === undefined ? undefined : problemOf(setup.problem.code, setup, setup.problem.said),
 })
 
+/** The code's way as the dialog draws it: its line and how long it lasts, being made, or why the home made none. */
+export const codeView = (
+  code: { readonly code: string; readonly expiresAt: number } | null,
+  failed: string | null,
+  now: number,
+): WorkerCodeView =>
+  failed !== null
+    ? { command: null, lasts: null, failed }
+    : code === null || code.expiresAt <= now
+      ? { command: null, lasts: null }
+      : {
+          command: `curl -fsSL ${WORKER_SCRIPT} | sh -s -- join '${code.code}'`,
+          lasts: text.lasts(Math.max(1, Math.round((code.expiresAt - now) / 60_000))),
+        }
+
 export interface AddWorkerModel {
   readonly way: 'ssh' | 'code'
   readonly setWay: (way: 'ssh' | 'code') => void
@@ -287,17 +302,7 @@ export const useAddWorker = ({
     stop: () => {
       void bridge?.act({ kind: 'stop' })
     },
-    code:
-      way !== 'code'
-        ? null
-        : codeFailed !== null
-          ? { command: null, lasts: null, failed: codeFailed }
-          : code === null || expired
-            ? { command: null, lasts: null }
-            : {
-                command: `curl -fsSL ${WORKER_SCRIPT} | sh -s -- join '${code.code}'`,
-                lasts: text.lasts(Math.max(1, Math.round((code.expiresAt - now) / 60_000))),
-              },
+    code: way === 'code' ? codeView(code, codeFailed, now) : null,
     close,
     ssh: bridge !== undefined,
   }

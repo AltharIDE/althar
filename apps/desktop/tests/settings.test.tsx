@@ -890,7 +890,7 @@ describe('the Settings tab', () => {
       },
     ]
     act(() => listening?.({ ...base, phase: 'done', at: 5, workerId }))
-    expect(await within(page).findByRole('heading', { name: 'box' }, { timeout: 8_000 })).toBeTruthy()
+    expect(await within(page).findByRole('heading', { name: 'box' })).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'Add a worker to This Mac' })).toBeNull()
     expect(bridge.act).toHaveBeenCalledWith({ kind: 'dismiss' })
     await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))

@@ -17,6 +17,7 @@ import {
   type AgentDefinition,
   type SignInWay,
 } from '@althar/provider-adapters'
+import { workerCodeOf } from '@althar/runtime/workerHome'
 import { newKey } from '@althar/transport-node'
 import { Effect } from 'effect'
 
@@ -286,7 +287,6 @@ export const enroll = async (raw: unknown, out: (text: string) => void, first: R
 
 /** A code's way to a grant: ask the home at each address it gave, trusting only the authority it carries. */
 export const join_ = async (code: string, name: string, out: (text: string) => void) => {
-  const { workerCodeOf } = await import('@althar/runtime/workerHome')
   const read = workerCodeOf(code)
   if (read === undefined) throw failed('InvalidRequest', 'That isn’t a worker code. Copy it again from Settings › Computers.')
   if (read.expiresAt <= Date.now()) throw failed('Expired', 'That code expired. Make a new one in Settings › Computers.')

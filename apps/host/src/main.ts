@@ -4,11 +4,11 @@ import { Cause, Effect, Exit, Logger } from 'effect'
 
 import { clearServiceEnvironment, failureMessage, runCommand } from './commands'
 import { parseOptions } from './options'
+import { workerMain } from './workerSetup'
 
 let exitCode = 0
-// A worker's own setup, as the window runs it on a worker: apart from the home's commands, none of which it needs.
+// A worker's own setup, as the window runs it on a worker: apart from the home's commands.
 if (process.argv[2] === 'worker') {
-  const { workerMain } = await import('./workerSetup')
   exitCode = await workerMain(process.argv.slice(3), (text) => {
     process.stdout.write(text)
   })
