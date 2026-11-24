@@ -232,6 +232,11 @@ export class Models extends Context.Service<
     }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
     /** Forgets what asking an agent found, as when it is newly installed: it is asked again, and an asking still under way counts for nothing. */
     forget(agentId: string): Effect.Effect<void>
+    /**
+     * Asks an agent again, as after a start that failed: its sign-in is checked afresh and its models asked again, in the
+     * background. What it said last stays until it answers, so its models keep their names meanwhile.
+     */
+    refresh(agentId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Models') {
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
@@ -251,6 +256,8 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      /* What an agent asked again said last, until it answers anew. */
+      const stale = new Map<string, Offered>()
       /*
        * The models sessions offered around each agent's asking. An agent that can't reach its maker as it is asked answers
        * with an older list of its own (Codex, where OpenAI's doesn't come in time), which mustn't hide a model its sessions
@@ -277,6 +284,7 @@ export class Models extends Context.Service<
       }
       /** Forgets what asking an agent found, and what its sessions offered since. */
       const forgetAsked = (agentId: string) => {
+        stale.delete(agentId)
         probed.delete(agentId)
         since.delete(agentId)
         failedAt.delete(agentId)
@@ -398,6 +406,7 @@ export class Models extends Context.Service<
             Effect.gen(function* () {
               if (!ownsProbe(entry.definition.id, reservation)) return
               probed.set(entry.definition.id, found)
+              if (found !== null) stale.delete(entry.definition.id)
               if (found === null) failedAt.set(entry.definition.id, yield* Clock.currentTimeMillis)
               else {
                 failedAt.delete(entry.definition.id)
@@ -434,7 +443,9 @@ export class Models extends Context.Service<
             forgetFailure(definition.id)
           // What it said when asked this launch is newer than any session before it; a model a session offered since is there too.
           const asked = probed.get(definition.id)
-          if (asked === null) return { ...seen, ...now, defaults, blocked, probing: false }
+          // Asked again after a start that failed: what it said last, until it answers anew.
+          const known = stale.get(definition.id) ?? seen
+          if (asked === null) return { ...known, ...now, defaults, blocked, probing: false }
           if (asked !== undefined)
             return { ...asked, models: yield* withLater(definition, asked), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
@@ -458,9 +469,9 @@ export class Models extends Context.Service<
               ),
               scope,
             )
-            return { ...seen, ...now, defaults, blocked, probing: true }
+            return { ...known, ...now, defaults, blocked, probing: true }
           }
-          return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
+          return { ...known, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })
 
       return Models.of({
@@ -480,6 +491,16 @@ export class Models extends Context.Service<
             yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
           }).pipe(Effect.provide(context)),
         forget: (agentId) => signIns.forget(agentId).pipe(Effect.andThen(Effect.sync(() => forgetAsked(agentId)))),
+        refresh: (agentId) =>
+          signIns.forget(agentId).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                const last = probed.get(agentId) ?? stale.get(agentId)
+                forgetAsked(agentId)
+                if (last !== undefined && last !== null) stale.set(agentId, last)
+              }),
+            ),
+          ),
       })
     }),
   )

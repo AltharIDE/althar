@@ -340,6 +340,44 @@ describe('what Althar holds of an agent, when its start is made again', () => {
       assert.notInclude(after, 'old')
     }).pipe(Effect.provide(runtime(':memory:', {}, { each: { 'claude-code': options } })))
   })
+
+  it.live('keep their names while they are asked again, until the agent answers anew', () => {
+    let offered: ReadonlyArray<{ readonly id: string; readonly name: string }> = [{ id: 'large', name: 'Large' }]
+    let hold = false
+    const entered = Deferred.makeUnsafe<void>()
+    const release = Deferred.makeUnsafe<void>()
+    const options = {
+      get models() {
+        return offered
+      },
+      beforeNewSession: async () => {
+        if (!hold) return
+        hold = false
+        Deferred.doneUnsafe(entered, Exit.void)
+        await Effect.runPromise(Deferred.await(release))
+      },
+    }
+    return Effect.gen(function* () {
+      const models = yield* Models
+      const claude = (
+        all: ReadonlyArray<{ readonly agentId: string; readonly models: ReadonlyArray<{ readonly id: string; readonly name: string }> }>,
+      ) => all.find((agent) => agent.agentId === 'claude-code')?.models.map((model) => `${model.id}: ${model.name}`) ?? []
+      assert.deepStrictEqual(claude(yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))), ['large: Large'])
+      offered = [{ id: 'larger', name: 'Larger' }]
+      hold = true
+      yield* models.refresh('claude-code')
+      // Asked again, and while it is, what it said last.
+      const asking = (yield* models.catalog).find((agent) => agent.agentId === 'claude-code')
+      assert.isTrue(asking?.probing)
+      yield* Deferred.await(entered)
+      assert.deepStrictEqual(claude(yield* models.catalog), ['large: Large'])
+      yield* Deferred.succeed(release, undefined)
+      assert.deepStrictEqual(
+        claude(yield* until(models.catalog, (all) => all.every((agent) => !agent.probing) && claude(all).includes('larger: Larger'))),
+        ['larger: Larger'],
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { each: { 'claude-code': options } })))
+  })
 })
 
 describe('which failed starts are made again', () => {

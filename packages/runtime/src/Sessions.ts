@@ -1543,7 +1543,7 @@ export class Sessions extends Context.Service<
         permissions,
         policies,
         questions,
-        refreshAgent: (agentId) => Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.forget(agentId) }),
+        refreshAgent: (agentId) => Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.refresh(agentId) }),
         quietFor,
         signInFault: planUsage.signInFault,
         run,
