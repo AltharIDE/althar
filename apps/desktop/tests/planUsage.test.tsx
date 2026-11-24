@@ -168,7 +168,7 @@ describe('what the window says of a plan', () => {
       accountId: 'acc_codex_side',
       accountName: 'side',
       windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
-      fault: { kind: 'sign_in_again', message: 'Sign in to Codex to see its usage.' },
+      fault: { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' },
     })
     const work = usageAccount({ windows: [{ kind: 'five_hour', label: null, usedPercent: 97, resetsAt: RESET }] })
     const [codex] = planOf(planUsage([work, signedOut]), NOW).agents
@@ -189,7 +189,7 @@ describe('what the window says of a plan', () => {
     expect([first?.name, first?.left, first?.stopped]).toEqual(['Claude Code', 1, undefined])
     expect([out?.name, out?.stopped]).toEqual(['Codex', 'Signed out'])
     expect(out?.accounts[0]?.windows[0]?.left).toBe(80)
-    expect(out?.accounts[0]?.fault).toBe('Sign in to Codex to see its usage.')
+    expect(out?.accounts[0]?.fault).toBe('Signed out. Sign in again to read usage.')
     // Nor does a picker give its own default model the saved 80%.
     expect(roomOf({ id: 'codex:' }, [], planUsage([signedOut]), NOW)).toBeUndefined()
   })
@@ -320,7 +320,7 @@ describe('what the window says of a plan', () => {
   it('shows no room in the bar for an agent whose only account is signed out', async () => {
     const signedOut = usageAccount({
       windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
-      fault: { kind: 'sign_in_again', message: 'Sign in to Codex to see its usage.' },
+      fault: { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' },
     })
     const plan = planOf(planUsage([signedOut]), NOW)
     render(<PlanGauge agents={plan.agents} defaultOpen />)
@@ -331,29 +331,52 @@ describe('what the window says of a plan', () => {
   })
 
   it('says how old numbers are only once they are old, and why a read failed that the person can act on', () => {
-    const old = usageAccount({ observedAt: '2026-10-15T08:00:00.000Z', fault: { kind: 'expired', message: 'Its sign-in has expired.' } })
+    const old = usageAccount({
+      observedAt: '2026-10-15T08:00:00.000Z',
+      fault: { kind: 'expired', message: 'Sign-in expired. Claude Code renews it on its next run.' },
+    })
     const [account] = planOf(planUsage([old]), NOW).agents[0]?.accounts ?? []
     expect(account?.age).toBe('read 2h ago')
-    expect(account?.fault).toBe('Its sign-in has expired.')
+    expect(account?.fault).toBe('Sign-in expired. Claude Code renews it on its next run.')
     expect(planOf(planUsage([codexWork]), new Date('2026-10-15T10:10:00.000Z')).agents[0]?.accounts[0]?.age).toBeNull()
   })
 
-  it('shows no message for a read that must wait, only how old the saved numbers are', () => {
+  it('says a read that must wait in its short line, with the saved numbers drawn stale and how old they are', () => {
     const waiting = usageAccount({
       observedAt: '2026-10-15T09:50:00.000Z',
-      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+      fault: { kind: 'unreachable', message: 'Rate limited. Tries again later.' },
     })
     const [account] = planOf(planUsage([waiting]), new Date('2026-10-15T10:00:00.000Z')).agents[0]?.accounts ?? []
-    expect(account?.fault).toBeNull()
+    expect(account?.fault).toBe('Rate limited. Tries again later.')
     expect(account?.age).toBe('read 10m ago')
+    expect(account?.stale).toBe(true)
     expect(account?.windows.length).toBeGreaterThan(0)
+    // Old numbers set against now's clock would mislead: no tick on a stale bar.
+    expect(account?.windows.every((window) => window.elapsed === undefined)).toBe(true)
+  })
+
+  it('says once, for the agent, what every one of its accounts failed with alike', () => {
+    const expired = { kind: 'sign_in_again' as const, message: 'Signed out. Sign in again to read usage.' }
+    const main = usageAccount({ accountName: 'Main', observedAt: '2026-10-15T09:45:00.000Z', fault: expired })
+    const pro = usageAccount({ accountId: 'acc_codex_pro', accountName: 'Pro', observedAt: '2026-10-15T09:45:00.000Z', fault: expired })
+    const agent = planOf(planUsage([main, pro]), NOW).agents[0]
+    expect(agent).toMatchObject({ stopped: 'Signed out', signIn: true, fault: expired.message })
+    expect(agent?.accounts.map((one) => [one.name, one.fault, one.age, one.stale])).toEqual([
+      ['Main', null, 'read 20m ago', true],
+      ['Pro', null, 'read 20m ago', true],
+    ])
+    // Failed differently, each says its own.
+    const other = { ...pro, fault: { kind: 'unreachable' as const, message: 'No reply. Tries again soon.' } }
+    const apart = planOf(planUsage([main, other]), NOW).agents[0]
+    expect(apart?.fault).toBeUndefined()
+    expect(apart?.accounts.map((one) => one.fault).toSorted()).toEqual(['No reply. Tries again soon.', expired.message])
   })
 
   it('leaves out an account that is waiting with no numbers yet', () => {
     const none = usageAccount({
       observedAt: null,
       windows: [],
-      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+      fault: { kind: 'unreachable', message: 'Rate limited. Tries again later.' },
     })
     expect(planOf(planUsage([none]), NOW).agents).toEqual([])
   })
@@ -510,9 +533,12 @@ describe('what the window says of a plan', () => {
     const after = new Date('2026-10-20T00:00:00.000Z')
     const codex = usageAccount({ windows: [{ kind: 'weekly', label: null, usedPercent: 30, resetsAt: '2026-10-25T00:00:00.000Z' }] })
     for (const [fault, message] of [
-      [{ kind: 'expired', message: 'Its sign-in has expired.' }, 'Its sign-in has expired.'],
+      [
+        { kind: 'expired', message: 'Sign-in expired. Claude Code renews it on its next run.' },
+        'Sign-in expired. Claude Code renews it on its next run.',
+      ],
       // Even one that passes on its own: with no numbers to keep to, it's all there is to say.
-      [{ kind: 'unreachable', message: 'The provider could not be reached.' }, 'The provider could not be reached.'],
+      [{ kind: 'unreachable', message: 'No reply. Tries again soon.' }, 'No reply. Tries again soon.'],
     ] as const) {
       const { agents } = planOf(planUsage([{ ...claudeBoth, fault }, codex]), after)
       expect(agents.map((agent) => [agent.name, agent.unread, agent.accounts.map((account) => account.fault)])).toEqual([
@@ -522,11 +548,16 @@ describe('what the window says of a plan', () => {
     }
     // As the runtime sends it once every window has reset by its own clock: none of them, and that they reset.
     const sent = planUsage([
-      { ...claudeBoth, windows: [], resetSince: true, fault: { kind: 'expired', message: 'Its sign-in has expired.' } },
+      {
+        ...claudeBoth,
+        windows: [],
+        resetSince: true,
+        fault: { kind: 'expired', message: 'Sign-in expired. Claude Code renews it on its next run.' },
+      },
     ])
     expect(
       planOf(sent, after).agents.map((agent) => [agent.unread, agent.accounts.map((account) => [account.age, account.fault])]),
-    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Its sign-in has expired.']]]])
+    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Sign-in expired. Claude Code renews it on its next run.']]]])
     // Signed out as well, it can't run: said as it is, not as unread.
     const [out] = planOf(planUsage([{ ...claudeBoth, fault: { kind: 'sign_in_again', message: 'Sign in.' } }]), after).agents
     expect([out?.stopped, out?.unread]).toEqual(['Signed out', undefined])

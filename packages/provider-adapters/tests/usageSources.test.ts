@@ -374,10 +374,10 @@ describe('the usage reader', () => {
 
   it('says again inside the interval what the last read said, where it read no windows: never a wait the provider didn’t ask for', async () => {
     for (const [reply, said] of [
-      [{ status: 500 }, { kind: 'fault', fault: 'unreachable', message: 'The provider answered with an error.' }],
-      [{ throws: true }, { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' }],
-      [{ status: 401 }, { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }],
-      [{ status: 429 }, { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' }],
+      [{ status: 500 }, { kind: 'fault', fault: 'unreachable', message: 'Provider error. Tries again soon.' }],
+      [{ throws: true }, { kind: 'fault', fault: 'unreachable', message: 'No reply. Tries again soon.' }],
+      [{ status: 401 }, { kind: 'fault', fault: 'expired', message: 'Sign-in expired.' }],
+      [{ status: 429 }, { kind: 'fault', fault: 'unreachable', message: 'Rate limited. Tries again later.' }],
     ] as const) {
       let time = Date.parse('2026-10-15T12:00:00Z')
       const { seen, fetch } = server(reply)
@@ -478,7 +478,8 @@ describe('the usage reader', () => {
     const { seen, fetch } = server({})
     expect(await reader({ fetch }, { url: 'https://evil.example/steal' }).read('codex-chatgpt', codex(fakeHome()))).toMatchObject({
       fault: 'no_source',
-      message: expect.stringContaining('not allowed'),
+      message: 'Couldn’t read usage.',
+      detail: expect.stringContaining('not allowed'),
     })
     expect(seen).toHaveLength(0)
   })
@@ -488,13 +489,13 @@ describe('the usage reader', () => {
     const r = reader({ fetch })
     const home = fakeHome()
     // A source of another agent, one that does not exist, and a key pair: none is read.
-    expect(await r.read('claude-oauth', codex(home))).toMatchObject({ message: expect.stringContaining('no such usage source') })
-    expect(await r.read('nope', codex(home))).toMatchObject({ message: expect.stringContaining('no such usage source') })
+    expect(await r.read('claude-oauth', codex(home))).toMatchObject({ detail: expect.stringContaining('no such usage source') })
+    expect(await r.read('nope', codex(home))).toMatchObject({ detail: expect.stringContaining('no such usage source') })
     expect(await r.read('codex-chatgpt', { agent: 'claude-code', provider: 'anthropic', home, named: false })).toMatchObject({
-      message: expect.stringContaining('no such usage source'),
+      detail: expect.stringContaining('no such usage source'),
     })
     expect(await r.read('codex-chatgpt', { agent: 'codex', provider: 'other', home, named: true })).toMatchObject({
-      message: expect.stringContaining('no such usage source'),
+      detail: expect.stringContaining('no such usage source'),
     })
     expect(seen).toHaveLength(0)
   })
@@ -951,7 +952,7 @@ describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
     expect(await readOpenCodeGoUsage(limits(script), { now: () => now })).toEqual({ kind: 'none' })
     expect(await readOpenCodeGoUsage(limits(`console.error('Error: no server'); process.exit(1)`), { now: () => now })).toEqual({
       kind: 'failed',
-      message: 'OpenCode couldn’t read Go’s usage: Error: no server.',
+      message: 'Error: no server',
     })
     expect(await readOpenCodeGoUsage(agents.codex, { now: () => now })).toEqual({ kind: 'none' })
     expect(agents.opencode.usageLimits?.('node').args).toEqual(['api', '--standalone', 'experimental.usage.limits'])

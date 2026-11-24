@@ -19,7 +19,9 @@ import {
   readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsageAccount,
+  usageFailureOf,
   usagePairs,
+  usageSaid,
   usageReader,
   type UsageRead,
   type UsageSource,
@@ -120,12 +122,6 @@ const keyOf = (window: UsageWindow) => (window.label === undefined ? window.kind
 /** Windows read together, each with when they were. */
 const dated = (windows: ReadonlyArray<UsageWindow>, observedAt: string): ReadonlyArray<Dated> =>
   windows.map((window) => ({ ...window, observedAt }))
-
-/** The message a failed Codex read is shown as, and whether the person should sign in again. */
-const faultOfRead = (message: string): { kind: UsageFaultKind; message: string } =>
-  /not (logged|signed) in|sign in|log in|unauthori[sz]ed|auth/i.test(message)
-    ? { kind: 'sign_in_again', message }
-    : { kind: 'unreachable', message }
 
 /** Whether a reset time has passed: the window it belongs to has started again. */
 const past = (resetsAt: string | null | undefined, now: number) =>
@@ -243,6 +239,8 @@ export class PlanUsage extends Context.Service<
         const hearing = Semaphore.makeUnsafe(1)
 
         const held = new Map<string, Held>()
+        /** The last failure logged of each account, in its own words: logged again only once it changes, or after a reading. */
+        const failures = new Map<string, string>()
         const asked = new Map<string, number>()
         // A listing classifies connections; it doesn't measure usage. Retain it until the sign-in is checked again or
         // explicitly refreshed, while continuing to read Go's actual limits on the usual schedule.
@@ -344,6 +342,7 @@ export class PlanUsage extends Context.Service<
         const keepUsage = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
+            if (next.fault === null) failures.delete(accountId)
             if (next.paidBy !== 'key') yield* keepWeek(accountId, next.windows)
             // A key has no windows: one read while it was on a plan no longer steers work, nor says it is on one (SignIns).
             if (next.paidBy === 'key') return yield* sql`DELETE FROM plan_usage_readings WHERE account_id = ${accountId}`
@@ -416,12 +415,16 @@ export class PlanUsage extends Context.Service<
               paidBy: 'key',
             }
             // Its status says plan, but the sign-in its usage is read with isn't where its agent keeps it: what was heard stays.
-            const unfound = fault(
-              'no_data_yet',
-              definition.id === 'claude-code'
-                ? 'Althar couldn’t find this account’s sign-in to read its usage. Its usage shows after its next turn.'
-                : 'Althar couldn’t find this account’s sign-in to read its usage.',
-            )
+            const unfound = fault('no_data_yet', definition.id === 'claude-code' ? usageSaid.afterTurn : usageSaid.noSignIn)
+            /* What failed, in its own words, to the log only: the person is shown a short line (`usageSaid`). Once per change, as reads repeat. */
+            const logFailure = (raw: string | undefined) =>
+              Effect.gen(function* () {
+                if (raw === undefined || raw === '' || failures.get(account.id) === raw) return
+                failures.set(account.id, raw)
+                yield* Effect.logWarning('A usage reading failed').pipe(
+                  Effect.annotateLogs({ agent: definition.id, account: account.id, error: raw }),
+                )
+              })
             /* What a source read, kept. */
             const read = (usage: {
               readonly source: UsageSource
@@ -498,28 +501,26 @@ export class PlanUsage extends Context.Service<
                     // A session said its windows while the endpoint was asked: they are fresher than why it couldn't answer.
                     if ((sayings.get(account.id) ?? 0) !== said) return
                     if (got.kind === 'none') return yield* keep(account.id, none)
+                    yield* logFailure(got.detail)
                     yield* keep(
                       account.id,
-                      got.fault === 'expired'
-                        ? fault('expired', `Its sign-in has expired. ${definition.name} renews it the next time it runs on this account.`)
-                        : fault(got.fault, got.message),
+                      got.fault === 'expired' ? fault('expired', usageSaid.expired(definition.name)) : fault(got.fault, got.message),
                     )
                   }),
                 )
               })
-            if (check.status === 'signed_out')
-              return yield* keep(account.id, fault('sign_in_again', `Sign in to ${definition.name} to see its usage.`))
+            if (check.status === 'signed_out') return yield* keep(account.id, fault('sign_in_again', usageSaid.signedOut))
             if (definition.id === 'codex') {
               if (check.paidBy === 'key') return yield* keep(account.id, key)
               const asked = yield* Effect.promise(() => readAgent(definition, env))
               if (asked.kind === 'usage') return yield* read(asked.usage)
               if (asked.kind === 'none')
                 return yield* keep(account.id, fault('no_data_yet', 'Codex reported no plan window for this account.'))
-              const failed = { ...fault('unreachable', asked.message), fault: faultOfRead(asked.message) }
+              yield* logFailure(asked.message)
+              const failure = usageFailureOf(asked.message)
+              const failed = fault(failure.signedOut ? 'sign_in_again' : 'unreachable', failure.said)
               // Its app-server couldn't answer, for another reason than its sign-in: ChatGPT's own usage endpoint instead.
-              return yield* failed.fault.kind === 'sign_in_again'
-                ? keep(account.id, failed)
-                : fromEndpoint('codex-chatgpt', 'openai', failed)
+              return yield* failure.signedOut ? keep(account.id, failed) : fromEndpoint('codex-chatgpt', 'openai', failed)
             }
             if (definition.id === 'claude-code') {
               if (check.paidBy === 'key') return yield* keep(account.id, key)
@@ -556,7 +557,10 @@ export class PlanUsage extends Context.Service<
                 if (!(yield* current)) return
                 if (listed.kind === 'credentials') listings.set(account.id, { check, credentials: listed })
               }
-              if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
+              if (listed.kind === 'failed') {
+                yield* logFailure(listed.detail)
+                return yield* keep(account.id, fault('cannot_classify', listed.message))
+              }
               // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
               // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
               const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
@@ -585,9 +589,12 @@ export class PlanUsage extends Context.Service<
                     fault: again,
                   })
                 if (asked.kind === 'failed') {
-                  const failed = fault('unreachable', asked.message)
+                  yield* logFailure(asked.message)
+                  // Its sign-in refused is told apart above (`refused`), with its button: here only that the read failed.
+                  const failure = usageFailureOf(asked.message)
+                  const failed = fault('unreachable', failure.signedOut ? usageSaid.unknown : failure.said)
                   // Never read before: why is all there is to show, as for one connected and unread.
-                  const why = failed.windows.length === 0 ? { noReading: asked.message } : {}
+                  const why = failed.windows.length === 0 ? { noReading: failed.fault?.message ?? usageSaid.unknown } : {}
                   return yield* keep(account.id, { ...failed, ...onGo, ...why, fault: again ?? failed.fault })
                 }
                 // Connected, its usage unread: OpenCode reads it only through a Console sign-in.
@@ -720,7 +727,7 @@ export class PlanUsage extends Context.Service<
                 mine?.fault ??
                 (key || noReading !== null || (mine?.windows.length ?? 0) > 0
                   ? null
-                  : { kind: 'no_data_yet' as const, message: `${entry.definition.name}’s usage hasn’t been read yet.` })
+                  : { kind: 'no_data_yet' as const, message: usageSaid.notYet })
               list.push({
                 agentId: entry.definition.id,
                 agentName: entry.definition.name,
