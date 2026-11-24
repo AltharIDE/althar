@@ -9,6 +9,7 @@ import {
   type ReviewBrief,
 } from '@althar/contracts'
 import {
+  AbandonTask,
   Board,
   BoardCard as KitBoardCard,
   boardCardText,
@@ -230,6 +231,8 @@ export interface TeamActions {
   /** Holds it, out of the line, until it is started. */
   readonly hold: (planId: string) => Promise<void>
   readonly change: (taskId: string) => void
+  /** Abandons a task, asked first here: its row leaves Up next at once; whether it went through. */
+  readonly abandon?: (taskId: string) => Promise<boolean>
 }
 
 /** What the home's dock holds: a task, by its id, or a call. */
@@ -1236,6 +1239,10 @@ export function BoardView({
 
   // The plans starting from their rows, by id, until the runtime has answered.
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
+  // The row whose Abandon is being asked about, and the last one the runtime wouldn't abandon, which says why over the line.
+  const [asking, setAsking] = useState<string | null>(null)
+  const [unabandoned, setUnabandoned] = useState<string | null>(null)
+  const abandonFailed = unabandoned === null ? undefined : actions?.failed[unabandoned]?.message
   const { continuing, free, paused } = lanes
   // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
   const waitingRows = lanes.next.slice(0, continuing + free)
@@ -1340,6 +1347,7 @@ export function BoardView({
           {...(start === undefined ? {} : { onStart: start })}
           {...(hold === undefined ? {} : { onHold: hold })}
           onChange={() => team.change(work.taskId)}
+          {...(team.abandon === undefined ? {} : { onAbandon: () => setAsking(work.taskId) })}
         />
       ),
     }
@@ -1407,6 +1415,7 @@ export function BoardView({
           : {})}
       >
         {line?.failed != null && <Problem className={s.failure}>{line.failed}</Problem>}
+        {abandonFailed !== undefined && <Problem className={s.failure}>{abandonFailed}</Problem>}
         {line !== undefined && lanes.reordered && waitingRows.length > 1 && (
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
         )}
@@ -1672,6 +1681,22 @@ export function BoardView({
           </>
         )}
       </BoardColumn>
+      {/* Abandoning a row up next, asked first: nothing of it has begun, so there is no branch, worktree or pull request to say. */}
+      {asking !== null && team?.abandon !== undefined && (
+        <AbandonTask
+          worktree={null}
+          branch={null}
+          onAbandon={() => {
+            const abandon = team.abandon!
+            setAsking(null)
+            setUnabandoned(null)
+            void abandon(asking).then((through) => {
+              if (!through) setUnabandoned(asking)
+            })
+          }}
+          onClose={() => setAsking(null)}
+        />
+      )}
     </Board>
   )
 }

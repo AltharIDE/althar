@@ -1326,6 +1326,7 @@ export function ProjectView({
                             },
                             hold: (planId) => model.holdPlan(planId),
                             change: setTeamFor,
+                            abandon: board.abandon,
                           }}
                           {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                           // Where the bar shows this computer's load, Up next's line over what is held back opens it there.

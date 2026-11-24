@@ -324,6 +324,42 @@ describe('changing a plan’s team before it begins', () => {
     expect(team.change).toHaveBeenCalledWith('h')
   })
 
+  it('abandons a row from its menu, asked first, and says why where the runtime wouldn’t', async () => {
+    const abandon = vi.fn(async () => false)
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn(), abandon }
+    const failed = { h: { action: 'other' as const, message: 'It started meanwhile.' } }
+    withServices(
+      <BoardView
+        lanes={lanesOf(board([held]))}
+        agents={agents}
+        now={NOW}
+        onOpen={vi.fn()}
+        team={team}
+        actions={{ push: vi.fn(), merge: vi.fn(), pushing: new Set(), merging: new Set(), failed }}
+      />,
+      fakeClient().client,
+    )
+    const open = async () => {
+      await userEvent.click(rowOf(held.title).getByRole('button', { name: 'The team' }))
+      await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Abandon' }))
+      return within(await screen.findByRole('dialog'))
+    }
+    // Cancel leaves it as it was.
+    await userEvent.click((await open()).getByRole('button', { name: 'Cancel' }))
+    expect(abandon).not.toHaveBeenCalled()
+    await userEvent.click((await open()).getByRole('button', { name: 'Abandon task' }))
+    expect(abandon).toHaveBeenCalledWith('h')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(await screen.findByText('It started meanwhile.')).toBeTruthy()
+  })
+
+  it('offers no Abandon in a row’s menu without the board’s way to abandon', async () => {
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
+    withServices(<BoardView lanes={lanesOf(board([held]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />, fakeClient().client)
+    await userEvent.click(rowOf(held.title).getByRole('button', { name: 'The team' }))
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Abandon' })).toBeNull()
+  })
+
   it('offers no Start on a plan that starts by itself once an agent is free, but Hold, and its team', async () => {
     const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
     withServices(
