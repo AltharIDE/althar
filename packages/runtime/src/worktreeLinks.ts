@@ -67,7 +67,7 @@ const read = (file: string): string | null => {
 }
 
 /** The git directory a repository's worktrees share, from its main checkout: its `.git`, or what a `.git` file names, through its `commondir`. */
-const commonDirOf = (root: string): string | null => {
+export const commonDirOf = (root: string): string | null => {
   const dotGit = join(root, '.git')
   try {
     if (lstatSync(dotGit).isDirectory()) return dotGit

@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { currentBranch, git } from './git'
 import { change, fact, timestamp } from './records'
+import { sweepPlaces } from './sandboxLeftovers'
 
 /*
  * What an earlier launch of the runtime left unfinished, settled before
@@ -76,6 +77,8 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
       endedAt: yield* timestamp,
     })
   }
+  // What the sandboxes of processes that have gone left in the person's repositories, a crash's included (sandboxLeftovers.ts).
+  yield* sweepPlaces()
 
   // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
   // A Local task's checkout waiting to be taken is the person's, and waits on (ADR-091).
