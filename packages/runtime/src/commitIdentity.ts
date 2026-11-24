@@ -71,29 +71,25 @@ const fromEnvironment = (env: NodeJS.ProcessEnv, role: Role, field: 'name' | 'em
 }
 
 /**
- * Every identity key of git's config here, with the file each came from (`git config --show-origin`): the last of a
- * key wins, as in git.
+ * Every identity key in `git config --show-origin --get-regexp` output, with the file each came from: the last of a
+ * key wins, as in git. A file in the folder's own repository is named from it (`.git/config`): said whole, so the
+ * person can open it.
  */
+export const configuredIn = (path: string, output: string): ReadonlyMap<string, Source> => {
+  const keys = new Map<string, Source>()
+  for (const found of output.matchAll(/^([^\t\n]*)\t(\S+) ?(.*)$/gm)) {
+    // Every group takes part in each match.
+    const named = String(found[1])
+    const key = String(found[2]).toLowerCase()
+    const origin = named.startsWith('file:') ? resolve(path, named.slice('file:'.length)) : named
+    keys.set(key, { value: String(found[3]), key, origin })
+  }
+  return keys
+}
+
 const configured = (path: string) =>
-  Effect.map(
-    gitOutcome(path, 'config', '--show-origin', '--get-regexp', '^(user|author|committer)\\.(name|email)$'),
-    (found): ReadonlyMap<string, Source> => {
-      const keys = new Map<string, Source>()
-      if (found.code !== 0) return keys
-      for (const line of found.stdout.split('\n')) {
-        const tab = line.indexOf('\t')
-        if (tab < 0) continue
-        const named = line.slice(0, tab)
-        const rest = line.slice(tab + 1)
-        const space = rest.indexOf(' ')
-        const key = (space < 0 ? rest : rest.slice(0, space)).toLowerCase()
-        const value = space < 0 ? '' : rest.slice(space + 1)
-        // A file in the folder's own repository is named from it (`.git/config`): said whole, so the person can open it.
-        const origin = named.startsWith('file:') ? resolve(path, named.slice('file:'.length)) : named
-        keys.set(key, { value, key, origin })
-      }
-      return keys
-    },
+  Effect.map(gitOutcome(path, 'config', '--show-origin', '--get-regexp', '^(user|author|committer)\\.(name|email)$'), (found) =>
+    configuredIn(path, found.code === 0 ? found.stdout : ''),
   )
 
 const IDENTITY_VARIABLES = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const
@@ -103,10 +99,15 @@ const IDENT = /^(.*?) <([^>]*)> \d+ [+-]\d{4}$/
 
 /** What git writes one role as here, with `env`'s identity words over Althar's own: null where it refuses (an empty name). */
 const resolvedIn = (path: string, role: Role, env: NodeJS.ProcessEnv) => {
-  const words = Object.fromEntries(IDENTITY_VARIABLES.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name] ?? '']])))
+  const words = Object.fromEntries(
+    IDENTITY_VARIABLES.flatMap((name) => {
+      const value = env[name]
+      return value === undefined ? [] : [[name, value]]
+    }),
+  )
   return Effect.map(gitOutcomeWith(words, path, 'var', `GIT_${role.toUpperCase()}_IDENT`), ({ code, stdout }): Resolved | null => {
-    const found = code === 0 ? IDENT.exec(stdout) : null
-    return found === null ? null : { name: found[1] ?? '', email: found[2] ?? '' }
+    const [, name, email] = (code === 0 ? IDENT.exec(stdout) : null) ?? []
+    return name === undefined || email === undefined ? null : { name, email }
   })
 }
 
@@ -133,13 +134,13 @@ const isTest = (value: string, field: 'name' | 'email') => (field === 'name' ? v
  * What of one role is plainly a test's, judged on what git resolves it to (`<t@t.test>` in a config is `t@t.test`):
  * the name `T`, or an address on a `.test` domain. Each is said by where it came from.
  */
-const testIn = (person: Person): ReadonlyArray<Source> =>
-  person.resolved === null
+const testIn = ({ resolved, ...sources }: Person): ReadonlyArray<Source> =>
+  resolved === null
     ? []
     : (['name', 'email'] as const).flatMap((field) => {
-        const value = person.resolved?.[field] ?? ''
+        const value = resolved[field]
         if (!isTest(value, field)) return []
-        return [person[field] ?? { value, key: `user.${field}`, origin: 'git’s own default' }]
+        return [sources[field] ?? { value, key: `user.${field}`, origin: 'git’s own default' }]
       })
 
 /** Whether git would write one role as no one Althar can stand behind: it refuses, or has no address for it. */

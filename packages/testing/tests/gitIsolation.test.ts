@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
-import { afterAll, beforeAll, describe, expect, test } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { realPath, removeTreeSync } from '../src/files'
 import { gitCeiling, identify, isOwnRepository, setConfig } from '../src/git'
@@ -18,7 +18,8 @@ let sandbox = ''
 let main = ''
 let worktree = ''
 
-beforeAll(() => {
+// Each test, and each repeat of it, gets a sandbox of its own.
+beforeEach(() => {
   sandbox = realPath(mkdtempSync(join(tmpdir(), 'althar-isolation-')))
   main = join(sandbox, 'althar')
   mkdirSync(main)
@@ -30,7 +31,7 @@ beforeAll(() => {
   git(main, 'worktree', 'add', '-q', '-b', 'task', worktree)
 })
 
-afterAll(() => removeTreeSync(sandbox))
+afterEach(() => removeTreeSync(sandbox))
 
 /** A test run started in the worktree, its temporary folder in it too, as under a sandbox that gives the task one. */
 const runInWorktree = (env: Record<string, string>) => {

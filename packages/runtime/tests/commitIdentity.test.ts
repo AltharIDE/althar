@@ -7,7 +7,16 @@ import { identify, removeTreeSync, setConfig } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { ALTHAR, type Committer, type Identity, committerIdentity, identityIn, testIdentityWarning } from '../src/commitIdentity'
+import {
+  ALTHAR,
+  type Committer,
+  type Identity,
+  committerIdentity,
+  configuredIn,
+  identityIn,
+  testIdentityIn,
+  testIdentityWarning,
+} from '../src/commitIdentity'
 import { repository } from './support'
 
 /*
@@ -203,4 +212,22 @@ describe('who a commit of Althar’s is written as', () => {
       assert.strictEqual(committed(path, environment, said.as), 'Althar <althar@localhost> | Ada <ada@pm.me>')
     }),
   )
+
+  it('reads each key of git’s config with where it came from, a value given on the command line or left out too', () => {
+    const keys = configuredIn(
+      '/work/repo',
+      ['file:.git/config\tuser.name T', 'command line:\tuser.email t@t.test', 'file:/home/ada/.gitconfig\tAuthor.Name', ''].join('\n'),
+    )
+    assert.deepStrictEqual(keys.get('user.name'), { value: 'T', key: 'user.name', origin: '/work/repo/.git/config' })
+    assert.deepStrictEqual(keys.get('user.email'), { value: 't@t.test', key: 'user.email', origin: 'command line:' })
+    assert.deepStrictEqual(keys.get('author.name'), { value: '', key: 'author.name', origin: '/home/ada/.gitconfig' })
+    assert.strictEqual(keys.size, 3)
+  })
+
+  it('says a test value git made up itself, which no config or variable holds, as git’s own default', () => {
+    const made = { resolved: { name: 'Ada', email: 'ada@host.test' }, name: some('Ada', 'user.name'), email: null }
+    assert.deepStrictEqual(testIdentityIn({ author: made, committer: made }), [
+      { value: 'ada@host.test', key: 'user.email', origin: 'git’s own default' },
+    ])
+  })
 })
