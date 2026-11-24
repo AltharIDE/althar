@@ -2632,6 +2632,10 @@ export const Holder = Schema.Struct({
 })
 export type Holder = typeof Holder.Type
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
+export type PlacesWhy = typeof PlacesWhy.Type
+
 /**
  * Work waiting for a place among the agents this machine runs at once
  * (ADR-032), as it says why: how many tasks' agents are busy, which hold the
@@ -2644,6 +2648,11 @@ export const Queued = Schema.Struct({
   holders: Schema.optional(Schema.Array(Holder)),
   configured: Schema.optional(Schema.Int),
   offline: Schema.optional(Schema.Boolean),
+  /**
+   * Held back for now, and why: with the person's number it would have a place, but this computer's memory or CPU lets
+   * fewer agents work (`atOnce` < `configured`). It starts as that frees up, or at once where the person starts it anyway.
+   */
+  held: Schema.optional(PlacesWhy),
 })
 export const WorkPlaces = Schema.Struct({
   ...Queued.fields,
@@ -2653,10 +2662,6 @@ export const WorkPlaces = Schema.Struct({
 })
 export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
-
-/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
-export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
-export type PlacesWhy = typeof PlacesWhy.Type
 
 /**
  * The agents the home runs at once (ADR-032) as they stand, for the window's
@@ -6048,6 +6053,12 @@ const WorkApi = RpcGroup.make(
   command('MoveInLine', { taskId: Schema.String, to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }, Schema.Void),
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
+  /**
+   * Starts what of a task waits for a place now, whatever is free, as the person's own start, which never waits (ADR-037):
+   * Start anyway, on a task held back while this computer lets fewer agents work than the number. False, and nothing
+   * changes, where nothing of it waits any more.
+   */
+  command('StartAnyway', { taskId: Schema.String }, Schema.Boolean),
   /**
    * Stops the turn the thread's agent is in. Between turns, where a turn Althar asked of a task's lead or reviewer waits for a
    * place up next, that turn is let go instead: it leaves Up next, and its agent reads what it would have said with its next.

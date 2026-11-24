@@ -229,6 +229,7 @@ const ALTHAR: Readonly<Record<string, string>> = {
   ship_task: 'Ship the task',
   show_pictures: 'Show pictures',
   skip_review: 'Skip the review',
+  start_anyway: 'Start the task anyway',
   start_change: 'Start a change',
   start_helper: 'Start a helper',
   start_task: 'Start a task',

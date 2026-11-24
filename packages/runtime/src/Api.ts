@@ -1624,6 +1624,7 @@ export const handlers = apiLayer(
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
+      StartAnyway: ({ commandId, taskId }) => once(commandId, api(busy.startNow(taskId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),

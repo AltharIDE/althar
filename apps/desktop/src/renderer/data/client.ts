@@ -412,6 +412,8 @@ export interface Client {
   readonly moveInLine: (taskId: string, to: number) => Promise<void>
   /** Puts a project's line back in the order its tasks began waiting. */
   readonly lineOldestFirst: (projectId: string) => Promise<void>
+  /** Starts what of a task waits for a place now, whatever is free, as the person's own start; false where nothing of it waits. */
+  readonly startAnyway: (taskId: string) => Promise<boolean>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
@@ -1309,6 +1311,7 @@ export const connect = async (
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
     moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
     lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
+    startAnyway: (taskId) => command((commandId) => api.StartAnyway({ commandId, taskId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     tryAgain: (threadId) => command((commandId) => api.TryAgain({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
