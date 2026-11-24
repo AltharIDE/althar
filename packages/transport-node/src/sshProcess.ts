@@ -78,6 +78,19 @@ export const stopSsh = (resource: SshProcess) =>
     }
   })
 
+/**
+ * The ssh a home is reached by: one given (a build from source's own tools), the Flatpak's way out to the device's own
+ * ssh, with its config, agent and known hosts, or the system's. Anything else that runs ssh against a home the window
+ * reaches, such as its update, runs this same one.
+ */
+export const sshProgram = (executable?: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform) =>
+  executable ??
+  (env.FLATPAK_ID !== undefined
+    ? '/app/bin/althar-host-ssh'
+    : platform === 'win32'
+      ? join(env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH/ssh.exe')
+      : '/usr/bin/ssh')
+
 /** Own the dedicated SSH child and bounded diagnostics; none of its output becomes an exception message. */
 export const startSsh = (target: SshTarget, homeId: string | undefined, runtime: SshRuntime = {}) =>
   Effect.acquireRelease(
@@ -85,13 +98,7 @@ export const startSsh = (target: SshTarget, homeId: string | undefined, runtime:
       try: () => {
         const args = sshArguments(target, homeId)
         const environment = sshEnvironment(runtime.environment ?? process.env)
-        const program =
-          runtime.executable ??
-          (process.env.FLATPAK_ID !== undefined
-            ? '/app/bin/althar-host-ssh'
-            : process.platform === 'win32'
-              ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH/ssh.exe')
-              : '/usr/bin/ssh')
+        const program = sshProgram(runtime.executable)
         if (!isAbsolute(program)) throw unavailable()
         const child = (runtime.spawn ?? nativeSpawn)(program, args, {
           env: environment,

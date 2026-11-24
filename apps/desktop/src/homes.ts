@@ -109,7 +109,18 @@ export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   )
 }
 
+/** A home updated from its window: the release it runs now, where it said. */
+export interface HomeUpdated {
+  readonly state: 'applied'
+  readonly version?: string
+}
+
 export interface HomesHost {
+  /**
+   * The window's home, reached over SSH, updated by its own managed updater: answers once the new release runs, or
+   * fails with a line saying why. The window's connection drops while the home restarts.
+   */
+  readonly update?: () => Promise<HomeUpdated>
   /** A home being set up over SSH, or none; with the calls that start and steer it. */
   readonly setup?: () => Promise<HomeSetup | null>
   readonly setUp?: (target: SshHomeTarget) => Promise<void>
