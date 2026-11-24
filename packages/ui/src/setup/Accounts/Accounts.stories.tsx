@@ -368,6 +368,17 @@ export const UsualSignOut: Story = {
   },
 }
 
+/** The usual folder's account's menu, open: sign in again or sign out, each saying the agent's own command follows. */
+export const UsualMenu: Story = {
+  args: { onSignOut: fn() },
+  decorators: [(Story) => <div style={{ minHeight: 420 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'More for Personal' }))
+    await expect(await page.findByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument()
+  },
+}
+
 /** Every state, and the list where it is narrow: who moves under the name. */
 export const AllStates: Story = {
   render: (args) => (
