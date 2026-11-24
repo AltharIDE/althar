@@ -227,6 +227,31 @@ describe('stop_task', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
+  it.live('reads a stop its parent’s lead made before stops named their task as folded into that task', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const c = yield* coordinator
+      const task = yield* started(c.projectId, 'Pull to reload', 'Work on it. [lead:wait]')
+      const parent = yield* started(c.projectId, 'Phone pairs over Wi-Fi', 'Work on it. [lead:wait]')
+      yield* sql`UPDATE tasks SET parent_task_id = ${parent.taskId} WHERE id = ${task.taskId}`
+      yield* until(standing(task.taskId), (row) => row?.run === 'running')
+      const lead: ToolAccess = { ...c.access, role: 'lead', threadId: parent.threadId, taskId: parent.taskId, sessionId: 'none' }
+      yield* callTool(lead, 'stop_task', { task: task.slug, why: 'the person asked for it here' })
+      // As such a stop was recorded then: by a lead, with neither its task nor where the work went.
+      yield* sql`UPDATE record_events SET payload = json_remove(payload, '$.from')
+        WHERE aggregate_type = 'task' AND aggregate_id = ${task.taskId} AND type = 'task.moved'`
+      const cardOf = Effect.map(Effect.orDie((yield* Queries).board(c.projectId)), (board) =>
+        board.tasks.find((one) => one.taskId === task.taskId),
+      )
+      const card = yield* until(cardOf, (one) => one?.stopped?.into !== undefined)
+      assert.deepInclude(card?.stopped, {
+        who: 'lead',
+        lead: { threadId: parent.threadId, title: 'Phone pairs over Wi-Fi' },
+        into: { threadId: parent.threadId, title: 'Phone pairs over Wi-Fi' },
+      })
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
   it.live('says on the card of a task the person stopped the reason and the fold said after, still as theirs', () =>
     Effect.gen(function* () {
       const c = yield* coordinator

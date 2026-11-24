@@ -38,8 +38,9 @@ const namedTask = (taskId: string) =>
 /**
  * Who stopped a task, why, and where its work went on, as stop_task recorded it (TaskActions): its stops since its run was
  * suspended at `since`, those said again on a task stopped already included: who from the latest, a reason or a fold from
- * the latest that says one. A lead's stop recorded before it named its
- * task names the task that started this one, whose lead it almost always is. Nothing where nothing is on record.
+ * the latest that says one. A lead's stop recorded before stop_task
+ * named its task names the task that started this one, whose lead it almost always is, and reads as folded into it.
+ * Nothing where nothing is on record.
  */
 export const stopSaid = (taskId: string, since: number | null, parentId: string | null) =>
   Effect.gen(function* () {
@@ -57,8 +58,11 @@ export const stopSaid = (taskId: string, since: number | null, parentId: string 
     const last = (key: string) => stops.reduceRight((found, one) => found || said(one.payload, key), '')
     const role = stop === undefined ? '' : said(stop.payload, 'by')
     const why = last('why').trim()
-    const from = (stop === undefined ? '' : said(stop.payload, 'from')) || (role === 'lead' ? parentId : null)
-    const into = last('into')
+    const named = stop === undefined ? '' : said(stop.payload, 'from')
+    const from = named || (role === 'lead' ? parentId : null)
+    // A lead's stop from before stops named their task or where the work went: it was the lead of the task that started
+    // this one, taking the work back into its own task, as leads did then. Its card reads folded into that task.
+    const into = last('into') || (role === 'lead' && named === '' && parentId !== null ? parentId : '')
     const lead = role === 'lead' && from !== null && from !== '' ? yield* namedTask(from) : undefined
     const went = into === '' ? undefined : yield* namedTask(into)
     return {
