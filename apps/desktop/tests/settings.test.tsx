@@ -655,6 +655,26 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
   })
 
+  it('lists the phones paired with the home under Computers, with Pair a phone…', async () => {
+    const phone = {
+      deviceId: 'dev_1a2b3c4d5e6f708192a3b4c5d6e7f809',
+      name: 'Balázs’s iPhone',
+      publicKey: 'A'.repeat(43),
+      role: 'socket' as const,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      revokedAt: null,
+    }
+    const { client } = fakeClient({ pairedDevices: vi.fn(async () => ({ clients: [phone], next: null })) })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    const phones = await within(page).findByRole('region', { name: 'Phones' })
+    expect(await within(phones).findByText('Balázs’s iPhone')).toBeTruthy()
+    expect(within(phones).getByText('Paired Today')).toBeTruthy()
+    await userEvent.click(within(phones).getByRole('button', { name: 'Pair a phone…' }))
+    expect(await screen.findByRole('dialog', { name: /Pair a phone with/ })).toBeTruthy()
+  })
+
   it('lists the home and its workers, opens one out, and takes one out at once once the person says so', async () => {
     const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
     const free = {

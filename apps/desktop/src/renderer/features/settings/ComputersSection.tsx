@@ -2,12 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
-import { AddWorkerDialog, AgentsAtOnce, Computers, fewerOf, Problem, SettingList } from '@althar/ui'
+import { AddWorkerDialog, AgentsAtOnce, Button, Computers, fewerOf, PhoneList, Problem, SettingGroup, SettingList } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
 import { computerWorkerOf, useRemoveWorker, useWorkers } from '../../shared/useWorkers'
 import { useWindowHome } from '../homes/windowHome'
+import { PhonesDialog } from '../phones/PhonesDialog'
+import { phoneOf, usePairedPhones } from '../phones/usePairing'
 import type { StartModel } from '../start/useStart'
 import { EVERY, glanceOf, SLOTS } from '../tabs/useLoad'
 import s from './Settings.module.css'
@@ -26,6 +29,8 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
  * once a home has Althar Cloud; none has yet. It is the window's home it
  * reads: in a window on a Linux home, that home by its name, the commands
  * that add a worker to it there, and Remove only where this connection may.
+ * Under them, the phones paired with the home, each with Remove, and Pair a
+ * phone…, the homes menu's own dialog.
  */
 
 export function ComputersSection({
@@ -54,6 +59,9 @@ export function ComputersSection({
   const removing = useRemoveWorker()
   const atOnce = useAgentsAtOnce()
   const [adding, setAdding] = useState(false)
+  const [pairing, setPairing] = useState(false)
+  const phones = usePairedPhones()
+  const now = useNow(false)
   const here = useWindowHome()
   const names = new Map((start.status?.agents ?? []).map((agent) => [agent.id, agent.name]))
   return (
@@ -91,6 +99,27 @@ export function ComputersSection({
         }
         slots={SLOTS}
       />
+      <SettingGroup
+        title="Phones"
+        headingLevel={2}
+        action={
+          <Button size="small" variant="quiet" onClick={() => setPairing(true)}>
+            Pair a phone…
+          </Button>
+        }
+      >
+        {phones.devices === null ? null : phones.devices.length === 0 ? (
+          <p className={s.quiet}>No phones paired with {here.name} yet.</p>
+        ) : (
+          <PhoneList
+            home={here.name}
+            phones={phones.devices.map((device) => phoneOf(device, now, phones.fresh))}
+            onRemove={phones.remove}
+          />
+        )}
+        {phones.problem !== null && <Problem className={s.failed}>{phones.problem}</Problem>}
+      </SettingGroup>
+      {pairing && <PhonesDialog home={here.name} onClose={() => setPairing(false)} />}
       {removing.failed !== null && <Problem className={s.failed}>{removing.failed}</Problem>}
       {atOnce?.failed === true && <Problem className={s.failed}>{text.failed}</Problem>}
       {adding && (
