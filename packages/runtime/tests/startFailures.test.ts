@@ -1,4 +1,5 @@
-import { AgentExited, AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
+import { AgentExited, AgentRequestFailed, AgentStartFailed, type InProcessAgent } from '@althar/provider-adapters'
+import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Deferred, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -237,31 +238,49 @@ describe('what the agent answered', () => {
 })
 
 describe('the models an agent offers, asked of it', () => {
-  it.live('are asked again, afresh, where the first start of the asking crashed', () => {
-    let asked = 0
-    const app = runtime(
-      ':memory:',
-      {},
-      {
-        each: {
-          'claude-code': {
-            beforeNewSession: async () => {
-              asked += 1
-              if (asked === 1) throw new Error('Claude Code process exited with code 137')
-            },
-          },
-        },
+  it.live('are asked again, afresh, where the first start of the asking crashed: the adapter it was on stopped first', () => {
+    const seen: Array<string> = []
+    let connections = 0
+    let refused = false
+    // One adapter that takes any number of connections and stays alive after refusing a start, as an in-process one does.
+    const app = fakeAgent({
+      beforeNewSession: async () => {
+        seen.push(`start ${connections}`)
+        if (!refused) {
+          refused = true
+          throw new Error('Claude Code process exited with code 137')
+        }
       },
+    }).app
+    const watched: InProcessAgent = {
+      _tag: 'InProcessAgent',
+      app: Object.assign(Object.create(app) as typeof app, {
+        connect: (streams: Parameters<typeof app.connect>[0]) => {
+          const at = ++connections
+          const peer = app.connect(streams)
+          void peer.closed.then(() => seen.push(`closed ${at}`))
+          return peer
+        },
+      }),
+    }
+    const agents = changed((entry) =>
+      entry.definition.id === 'claude-code' ? { ...entry, transport: () => ({ _tag: 'InProcess', agent: watched }) } : entry,
     )
     return Effect.gen(function* () {
       const models = yield* Models
+      const signIns = yield* SignIns
       const known = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
-      assert.strictEqual(asked, 2)
       assert.deepStrictEqual(
         known.find((agent) => agent.agentId === 'claude-code')?.models.map((model) => model.id),
         ['small', 'large'],
       )
-    }).pipe(Effect.provide(app))
+      // The first connection closed before the second start began, and the second closed once the asking was done.
+      assert.deepStrictEqual(seen, ['start 1', 'closed 1', 'start 2', 'closed 2'])
+      // Its sign-in, checked as the asking began, was forgotten before it started again, and nothing read it since.
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      if (account === undefined) throw new Error('Claude Code has no account.')
+      assert.isUndefined(yield* signIns.cached(account))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agents })))
   })
 })
 

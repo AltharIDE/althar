@@ -345,35 +345,43 @@ export class Models extends Context.Service<
                   state: 'launching',
                   launchedAt: yield* timestamp,
                 })}`
+              // One start of the asking, in a scope of its own: closing it stops its adapter, whatever it did.
+              const attempt = Effect.scoped(
+                Effect.gen(function* () {
+                  const { session, images } = yield* Effect.gen(function* () {
+                    const connection = yield* connect({
+                      transport,
+                      // It is never prompted, so it has nothing to ask.
+                      onPermission: () => Effect.succeed({ decision: 'reject' as const }),
+                      permissions: definition.permissions,
+                    })
+                    if (processId !== undefined && connection.process !== undefined)
+                      yield* change('processes', processId, {
+                        pid: connection.process.pid,
+                        processGroupId: connection.process.pid,
+                        osStartedAt: connection.process.osStartedAt ?? null,
+                        environmentDigest: connection.process.environmentDigest,
+                        state: 'running',
+                      })
+                    const session = yield* connection.newSession({
+                      cwd: folder,
+                      mode: definition.modes.reader,
+                      modeOptionId: definition.options.mode,
+                      ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
+                    })
+                    return { session, images: connection.info.images }
+                  }).pipe(Effect.timeout(PROBE_TIMEOUT))
+                  return yield* walk(definition, session, images)
+                }),
+              )
+              // A start that may pass is made once more, afresh, as a session's is (startAgain.ts): the failed one's adapter has
+              // stopped with its scope, and the agent's sign-in is read again, before a new process of its adapter starts.
               const read = yield* Effect.exit(
-                Effect.scoped(
-                  Effect.gen(function* () {
-                    const { session, images } = yield* Effect.gen(function* () {
-                      const connection = yield* connect({
-                        transport,
-                        // It is never prompted, so it has nothing to ask.
-                        onPermission: () => Effect.succeed({ decision: 'reject' as const }),
-                        permissions: definition.permissions,
-                      })
-                      if (processId !== undefined && connection.process !== undefined)
-                        yield* change('processes', processId, {
-                          pid: connection.process.pid,
-                          processGroupId: connection.process.pid,
-                          osStartedAt: connection.process.osStartedAt ?? null,
-                          environmentDigest: connection.process.environmentDigest,
-                          state: 'running',
-                        })
-                      const session = yield* connection.newSession({
-                        cwd: folder,
-                        mode: definition.modes.reader,
-                        modeOptionId: definition.options.mode,
-                        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
-                      })
-                      return { session, images: connection.info.images }
-                      // A start that may pass is made once more, afresh, as a session's is (startAgain.ts): a new process of its adapter.
-                    }).pipe(Effect.retry({ times: 1, while: (error) => startsAgain(Cause.fail(error)) }), Effect.timeout(PROBE_TIMEOUT))
-                    return yield* walk(definition, session, images)
-                  }),
+                attempt.pipe(
+                  Effect.catchIf(
+                    (error) => startsAgain(Cause.fail(error)),
+                    () => Effect.andThen(signIns.forget(definition.id), attempt),
+                  ),
                 ),
               )
               // Its scope closed, so its agent has stopped; one that never started, or failed on the way, isn't known to have.
