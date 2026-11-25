@@ -5351,6 +5351,13 @@ const socketCalls = new Set<string>([
   'CancelAccountSignIn',
 ])
 
+/**
+ * The code hosts a socket sets its home up with, by product and by service: connected, checked or removed there. A
+ * tracker's connection, like a project's tracker, stays with the person's own window.
+ */
+export const SOCKET_CODE_HOSTS: ReadonlySet<string> = new Set<Product>(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'])
+export const SOCKET_CODE_SERVICES: ReadonlySet<string> = new Set<Service>(['github', 'gitlab', 'bitbucket'])
+
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 /** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */
 export const socketCanCall = (tag: string): boolean => tag === 'WatchFrom' || tag === 'WatchAttention' || socketCalls.has(tag)
