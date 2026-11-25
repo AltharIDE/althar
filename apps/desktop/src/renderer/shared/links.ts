@@ -14,5 +14,5 @@ export const REPOSITORY = 'https://github.com/AltharIDE/althar'
 export const ISSUES = `${REPOSITORY}/issues`
 
 /** Where Althar posts what it ships. */
-export const X = 'https://x.com/AltharAiUS'
+export const X = 'https://x.com/GetAlthar'
 export const LINKEDIN = 'https://www.linkedin.com/company/althar-ai/'

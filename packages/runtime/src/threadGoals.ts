@@ -27,6 +27,8 @@ const goalRow = (threadId: string) =>
     const [row] = yield* sql<GoalRow>`
       SELECT g.*, g.generation AS revision,
         (k.state IN ('draft', 'open') AND k.kept_at IS NULL AND p.archived_at IS NULL
+          -- A plan not started yet, counting down or held: the goal waits for it, and its lead takes it up once it starts.
+          AND NOT EXISTS (SELECT 1 FROM task_plans tp WHERE tp.task_id = k.id AND tp.state = 'proposed')
           AND NOT EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
           AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.task_id = k.id AND h.state = 'working')
           AND NOT EXISTS (
@@ -102,7 +104,8 @@ export const controlGoal = (threadId: string, control: GoalControl, lead?: GoalL
             })
         }
         const next = nextGoal(current, control)
-        if (next === current) return { goal: current, changed: false, taskId: task.id, stopping: undefined }
+        if (next === current)
+          return { goal: current, before: current, changed: false, taskId: task.id, projectId: task.projectId, stopping: undefined }
         const stopping = yield* goalRoundInProgress(threadId)
         if (next?.status === 'active' && (task.state === 'abandoned' || task.state === 'done'))
           return yield* new ApiError({ reason: 'Invalid', message: 'Start a goal on an open task.' })
@@ -121,10 +124,28 @@ export const controlGoal = (threadId: string, control: GoalControl, lead?: GoalL
             launch_agent = excluded.launch_agent, launch_model = excluded.launch_model, launch_effort = excluded.launch_effort,
             progress = excluded.progress, detail = excluded.detail`
         yield* touchTask(task.id)
-        return { goal: yield* readGoal(threadId), changed: true, taskId: task.id, stopping }
+        return { goal: yield* readGoal(threadId), before: current, changed: true, taskId: task.id, projectId: task.projectId, stopping }
       }),
     )
   })
+
+/** What the person did to the goal, as Althar's line in the thread says it: the goal is the thread's, not said to the lead. */
+export const goalLine = (control: GoalControl, before: ThreadGoal | null, after: ThreadGoal | null): string => {
+  switch (control.action) {
+    case 'set':
+      return before === null
+        ? `You set a goal: ${after?.objective ?? control.objective.trim()}`
+        : `You replaced the goal: ${after?.objective ?? control.objective.trim()}`
+    case 'edit':
+      return `You changed the goal: ${after?.objective ?? control.objective.trim()}`
+    case 'pause':
+      return 'You paused the goal.'
+    case 'resume':
+      return 'You resumed the goal.'
+    case 'clear':
+      return 'You cleared the goal.'
+  }
+}
 
 /** Stop invalidates both work waiting for dispatch and the running turn's permission to report a result. */
 export const pauseGoal = (threadId: string, detail: string | null = null) =>

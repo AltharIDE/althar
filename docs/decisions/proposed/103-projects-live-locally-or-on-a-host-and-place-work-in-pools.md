@@ -622,6 +622,8 @@ outcome after an interrupted attempt. The
 [operator guide](../../../apps/host/README.md#native-worker-diagnostic)
 covers certificate and journal setup.
 
+**Workers added from the window, 23 Nov 2026:** a personal worker is added from Settings › Computers over SSH or with a one-time code; the home is its own certificate authority, signs the worker's own key and opens its worker port on demand; the worker runs from the signed release as a systemd user service that updates itself, offers its agents for any project the home grants, and says which are signed in. Projects are granted in the window. [Foundations](../foundations.md#remote-connections-and-native-workers) records the trust model; [the host README](../../../apps/host/README.md#add-a-worker) how it runs.
+
 Client enrollment, self-hosted projects and managed worker capacity can
 advance independently where they share the existing home and execution
 contract. The first paid release tests a managed worker from an existing

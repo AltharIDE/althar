@@ -9,7 +9,11 @@ import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Code } from '../../primitives/Code/Code'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
+import { CheckList } from '../../primitives/CheckList/CheckList'
 import { Dialog } from '../../primitives/Dialog/Dialog'
+import { Field } from '../../primitives/Field/Field'
+import { Problem } from '../../primitives/Problem/Problem'
+import { Spinner } from '../../primitives/Spinner/Spinner'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
 import cc from '../ControlCenter/ControlCenter.module.css'
@@ -54,10 +58,19 @@ export interface ComputerWorker {
   /** What it has free, formatted: 12.4 GB; null while it hasn't said. */
   memoryFree: string | null
   diskFree: string | null
-  /** The agents it can run, by name, each with its mark where it has one. */
-  agents: readonly { name: string; mark?: Brand | undefined }[]
+  /**
+   * The agents it can run, by name, each with its mark where it has one; `signedIn` where it says, as a worker its home
+   * set up does, and `id` to sign one in by.
+   */
+  agents: readonly { id?: string | undefined; name: string; mark?: Brand | undefined; signedIn?: boolean | undefined }[]
   /** The projects it may work on, by name. */
   projects: readonly string[]
+  /** Those projects, by id, where the window picks them (`ComputersProps.onProjects`). */
+  projectIds?: readonly string[] | undefined
+  /** Its home set it up: its projects are picked in the window, and its agents signed in from it. */
+  managed?: boolean | undefined
+  /** It can be reached over SSH from here: its agents sign in from the window. */
+  reachable?: boolean | undefined
   /**
    * Gone offline during a task: it still holds that task's workspace, and keeps it until it reconnects and says the work
    * stopped, so it can't be taken out before then.
@@ -96,6 +109,23 @@ export interface ComputersText {
   facts: { computer: string; agents: string; projects: string; id: string; memory: string; workers: string }
   noAgents: string
   noProjects: string
+  /** Over the projects to pick, while none is. */
+  pickProjects: string
+  signedIn: string
+  notSignedIn: string
+  signIn: string
+  signInHere: string
+  signInSteps: {
+    code: (page: string) => string
+    copyCode: string
+    openPage: string
+    browser: string
+    paste: string
+    pasteHint: string
+    send: string
+    cancel: string
+    starting: string
+  }
   /** How many of the home's workers are connected. */
   connected: (connected: number, all: number) => string
   noWorkers: string
@@ -104,7 +134,7 @@ export interface ComputersText {
   removeLater: string
   /** Under Remove, for one gone offline during a task. */
   removeStranded: string
-  /** Where this connection can't take workers out, as a window on a home over SSH can't: who can. */
+  /** Where this connection can't take workers out, as a window on a device paired over the network can't: who can. */
   removeElsewhere: (home: string) => string
   removeTitle: (name: string) => string
   removeNote: (home: string) => string
@@ -151,21 +181,36 @@ export const computersText: ComputersText = {
   facts: { computer: 'Computer', agents: 'Agents', projects: 'Projects', id: 'Worker ID', memory: 'Memory', workers: 'Workers' },
   noAgents: 'None it has said',
   noProjects: 'None yet',
+  pickProjects: 'Pick the projects it works on. It takes no tasks until one is picked.',
+  signedIn: 'Signed in',
+  notSignedIn: 'Not signed in',
+  signIn: 'Sign in',
+  signInHere: 'Sign in on the worker itself: this window can’t reach it over SSH.',
+  signInSteps: {
+    code: (page) => `Enter this code at ${page}`,
+    copyCode: 'Copy code',
+    openPage: 'Open the page',
+    browser: 'Approve it in your browser. Where the page shows a code, paste it here.',
+    paste: 'Code from the page',
+    pasteHint: 'Paste the code the page shows',
+    send: 'Continue',
+    cancel: 'Cancel',
+    starting: 'Starting its sign-in…',
+  },
   connected: (connected, all) => `${connected} of ${all} connected`,
   noWorkers: 'None',
   openTask: 'Open its task',
   remove: (name) => `Remove ${name}`,
   removeLater: 'You can remove it once its task finishes.',
   removeStranded: 'It went offline during a task. Start it again so it can stop that work, then remove it.',
-  removeElsewhere: (home) => `Over SSH, this window can’t remove workers. A device paired with ${home} can.`,
+  removeElsewhere: (home) => `From a paired device, this window can’t remove workers. A window on ${home} itself, or over SSH, can.`,
   removeTitle: (name) => `Remove ${name}?`,
-  removeNote: (home) =>
-    `It gets no more tasks from ${home}, and its certificate isn’t accepted again. To bring it back, enroll a new certificate.`,
+  removeNote: (home) => `It gets no more tasks from ${home}, and its key isn’t accepted again. To bring it back, add it again.`,
   removeConfirm: 'Remove',
   cancel: 'Cancel',
   addTitle: (home) => `Add a worker to ${home}`,
   addNote:
-    'A worker is a Linux computer this home runs tasks on, one at a time. For now, you set one up with certificates and Althar’s command line.',
+    'A worker is a Linux computer this home runs tasks on, one at a time. This home takes workers by its own certificates: set one up with Althar’s command line.',
   steps: {
     listen: 'Let this home take workers, then restart Althar.',
     enroll: 'Enroll the worker’s certificate for each project it may work on.',
@@ -280,10 +325,22 @@ export interface ComputersProps {
   onAdd: () => void
   /** Takes a worker out of the home, once the person says so. */
   onRemove: (id: string) => void
-  /** Whether this connection may take workers out: a window on a home over SSH may not. */
+  /** Whether this connection may take workers out: a window on a device paired over the network may not. */
   canRemove?: boolean | undefined
   /** Opens the task a worker runs. */
   onTask?: ((id: string) => void) | undefined
+  /** The home's projects, for a worker's projects to be picked from. */
+  allProjects?: readonly { id: string; name: string }[] | undefined
+  /** The projects a worker works on, as the person picks them; none where this connection can't. */
+  onProjects?: ((id: string, projectIds: readonly string[]) => void) | undefined
+  /** Signs one of a worker's agents in, on the worker; none where this window can't. */
+  onSignIn?: ((id: string, agent: string) => void) | undefined
+  /** An agent's sign-in under way on a worker. */
+  signingIn?: WorkerSignInView | null | undefined
+  onPaste?: ((code: string) => void) | undefined
+  onCancelSignIn?: (() => void) | undefined
+  /** Opens a sign-in's page in the person's browser. */
+  onOpenLink?: ((url: string) => void) | undefined
   /** The home's own settings, opened out: its Agents at once. */
   homeSettings?: ReactNode
   /** How many readings the home's trace has room for. */
@@ -303,6 +360,13 @@ export function Computers({
   onRemove,
   canRemove = true,
   onTask,
+  allProjects,
+  onProjects,
+  onSignIn,
+  signingIn,
+  onPaste,
+  onCancelSignIn,
+  onOpenLink,
   homeSettings,
   slots,
   text,
@@ -325,6 +389,13 @@ export function Computers({
           onBack={() => onOpen(null)}
           onRemove={canRemove ? () => onRemove(worker.id) : null}
           onTask={onTask}
+          allProjects={allProjects}
+          onProjects={onProjects === undefined ? undefined : (ids) => onProjects(worker.id, ids)}
+          onSignIn={onSignIn === undefined ? undefined : (agent) => onSignIn(worker.id, agent)}
+          signingIn={signingIn?.workerId === worker.id ? signingIn : null}
+          onPaste={onPaste}
+          onCancelSignIn={onCancelSignIn}
+          onOpenLink={onOpenLink}
           t={t}
         />
       </div>
@@ -437,6 +508,13 @@ function WorkerSheet({
   onBack,
   onRemove,
   onTask,
+  allProjects,
+  onProjects,
+  onSignIn,
+  signingIn,
+  onPaste,
+  onCancelSignIn,
+  onOpenLink,
   t,
 }: {
   worker: ComputerWorker
@@ -445,8 +523,17 @@ function WorkerSheet({
   /** Null where this connection can't take workers out. */
   onRemove: (() => void) | null
   onTask: ((id: string) => void) | undefined
+  allProjects: readonly { id: string; name: string }[] | undefined
+  onProjects: ((projectIds: readonly string[]) => void) | undefined
+  onSignIn: ((agent: string) => void) | undefined
+  signingIn: WorkerSignInView | null
+  onPaste: ((code: string) => void) | undefined
+  onCancelSignIn: (() => void) | undefined
+  onOpenLink: ((url: string) => void) | undefined
   t: ComputersText
 }) {
+  // Its projects are picked here where its home set it up and this connection may; else named, as its operator gave them.
+  const picking = worker.managed === true && onProjects !== undefined && allProjects !== undefined && allProjects.length > 0
   const [asking, setAsking] = useState(false)
   const { task } = worker
   // A worker at work keeps its task: taking it out under it would leave the task without its checkout. So does one gone
@@ -473,6 +560,16 @@ function WorkerSheet({
               <SheetFact label={t.facts.agents}>
                 {worker.agents.length === 0 ? (
                   t.noAgents
+                ) : worker.agents.some((agent) => agent.signedIn !== undefined) ? (
+                  <Agents
+                    worker={worker}
+                    onSignIn={onSignIn}
+                    signingIn={signingIn}
+                    onPaste={onPaste}
+                    onCancel={onCancelSignIn}
+                    onOpenLink={onOpenLink}
+                    t={t}
+                  />
                 ) : (
                   <span className={s.marks}>
                     {worker.agents.map((agent) => (
@@ -484,7 +581,24 @@ function WorkerSheet({
                   </span>
                 )}
               </SheetFact>
-              <SheetFact label={t.facts.projects}>{worker.projects.length === 0 ? t.noProjects : worker.projects.join(', ')}</SheetFact>
+              <SheetFact label={t.facts.projects}>
+                {picking ? (
+                  <div className={s.agentRows}>
+                    {(worker.projectIds ?? []).length === 0 && <span className={s.addressHint}>{t.pickProjects}</span>}
+                    <CheckList
+                      label={t.facts.projects}
+                      className={s.projectsPick}
+                      items={allProjects.map((project) => ({ id: project.id, label: project.name }))}
+                      value={worker.projectIds ?? []}
+                      onChange={onProjects}
+                    />
+                  </div>
+                ) : worker.projects.length === 0 ? (
+                  t.noProjects
+                ) : (
+                  worker.projects.join(', ')
+                )}
+              </SheetFact>
               <SheetFact label={t.facts.id}>
                 <span className={s.inline}>
                   <Code className={s.id}>{worker.id}</Code>
@@ -526,6 +640,139 @@ function WorkerSheet({
   )
 }
 
+/** An agent's sign-in on a worker, as its steps come. */
+export interface WorkerSignInView {
+  workerId: string
+  agent: string
+  step:
+    | { kind: 'starting' }
+    | { kind: 'code'; code: string; page: string }
+    | { kind: 'browser'; link: string | null; paste: boolean; refused?: string | null | undefined }
+    | { kind: 'failed'; message: string }
+}
+
+/** A worker's agents, each signed in or not, with Sign in; the sign-in under way under its agent. */
+function Agents({
+  worker,
+  onSignIn,
+  signingIn,
+  onPaste,
+  onCancel,
+  onOpenLink,
+  t,
+}: {
+  worker: ComputerWorker
+  onSignIn: ((agent: string) => void) | undefined
+  signingIn: WorkerSignInView | null
+  onPaste: ((code: string) => void) | undefined
+  onCancel: (() => void) | undefined
+  onOpenLink: ((url: string) => void) | undefined
+  t: ComputersText
+}) {
+  const [pasted, setPasted] = useState('')
+  const canSignIn = onSignIn !== undefined && worker.reachable === true && worker.state !== 'offline'
+  return (
+    <div className={s.agentRows}>
+      {worker.agents.map((agent) => {
+        const signing = signingIn !== null && agent.id !== undefined && signingIn.agent === agent.id ? signingIn : null
+        return (
+          <div key={agent.name} className={s.agentRows}>
+            <span className={s.agentRow}>
+              <span className={s.inline}>
+                {agent.mark !== undefined && <BrandMark brand={agent.mark} size={13} />}
+                {agent.name}
+              </span>
+              {agent.signedIn === true ? (
+                <span className={s.agentState}>{t.signedIn}</span>
+              ) : canSignIn && agent.id !== undefined && signing === null ? (
+                <LinkButton onClick={() => onSignIn(agent.id ?? '')}>{t.signIn}</LinkButton>
+              ) : (
+                <span className={s.agentState}>{t.notSignedIn}</span>
+              )}
+            </span>
+            {signing !== null && (
+              <div className={s.signInStep}>
+                {signing.step.kind === 'starting' && (
+                  <span className={s.making}>
+                    <Spinner size="small" />
+                    {t.signInSteps.starting}
+                  </span>
+                )}
+                {signing.step.kind === 'code' && (
+                  <>
+                    <span className={s.addressHint}>{t.signInSteps.code(signing.step.page.replace(/^https:\/\//u, ''))}</span>
+                    <span className={s.signInRow}>
+                      <span className={s.signInCode}>{signing.step.code}</span>
+                      <CopyButton value={signing.step.code} ghost />
+                      <LinkButton onClick={() => signing.step.kind === 'code' && onOpenLink?.(signing.step.page)}>
+                        {t.signInSteps.openPage}
+                      </LinkButton>
+                    </span>
+                  </>
+                )}
+                {signing.step.kind === 'browser' && (
+                  <>
+                    <span className={s.addressHint}>{t.signInSteps.browser}</span>
+                    {signing.step.link !== null && (
+                      <span className={s.signInRow}>
+                        <LinkButton
+                          onClick={() => signing.step.kind === 'browser' && signing.step.link !== null && onOpenLink?.(signing.step.link)}
+                        >
+                          {t.signInSteps.openPage}
+                        </LinkButton>
+                      </span>
+                    )}
+                    {signing.step.paste && onPaste !== undefined && (
+                      <form
+                        className={s.pasteRow}
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          if (pasted.trim() === '') return
+                          onPaste(pasted.trim())
+                          setPasted('')
+                        }}
+                      >
+                        <Field
+                          aria-label={t.signInSteps.paste}
+                          placeholder={t.signInSteps.pasteHint}
+                          value={pasted}
+                          onChange={(event) => setPasted(event.target.value)}
+                          className={s.address}
+                        />
+                        <Button type="submit" disabled={pasted.trim() === ''}>
+                          {t.signInSteps.send}
+                        </Button>
+                      </form>
+                    )}
+                    {signing.step.refused != null && (
+                      <Problem as="span" size="small">
+                        {signing.step.refused}
+                      </Problem>
+                    )}
+                  </>
+                )}
+                {signing.step.kind === 'failed' && (
+                  <Problem as="span" size="small">
+                    {signing.step.message}
+                  </Problem>
+                )}
+                {signing.step.kind !== 'failed' && onCancel !== undefined && (
+                  <span className={s.signInRow}>
+                    <LinkButton onClick={onCancel}>{t.signInSteps.cancel}</LinkButton>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+      {onSignIn !== undefined && worker.reachable !== true && worker.agents.some((agent) => agent.signedIn === false) && (
+        <span className={s.addressHint}>{t.signInHere}</span>
+      )}
+    </div>
+  )
+}
+
 /** A step of adding a worker: what to do, and the line to run for it, to copy. */
 function Step({ n, words, command }: { n: number; words: string; command: string }) {
   return (
@@ -542,7 +789,7 @@ function Step({ n, words, command }: { n: number; words: string; command: string
   )
 }
 
-export interface AddWorkerDialogProps {
+export interface AddWorkerByHandDialogProps {
   /** The home it joins, by name. */
   home: string
   /** Whether the home takes workers already: without, the first step lets it. */
@@ -553,8 +800,11 @@ export interface AddWorkerDialogProps {
   text?: Partial<ComputersText> | undefined
 }
 
-/** Add a worker: what it takes, a step a line to run, and that it shows in Computers once it connects. */
-export function AddWorkerDialog({ home, enabled, standalone = false, onClose, text }: AddWorkerDialogProps) {
+/**
+ * Add a worker to a home that takes workers only by its operator's certificates: what it takes, a step a line to run,
+ * and that it shows in Computers once it connects. A home that is its own authority has `AddWorkerDialog` instead.
+ */
+export function AddWorkerByHandDialog({ home, enabled, standalone = false, onClose, text }: AddWorkerByHandDialogProps) {
   const t = { ...computersText, ...text }
   const listen = standalone
     ? { words: t.hostSteps.listen, command: t.hostCommands.listen }

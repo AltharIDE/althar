@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { userEvent } from 'storybook/test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Board, BoardColumn, BoardDivider, boardText } from '../src/board/Board/Board'
@@ -149,6 +150,31 @@ describe('the board’s lanes', () => {
     const pin = render(<Icon name="pin" size={11} />).container.querySelector('svg')!
     expect(container.querySelector('header > svg')?.innerHTML).toBe(pin.innerHTML)
     expect(screen.getByRole('button', { name: 'Kept 0', pressed: true })).toBeInTheDocument()
+  })
+
+  it('offers its orders from its head while it holds something, and keeps the button in sight while it isn’t in its own', async () => {
+    const onChange = vi.fn()
+    const order = (value: string) => ({
+      label: 'Order',
+      value,
+      onChange,
+      options: [
+        { value: 'oldest', label: 'Oldest first' },
+        { value: 'status', label: 'Status' },
+      ],
+    })
+    const { rerender } = render(<BoardColumn lane={BoardLane.Running} count={0} order={order('oldest')} />)
+    // Empty, there is nothing to sort.
+    expect(screen.queryByRole('button', { name: 'Sort Running' })).toBeNull()
+    rerender(<BoardColumn lane={BoardLane.Running} count={2} order={order('oldest')} />)
+    const sort = screen.getByRole('button', { name: 'Sort Running' })
+    expect(sort.className).not.toMatch(/sorted/)
+    await userEvent.click(sort)
+    expect(screen.getByRole('menuitemradio', { name: 'Oldest first' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Status' }))
+    expect(onChange).toHaveBeenCalledWith('status')
+    rerender(<BoardColumn lane={BoardLane.Running} count={2} order={order('status')} />)
+    expect(screen.getByRole('button', { name: 'Sort Running' }).className).toMatch(/sorted/)
   })
 })
 

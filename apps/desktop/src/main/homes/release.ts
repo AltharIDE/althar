@@ -8,10 +8,15 @@ import { createHash, createPublicKey, verify } from 'node:crypto'
  */
 
 /**
- * The public halves of the keys host releases are signed with (Ed25519, SPKI PEM). None is pinned yet: no host
- * release has been published, and the key's public half goes here with the first one.
+ * The public halves of the keys host releases are signed with (Ed25519, SPKI PEM). The first is the key host-v0.1.0 was
+ * signed with (keyId 22735d0dc71860e22ab718b88997dcb829d6a46dd5d1a7b219b0f36b99464700, the SHA-256 of its DER).
  */
-export const HOST_RELEASE_KEYS: ReadonlyArray<string> = []
+export const HOST_RELEASE_KEYS: ReadonlyArray<string> = [
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA4IfWro8ZWZWyiGUIqFKQ425o4UKX6QdGIy30aKM7fKY=
+-----END PUBLIC KEY-----
+`,
+]
 const REPOSITORY = 'AltharIDE/althar'
 const MAX_MANIFEST_BYTES = 65_536
 const MAX_ARCHIVE_BYTES = 1_073_741_824
@@ -148,4 +153,39 @@ export const findRelease = async (arch: string, source: ReleaseSource, signal: A
   }
   const bytes = await read(fetcher, await manifestAt(), MAX_MANIFEST_BYTES, signal)
   return authenticateRelease(bytes, source.keys, arch, source.now?.() ?? Date.now())
+}
+
+const versionOf = (tag: string) => /^host-v(\d{1,9}\.\d{1,9}\.\d{1,9})$/.exec(tag)?.[1]
+const later = (left: string, right: string) => {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0)
+  return false
+}
+
+/**
+ * The newest host release published, by its version (null where there's none), for the window to offer an older home's
+ * update by: whether one would help, before it's run. Nothing of it is trusted beyond that, so it needs no pinned key:
+ * the home's own updater authenticates what it takes. Where a release of your own is tried (`manifest`), its version,
+ * read from it unchecked.
+ */
+export const newestHostVersion = async (source: ReleaseSource, signal: AbortSignal): Promise<string | null> => {
+  const fetcher = source.fetch ?? fetch
+  if (source.manifest !== undefined) {
+    const envelope = json(await read(fetcher, source.manifest, MAX_MANIFEST_BYTES, signal))
+    const version = json(decode(envelope.payload, MAX_MANIFEST_BYTES)).version
+    if (typeof version !== 'string' || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(version)) throw rejected()
+    return version
+  }
+  const listed: unknown = JSON.parse(
+    new TextDecoder().decode(await read(fetcher, `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, 4_194_304, signal)),
+  )
+  let newest: string | null = null
+  for (const release of Array.isArray(listed) ? listed : []) {
+    if (typeof release !== 'object' || release === null) continue
+    const { draft, prerelease, tag_name: tag } = release as Record<string, unknown>
+    const version = draft === true || prerelease === true || typeof tag !== 'string' ? undefined : versionOf(tag)
+    if (version !== undefined && (newest === null || later(version, newest))) newest = version
+  }
+  return newest
 }

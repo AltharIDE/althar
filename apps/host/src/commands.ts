@@ -37,6 +37,8 @@ export interface HostIO extends ServiceCommands {
   readonly notifySocket?: string | undefined
   readonly updateLocked?: string | undefined
   readonly releaseSigningKey?: string | undefined
+  /** The native worker binary a release carries, as the release workflow built it. */
+  readonly workerBinary?: string | undefined
   readonly updates?: ControllerDependencies & SetupDependencies
 }
 
@@ -204,7 +206,12 @@ ${readable}`,
       case 'package-release': {
         const result = yield* update(() =>
           packageRelease(options, {
-            source: io.updates?.source ?? { entry: io.entry, node: io.node, version: HOST_VERSION },
+            source: io.updates?.source ?? {
+              entry: io.entry,
+              node: io.node,
+              version: HOST_VERSION,
+              ...(io.workerBinary === undefined || io.workerBinary === '' ? {} : { worker: io.workerBinary }),
+            },
             signingKey: io.releaseSigningKey,
             ...(io.updates?.assemble === undefined ? {} : { assemble: io.updates.assemble }),
             ...(io.updates?.execute === undefined ? {} : { execute: io.updates.execute }),

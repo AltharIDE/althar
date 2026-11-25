@@ -325,6 +325,16 @@ describe('the API', () => {
       assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
       yield* send('/goal pause')
       assert.strictEqual((yield* goal)[0]?.status, 'paused')
+      // Each change the person made is said in the thread as Althar's line, in order.
+      const lines = (yield* client.GetThread({ threadId: task.threadId, limit: 200 })).items.flatMap((item) =>
+        item.kind === 'notice' && item.content.source === 'runtime' && item.content.title.includes('goal') ? [item.content.title] : [],
+      )
+      assert.deepStrictEqual(lines, [
+        'You set a goal: Keep checking the result',
+        'You cleared the goal.',
+        'You set a goal: Verify the next result',
+        'You paused the goal.',
+      ])
     }).pipe(Effect.scoped),
   )
 
@@ -1404,6 +1414,32 @@ describe('accounts, through the API', () => {
           })
         }),
       ),
+  )
+
+  it.live('signs the usual folder’s account out, which stays, and says the line to run where the agent didn’t', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const codex = (yield* client.Status({})).agents.find((agent) => agent.id === 'codex')
+        assert.isTrue(codex?.signsOut)
+        const main = codex?.accounts[0]?.id ?? ''
+        yield* client.SignOutAccount({ commandId: commandId(), accountId: main })
+        assert.deepStrictEqual(
+          (yield* client.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts.map((account) => account.id),
+          [main],
+        )
+        process.env.FAKE_SIGN_OUT_FAILS = '1'
+        try {
+          const failed = yield* Effect.flip(client.SignOutAccount({ commandId: commandId(), accountId: main }))
+          assert.deepStrictEqual(
+            [failed.reason, failed.message],
+            ['SignOutFailed', "Couldn't sign this account out. Try again, or run fake-logout in Terminal."],
+          )
+        } finally {
+          delete process.env.FAKE_SIGN_OUT_FAILS
+        }
+      }),
+    ),
   )
 })
 

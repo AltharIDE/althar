@@ -1092,6 +1092,58 @@ it('says why an older home couldn’t update, with Try again and its command fol
   expect(homes.reconnect).not.toHaveBeenCalled()
 })
 
+it('doesn’t offer an older home an update no release would help: says none is out yet, and Check again looks anew', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  // The only host release out is 0.1.0, from before projects were made from a window; then 0.2.0 comes out.
+  const release = vi.fn().mockResolvedValueOnce({ newest: '0.1.0' }).mockResolvedValueOnce({ newest: '0.2.0' })
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => ({ state: 'applied' })),
+    release,
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  expect(await screen.findByText('No newer release yet')).not.toBeNull()
+  expect(screen.getByText('runner-1 runs an Althar host from before projects could be made from here.')).not.toBeNull()
+  expect(screen.getByText('The next Althar host release brings it. Once it’s out, update runner-1 here.')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'How to update it' })).toBeNull()
+  expect(release).toHaveBeenCalledWith(false)
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  // Looked for afresh, past main's few minutes; out now, so it's offered.
+  expect(release).toHaveBeenLastCalledWith(true)
+  const update = await screen.findByRole('button', { name: 'Update runner-1' })
+  // Looking again isn't reconnecting: nothing on the home changed.
+  expect(homes.reconnect).not.toHaveBeenCalled()
+  await userEvent.click(update)
+  expect(homes.update).toHaveBeenCalledOnce()
+})
+
+it('offers the update where the newest release can’t be found out, which says itself how it went', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'althar:homes-update': Error: runner-1’s DNS didn’t answer for api.github.com.")
+    }),
+    release: vi.fn(async () => {
+      throw new Error('Couldn’t find out the newest host release.')
+    }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('runner-1’s DNS didn’t answer for api.github.com.')).not.toBeNull()
+})
+
 it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {
   window.localStorage.clear()
   const { client } = fakeClient({

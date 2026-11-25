@@ -482,9 +482,11 @@ describe('Althar’s settings, in the window', () => {
   })
 
   it('wait for the bar, which comes with the first project', async () => {
-    windowAt('/', [])
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(screen.queryByRole('button', { name: /^Althar settings/ })).toBeNull()
+    // Until the projects are read the bar is drawn, gear and all; it goes once they're read as none, however long that takes.
+    const { client } = windowAt('/', [])
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalled())
+    await vi.mocked(client.listProjects).mock.results[0]?.value
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Althar settings/ })).toBeNull())
     comma()
     comma(true)
     expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull()

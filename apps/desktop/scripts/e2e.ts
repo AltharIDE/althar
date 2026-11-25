@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+
+import { BUS_CONFIG, chooseDisplay, type Display, displayEnv, onPath, startXvfb, type Xvfb, XVFB_PACKAGES } from './display.ts'
 
 /*
  * Builds the app and runs the end-to-end tests (any arguments go to
@@ -13,7 +15,10 @@ import { setTimeout as sleep } from 'node:timers/promises'
  * (ALTHAR_E2E_SLOTS, 3 unless set), waiting while all are taken, or while
  * another run in the same worktree has one. They are kept in /tmp rather
  * than the temporary folder, which a sandboxed agent may have of its own
- * (ALTHAR_E2E_LOCKS moves them). CI runs alone and takes none.
+ * (ALTHAR_E2E_LOCKS moves them). CI runs alone and takes none. On Linux,
+ * once it has its slot, it runs on a display of its own that no one sees,
+ * Xvfb or Chromium's headless one, never the person's desktop
+ * (scripts/display.ts), and stops it as it ends.
  */
 
 interface Owner {
@@ -99,11 +104,19 @@ const release = (slot: string | undefined) => {
 
 let child: ReturnType<typeof spawn> | undefined
 let slot: string | undefined
+let screen: Xvfb | undefined
+let busFolder: string | undefined
+const dropBus = () => busFolder !== undefined && rmSync(busFolder, { recursive: true, force: true })
 
-const run = (command: string, args: ReadonlyArray<string>) =>
+// Off Windows, what the run starts gets a process group of its own, which a signal to the run ends whole and the run waits
+// out before it gives up its slot: dbus-run-session, which wraps Playwright on a virtual display, passes no signal on, so
+// signalling only the child would leave Playwright, its workers and the app running in the worktree another run takes.
+const grouped = process.platform !== 'win32'
+
+const run = (command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = process.env) =>
   new Promise<number>((resolve) => {
     // Windows finds bun and playwright as .cmd files, which only a shell runs.
-    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32' })
+    child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', env, detached: grouped })
     child.once('exit', (code, signal) => resolve(code ?? (signal === null ? 1 : 128)))
     child.once('error', (error) => {
       console.error(`Could not start ${command}: ${error.message}`)
@@ -111,18 +124,105 @@ const run = (command: string, args: ReadonlyArray<string>) =>
     })
   })
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const)
-  process.on(signal, () => {
+/** Whether anything of the group the run started is still running. */
+const groupAlive = (pid: number) => {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Sends `signal` to all the run started and waits until it is gone, ending it outright after `grace` ms. */
+const endGroup = async (signal: NodeJS.Signals, grace = 10_000) => {
+  const pid = child?.pid
+  if (pid === undefined) return
+  if (!grouped) {
     child?.kill(signal)
+    return
+  }
+  const send = (what: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, what)
+    } catch {
+      // Gone already.
+    }
+  }
+  send(signal)
+  for (const end = Date.now() + grace; groupAlive(pid) && Date.now() < end;) await sleep(100)
+  if (groupAlive(pid)) send('SIGKILL')
+  for (const end = Date.now() + 2_000; groupAlive(pid) && Date.now() < end;) await sleep(50)
+}
+
+let ending = false
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.on(signal, async () => {
+    // A second Ctrl-C while it ends ends it at once.
+    const again = ending
+    ending = true
+    await endGroup(again ? 'SIGKILL' : signal, again ? 0 : undefined)
+    screen?.stop()
+    dropBus()
     release(slot)
     process.exit(130)
   })
+// However the run ends, its display goes with it.
+process.on('exit', () => {
+  screen?.stop()
+  dropBus()
+})
+
+// On Linux, a display of the run's own that no one sees (scripts/display.ts): never the person's desktop.
+let display: Display = chooseDisplay(process.platform, process.env, (command) => onPath(command))
+if (display.kind === 'fail') {
+  console.error(display.message)
+  process.exit(1)
+}
 
 if (process.env.CI === undefined) slot = await take()
 try {
   const built = await run('bun', ['run', 'build'])
-  // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
-  process.exitCode = built === 0 ? await run('bunx', ['playwright', 'test', ...process.argv.slice(2)]) : built
+  if (built !== 0) process.exitCode = built
+  else {
+    let x: { display: string; authority: string } | undefined
+    if (display.kind === 'xvfb') {
+      // Kept from the moment it is spawned, so a signal while it starts stops it too.
+      screen = startXvfb(display.program)
+      try {
+        x = { display: await screen.ready, authority: screen.authority }
+        console.warn(`Running on Xvfb at ${x.display}, which no one sees.`)
+      } catch (error) {
+        screen.stop()
+        screen = undefined
+        if (display.asked) throw error
+        console.warn(`${(error as Error).message}\nRunning on Chromium's headless display instead.`)
+        display = { kind: 'headless' }
+      }
+    } else if (display.kind === 'headless')
+      console.warn(
+        `Running on Chromium's headless display, which no one sees: no Xvfb here (to run as CI does, install it: ${XVFB_PACKAGES}).`,
+      )
+    const virtual = display.kind === 'xvfb' || display.kind === 'headless'
+    // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
+    const playwright = ['bunx', 'playwright', 'test', ...process.argv.slice(2)]
+    // On a virtual display, on a session bus of the run's own too, where there is one to start: the person's never.
+    const bus = virtual ? onPath('dbus-run-session') : undefined
+    if (bus !== undefined) {
+      busFolder = mkdtempSync(join(tmpdir(), 'althar-bus-'))
+      writeFileSync(join(busFolder, 'session.conf'), BUS_CONFIG)
+    }
+    const [command = 'bunx', ...args] =
+      busFolder === undefined ? playwright : [bus ?? '', `--config-file=${join(busFolder, 'session.conf')}`, '--', ...playwright]
+    process.exitCode = await run(command, args, virtual ? displayEnv(display, process.env, x) : process.env)
+  }
+} catch (error) {
+  console.error((error as Error).message)
+  process.exitCode = 1
 } finally {
+  // What Playwright left behind (a worker, the app) goes before the slot does.
+  await endGroup('SIGTERM')
+  screen?.stop()
+  dropBus()
   release(slot)
 }

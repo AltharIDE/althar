@@ -429,6 +429,8 @@ export const AgentStatus = Schema.Struct({
   accounts: Schema.Array(AccountStatus),
   /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
   addsAccounts: Schema.Boolean,
+  /** Its own command signs an account out, so each can be signed out from Althar, its usual folder's included. */
+  signsOut: Schema.optional(Schema.Boolean),
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
@@ -2543,6 +2545,8 @@ export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.Stri
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
+  /** As the person added it; none for one enrolled by command, or from an older home. */
+  name: Schema.optionalKey(Schema.String),
   providers: Schema.Array(Schema.String),
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
@@ -2559,6 +2563,10 @@ export type WorkerCapacity = typeof WorkerCapacity.Type
  */
 export const HomeWorker = Schema.Struct({
   workerId: Schema.String,
+  /** As the person added it: the computer's name or its SSH address; none for one enrolled by command, or from an older home. */
+  name: Schema.optionalKey(Schema.String),
+  /** The SSH address it was set up at, where it was: a window signs its agents in there. */
+  ssh: Schema.optionalKey(Schema.String),
   connected: Schema.Boolean,
   /** Running a task; or, offline, still holding the workspace of the task it went offline during, until it says it stopped. */
   busy: Schema.Boolean,
@@ -2566,14 +2574,48 @@ export const HomeWorker = Schema.Struct({
   capacity: Schema.optionalKey(WorkerCapacity),
   /** The agents it can run, by id; empty while it is offline. */
   providers: Schema.Array(Schema.String),
+  /**
+   * Of `providers`, those signed in on it, as it said when it connected; none where it doesn't say, as one set up by hand
+   * or an older worker doesn't.
+   */
+  signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The Althar release it runs, where it says. */
+  release: Schema.optionalKey(Schema.String),
+  /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
+  anyProject: Schema.optionalKey(Schema.Boolean),
   projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
   /** The home's task it runs now, or went offline during, where it holds one. */
   task: Schema.NullOr(Schema.Struct({ taskId: Schema.String, threadId: Schema.String, title: Schema.String, project: Schema.String })),
 })
 export type HomeWorker = typeof HomeWorker.Type
 
-/** The home's workers: whether it takes workers at all (it is set up to listen for them), and each it enrolled. */
-export const HomeWorkers = Schema.Struct({ enabled: Schema.Boolean, workers: Schema.Array(HomeWorker) })
+/**
+ * The home's workers: whether it takes workers at all (it is set up to listen for them), each it enrolled, and whether
+ * it adds them itself (`adds`): it is its own authority, and signs a worker's key as the window asks. A home that only
+ * takes workers by its operator's certificates, or an older one, doesn't.
+ */
+export const HomeWorkers = Schema.Struct({
+  enabled: Schema.Boolean,
+  workers: Schema.Array(HomeWorker),
+  adds: Schema.optionalKey(Schema.Boolean),
+})
+
+/** A worker the home signed, as the window hands it to the worker it sets up: all it needs to reach the home and prove who it is. */
+export const WorkerGrant = Schema.Struct({
+  homeId: Schema.String,
+  workerId: Schema.String,
+  /** The home's own authority's certificate, PEM: all the worker trusts. */
+  authority: Schema.String,
+  /** The worker's certificate, PEM, signed for its own key. */
+  certificate: Schema.String,
+  /** The name the home's certificate carries, wherever the worker reaches it. */
+  serverName: Schema.String,
+  port: Schema.Int,
+  /** Where the worker may reach the home, `host:port`, best first. */
+  addresses: Schema.Array(Schema.String),
+})
+export type WorkerGrant = typeof WorkerGrant.Type
+const WorkerId = Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))
 export type HomeWorkers = typeof HomeWorkers.Type
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
@@ -2632,6 +2674,10 @@ export const Holder = Schema.Struct({
 })
 export type Holder = typeof Holder.Type
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
+export type PlacesWhy = typeof PlacesWhy.Type
+
 /**
  * Work waiting for a place among the agents this machine runs at once
  * (ADR-032), as it says why: how many tasks' agents are busy, which hold the
@@ -2644,6 +2690,11 @@ export const Queued = Schema.Struct({
   holders: Schema.optional(Schema.Array(Holder)),
   configured: Schema.optional(Schema.Int),
   offline: Schema.optional(Schema.Boolean),
+  /**
+   * Held back for now, and why: with the person's number it would have a place, but this computer's memory or CPU lets
+   * fewer agents work (`atOnce` < `configured`). It starts as that frees up, or at once where the person starts it anyway.
+   */
+  held: Schema.optional(PlacesWhy),
 })
 export const WorkPlaces = Schema.Struct({
   ...Queued.fields,
@@ -2653,10 +2704,6 @@ export const WorkPlaces = Schema.Struct({
 })
 export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
-
-/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
-export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
-export type PlacesWhy = typeof PlacesWhy.Type
 
 /**
  * The agents the home runs at once (ADR-032) as they stand, for the window's
@@ -2904,6 +2951,26 @@ export const CardIssue = Schema.Struct({
 })
 export type CardIssue = typeof CardIssue.Type
 
+/** Another task, as a stopped task's card names it: by its title, and its thread, which opens it. */
+export const TaskNamed = Schema.Struct({ threadId: Schema.String, title: Schema.String })
+export type TaskNamed = typeof TaskNamed.Type
+
+/**
+ * What stopped a task's lead, and when. `by` is what its lead's turn ended in: the person declining a call or interrupting it,
+ * else Althar, or null where nothing says. `who` is who stopped it, where it is on record: the person, the coordinator, or a
+ * lead (another task's, named in `lead`); with `why`, the reason they gave, and `into`, the task its work went on in, where it
+ * was folded into another. A task folded into another is settled in all but name: Resume still carries it on.
+ */
+export const TaskStopped = Schema.Struct({
+  by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])),
+  at: Schema.NullOr(Schema.String),
+  who: Schema.optional(Schema.Literals(['person', 'coordinator', 'lead'])),
+  lead: Schema.optional(TaskNamed),
+  why: Schema.optional(Schema.String),
+  into: Schema.optional(TaskNamed),
+})
+export type TaskStopped = typeof TaskStopped.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2917,11 +2984,7 @@ export const TaskCard = Schema.Struct({
    * `at` where nothing says when. Only a task an agent worked on is stopped, or one drafted whose plan never came: one whose
    * lead is on its way is under way.
    */
-  stopped: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-    ),
-  ),
+  stopped: Schema.optional(Schema.NullOr(TaskStopped)),
   /**
    * Stopped, with its open pull request ready to merge as it stands (not a draft, no conflict, every check passed): the
    * person can accept it all the same, next to Carry on. Absent otherwise.
@@ -4409,11 +4472,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
     /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
-    stopped: Schema.optional(
-      Schema.NullOr(
-        Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-      ),
-    ),
+    stopped: Schema.optional(Schema.NullOr(TaskStopped)),
     /** Stopped, with its open pull request ready to merge as it stands: it can be accepted all the same, as its card says. */
     mergeable: Schema.optional(Schema.Literal(true)),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
@@ -5218,6 +5277,10 @@ const socketCalls = new Set<string>([
   'GetLoad',
   'GetPlaces',
   'GetWorkers',
+  'AddWorker',
+  'CreateWorkerCode',
+  'SetWorkerProjects',
+  'RemoveWorker',
   'SearchTasks',
   'GetSearchDocuments',
   'GetSearchFiles',
@@ -6049,6 +6112,12 @@ const WorkApi = RpcGroup.make(
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   /**
+   * Starts what of a task waits for a place now, whatever is free, as the person's own start, which never waits (ADR-037):
+   * Start anyway, on a task held back while this computer lets fewer agents work than the number. False, and nothing
+   * changes, where nothing of it waits any more.
+   */
+  command('StartAnyway', { taskId: Schema.String }, Schema.Boolean),
+  /**
    * Stops the turn the thread's agent is in. Between turns, where a turn Althar asked of a task's lead or reviewer waits for a
    * place up next, that turn is let go instead: it leaves Up next, and its agent reads what it would have said with its next.
    */
@@ -6343,6 +6412,11 @@ const WorkApi = RpcGroup.make(
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
   /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
   command('RemoveAccount', { accountId: Schema.String, anyway: Schema.optional(Schema.Boolean) }, Schema.Void),
+  /**
+   * Signs an account out with its agent's own tool, and keeps it, to sign in again: the usual folder's too, which signs the
+   * agent's own command out with it. Not for an agent without a command that signs out (AgentStatus' `signsOut`).
+   */
+  command('SignOutAccount', { accountId: Schema.String }, Schema.Void),
   /** Puts an agent's accounts in the person's order: the first that can runs work first. */
   command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
   /** Folders account switchers keep the agent's accounts in, not added yet. */
@@ -6539,7 +6613,29 @@ const WorkApi = RpcGroup.make(
   /** The workers this home enrolled, connected or not, and what each runs and reported. */
   call('GetWorkers', {}, HomeWorkers),
   /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
-  command('RemoveWorker', { workerId: Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u)) }, Schema.Void),
+  command('RemoveWorker', { workerId: WorkerId }, Schema.Void),
+  /**
+   * Adds a worker: the home signs the worker's own P-256 public key (SPKI DER, base64url) as its certificate, enrolls it
+   * by that key under the name the person knows it by, and opens its worker port where it hasn't yet. Again for the same
+   * key, the same worker. The home's operator or the person's own client only, as pairing a device is.
+   */
+  command(
+    'AddWorker',
+    {
+      publicKey: Schema.String.check(Schema.isMaxLength(512)),
+      name: Schema.String.check(Schema.isMaxLength(80)),
+      ssh: Schema.optional(Schema.String.check(Schema.isMaxLength(255))),
+    },
+    WorkerGrant,
+  ),
+  /** A one-time code a machine without SSH adds itself with, good for ten minutes and one worker. Not a command: no receipt keeps the code. */
+  call(
+    'CreateWorkerCode',
+    { name: Schema.String.check(Schema.isMaxLength(80)) },
+    Schema.Struct({ code: Schema.String, expiresAt: Schema.Number }),
+  ),
+  /** The projects a worker may work on, as the person picks them: one taken off stops its run there. */
+  command('SetWorkerProjects', { workerId: WorkerId, projectIds: Schema.Array(Schema.String).check(Schema.isMaxLength(256)) }, Schema.Void),
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */

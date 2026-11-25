@@ -360,4 +360,3 @@ export const homeController = ({
     },
   }
 }
-export type HomeController = ReturnType<typeof homeController>

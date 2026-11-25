@@ -123,7 +123,7 @@ export const betterOf = (release: Release): readonly string[] =>
 export const FOLLOW: readonly FollowLink[] = [
   { kind: 'github', href: REPOSITORY, handle: 'AltharIDE/althar' },
   { kind: 'discord', href: COMMUNITY, handle: 'Althar’s server' },
-  { kind: 'x', href: X, handle: '@AltharAiUS' },
+  { kind: 'x', href: X, handle: '@GetAlthar' },
   { kind: 'linkedin', href: LINKEDIN, handle: 'althar-ai' },
 ]
 

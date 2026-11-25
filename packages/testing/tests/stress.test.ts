@@ -14,8 +14,17 @@ describe('the stress plan', () => {
     const parts = [{ dir: 'packages/runtime', files: ['tests/limits.test.ts'] }]
     expect(plan(changed).linux).toEqual({ parts, runs: 3, seconds: 900 })
     expect(plan(changed, 'nightly').linux).toEqual({ parts, runs: 20, seconds: 2400 })
-    expect(plan(changed, 'nightly').windows).toEqual({ parts, runs: 10 })
+    expect(plan(changed, 'nightly').windows).toEqual({ parts, runs: 10, seconds: 2400 })
     expect(plan(changed).specs.files).toEqual([])
+  })
+
+  it('gives each platform a whole number of runs for its time, Windows too, where a plan without seconds ran NaN', () => {
+    const planned = plan(['packages/runtime/tests/limits.test.ts', 'packages/ui/tests/Menu.test.tsx'], 'nightly')
+    for (const { parts, runs, seconds } of [planned.linux, planned.windows]) {
+      const more = moreRuns(runs, 30, seconds / parts.length)
+      expect(Number.isInteger(more)).toBe(true)
+      expect(more).toBeGreaterThanOrEqual(2)
+    }
   })
 
   it('runs each of many changed tests fewer times at night, never fewer than three on Linux and two on Windows', () => {
