@@ -59,20 +59,17 @@ export const takesKeep = (task: { readonly phase: string; readonly state?: strin
 /** What the window says where Done or Keep for later was answered and the task didn't move, by why it didn't. */
 export const unmovedText = {
   pullOpen: 'Its pull request is open, so it waits there: merge or close it first.',
-  atWork: 'Its lead took it up again meanwhile, so it stays as it was.',
   waits: 'Something of it waits on you, so it stays as it was.',
   other: 'Althar couldn’t move it, so it stays as it was.',
 }
 
-/** Why a task Done or Keep for later didn't move, as it reads now: its pull request open, its lead at work, a call on the person. */
+/**
+ * Why a task Done or Keep for later didn't move, as it reads now, where that says so: its pull request open, or a call of it
+ * waiting on the person. Under way reads the same for its lead at work, its turn queued, a pull request opening or checks
+ * running, so it, and anything else, says only that it stays.
+ */
 export const unmovedWhy = (task: { readonly phase: string; readonly pullOpen: boolean }): string =>
-  task.pullOpen
-    ? unmovedText.pullOpen
-    : task.phase === 'running'
-      ? unmovedText.atWork
-      : task.phase === 'waiting'
-        ? unmovedText.waits
-        : unmovedText.other
+  task.pullOpen ? unmovedText.pullOpen : task.phase === 'waiting' ? unmovedText.waits : unmovedText.other
 
 /**
  * What a finished lead's report leaves to the person, in a line: the last line of it that asks, else its last line. Null where

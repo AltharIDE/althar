@@ -51,15 +51,16 @@ test('a task whose commits wait for Ship keeps for later, and Ship is there when
     await settled.getByRole('button', { name: 'Kept 1' }).click()
     await expect(settled.getByText(title)).toBeVisible()
     await expect(work.getByRole('region', { name: /^Needs you/ }).getByText(title)).toHaveCount(0)
-    // Read again after the runtime's answer, it stays: no line that it came back.
+    // When it was kept shows only once a read says it is, after the runtime's answer: it stays, with no line that it came back.
     await expect(settled.getByText('kept just now')).toBeVisible()
-    await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'))
     await expect(settled.getByRole('alert')).toHaveCount(0)
     await expect(settled.getByText(/opened meanwhile|stays as it was/)).toHaveCount(0)
     await settled.screenshot({ path: 'test-results/kept-held-kept.png', animations: 'disabled', scale: 'css' })
 
-    // Opened from Kept, its held commit waits as it did: Ship is in its header.
+    // Opened from Kept, it reads kept, with no Keep for later to press, and its held commit waits as it did: Ship is in its header.
     await settled.getByRole('button', { name: title }).click()
+    await expect(header.getByText('Kept for later', { exact: true })).toBeVisible()
+    await expect(header.getByRole('button', { name: 'Keep for later' })).toHaveCount(0)
     await expect(header.getByRole('button', { name: /^Ship/ })).toBeVisible()
     await header.screenshot({ path: 'test-results/kept-held-header.png', animations: 'disabled', scale: 'css' })
   } finally {

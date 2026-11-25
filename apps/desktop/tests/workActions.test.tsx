@@ -91,6 +91,12 @@ describe('Done and Keep for later, from a card', () => {
     expect(view.result.current.failed['t1']?.message).toBe(unmovedText.other)
   })
 
+  it('brings a card back that reads under way, saying only that it stays: under way says nothing of why', async () => {
+    const view = actions(async () => [{ ...ready, phase: 'running' }])
+    await act(() => view.result.current.keep('t1'))
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.other)
+  })
+
   it('brings a kept card back where its pull request is open, saying so rather than that something opened', async () => {
     const view = actions(async () => [{ ...ready, change: change() }])
     await act(() => view.result.current.keep('t1'))
