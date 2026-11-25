@@ -149,7 +149,10 @@ export function SettingsPage({
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
-  const catalog = canCall(useServices().client, 'GetAgentCatalog')
+  const { client } = useServices()
+  const catalog = canCall(client, 'GetAgentCatalog')
+  // An older home doesn't let this window sign its agents in: a link to an agent's sign-in opens its tab, with its update.
+  const signsIn = canCall(client, 'StartAccountSignIn')
   // Here, and not in the agents' section, so a sign-in lasts from one section to another.
   const accounts = useAccountSignIn(start)
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
@@ -160,7 +163,7 @@ export function SettingsPage({
   if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
-  const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
+  const wanted = signsIn && start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {

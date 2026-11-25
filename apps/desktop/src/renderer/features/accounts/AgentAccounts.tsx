@@ -137,14 +137,16 @@ export function AgentAccounts({
   // The account made for a sign-in under way is that sign-in's line until it is named.
   const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
   const again = flow?.again == null ? undefined : accounts.find((account) => account.id === flow.again)
-  const node = flow && (
-    <AgentSignIn
-      agent={agent}
-      signIn={signIn}
-      position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
-      {...(again === undefined ? {} : { account: { name: again.name } })}
-    />
-  )
+  // Shown only, it has no sign-in to show either.
+  const node =
+    readOnly || flow === null ? null : (
+      <AgentSignIn
+        agent={agent}
+        signIn={signIn}
+        position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
+        {...(again === undefined ? {} : { account: { name: again.name } })}
+      />
+    )
   return (
     <Accounts
       agent={agent.name}

@@ -818,6 +818,19 @@ describe('the Settings tab', () => {
     )
     expect(await screen.findByText('Update studio to sign its agents in from here.')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Sign in|Add an account/ })).toBeNull()
+    cleanup()
+    // A task's link to an agent's sign-in opens its tab with the update, and starts no sign-in the home would refuse.
+    function SignInLink() {
+      return <SettingsPage start={useStart({ recheck: true })} section="agents" onSection={() => undefined} signIn="codex" />
+    }
+    const linked = fakeClient({ connection: { ...studio.connection, calls: older } })
+    withServices(<SignInLink />, linked.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('Update studio to sign its agents in from here.')).toBeTruthy()
+    await waitFor(() => expect(linked.client.status).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(screen.queryByRole('group', { name: /^Signing/ })).toBeNull()
+    expect(linked.client.addAccount).not.toHaveBeenCalled()
+    expect(linked.client.startAccountSignIn).not.toHaveBeenCalled()
   })
 
   it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {
