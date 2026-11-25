@@ -2651,12 +2651,54 @@ export const handlers = apiLayer(
       GetLoad: () => api(machine.now),
       GetPlaces: () => api(busy.places),
       GetWorkers: () => api(homeWorkers(config.workers)),
+      // Adding, changing and removing workers is the home's operator's or the person's own client's, as pairing a device
+      // is: a device paired over the network can't, nor can an agent's socket on another device.
       RemoveWorker: ({ commandId, workerId }) =>
-        once(
-          commandId,
-          config.workers?.revoke === undefined
-            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
-            : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.revoke === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+              : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+          ),
+        ),
+      AddWorker: ({ commandId, publicKey, name, ssh }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.admin === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+              : config.workers.admin
+                  .add({ publicKey: Buffer.from(publicKey, 'base64url'), name: name.trim(), ssh: ssh?.trim() || null })
+                  .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+          ),
+        ),
+      CreateWorkerCode: ({ name }) =>
+        connectionAdmin(
+          config.workers?.admin === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+            : config.workers.admin.code(name).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+        ),
+      SetWorkerProjects: ({ commandId, workerId, projectIds }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            Effect.gen(function* () {
+              const admin = config.workers?.admin
+              if (admin === undefined)
+                return yield* new ApiError({ reason: 'WorkersOff', message: 'This home’s workers get their projects from its operator.' })
+              const wanted = [...new Set(projectIds)]
+              const known =
+                wanted.length === 0
+                  ? []
+                  : yield* sql<{ id: string }>`SELECT id FROM projects WHERE id IN ${sql.in(wanted)}`.pipe(Effect.orDie)
+              if (known.length !== wanted.length)
+                return yield* new ApiError({ reason: 'NotFound', message: 'That project isn’t on this home.' })
+              return yield* admin
+                .assign(workerId, wanted)
+                .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotChanged', message })))
+            }),
+          ),
         ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),

@@ -162,6 +162,12 @@ const capacityOf = (reported: AgentWorkerCapacity | undefined): WorkerCapacity |
 export interface AvailableAgentWorker {
   readonly workerId: string
   readonly capacity?: WorkerCapacity
+  /** Of its providers, those signed in on it, where it says. */
+  readonly signedIn?: ReadonlyArray<string>
+  /** The Althar release it runs, where it says. */
+  readonly release?: string
+  /** It offers its agents for any project the home grants it. */
+  readonly anyProject?: boolean
   readonly capabilities: ReadonlyArray<
     Pick<AgentWorkerCapability, 'projectId' | 'providerId'> & Partial<Pick<AgentWorkerCapability, 'workspaceSets'>>
   >
@@ -170,6 +176,8 @@ export interface AvailableAgentWorker {
 
 interface Slot {
   readonly workerId: string
+  /** What it said of itself; who is signed in, again with its heartbeats. */
+  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject'>
   readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
@@ -219,8 +227,13 @@ interface Run {
 const encode = (payload: AgentHomeFrame['payload']): Buffer =>
   Buffer.from(toBinary(AgentHomeFrameSchema, create(AgentHomeFrameSchema, { payload })))
 
+/** A capability for any project the home grants: a worker its home set up offers its agents so, and the grants decide. */
+export const ANY_PROJECT = '*'
+const covers = (capability: Pick<AgentWorkerCapability, 'projectId'>, projectId: string): boolean =>
+  capability.projectId === projectId || capability.projectId === ANY_PROJECT
+
 const supports = (slot: Slot, projectId: string, providerId: string): boolean =>
-  slot.capabilities.some((item) => item.projectId === projectId && item.providerId === providerId)
+  slot.capabilities.some((item) => covers(item, projectId) && item.providerId === providerId)
 
 export const MAX_WORKER_REPOSITORIES = 8
 export const MAX_WORKER_SET_BYTES = 2 * MAX_WORKER_BUNDLE_BYTES
@@ -479,7 +492,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         transfer.abort()
         accept?.resolve(false)
       }
-      const capability = slot.capabilities.find((cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId)
+      const capability = slot.capabilities.find((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId)
       const workerId = slot.workerId
       const managed = makeManagedCommands(
         id,
@@ -488,7 +501,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         send,
         (message) => fail(status.INVALID_ARGUMENT, message),
         (providerId, withSkills, withCheckout) => {
-          const cap = slot?.capabilities.find((each) => each.projectId === placement.projectId && each.providerId === providerId)
+          const cap = slot?.capabilities.find((each) => covers(each, placement.projectId) && each.providerId === providerId)
           if (cap === undefined) return 'agent'
           // What it lacks is what a newer worker reports it can do.
           return cap.helperAgents && (!withSkills || cap.helperSkillFiles) && (!withCheckout || cap.helperCheckouts) ? undefined : 'update'
@@ -629,7 +642,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
             capabilities.length === 0 ||
             capabilities.length > MAX_CAPABILITIES ||
             distinct.size !== capabilities.length ||
-            capabilities.some(({ projectId, providerId }) => !validWorkerProtocolId(projectId, 'proj_') || !PROVIDER_ID.test(providerId))
+            capabilities.some(
+              ({ projectId, providerId }) =>
+                !(validWorkerProtocolId(projectId, 'proj_') || (payload.value.anyProject && projectId === ANY_PROJECT)) ||
+                !PROVIDER_ID.test(providerId),
+            ) ||
+            payload.value.signedIn.length > MAX_CAPABILITIES ||
+            payload.value.signedIn.some((providerId) => !PROVIDER_ID.test(providerId)) ||
+            payload.value.release.length > 64
           )
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent capabilities.')
           if (slots.has(workerId)) return fail(status.ALREADY_EXISTS, 'This worker already has an agent stream.')
@@ -640,8 +660,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
           accountReserved = payload.value.capacity?.accountReserved ?? false
           reserveBeforeTransfer = payload.value.reserveBeforeTransfer
           sampledAt = performance.now()
+          const hello = payload.value
           slot = {
             workerId,
+            said: {
+              ...(hello.reportsSignIn ? { signedIn: [...new Set(hello.signedIn)] } : {}),
+              ...(hello.release === '' ? {} : { release: hello.release }),
+              ...(hello.anyProject ? { anyProject: true } : {}),
+            },
             capabilities,
             start,
             openTools,
@@ -674,6 +700,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         if (payload.case === 'heartbeat') {
           if (payload.value.sequence !== sequence + 1) return fail(status.INVALID_ARGUMENT, 'The worker heartbeat was out of order.')
           sequence = payload.value.sequence
+          if (payload.value.reportsSignIn && payload.value.signedIn.every((providerId) => PROVIDER_ID.test(providerId)))
+            slot.said = { ...slot.said, signedIn: [...new Set(payload.value.signedIn)].slice(0, MAX_CAPABILITIES) }
           if (payload.value.capacity !== undefined) {
             capacity = capacityOf(payload.value.capacity)
             accountReserved = payload.value.capacity.accountReserved
@@ -904,7 +932,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
           const reported = capacity()
           return {
             workerId,
-            capabilities: capabilities.filter((item) => item.projectId === projectId),
+            // One for any project is, here, for this one.
+            capabilities: capabilities.filter((item) => covers(item, projectId)).map((item) => ({ ...item, projectId })),
             busy: busy(),
             ...(reported === undefined ? {} : { capacity: reported }),
           }
@@ -912,10 +941,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         .filter((item) => item.capabilities.length > 0),
     /** Every worker connected now, whatever it may work on: for the home's own list of its workers, not for placing work. */
     connected: (): ReadonlyArray<AvailableAgentWorker> =>
-      [...slots.values()].map(({ workerId, capabilities, busy, capacity }) => {
+      [...slots.values()].map(({ workerId, capabilities, busy, capacity, said }) => {
         const reported = capacity()
         return {
           workerId,
+          ...said,
           capabilities: capabilities.map(({ projectId, providerId }) => ({ projectId, providerId })),
           busy: busy(),
           ...(reported === undefined ? {} : { capacity: reported }),
@@ -939,24 +969,18 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId))
           throw new Error('The worker needs a valid, bounded set of Git repositories.')
         if (
-          !slot.capabilities.some(
-            (cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId && cap.workspaceSets,
-          )
+          !slot.capabilities.some((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId && cap.workspaceSets)
         )
           throw new Error('Update this worker to run a task with several repositories.')
       }
       if (skills !== undefined) {
-        if (
-          !slot.capabilities.some(
-            (cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId && cap.skillFiles,
-          )
-        )
+        if (!slot.capabilities.some((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId && cap.skillFiles))
           throw new Error('Update this worker to load the selected skills.')
       }
       if (
         options.setup !== undefined &&
         !slot.capabilities.some(
-          (entry) => entry.projectId === placement.projectId && entry.providerId === placement.providerId && entry.workspaceSetup,
+          (entry) => covers(entry, placement.projectId) && entry.providerId === placement.providerId && entry.workspaceSetup,
         )
       )
         throw new Error('Update this worker to run the project’s setup in its task checkout.')

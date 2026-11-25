@@ -18,6 +18,7 @@ import { findRelease, HOST_RELEASE_KEYS, newestHostVersion } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
+import { startWorkerSetups } from './workerMain'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -152,6 +153,14 @@ export const startHomeConnections = ({
   const setups = homeSetups(system, (setup) => {
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+  })
+  // Workers added over SSH from Settings › Computers, from the same releases.
+  const workers = startWorkerSetups({
+    system,
+    tools: source.tools,
+    mine,
+    // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
+    reachesOwnHome: (id) => controller.state(id).current.kind !== 'https',
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
@@ -464,6 +473,7 @@ export const startHomeConnections = ({
     previewPort,
     stopAll: async () => {
       controller.stopping()
+      workers.stop()
       quitting.abort()
       await setups.stop()
       await keyChanges

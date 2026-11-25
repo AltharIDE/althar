@@ -21,6 +21,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         home_ca_pem: &home_ca,
         worker_certificate_pem: &certificate,
         worker_private_key_pem: &key,
+        server_name: None,
     };
     let first = probe_home(address, enrollment()).await?;
     let second = probe_home(address, enrollment()).await?;

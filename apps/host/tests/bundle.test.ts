@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { execFile } from 'node:child_process'
@@ -99,6 +99,13 @@ describe('locked host dependency bundles', () => {
       recaptured,
     )
     expect(readFileSync(join(recaptured, 'LICENSE'), 'utf8')).toBe('Host license')
+    // Without a worker, none; with one, the release carries it, for a worker to install from the same release.
+    expect(existsSync(join(destination, 'althar-worker'))).toBe(false)
+    writeFileSync(join(root, 'althar-worker'), 'worker binary')
+    const withWorker = join(temporary(), 'release')
+    await assembleBundle({ entry, node, version: '1.2.3', worker: join(root, 'althar-worker') }, withWorker)
+    expect(readFileSync(join(withWorker, 'althar-worker'), 'utf8')).toBe('worker binary')
+    expect(statSync(join(withWorker, 'althar-worker')).mode & 0o777).toBe(0o700)
     await expect(assembleBundle({ entry, node, version: '1.2.3' }, destination)).rejects.toThrow()
     await expect(
       assembleBundle({ entry, node, version: '1.2.3', license: join(root, 'missing-license') }, join(temporary(), 'release')),

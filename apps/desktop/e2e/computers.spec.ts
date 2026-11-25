@@ -15,7 +15,7 @@ import { launch, openFirstProject, sizeWindow, still } from './support'
 
 /*
  * Settings › Computers in the built app, on a home that takes no workers yet: the home with its live readings and
- * its agents, opened out to its Agents at once, and Add a worker, which starts with letting the home take workers.
+ * its agents, opened out to its Agents at once, and Add a worker: an SSH address, or a one-time code and its line.
  * Then a home that takes them, with a worker enrolled and connected as `althar workers` and the protocol do: in the
  * load popover, opened in Computers, offline, and removed for good. Each shot is kept in test-results/computers.
  */
@@ -62,16 +62,16 @@ test('lists the home with its readings, opens it to its Agents at once, and says
     await shoot(page, 'home')
     await main.getByRole('button', { name: 'Computers' }).click()
 
-    // Adding one: this home takes none yet, so letting it comes first.
+    // Adding one: its SSH address, as for a home, or a one-time code for a machine without SSH.
     await main.getByRole('button', { name: /^Add a worker/ }).click()
     const dialog = page.getByRole('dialog', { name: `Add a worker to ${THIS}` })
-    await expect(dialog).toContainText('Let this home take workers, then restart Althar.')
-    await expect(dialog).toContainText('althar workers enroll')
-    // The worker is left running, with its agents: a one-off check wouldn't connect it.
-    await expect(dialog).toContainText('--agent-config ~/althar-worker/agents.conf --watch')
+    await expect(dialog.getByLabel('SSH address')).toBeFocused()
+    await expect(dialog.getByRole('button', { name: 'Add worker' })).toBeDisabled()
     await still(page)
     await dialog.screenshot({ path: 'test-results/computers/add.png', scale: 'css', animations: 'disabled' })
-    await dialog.getByRole('button', { name: 'Done' }).click()
+    await dialog.getByRole('radio', { name: 'With a code' }).click()
+    await expect(dialog.getByText(/althar-worker\.sh \| sh -s -- join 'althar-worker1\./)).toBeVisible()
+    await dialog.getByRole('button', { name: 'Close' }).click()
     await expect(dialog).toHaveCount(0)
   } finally {
     await electronApp.close()
@@ -138,6 +138,10 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
     const name = `Linux worker ${workerId.slice(-6)}`
     const hello: Parameters<ReturnType<typeof testAgentWorker>['hello']>[0] = {
       $typeName: 'althar.worker.v1.AgentWorkerHello',
+      anyProject: false,
+      reportsSignIn: false,
+      signedIn: [],
+      release: '',
       reserveBeforeTransfer: false,
       version: 1,
       workerId,

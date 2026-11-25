@@ -1585,6 +1585,9 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   disconnect: 'person: connections and their sign-ins',
   // althar/computers
   removeWorker: "person: taking a worker out of the home revokes its certificate, the person's (althar/computers says so)",
+  addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
+  createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
+  setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import {
   configureWorkers as configure,
   listenWorkers as listen,
+  openWorkers as open,
   workerCertificate as certificate,
   WorkerHomeError,
   withWorkerStore,
@@ -27,6 +28,9 @@ export const configureWorkers = (options: WorkerHomePaths, config: WorkerConfigu
   configure(options, config).pipe(Effect.mapError(workerFailure))
 
 export const listenWorkers = (options: WorkerHomePaths, homeId: string) => listen(options, homeId).pipe(Effect.mapError(workerFailure))
+
+/** Opens the home's worker port now, as its own authority: the person added a worker from a window. */
+export const openWorkers = (options: WorkerHomePaths, homeId: string) => open(options, homeId).pipe(Effect.mapError(workerFailure))
 
 export const workerCertificate = async (path: string) => {
   try {

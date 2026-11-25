@@ -1199,6 +1199,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getPlaces: vi.fn(async () => ({ busy: 2, configured: 4, atOnce: 4, why: null, waiting: 0 })),
     getWorkers: vi.fn(async () => ({ enabled: false, workers: [] })),
     removeWorker: vi.fn(async () => undefined),
+    addWorker: vi.fn(async () => {
+      throw new Error('No worker to add here.')
+    }),
+    createWorkerCode: vi.fn(async () => ({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 })),
+    setWorkerProjects: vi.fn(async () => undefined),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),

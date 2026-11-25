@@ -331,10 +331,15 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot }, (outcome) => {
-    parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
-  })
-  const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
+  const workerHome = yield* workersForProfile(
+    { profile, worktrees: options.worktreeRoot },
+    (outcome) => {
+      parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+    },
+    // Opened once the person adds a worker: one more of the runtime's own ports, which no canvas may reach (ADR-104).
+    (port) => parent.postMessage({ type: 'listening', ports: [port] }),
+  )
+  const workerOptions = { workers: workerHome.execution }
   const context = yield* startup(
     'services',
     Layer.build(
@@ -371,12 +376,9 @@ const program = Effect.gen(function* () {
     threads: number
   }>`SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM threads) AS threads`
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
-  const workerPort =
-    workerHome === undefined
-      ? undefined
-      : yield* workerHome
-          .listen(Context.get(context, Instance).homeId)
-          .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
+  const workerPort = yield* workerHome
+    .listen(Context.get(context, Instance).homeId)
+    .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
   // Phones reach This Mac's home once the person lets them in (Settings › Computers), and again after a restart.
   yield* phonesIn(profile, context as never).pipe(Effect.catch((error) => Effect.logWarning('Phones could not be let in', String(error))))
   isReady(context)
