@@ -111,6 +111,13 @@ export class Plans extends Context.Service<
      */
     hold(planId: string, actorId: ActorId): Effect.Effect<boolean, unknown>
     /**
+     * Where a plan not yet begun runs (ADR-103), chosen as it counts down or is held: a worker by its id, any free worker
+     * (`auto`), or null for the home. Its countdown starts it there, as Start does without a worker of its own. One counting
+     * down that the chosen place can't take now is held, so it waits for the person rather than failing as its time comes.
+     * Whether it was held.
+     */
+    place(planId: string, runsOn: string | null, actorId: ActorId): Effect.Effect<boolean, unknown>
+    /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
      * first step waits for a place among the agents at work here (ADR-032).
@@ -207,6 +214,8 @@ export class Plans extends Context.Service<
           reviewAfterMerge?: boolean
           smallChange?: boolean
           workerId?: string
+          /** Where it runs, chosen before it starts (`place`): a worker's id or `auto`; absent for the home. */
+          runsOn?: string
         }
 
       /** Whether a plan still counts down. */
@@ -324,9 +333,11 @@ export class Plans extends Context.Service<
        * Starts a proposed plan: when the person says, or, `due`, when its countdown has ended, it isn't held, and nothing it
        * waits for is open (waits.ts). The person's own start doesn't wait.
        */
-      const placeOn = (workerId: string | undefined) => (plan: PlanRow) =>
+      const placeOn = (asked: string | undefined) => (plan: PlanRow) =>
         Effect.gen(function* () {
           const parameters = parametersOf(plan)
+          // A start that names no place runs where the person chose as it counted down or was held.
+          const workerId = asked ?? parameters.runsOn
           if (workerId === undefined) {
             // A plan brought back to Hold may still hold its previous acceptance's placement.
             const { workerId: previous, ...atHome } = parameters
@@ -360,7 +371,7 @@ export class Plans extends Context.Service<
               SELECT p.id FROM task_plans p WHERE p.id = ${planId} AND ${sql.unsafe(blockedIn('p'))}`
             if (blocked !== undefined) return null
           }
-          const accepted = yield* transition(
+          const accepting = transition(
             planId,
             (plan) => (due ? counting(plan) && plan.startsAt !== null && plan.startsAt <= at : plan.state === 'proposed'),
             () => ({ state: 'accepted', startsAt: null, decidedAt: at }),
@@ -368,6 +379,19 @@ export class Plans extends Context.Service<
             actorId,
             placeOn(workerId),
           )
+          // Due on a worker that can't take it now, it is held for the person, its card saying why, rather than tried again.
+          const accepted = yield* due
+            ? accepting.pipe(
+                Effect.catch((error) =>
+                  error instanceof ApiError
+                    ? Effect.as(
+                        transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId),
+                        false,
+                      )
+                    : Effect.fail(error),
+                ),
+              )
+            : accepting
           if (!accepted && workerId !== undefined)
             return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
           const plan = yield* load(planId)
@@ -433,6 +457,29 @@ export class Plans extends Context.Service<
           return true
         })
 
+      const place = (planId: string, runsOn: string | null, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const placed = yield* transition(
+            planId,
+            (plan) => plan.state === 'proposed',
+            (plan) => {
+              const { runsOn: _was, ...rest } = parametersOf(plan)
+              return { parameters: JSON.stringify(runsOn === null ? rest : { ...rest, runsOn }) }
+            },
+            'task_plan.changed',
+            actorId,
+          )
+          if (!placed)
+            return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
+          const plan = yield* load(planId)
+          if (runsOn === null || !counting(plan)) return false
+          const fits = yield* placeOn(runsOn)(plan).pipe(
+            Effect.as(true),
+            Effect.catch((error) => (error instanceof ApiError ? Effect.succeed(false) : Effect.fail(error))),
+          )
+          return fits ? false : yield* transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId)
+        })
+
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
       const tries = backoff()
 
@@ -486,6 +533,7 @@ export class Plans extends Context.Service<
         propose,
         start: (planId, actorId, workerId) => provide(start(planId, actorId, false, workerId)),
         hold: (planId, actorId) => provide(hold(planId, actorId)),
+        place: (planId, runsOn, actorId) => provide(place(planId, runsOn, actorId)),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
@@ -509,6 +557,7 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                   ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
                   ...(before.workerId === undefined ? {} : { workerId: before.workerId }),
+                  ...(before.runsOn === undefined ? {} : { runsOn: before.runsOn }),
                   // The preset it was planned from: its card names it while its parts still have that preset's shape.
                   ...(before.preset === undefined ? {} : { preset: before.preset }),
                 })

@@ -637,6 +637,65 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
+  it('offers where it runs as it counts down, keeping the countdown for a worker that can take it', async () => {
+    const free = 'wrk_' + 'f'.repeat(32)
+    const busy = 'wrk_' + '9'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [
+        { workerId: free, providers: ['claude-code'], busy: false },
+        { workerId: busy, providers: ['claude-code'], busy: true },
+      ]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
+    // Kept, so the countdown starts it there; it still counts down.
+    expect(client.placePlan).toHaveBeenCalledWith('pln1', free)
+    expect(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', free)
+  })
+
+  it('holds a countdown at once where the worker chosen can’t take it', async () => {
+    const workerId = 'wrk_' + '9'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        worksIn: 'worktree',
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      holdPlan: vi.fn(() => new Promise<boolean>(() => {})),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker 999999' }))
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+    // Local can't go to a worker: held before the runtime answers, saying why, with the way back to the home.
+    await userEvent.click(screen.getByRole('radio', { name: 'Local' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect((await screen.findByRole('alert')).textContent).toContain('Choose Worktree to run it on a worker.')
+  })
+
   it('offers the best available worker while keeping This home selected by default', async () => {
     const plan = card().plan
     if (plan == null) throw new Error('The task card fixture needs a plan.')

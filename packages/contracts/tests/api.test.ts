@@ -664,6 +664,7 @@ describe('the API', () => {
               StartPlan: () => Effect.void,
               StopWaiting: () => Effect.void,
               HoldPlan: () => Effect.succeed(true),
+              PlacePlan: () => Effect.succeed(false),
               HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,

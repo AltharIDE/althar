@@ -633,6 +633,81 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('keeps a worker chosen during the countdown, and holds it when due where that worker can’t take it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '3'.repeat(32)
+        let busy = false
+        const { client, grant } = yield* connected({
+          countdown: Duration.seconds(3),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy }],
+            open: () => Effect.die('A busy worker must not start'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const card = (snapshot: Effect.Success<typeof thread>) => {
+          const item = snapshot.items.find((one) => one.kind === 'task')
+          return item?.kind === 'task' ? item.content : null
+        }
+        const planned = yield* until(thread, (snapshot) => card(snapshot)?.plan != null)
+        const planId = card(planned)?.plan?.id ?? ''
+        // A worker that can take it: chosen, the countdown goes on, and the card says where it runs.
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
+        const placed = card(yield* thread)
+        assert.strictEqual(placed?.phase, 'planned')
+        assert.isNotNull(placed?.plan?.startsAt)
+        assert.strictEqual(placed?.plan?.runsOn, workerId)
+        // Busy by the time it is due: held for the person, rather than started on the home or tried again.
+        busy = true
+        const held = yield* until(thread, (snapshot) => card(snapshot)?.phase === 'held')
+        assert.strictEqual(card(held)?.plan?.runsOn, workerId)
+        // Held, it can go back to the home.
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId: null }))
+        assert.isUndefined(card(yield* thread)?.plan?.runsOn)
+      }),
+    ),
+  )
+
+  it.live('holds a countdown at once where the worker chosen can’t take it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '2'.repeat(32)
+        const { client, grant } = yield* connected({
+          countdown: Duration.minutes(5),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true }],
+            open: () => Effect.die('A busy worker must not start'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        const planId = item?.kind === 'task' ? (item.content.plan?.id ?? '') : ''
+        assert.isTrue(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
+        const after = (yield* thread).items.find((one) => one.kind === 'task')
+        assert.strictEqual(after?.kind === 'task' ? after.content.phase : null, 'held')
+        assert.strictEqual(after?.kind === 'task' ? after.content.plan?.runsOn : null, workerId)
+      }),
+    ),
+  )
+
   it.live('refuses unsupported worker starts before creating a task', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -129,7 +129,7 @@ export interface LaunchPlace {
 }
 
 /**
- * Where it runs (ADR-103), while it is held: the home, or one of the home's
+ * Where it runs (ADR-103), as it counts down or is held: the home, or one of the home's
  * workers. A menu beside where it works, at the head's end; what stops it
  * starting there under the head, with the way back to the home.
  */
