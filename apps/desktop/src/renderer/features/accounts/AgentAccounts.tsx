@@ -121,7 +121,18 @@ export function AgentSignIn({
   )
 }
 
-export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; start: StartModel; signIn: AccountSignInModel }) {
+export function AgentAccounts({
+  agent,
+  start,
+  signIn,
+  readOnly = false,
+}: {
+  agent: AgentStatus
+  start: StartModel
+  signIn: AccountSignInModel
+  /** Shown only, with nothing to press: on a home that doesn't let this window sign its agents in. */
+  readOnly?: boolean
+}) {
   const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
   // The account made for a sign-in under way is that sign-in's line until it is named.
   const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
@@ -144,14 +155,18 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
             : account,
         ),
       )}
-      // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
-      {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}
-      onSignIn={(accountId) => signIn.again(agent.id, accountId)}
-      onRename={(accountId, name) => void start.renameAccount(accountId, name)}
-      onMove={(accountId, to) => void start.moveAccount(agent.id, accountId, to)}
-      onRemove={(accountId) => void start.removeAccount(accountId)}
-      // The usual folder's account, signed out with the agent's own command, where it has one that does.
-      {...(agent.signsOut === true ? { onSignOut: (accountId: string) => void start.signOutAccount(accountId) } : {})}
+      {...(readOnly
+        ? {}
+        : {
+            // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
+            ...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {}),
+            onSignIn: (accountId: string) => signIn.again(agent.id, accountId),
+            onRename: (accountId: string, name: string) => void start.renameAccount(accountId, name),
+            onMove: (accountId: string, to: 'up' | 'down') => void start.moveAccount(agent.id, accountId, to),
+            onRemove: (accountId: string) => void start.removeAccount(accountId),
+            // The usual folder's account, signed out with the agent's own command, where it has one that does.
+            ...(agent.signsOut === true ? { onSignOut: (accountId: string) => void start.signOutAccount(accountId) } : {}),
+          })}
       {...(flow === null || node === null ? {} : { signIn: { account: flow.again, at: accounts.length, node } })}
     />
   )

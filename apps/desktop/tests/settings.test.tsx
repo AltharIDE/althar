@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -795,6 +795,29 @@ describe('the Settings tab', () => {
     await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 666666/ }))
     expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
     expect(within(page).getByText('studio runs an older Althar: update it to remove its workers from here.')).toBeTruthy()
+  })
+
+  it('on another computer’s home, offers its code hosts alone, and on an older one its update in place of signing in or connecting', async () => {
+    const studio = onLinuxHome('studio')
+    const current = fakeClient({ connection: studio.connection, listConnections: vi.fn(async () => connectionList) })
+    withServices(<Settings at="code-hosts" />, current.client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    expect(await within(page).findByRole('button', { name: /Connect GitHub|^Connect$/ })).toBeTruthy()
+    expect(within(page).queryByText('Linear')).toBeNull()
+    cleanup()
+    const older = studio.connection.calls.filter((call) => call !== 'ConnectToken' && call !== 'StartAccountSignIn')
+    const old = fakeClient({ connection: { ...studio.connection, calls: older }, listConnections: vi.fn(async () => connectionList) })
+    withServices(<Settings at="code-hosts" />, old.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('Update studio to connect GitHub or GitLab there from here.')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Connect/ })).toBeNull()
+    cleanup()
+    withServices(
+      <Settings at="agents" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to sign its agents in from here.')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Sign in|Add an account/ })).toBeNull()
   })
 
   it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {

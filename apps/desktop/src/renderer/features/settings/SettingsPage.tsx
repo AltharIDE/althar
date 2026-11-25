@@ -52,6 +52,7 @@ import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { useAppVersion } from '../../shared/appVersion'
+import { behindText, HomeBehind } from '../homes/HomeBehind'
 import { useHomeName } from '../homes/useHomes'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -274,7 +275,7 @@ function SectionBody({
     case 'skills':
       return <SkillsSection start={start} />
     case 'code-hosts':
-      return <ConnectionsView model={connections} columns />
+      return <CodeHostsSection model={connections} />
     case 'computers':
       return <ComputersSection start={start} opened={computer} onOpen={onComputer} onTask={onTask} />
     case 'this-mac':
@@ -314,6 +315,17 @@ function Failed({ when, children = text.failed }: { when: boolean; children?: st
   return <Problem className={s.failed}>{children}</Problem>
 }
 
+/**
+ * The code hosts and trackers. On another computer's home, its code hosts alone, connected there from here: its trackers stay
+ * the person's own window's. An older home that can't connect one from here offers its update in their place.
+ */
+function CodeHostsSection({ model }: { model: ConnectionsModel }) {
+  const { client } = useServices()
+  if (client.connection === undefined) return <ConnectionsView model={model} columns />
+  if (!canCall(client, 'ConnectToken')) return <HomeBehind line={behindText.hosts} />
+  return <ConnectionsView model={model} only="hosts" />
+}
+
 /* ---- the agents ------------------------------------------------------------------- */
 
 /** An agent as a tab: a dot on one with an account signed out. */
@@ -334,8 +346,12 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
-  // The agents of the home the window is on: this computer's, or another's, by its name.
+  // The agents of the home the window is on: this computer's, or another's, by its name; on an older one, shown only, with its
+  // update in place of signing them in.
   const { name: where } = useHomeName()
+  const { client } = useServices()
+  const signsIn = canCall(client, 'StartAccountSignIn')
+  const installs = canCall(client, 'InstallAgent')
   // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
   const [checking, setChecking] = useState(false)
   const checkAgain = () => {
@@ -373,7 +389,10 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          <>
+            {!signsIn && <HomeBehind line={behindText.agents} />}
+            <AgentAccounts agent={chosen} start={start} signIn={accounts} readOnly={!signsIn} />
+          </>
         ) : (
           <AgentInstall
             name={chosen.name}
@@ -388,7 +407,8 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
                   ? { kind: 'idle' }
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
-            onInstall={() => void start.install(chosen.id)}
+            // Downloaded where the home lets this window: another computer's home is told its guide instead.
+            {...(installs ? { onInstall: () => void start.install(chosen.id) } : {})}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
             onCheck={checkAgain}
             checking={checking}
