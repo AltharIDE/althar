@@ -57,6 +57,8 @@ export type WorkerSetupAction =
   | { readonly kind: 'enroll'; readonly grant: WorkerGrant }
   | { readonly kind: 'stop' }
   | { readonly kind: 'again' }
+  /** The window's home didn't sign the worker's key: its words, for main to keep in the log. */
+  | { readonly kind: 'unsigned'; readonly said?: string | undefined }
   | { readonly kind: 'dismiss' }
 
 /** An agent's sign-in on a worker, as its steps come: the sign-in flow's own, and a page to open in the browser here. */
@@ -70,7 +72,17 @@ export type WorkerSignInEvent =
   /** Checked again once it ended: the worker's agents, and whether it started again to say so. */
   | { readonly kind: 'agents'; readonly agents: ReadonlyArray<WorkerAgent> }
 
+/**
+ * Whether the newest host release can add a worker: `ready`, with its version and where its files are (the code's line
+ * takes them from there); `none`, with the newest release's version where there is one.
+ */
+export type WorkerReleaseState =
+  | { readonly kind: 'ready'; readonly version: string; readonly base: string }
+  | { readonly kind: 'none'; readonly newest: string | null }
+
 export interface WorkersHost {
+  /** Whether a release can add a worker, found out once in a while, or afresh with `fresh`; it throws where it can't be found out. */
+  readonly release: (fresh?: boolean) => Promise<WorkerReleaseState>
   readonly setup: () => Promise<WorkerSetup | null>
   /** Starts adding the worker at `target`; `here`: the window's home is this computer, so the address SSH came from reaches it. */
   readonly setUp: (target: SshHomeTarget, here: boolean) => Promise<void>

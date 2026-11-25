@@ -78,6 +78,8 @@ export interface AddWorkerText {
   making: string
   codeLasts: (time: string) => string
   shows: string
+  checkAgain: string
+  checking: string
 }
 
 export const addWorkerText: AddWorkerText = {
@@ -112,6 +114,8 @@ export const addWorkerText: AddWorkerText = {
   making: 'Making a code…',
   codeLasts: (time) => `Works for ${time}`,
   shows: 'It shows in Computers once it connects.',
+  checkAgain: 'Check again',
+  checking: 'Checking…',
 }
 
 export interface AddWorkerDialogProps {
@@ -133,6 +137,12 @@ export interface AddWorkerDialogProps {
   onStop: () => void
   /** The code, while that way is chosen. */
   code: WorkerCodeView | null
+  /** No release can add a worker yet: said in place of both ways, until a setup has started. */
+  unavailable?: { title: string; body?: string | undefined } | null | undefined
+  /** Asks again whether one can, or for the code where it couldn't be given. */
+  onCheck?: (() => void) | undefined
+  /** Check again is pressed and not yet answered. */
+  checking?: boolean | undefined
   onClose: () => void
   text?: Partial<AddWorkerText> | undefined
 }
@@ -154,6 +164,9 @@ export function AddWorkerDialog({
   onAgain,
   onStop,
   code,
+  unavailable,
+  onCheck,
+  checking = false,
   onClose,
   text,
 }: AddWorkerDialogProps) {
@@ -162,47 +175,70 @@ export function AddWorkerDialog({
   const hint = useId()
   const going = setup !== null && setup.phase !== 'failed' && setup.phase !== 'done'
   const chosen = ssh ? way : 'code'
-  const actions =
-    chosen === 'code' ? (
+  const blocked = setup === null && unavailable != null
+  const checkAgain = onCheck !== undefined && (
+    <Button variant="signal" onClick={onCheck} disabled={checking}>
+      {checking ? t.checking : t.checkAgain}
+    </Button>
+  )
+  const actions = blocked ? (
+    <>
       <Button onClick={onClose}>{t.close}</Button>
-    ) : setup === null ? (
-      <>
-        <Button onClick={onClose}>{t.cancel}</Button>
-        <Button variant="signal" type="submit" disabled={address.trim() === ''}>
-          {t.add}
+      {checkAgain}
+    </>
+  ) : chosen === 'code' && code?.failed != null ? (
+    <>
+      <Button onClick={onClose}>{t.close}</Button>
+      {checkAgain}
+    </>
+  ) : chosen === 'code' ? (
+    <Button onClick={onClose}>{t.close}</Button>
+  ) : setup === null ? (
+    <>
+      <Button onClick={onClose}>{t.cancel}</Button>
+      <Button variant="signal" type="submit" disabled={address.trim() === ''}>
+        {t.add}
+      </Button>
+    </>
+  ) : setup.phase === 'trust' ? (
+    <>
+      <Button onClick={onStop}>{t.stop}</Button>
+      <Button variant="signal" onClick={onTrust}>
+        {t.trust}
+      </Button>
+    </>
+  ) : setup.phase === 'failed' ? (
+    <>
+      <Button onClick={onClose}>{t.close}</Button>
+      {setup.problem?.retry !== false && (
+        <Button variant="signal" onClick={onAgain}>
+          {t.again}
         </Button>
-      </>
-    ) : setup.phase === 'trust' ? (
-      <>
-        <Button onClick={onStop}>{t.stop}</Button>
-        <Button variant="signal" onClick={onTrust}>
-          {t.trust}
-        </Button>
-      </>
-    ) : setup.phase === 'failed' ? (
-      <>
-        <Button onClick={onClose}>{t.close}</Button>
-        {setup.problem?.retry !== false && (
-          <Button variant="signal" onClick={onAgain}>
-            {t.again}
-          </Button>
-        )}
-      </>
-    ) : (
-      <Button onClick={going ? onStop : onClose}>{going ? t.stop : t.close}</Button>
-    )
+      )}
+    </>
+  ) : (
+    <Button onClick={going ? onStop : onClose}>{going ? t.stop : t.close}</Button>
+  )
   return (
     <Dialog
       title={t.title(home)}
       description={setup === null ? t.note : undefined}
       onClose={onClose}
       holding={going}
-      {...(chosen === 'ssh' && setup === null ? { onSubmit: onAdd } : {})}
+      {...(chosen === 'ssh' && setup === null && !blocked ? { onSubmit: onAdd } : {})}
       actions={actions}
       width={520}
     >
       <div className={s.adding}>
-        {setup === null && ssh && (
+        {blocked && (
+          <span className={s.stopped} aria-live="polite">
+            <Problem as="span" size="small">
+              {unavailable.title}
+            </Problem>
+            {unavailable.body !== undefined && <span className={s.addressHint}>{unavailable.body}</span>}
+          </span>
+        )}
+        {setup === null && ssh && !blocked && (
           <Segmented
             label={t.title(home)}
             options={[
@@ -213,7 +249,7 @@ export function AddWorkerDialog({
             onChange={onWay}
           />
         )}
-        {chosen === 'ssh' && setup === null && (
+        {chosen === 'ssh' && setup === null && !blocked && (
           <div className={s.addressRow}>
             <label htmlFor={field} className={s.addressLabel}>
               {t.address}
@@ -244,7 +280,7 @@ export function AddWorkerDialog({
           </div>
         )}
         {chosen === 'ssh' && setup !== null && <WorkerSteps setup={setup} home={home} t={t} />}
-        {chosen === 'code' && <WorkerCode code={code} home={home} t={t} />}
+        {chosen === 'code' && !blocked && <WorkerCode code={code} home={home} t={t} />}
       </div>
     </Dialog>
   )

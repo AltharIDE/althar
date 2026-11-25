@@ -123,6 +123,7 @@ export function NewProjectView({
             name={home.name}
             update={updating.offer}
             onUpdate={updating.onUpdate}
+            onCancelUpdate={updating.onCancelUpdate}
             onCheckAgain={updating.onCheckAgain}
             copied={copied}
             onCopy={() => {

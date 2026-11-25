@@ -89,7 +89,7 @@
     },
     "apps/host": {
       "name": "@althar/host",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "althar-host": "./dist/althar-host.js",
       },

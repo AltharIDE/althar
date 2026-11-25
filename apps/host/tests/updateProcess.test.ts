@@ -24,6 +24,10 @@ import metadata from '../package.json'
 import { temporary } from './support'
 
 const bundle = fileURLToPath(new URL('../dist/althar-host.js', import.meta.url))
+// Updates to offer the built host: releases newer than its own version.
+const [major, minor, patch] = metadata.version.split('.').map(Number) as [number, number, number]
+const next = `${major}.${minor}.${patch + 1}`
+const broken = `${major}.${minor}.${patch + 2}`
 const children: ChildProcess[] = []
 afterEach(async () => {
   await Promise.all(
@@ -80,7 +84,7 @@ const assembleFixture = async (source: BundleSource, folder: string) => {
 }
 const alteredBundle = (folder: string, version: string, failStartup = false) => {
   let source = readFileSync(bundle, 'utf8')
-  const pattern = /(name:\s*"@althar\/host",\s*version:\s*")0\.1\.0(")/
+  const pattern = new RegExp(`(name:\\s*"@althar/host",\\s*version:\\s*")${metadata.version.replaceAll('.', '\\.')}(")`)
   if (!pattern.test(source)) throw new Error('Host metadata could not be versioned in the release fixture')
   source = source.replace(pattern, (_match: string, prefix: string, suffix: string) => `${prefix}${version}${suffix}`)
   if (failStartup) {
@@ -191,10 +195,10 @@ describe.runIf(process.platform === 'linux')('managed host processes', () => {
         { services, assemble: assembleFixture },
       )
       await services.start('fixture')
-      expect(current).toBe('0.1.0')
+      expect(current).toBe(metadata.version)
       for (const [version, fails, sequence] of [
-        ['0.1.1', false, 1],
-        ['0.1.2', true, 2],
+        [next, false, 1],
+        [broken, true, 2],
       ] as const) {
         const source = alteredBundle(root, version, fails)
         const tree = join(root, `release-${version}`)
@@ -252,7 +256,7 @@ describe.runIf(process.platform === 'linux')('managed host processes', () => {
         await stageUpdate(options.updateRoot, { fetch: async (url) => new Response(url.endsWith('/feed') ? envelope : bytes) })
         if (fails) await expect(applyStaged(options.updateRoot, false, { services })).rejects.toThrow()
         else await applyStaged(options.updateRoot, false, { services })
-        expect(current).toBe('0.1.1')
+        expect(current).toBe(next)
         expect(readFileSync(options.keyFile)).toEqual(originalKey)
         expect((await loadInstallation(options.updateRoot)).config.homeId).toBe(initialized.homeId)
         expect((await readState(options.updateRoot)).transaction).toBeUndefined()

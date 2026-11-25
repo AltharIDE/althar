@@ -134,6 +134,7 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
       : {
           update: updating.offer,
           ...(updating.onUpdate === undefined ? {} : { onUpdate: updating.onUpdate }),
+          ...(updating.onCancelUpdate === undefined ? {} : { onCancelUpdate: updating.onCancelUpdate }),
           onCheckAgain: updating.onCheckAgain,
         }),
     onSignIn: (agentId) => settings.signIn(agentId),

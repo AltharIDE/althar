@@ -9,6 +9,8 @@ import { removeTreeSync } from '@althar/testing'
 import { budget } from '@althar/testing/budget'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import metadata from '../package.json'
+
 const bundle = fileURLToPath(new URL('../dist/althar-host.js', import.meta.url))
 const children: ChildProcess[] = []
 const roots: string[] = []
@@ -119,6 +121,6 @@ describe.runIf(process.platform === 'linux')('the built Node host', () => {
     await expect(command(['serve', ...at.common], at.env)).rejects.toMatchObject({ code: 78 })
     expect(existsSync(at.keyFile)).toBe(false)
     const version = await command(['--version'], at.env)
-    expect(version.stdout.trim()).toBe('0.1.0')
+    expect(version.stdout.trim()).toBe(metadata.version)
   })
 })

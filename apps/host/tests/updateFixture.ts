@@ -10,6 +10,8 @@ import { createInstallationFolders, pointRelease, readState, saveState, storeBoo
 import type { UpdateExecutor, UpdateServices } from '../src/updates/execute'
 import { temporary } from './support'
 
+// The update on offer: the patch after the host's own version, so a version bump never makes it a downgrade.
+export const NEXT_VERSION = releaseInfo().version.replace(/\d+$/, (patch) => String(Number(patch) + 1))
 export const NOW = Date.parse('2026-11-15T12:00:00Z')
 export const HOME_ID = `home_${'1'.repeat(32)}`
 export const fixtureFiles = (folder: string, text = 'fixture') => {
@@ -36,7 +38,7 @@ export const updateFixture = async (changes: Partial<ReleaseInfo> = {}) => {
   )
   db.close()
   const oldInfo = releaseInfo()
-  const nextInfo: ReleaseInfo = { ...oldInfo, version: '0.1.1', ...changes }
+  const nextInfo: ReleaseInfo = { ...oldInfo, version: NEXT_VERSION, ...changes }
   const oldId = 'a'.repeat(64)
   fixtureFiles(join(root, 'releases', oldId), 'initial code')
   const pair = generateKeyPairSync('ed25519')

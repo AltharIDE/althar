@@ -558,6 +558,7 @@ const homes = startHomeConnections({
     if (fresh === true) opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-new-project'))
   },
   log: (message) => logs.error(message),
+  logs,
   usage: recordUsage,
 })
 const mineLocal = (contents: WebContents) => mine(contents) && homes.state(contents.id).current.kind === 'local'

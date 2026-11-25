@@ -6,6 +6,7 @@ import {
   releaseMakesProjects,
   type HomeSetup,
   type HomeState,
+  type HomeUpdateCheck,
   type HomesHost,
   type HomesOverview,
   type RemoteHome,
@@ -88,7 +89,7 @@ export const useHomeUpdate = (): HomeUpdate => {
   return updateOf(useHomeState(host.homes)?.current)
 }
 
-type Running = 'idle' | 'running' | 'done' | { readonly problem: string }
+type Running = 'idle' | 'running' | 'done' | { readonly problem: string } | { readonly confirm: HomeUpdateCheck }
 
 /**
  * An older home's update, for its window to offer: run by the window itself where it reaches the home over SSH by the
@@ -100,11 +101,20 @@ type Running = 'idle' | 'running' | 'done' | { readonly problem: string }
  * without making projects, the home is told none is out yet (`release: 'unreleased'`), with Check again looking anew.
  * A home run from its own launcher may be a source checkout's, which pulling brings it, so it isn't asked; where the
  * newest can't be found out, the update is offered, and says itself how it went.
+ *
+ * Where the newest release moves the home's data to a new format (a migration, nearly every release), it's asked
+ * about first, in a word: the window looks at what the update changes as it's offered, so the press asks at once, and
+ * where it hadn't yet, main answers that it needs asking. Accepted, it goes for that release only.
  */
 export const useHomeUpdating = (
   older: boolean,
   onDone?: () => void,
-): { readonly offer: HomeUpdateOffer; readonly onUpdate?: () => void; readonly onCheckAgain: () => void } => {
+): {
+  readonly offer: HomeUpdateOffer
+  readonly onUpdate?: () => void
+  readonly onCancelUpdate?: () => void
+  readonly onCheckAgain: () => void
+} => {
   const { host } = useServices()
   const homes = host.homes
   const state = useHomeState(homes)
@@ -127,6 +137,15 @@ export const useHomeUpdating = (
   const connected = state?.connection === 'connected'
   const reconnect = () => void homes?.reconnect().catch(() => undefined)
   const update = homes?.update
+  const asking = homes?.updateCheck
+  const checked = useQuery({
+    queryKey: ['homes', 'updateCheck', home],
+    queryFn: () => asking?.() ?? Promise.reject(new Error('No check')),
+    enabled: older && asking !== undefined && update !== undefined && installed === 'known' && home !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+  }).data
+  const moving = checked?.change === 'data' ? checked : undefined
   if (asked !== undefined && installed !== 'custom' && running === 'idle') {
     if (news.isPending || news.isFetching) return { offer: { command, installed, release: 'checking' }, onCheckAgain: reconnect }
     if (news.data != null && !releaseMakesProjects(news.data))
@@ -135,21 +154,27 @@ export const useHomeUpdating = (
   if (update === undefined || installed !== 'known') return { offer: { command, installed }, onCheckAgain: reconnect }
   const run: HomeUpdateRun =
     running === 'idle'
-      ? { state: 'idle', ...(busy > 0 ? { busy } : {}) }
-      : running === 'running' || running === 'done'
-        ? {
-            state: 'running',
-            step: running === 'done' ? 'reconnecting' : connected ? 'getting' : 'restarting',
-          }
-        : // The connection dropped on the way: the home may be serving its old release again, for a Reconnect.
-          { state: 'failed', problem: running.problem, ...(connected ? {} : { offline: true }) }
+      ? { state: 'idle', ...(busy > 0 ? { busy } : {}), ...(moving === undefined ? {} : { moves: true }) }
+      : typeof running === 'object' && 'confirm' in running
+        ? { state: 'confirm', from: running.confirm.from, to: running.confirm.to, ...(busy > 0 ? { busy } : {}) }
+        : running === 'running' || running === 'done'
+          ? {
+              state: 'running',
+              step: running === 'done' ? 'reconnecting' : connected ? 'getting' : 'restarting',
+            }
+          : // The connection dropped on the way: the home may be serving its old release again, for a Reconnect.
+            { state: 'failed', problem: running.problem, ...(connected ? {} : { offline: true }) }
   return {
     offer: { command, installed, run },
     onUpdate: () => {
       if (running === 'running' || running === 'done') return
+      const accepted = typeof running === 'object' && 'confirm' in running ? running.confirm.to : undefined
+      // Known to move its data: asked at once, before anything runs.
+      if (accepted === undefined && moving !== undefined) return setRunning({ confirm: moving })
       setRunning('running')
-      update().then(
-        () => {
+      update(accepted).then(
+        (updated) => {
+          if (updated.state === 'confirm') return setRunning({ confirm: updated.check })
           setRunning('done')
           onDone?.()
           reconnect()
@@ -157,6 +182,7 @@ export const useHomeUpdating = (
         (error: unknown) => setRunning({ problem: homeProblem(error) }),
       )
     },
+    onCancelUpdate: () => setRunning('idle'),
     onCheckAgain: reconnect,
   }
 }

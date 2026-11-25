@@ -9,7 +9,14 @@ export { LocalApiEndpoint, readLocalEndpoint } from './endpoint'
 export { openLocalConnection, apiClient, type ApiConnection } from './client'
 export { BridgeRejected, receiveBridgeIdentity, socketReady } from './bridgeProtocol'
 export { TransportError, TransportReason, transportError } from './errors'
-export { sshArguments, sshEnvironment, sshUpdateArguments, type SshTarget, type SshConnectionOptions } from './sshArguments'
+export {
+  sshArguments,
+  sshEnvironment,
+  sshReleaseInfoArguments,
+  sshUpdateArguments,
+  type SshTarget,
+  type SshConnectionOptions,
+} from './sshArguments'
 
 export { httpsOrigin, tlsPublicKeyPin, homeHttpsAgent, httpsJson } from './https'
 export {

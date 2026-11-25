@@ -86,19 +86,67 @@ export const NothingToInstall: Story = {
   },
 }
 
+/** No release can add a worker yet: said for both ways, before anything is pressed. */
+export const NoReleaseWithWorkers: Story = {
+  args: {
+    unavailable: {
+      title: 'There’s no Althar release with workers yet.',
+      body: 'The newest host release, 0.1.0, came before workers. Check again once a newer one is out.',
+    },
+    onCheck: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await expect(page.queryByLabelText('SSH address')).not.toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheck).toHaveBeenCalled()
+  },
+}
+
+/** A step that failed: a short line, what it said in Althar's log. */
+export const AStepFailed: Story = {
+  args: {
+    setup: {
+      ...RUNNING,
+      phase: 'failed',
+      at: 2,
+      facts: 'Linux · arm64 · 62 GB free',
+      problem: { title: 'The release couldn’t get to build-box.', retry: true },
+    },
+  },
+}
+
+/** The release couldn't be found out, for the code's line: said, with Check again. */
+export const CodeWithoutARelease: Story = {
+  args: {
+    way: 'code',
+    code: {
+      command: null,
+      lasts: null,
+      failed: 'Couldn’t find out which release to install from. Check your connection, then check again.',
+    },
+    onCheck: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.click(page.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheck).toHaveBeenCalled()
+  },
+}
+
 /** A machine without SSH: a one-time code, and the one line that takes it. */
 export const WithACode: Story = {
   args: {
     way: 'code',
     code: {
       command:
-        "curl -fsSL https://github.com/AltharIDE/althar/releases/download/host-v0.11.0/althar-worker.sh | sh -s -- join 'althar-worker1.eyJob21lSWQiOiJob21lXzA…'",
+        "curl -fsSL https://github.com/AltharIDE/althar/releases/download/host-v0.11.0/althar-worker.sh | ALTHAR_RELEASE_BASE=https://github.com/AltharIDE/althar/releases/download/host-v0.11.0 sh -s -- join 'althar-worker1.eyJob21lSWQiOiJob21lXzA…'",
       lasts: '10 minutes',
     },
   },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
-    await expect(page.getByText(/althar-worker\.sh \| sh -s -- join/)).toBeInTheDocument()
+    await expect(page.getByText(/althar-worker\.sh \| ALTHAR_RELEASE_BASE=\S+\/host-v0\.11\.0 sh -s -- join/)).toBeInTheDocument()
     await expect(page.getByText('Works for 10 minutes')).toBeInTheDocument()
   },
 }

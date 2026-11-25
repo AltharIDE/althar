@@ -362,7 +362,7 @@ sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait
 journalctl --user -u althar-host-update.service
 ```
 
-`configure-updates --automatic-updates` lets a compatible staged release activate at the next service start. Use `--manual-updates` to return to explicit application. Changes to the API or database format always need `--apply --allow-incompatible`. Check the clients and make a separate export first.
+`configure-updates --automatic-updates` lets a compatible staged release activate at the next service start. Use `--manual-updates` to return to explicit application. Changes to the API or database format always need `--apply --allow-incompatible`. Check the clients and make a separate export first. A desktop window that reaches the home over SSH does this itself for a release that only moves the data: it asks once, then applies it, and it never applies a release whose API version differs from its own.
 
 ### If an update stops partway through
 
