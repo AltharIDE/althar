@@ -1,102 +1,136 @@
 /*
- * What Undo and Redo do in a composer, beside what the field does with its
- * own words: an attachment taken off (an image, a file, a comment) is a step
- * of the same history, in the order it happened. The field keeps its words'
- * steps itself, and the browser never says how many it has; so each
- * attachment step remembers the words as they were when it was taken, and
- * it is the last step once the words are back to that. Before then, Undo is
- * the field's own. Where the field has none of its own left, as after words
- * were put in it rather than typed, the attachment's step is taken anyway
- * (`last`), so it is never out of reach.
+ * What Undo and Redo do in a composer: one history of its words and of what
+ * is taken off it (an image, a file, a comment), in the order they happened.
+ * The browser keeps a field's word steps itself, but never says how many it
+ * has, so it can't say whether the next one is older than an attachment taken
+ * off; the composer keeps them here instead, beside the attachments', and the
+ * field's own Undo and Redo are this history's. Words typed on in one run are
+ * one step, as the field has them; words put in otherwise (dictated, a
+ * suggestion taken, a message given back) are a step each.
  *
- * The steps hold what they put back (the image itself, its bytes and its
- * crop), in the window's memory only, for as long as its draft is kept.
+ * The steps hold what they put back (the words, and the image itself with its
+ * bytes and its crop), in the window's memory only, for as long as its draft
+ * is kept.
  */
 
-/** A step a composer can take back and do again, beside its field's own: an attachment taken off, and how to put it back. */
-export interface ComposerStep {
-  /** Puts it back where it was, as it was. */
-  readonly undo: () => void
-  /** Takes it off again. */
-  readonly redo: () => void
+/** The words in a composer's field, and where its caret or selection was. */
+export interface ComposerWords {
+  readonly text: string
+  readonly start: number
+  readonly end: number
 }
 
-/** A composer's history of attachment steps, merged with its field's own (`Composer`'s `history`). */
+/** A step a composer can take back and do again, beside its words': an attachment taken off, and how to put it back. */
+export interface ComposerStep {
+  /** Puts it back where it was, as it was. False where there was nothing left to put back, as an image whose reading failed since. */
+  readonly undo: () => boolean | void
+  /** Takes it off again. */
+  readonly redo: () => boolean | void
+}
+
+/** How words were changed: typed or deleted in a run that is one step, or otherwise (null): a step of its own. */
+export type ComposerTyping = 'insert' | 'delete' | null
+
+/** A composer's history of its words and attachments (`Composer`'s `history`). */
 export interface ComposerHistory {
-  /** An attachment taken off, with the words as they were: a step of its own, after which nothing is left to redo. */
-  push: (step: ComposerStep, words: string) => void
-  /** The person changed the words: what was undone, the attachments' and the field's own alike, can't be redone. */
-  edited: () => void
-  /** The field undid or redid words of its own. */
-  native: (kind: 'undo' | 'redo') => void
-  /**
-   * Undo, with the words as they are. True where it was this history's to do, and done: the field must not do its own
-   * then. With `last`, the field had nothing of its own to undo.
-   */
-  undo: (words: string, last?: boolean) => boolean
-  /** Redo, as Undo is; true too where the field's own steps to redo are older than an attachment taken off since, which hold them back. */
-  redo: (words: string, last?: boolean) => boolean
-  /** Forgets every step, as its message is sent. */
+  /** An attachment taken off: a step of its own, after which nothing is left to redo. */
+  push: (step: ComposerStep) => void
+  /** The words changed, from `before`: a step, or the last one gone on, where it is typing that goes on. */
+  wrote: (before: ComposerWords, after: ComposerWords, typing?: ComposerTyping) => void
+  /** The words as this history last knew them; undefined where it knows none yet, as before its composer first shows, or once sent. */
+  known: () => ComposerWords | undefined
+  /** Takes back the last step: an attachment's itself, the words' by `put`. False where there was none. */
+  undo: (put: (words: ComposerWords) => void) => boolean
+  /** Does again the step last taken back, as Undo does. */
+  redo: (put: (words: ComposerWords) => void) => boolean
+  /** Forgets every step, and the words, as its message is sent. */
   clear: () => void
 }
 
-/** How many attachment steps are kept, each way. */
-const KEPT = 50
+/** How many steps are kept, each way. */
+const KEPT = 100
+/** How long a pause ends a run of typing, in ms. */
+const PAUSE = 1000
 
-interface Taken {
-  readonly step: ComposerStep
-  /** The words as they stood when it was done or undone: it is the next step once they stand so again. */
-  readonly words: string
-}
+type Entry =
+  | { readonly kind: 'attachment'; readonly step: ComposerStep }
+  | { readonly kind: 'words'; readonly before: ComposerWords; after: ComposerWords; readonly typing: ComposerTyping; at: number }
 
-export const createComposerHistory = (): ComposerHistory => {
-  const undoing: Taken[] = []
-  const redoing: Taken[] = []
-  /*
-   * How many of the field's own steps it may redo, where an attachment was taken off since its words last changed: those
-   * it undid before then are of an older history. Null where every one it has is its to redo.
-   */
-  let fieldRedo: number | null = null
-  const keep = (stack: Taken[], taken: Taken) => {
-    stack.push(taken)
+export const createComposerHistory = (now: () => number = Date.now): ComposerHistory => {
+  const undoing: Entry[] = []
+  const redoing: Entry[] = []
+  let words: ComposerWords | undefined
+  /* Whether typing on joins the last step: not once something else was done, or taken back, since. */
+  let joinable = false
+  const keep = (stack: Entry[], entry: Entry) => {
+    stack.push(entry)
     if (stack.length > KEPT) stack.shift()
   }
-  return {
-    push: (step, words) => {
-      keep(undoing, { step, words })
-      redoing.length = 0
-      fieldRedo = 0
-    },
-    edited: () => {
-      redoing.length = 0
-      fieldRedo = null
-    },
-    native: (kind) => {
-      if (fieldRedo !== null) fieldRedo = Math.max(0, fieldRedo + (kind === 'undo' ? 1 : -1))
-    },
-    undo: (words, last = false) => {
-      const top = undoing.at(-1)
-      if (top === undefined || (top.words !== words && !last)) return false
-      undoing.pop()
-      top.step.undo()
-      keep(redoing, { step: top.step, words })
-      return true
-    },
-    redo: (words, last = false) => {
-      const top = redoing.at(-1)
-      const fieldHasNone = fieldRedo === 0
-      if (top !== undefined && (top.words === words || last || fieldHasNone)) {
-        redoing.pop()
-        top.step.redo()
-        keep(undoing, { step: top.step, words })
+  /* Takes the top of one stack onto the other: an attachment's step, or the words as they were on its side. */
+  const move = (from: Entry[], to: Entry[], back: boolean, put: (words: ComposerWords) => void): boolean => {
+    joinable = false
+    for (let entry = from.pop(); entry !== undefined; entry = from.pop()) {
+      if (entry.kind === 'words') {
+        words = back ? entry.before : entry.after
+        keep(to, entry)
+        put(words)
         return true
       }
-      return fieldHasNone
+      // An attachment with nothing left to put back is skipped, so the key does the next step.
+      if ((back ? entry.step.undo() : entry.step.redo()) === false) continue
+      keep(to, entry)
+      return true
+    }
+    return false
+  }
+  return {
+    push: (step) => {
+      keep(undoing, { kind: 'attachment', step })
+      redoing.length = 0
+      joinable = false
     },
+    wrote: (before, after, typing = null) => {
+      words = after
+      if (before.text === after.text) return
+      redoing.length = 0
+      const top = undoing.at(-1)
+      const at = now()
+      // Typing on, in the same run: one step, as the field has it. A new line starts another.
+      const joins =
+        joinable &&
+        typing !== null &&
+        top?.kind === 'words' &&
+        top.typing === typing &&
+        top.after.text === before.text &&
+        at - top.at < PAUSE &&
+        !after.text.slice(before.start, after.start).includes('\n')
+      joinable = typing !== null
+      if (joins) {
+        top.after = after
+        top.at = at
+        return
+      }
+      keep(undoing, { kind: 'words', before, after, typing, at })
+    },
+    known: () => words,
+    undo: (put) => move(undoing, redoing, true, put),
+    redo: (put) => move(redoing, undoing, false, put),
     clear: () => {
       undoing.length = 0
       redoing.length = 0
-      fieldRedo = null
+      words = undefined
+      joinable = false
     },
   }
+}
+
+/**
+ * Puts one taken off back in a list, after the nearest of those that were before it and are still there, so a change
+ * to the list since (one added, or one whose reading failed) doesn't move it among the rest.
+ */
+export const putBack = <T extends { readonly id: string }>(now: ReadonlyArray<T>, one: T, before: ReadonlyArray<string>): T[] => {
+  if (now.some((x) => x.id === one.id)) return [...now]
+  const after = before.findLast((id) => now.some((x) => x.id === id))
+  const at = after === undefined ? 0 : now.findIndex((x) => x.id === after) + 1
+  return [...now.slice(0, at), one, ...now.slice(at)]
 }

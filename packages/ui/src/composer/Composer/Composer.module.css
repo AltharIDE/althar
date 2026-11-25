@@ -13,6 +13,11 @@
     box-shadow var(--fast) var(--ease);
 }
 
+/* It takes the focus as an attachment is taken off, for Undo; the field shows where typing goes, the composer needs no ring of its own. */
+.composer:focus {
+  outline: none;
+}
+
 .composer:focus-within {
   border-color: var(--line-3);
   box-shadow: var(--lift-2);

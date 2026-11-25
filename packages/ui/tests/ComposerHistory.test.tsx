@@ -1,137 +1,157 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { userEvent } from 'storybook/test'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Composer, historyKey } from '../src/composer/Composer/Composer'
-import { createComposerHistory, type ComposerHistory } from '../src/composer/Composer/history'
+import { createComposerHistory, putBack, type ComposerHistory, type ComposerWords } from '../src/composer/Composer/history'
 
 /*
- * Undo and Redo in a composer: an attachment taken off is a step of the
- * field's own history, in the order it happened. The field's word steps are
- * the browser's, which jsdom doesn't keep, so here they are played as the
- * browser plays them: a beforeinput the composer may cancel, then the input.
+ * Undo and Redo in a composer: one history of its words and of what is taken
+ * off it, in the order they happened, kept by the composer rather than the
+ * field, whose own steps can't be counted.
  */
 
-/** A history of attachments in a list, as a consumer keeps one: what was taken off, and where it was. */
-const attachments = (history: ComposerHistory, words: () => string) => {
+const at = (text: string): ComposerWords => ({ text, start: text.length, end: text.length })
+
+/** A composer's words and its attachments, as a consumer keeps them, with the steps they make. */
+const composer = (history: ComposerHistory) => {
   let list = ['a', 'b', 'c']
-  const off = (one: string) => {
-    const at = list.indexOf(one)
-    list = list.filter((x) => x !== one)
-    history.push(
-      {
+  let words = ''
+  history.wrote(at(''), at(''))
+  const put = (now: ComposerWords) => {
+    words = now.text
+  }
+  return {
+    type: (next: string, typing: 'insert' | 'delete' | null = 'insert') => {
+      history.wrote(at(words), at(next), typing)
+      words = next
+    },
+    off: (one: string) => {
+      const before = list.slice(0, list.indexOf(one))
+      list = list.filter((x) => x !== one)
+      history.push({
         undo: () => {
-          list = [...list.slice(0, at), one, ...list.slice(at)]
+          list = putBack(
+            list.map((id) => ({ id })),
+            { id: one },
+            before,
+          ).map((x) => x.id)
         },
         redo: () => {
           list = list.filter((x) => x !== one)
         },
-      },
-      words(),
-    )
+      })
+    },
+    undo: () => history.undo(put),
+    redo: () => history.redo(put),
+    now: () => ({ list, words }),
   }
-  return { off, now: () => list }
 }
 
 describe('the history, in the order things happened', () => {
-  it('puts back what was taken off where it was, last first, and Redo takes it off again', () => {
-    const history = createComposerHistory()
-    const { off, now } = attachments(history, () => '')
-    off('b')
-    off('a')
-    expect(now()).toEqual(['c'])
-    expect(history.undo('')).toBe(true)
-    expect(now()).toEqual(['a', 'c'])
-    expect(history.undo('')).toBe(true)
-    expect(now()).toEqual(['a', 'b', 'c'])
-    // Nothing more of its own: the field's.
-    expect(history.undo('')).toBe(false)
-    expect(history.redo('')).toBe(true)
-    expect(now()).toEqual(['a', 'c'])
-    expect(history.redo('')).toBe(true)
-    expect(now()).toEqual(['c'])
+  it('takes back words and attachments in turn, last first, and Redo does them again the other way', () => {
+    const c = composer(createComposerHistory())
+    c.type('Look')
+    c.off('b')
+    c.type('Look at this')
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'c'], words: 'Look' })
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'b', 'c'], words: 'Look' })
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'b', 'c'], words: '' })
+    expect(c.undo()).toBe(false)
+    expect(c.redo()).toBe(true)
+    expect(c.redo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'c'], words: 'Look' })
+    expect(c.redo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'c'], words: 'Look at this' })
+    expect(c.redo()).toBe(false)
   })
 
-  it('leaves Undo to the field while words typed after the removal are still there, then takes the attachment back', () => {
-    const history = createComposerHistory()
-    let words = 'Look'
-    const { off, now } = attachments(history, () => words)
-    off('b')
-    history.edited()
-    words = 'Look at this'
-    // The words came last: the field's to undo.
-    expect(history.undo(words)).toBe(false)
-    history.native('undo')
-    words = 'Look'
-    // Back to how they were as it went: the attachment is next.
-    expect(history.undo(words)).toBe(true)
-    expect(now()).toEqual(['a', 'b', 'c'])
-    // And the other way: the attachment first, then the words.
-    expect(history.redo(words)).toBe(true)
-    expect(now()).toEqual(['a', 'c'])
-    expect(history.redo(words)).toBe(false)
+  it('takes back a letter typed and deleted after an attachment went before the attachment, though the words read the same', () => {
+    let clock = 0
+    const c = composer(createComposerHistory(() => (clock += 2000)))
+    c.type('Look')
+    c.off('b')
+    c.type('Look!')
+    c.type('Look', 'delete')
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'c'], words: 'Look!' })
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'c'], words: 'Look' })
+    expect(c.undo()).toBe(true)
+    expect(c.now()).toEqual({ list: ['a', 'b', 'c'], words: 'Look' })
   })
 
-  it('redoes words undone after an attachment was put back before taking it off again', () => {
-    const history = createComposerHistory()
-    let words = 'Look'
-    const { off, now } = attachments(history, () => words)
-    off('b')
-    expect(history.undo(words)).toBe(true)
-    // Undo again: the field's words from before.
-    expect(history.undo('')).toBe(false)
-    history.native('undo')
-    words = ''
-    // Redo: those words first, where the attachment's step waits for them.
-    expect(history.redo(words)).toBe(false)
-    history.native('redo')
-    words = 'Look'
-    expect(history.redo(words)).toBe(true)
-    expect(now()).toEqual(['a', 'c'])
+  it('makes one step of a run of typing, and a new one after a pause, a new line or something else done', () => {
+    let clock = 0
+    const c = composer(createComposerHistory(() => clock))
+    c.type('L')
+    c.type('Lo')
+    c.type('Look')
+    clock = 5000
+    c.type('Look at')
+    c.type('Look at\n')
+    c.type('Look at\nit', null)
+    expect(c.undo()).toBe(true)
+    expect(c.now().words).toBe('Look at\n')
+    expect(c.undo()).toBe(true)
+    expect(c.now().words).toBe('Look at')
+    expect(c.undo()).toBe(true)
+    expect(c.now().words).toBe('Look')
+    expect(c.undo()).toBe(true)
+    expect(c.now().words).toBe('')
   })
 
-  it('takes the attachment back where the field has nothing of its own to undo, as after words put in it', () => {
-    const history = createComposerHistory()
-    const { off, now } = attachments(history, () => '')
-    off('a')
-    // The words were set, not typed: the field can't take them back.
-    expect(history.undo('Written down while you were away')).toBe(false)
-    expect(history.undo('Written down while you were away', true)).toBe(true)
-    expect(now()).toEqual(['a', 'b', 'c'])
+  it('forgets what could be redone once the words change, or something else is taken off', () => {
+    const c = composer(createComposerHistory())
+    c.off('a')
+    expect(c.undo()).toBe(true)
+    c.type('New words')
+    expect(c.redo()).toBe(false)
+    expect(c.undo()).toBe(true)
+    c.off('c')
+    expect(c.redo()).toBe(false)
+    expect(c.now()).toEqual({ list: ['a', 'b'], words: '' })
   })
 
-  it('forgets what could be redone once the words change, and once something else is taken off', () => {
+  it('goes on to the step before one with nothing left to put back', () => {
     const history = createComposerHistory()
-    let words = ''
-    const { off, now } = attachments(history, () => words)
-    off('a')
-    expect(history.undo(words)).toBe(true)
-    history.edited()
-    words = 'New words'
-    expect(history.redo(words, true)).toBe(false)
-    expect(now()).toEqual(['a', 'b', 'c'])
-    // The field's own redo, undone before this attachment went, belongs to an older history: it is held back.
-    history.native('undo')
-    off('c')
-    expect(history.redo(words)).toBe(true)
-    expect(now()).toEqual(['a', 'b'])
+    const first = vi.fn()
+    history.push({ undo: first, redo: () => {} })
+    history.push({ undo: () => false, redo: () => {} })
+    expect(history.undo(() => {})).toBe(true)
+    expect(first).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps no step past a send', () => {
+  it('keeps no step past a send, and no words, until its composer shows again', () => {
     const history = createComposerHistory()
-    const { off, now } = attachments(history, () => '')
-    off('a')
+    history.wrote(at(''), at('x'))
     history.clear()
-    expect(history.undo('', true)).toBe(false)
-    expect(now()).toEqual(['b', 'c'])
+    expect(history.known()).toBeUndefined()
+    expect(history.undo(() => {})).toBe(false)
   })
 
-  it('keeps the last fifty steps', () => {
+  it('keeps the last hundred steps', () => {
     const history = createComposerHistory()
     const undo = vi.fn()
-    for (let i = 0; i < 60; i += 1) history.push({ undo, redo: () => {} }, '')
-    while (history.undo('', true));
-    expect(undo).toHaveBeenCalledTimes(50)
+    for (let i = 0; i < 120; i += 1) history.push({ undo, redo: () => {} })
+    while (history.undo(() => {}));
+    expect(undo).toHaveBeenCalledTimes(100)
+  })
+})
+
+describe('putting one back', () => {
+  const ids = (...all: string[]) => all.map((id) => ({ id }))
+
+  it('goes after the nearest of those before it still there, wherever the list has moved since', () => {
+    // A, still being read, then B and C; B is taken off, then A's reading fails: B comes back before C.
+    expect(putBack(ids('c'), { id: 'b' }, ['a'])).toEqual(ids('b', 'c'))
+    expect(putBack(ids('a', 'new', 'c'), { id: 'b' }, ['a'])).toEqual(ids('a', 'b', 'new', 'c'))
+    expect(putBack(ids('a', 'c'), { id: 'b' }, ['a'])).toEqual(ids('a', 'b', 'c'))
+    expect(putBack(ids('a', 'b'), { id: 'b' }, ['a'])).toEqual(ids('a', 'b'))
   })
 })
 
@@ -150,92 +170,90 @@ describe('the keys', () => {
 })
 
 /** A composer with two images, as a host keeps them, and its history. */
-function Host({ history }: { readonly history: ComposerHistory }) {
-  const [value, setValue] = useState('')
+function Host({ history, onFocusField }: { readonly history: ComposerHistory; readonly onFocusField?: () => void }) {
+  const [value, setValue] = useState('Look')
   const [images, setImages] = useState([
     { id: 'one', name: 'one.png', src: 'data:,' },
     { id: 'two', name: 'two.png', src: 'data:,' },
   ])
   return (
-    <Composer
-      value={value}
-      onChange={setValue}
-      onSubmit={() => {}}
-      placeholder="Tell the lead"
-      images={images}
-      onAddFiles={() => {}}
-      history={history}
-      onRemoveImage={(id) => {
-        const at = images.findIndex((one) => one.id === id)
-        const one = images[at]
-        if (one === undefined) return
-        const off = () => setImages((now) => now.filter((x) => x.id !== id))
-        off()
-        history.push({ undo: () => setImages((now) => [...now.slice(0, at), one, ...now.slice(at)]), redo: off }, value)
+    <div
+      onFocusCapture={(e) => {
+        if (e.target instanceof HTMLTextAreaElement) onFocusField?.()
       }}
-    />
+    >
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSubmit={() => {}}
+        placeholder="Tell the lead"
+        images={images}
+        onAddFiles={() => {}}
+        history={history}
+        onRemoveImage={(id) => {
+          const at = images.findIndex((one) => one.id === id)
+          const one = images[at]
+          if (one === undefined) return
+          const before = images.slice(0, at).map((x) => x.id)
+          const off = () => setImages((now) => now.filter((x) => x.id !== id))
+          off()
+          history.push({ undo: () => setImages((now) => putBack(now, one, before)), redo: off })
+        }}
+      />
+    </div>
   )
 }
 
 const field = () => screen.getByRole<HTMLTextAreaElement>('textbox')
 const shown = () => screen.queryAllByRole('img').map((one) => one.getAttribute('alt'))
-/** Words typed, as the browser says: an input that is no undo. */
-const type = (words: string) => fireEvent.input(field(), { target: { value: words }, inputType: 'insertText' })
-/** The field's own undo or redo, as the browser plays it: a beforeinput the composer may cancel, and the words, if it didn't. */
-const native = (kind: 'historyUndo' | 'historyRedo', words: string) => {
-  const went = fireEvent(field(), new InputEvent('beforeinput', { inputType: kind, cancelable: true, bubbles: true }))
-  if (went) fireEvent.input(field(), { target: { value: words }, inputType: kind })
-  return went
-}
+const undoKey = { key: 'z', code: 'KeyZ', metaKey: true }
 
 describe('the composer', () => {
-  it('gives the field the focus as an image is taken off, and ⌘Z puts it back where it was', () => {
-    render(<Host history={createComposerHistory()} />)
+  it('takes the focus as an image is taken off, without going to the field, and ⌘Z puts it back where it was', () => {
+    const onFocusField = vi.fn()
+    const { container } = render(<Host history={createComposerHistory()} onFocusField={onFocusField} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove one.png' }))
     expect(shown()).toEqual(['two.png'])
-    expect(field()).toHaveFocus()
-    const undo = fireEvent.keyDown(field(), { key: 'z', code: 'KeyZ', metaKey: true })
-    expect(undo).toBe(false)
+    expect(container.querySelector('form')).toHaveFocus()
+    expect(onFocusField).not.toHaveBeenCalled()
+    expect(fireEvent.keyDown(container.querySelector('form') as HTMLFormElement, undoKey)).toBe(false)
     expect(shown()).toEqual(['one.png', 'two.png'])
-    fireEvent.keyDown(field(), { key: 'z', code: 'KeyZ', metaKey: true, shiftKey: true })
+    fireEvent.keyDown(field(), { ...undoKey, shiftKey: true })
     expect(shown()).toEqual(['two.png'])
   })
 
-  it('leaves the field its own undo for words typed since, then puts the image back', () => {
+  it('takes back the words typed after an image went, the letter deleted since included, before the image', async () => {
+    const user = userEvent.setup()
     render(<Host history={createComposerHistory()} />)
-    type('Look')
     fireEvent.click(screen.getByRole('button', { name: 'Remove two.png' }))
-    type('Look at this')
-    // The words came last: the key goes on to the field, which undoes them itself.
-    expect(fireEvent.keyDown(field(), { key: 'z', code: 'KeyZ', metaKey: true })).toBe(true)
-    expect(native('historyUndo', 'Look')).toBe(true)
-    expect(shown()).toEqual(['one.png'])
-    // From the menu too: the image is the next step, and the field's own is held back.
-    expect(native('historyUndo', '')).toBe(false)
-    expect(shown()).toEqual(['one.png', 'two.png'])
+    await user.type(field(), '!{Backspace}')
     expect(field()).toHaveValue('Look')
-    // Redo, in the order they were undone back: the image first, then the words.
-    expect(native('historyRedo', 'Look')).toBe(false)
+    fireEvent.keyDown(field(), undoKey)
+    expect(field()).toHaveValue('Look!')
     expect(shown()).toEqual(['one.png'])
-    expect(native('historyRedo', 'Look at this')).toBe(true)
-    expect(field()).toHaveValue('Look at this')
+    fireEvent.keyDown(field(), undoKey)
+    expect(field()).toHaveValue('Look')
+    expect(shown()).toEqual(['one.png'])
+    fireEvent.keyDown(field(), undoKey)
+    expect(shown()).toEqual(['one.png', 'two.png'])
   })
 
-  it('puts the image back where the field had nothing of its own to undo', () => {
-    vi.useFakeTimers()
-    try {
-      render(<Host history={createComposerHistory()} />)
-      fireEvent.click(screen.getByRole('button', { name: 'Remove one.png' }))
-      // Words put in without typing, as a suggestion taken: the field keeps no step for them, and fires no beforeinput.
-      fireEvent.input(field(), { target: { value: 'Taken' } })
-      expect(fireEvent.keyDown(field(), { key: 'z', code: 'KeyZ', metaKey: true })).toBe(true)
-      expect(shown()).toEqual(['two.png'])
-      act(() => {
-        vi.runAllTimers()
-      })
-      expect(shown()).toEqual(['one.png', 'two.png'])
-    } finally {
-      vi.useRealTimers()
-    }
+  it('makes the field’s own Undo and Redo, from the menu, the history’s', () => {
+    render(<Host history={createComposerHistory()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove one.png' }))
+    const menu = (kind: string) => fireEvent(field(), new InputEvent('beforeinput', { inputType: kind, cancelable: true, bubbles: true }))
+    expect(menu('historyUndo')).toBe(false)
+    expect(shown()).toEqual(['one.png', 'two.png'])
+    expect(menu('historyRedo')).toBe(false)
+    expect(shown()).toEqual(['two.png'])
+  })
+
+  it('takes back words put in other than by typing as a step of their own', () => {
+    render(<Host history={createComposerHistory()} />)
+    fireEvent.input(field(), { target: { value: 'Look, pasted' }, inputType: 'insertFromPaste' })
+    fireEvent.keyDown(field(), undoKey)
+    expect(field()).toHaveValue('Look')
+    fireEvent.keyDown(field(), { ...undoKey, shiftKey: true })
+    expect(field()).toHaveValue('Look, pasted')
   })
 })

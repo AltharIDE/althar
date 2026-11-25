@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type UIEvent,
   type WheelEvent,
   type ReactNode,
@@ -276,8 +277,9 @@ export interface ComposerProps {
   /** Takes a file or folder off. Without it, they have no remove button. */
   onRemoveFile?: (id: string) => void
   /**
-   * The attachments taken off, as steps of the field's own history: Undo (⌘Z, Ctrl+Z) puts the last one back, and Redo
-   * (⇧⌘Z, Ctrl+Y) takes it off again, in turn with the words' own steps. The consumer pushes a step as it takes one off.
+   * One history of the words and the attachments taken off, in the order they happened: Undo (⌘Z, Ctrl+Z) takes back
+   * the last, and Redo (⇧⌘Z, Ctrl+Y) does it again. The composer keeps the words' steps in it; the consumer pushes an
+   * attachment's as it takes one off. Without it, the field undoes its words as browsers do.
    */
   history?: ComposerHistory
   /**
@@ -401,21 +403,45 @@ export function Composer({
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
 
-  /* Undo or Redo the field was asked, as its keys press them, until it says it did one of its own. */
-  const asked = useRef<'undo' | 'redo' | null>(null)
-  /* Undo or Redo, the field's own or an attachment's: true where the attachment's was done, and the field's must not be. */
-  const step = (kind: 'undo' | 'redo', words: string, last = false) =>
-    history !== undefined && (kind === 'undo' ? history.undo(words, last) : history.redo(words, last))
-  /* An attachment taken off: the field takes the focus its button had, so Undo is a key away. */
+  /* Where the caret goes once words taken back or done again are in the field. */
+  const caret = useRef<{ start: number; end: number } | null>(null)
+  /* Undo or Redo, of the words or an attachment, as one history: the field's own never runs beside it. */
+  const step = (kind: 'undo' | 'redo') => {
+    if (history === undefined) return
+    const put = (words: { text: string; start: number; end: number }) => {
+      caret.current = { start: words.start, end: words.end }
+      onChange(words.text)
+    }
+    if (kind === 'undo') history.undo(put)
+    else history.redo(put)
+  }
+  /* Where the caret was before a change, for Undo to put it back. */
+  const selected = useRef<{ start: number; end: number } | null>(null)
+  /* Words put in other than by typing (dictated, a suggestion or a command taken, a message given back): a step of their own. */
+  useLayoutEffect(() => {
+    if (history === undefined) return
+    const known = history.known()
+    const end = value.length
+    if (known === undefined) history.wrote({ text: value, start: end, end }, { text: value, start: end, end })
+    else if (known.text !== value) history.wrote(known, { text: value, start: end, end })
+    const el = ref.current
+    if (el && caret.current) el.setSelectionRange(caret.current.start, caret.current.end)
+    caret.current = null
+  }, [value, history, ref])
+  /* An attachment taken off: the composer takes the focus its button had, so Undo is a key away, without going to the field (which can start a chat). */
   const takenOff = (remove: (id: string) => void, id: string) => {
     remove(id)
-    ref.current?.focus()
+    if (history !== undefined) form.current?.focus({ preventScroll: true })
   }
-  /* From the menu, or a key the field heard before this did: the field's own, unless the attachment's step comes first. */
+  /* The field's own Undo and Redo, from the menu: this history's instead. Before any other change, where the caret was. */
   const beforeInput = useEffectEvent((e: InputEvent) => {
-    if (e.inputType !== 'historyUndo' && e.inputType !== 'historyRedo') return
-    asked.current = null
-    if (step(e.inputType === 'historyUndo' ? 'undo' : 'redo', (e.target as HTMLTextAreaElement).value)) e.preventDefault()
+    const el = e.target as HTMLTextAreaElement
+    if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+      e.preventDefault()
+      step(e.inputType === 'historyUndo' ? 'undo' : 'redo')
+      return
+    }
+    selected.current = { start: el.selectionStart, end: el.selectionEnd }
   })
   useEffect(() => {
     const el = ref.current
@@ -624,7 +650,24 @@ export function Composer({
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
-      <form ref={form} className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
+      <form
+        ref={form}
+        className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)}
+        onSubmit={submit}
+        {...(history === undefined
+          ? {}
+          : {
+              // Taking the focus as an attachment is taken off, so Undo reaches it.
+              tabIndex: -1,
+              onKeyDown: (e: KeyboardEvent<HTMLFormElement>) => {
+                /* Undo and Redo, here and in the field (not in a menu opened from it): this history's, the words' and the attachments' in turn. */
+                const kind = e.nativeEvent.isComposing || (e.target !== e.currentTarget && e.target !== ref.current) ? null : historyKey(e)
+                if (kind === null) return
+                e.preventDefault()
+                step(kind)
+              },
+            })}
+      >
         {drop.over && (
           <div className={s.dropping} aria-hidden="true">
             <Icon name="clip" size={14} />
@@ -798,11 +841,16 @@ export function Composer({
             }}
             onChange={(e) => {
               setDismissed(null)
-              const kind = (e.nativeEvent as Partial<InputEvent>).inputType
-              if (kind === 'historyUndo' || kind === 'historyRedo') {
-                asked.current = null
-                history?.native(kind === 'historyUndo' ? 'undo' : 'redo')
-              } else history?.edited()
+              if (history !== undefined) {
+                const kind = (e.nativeEvent as Partial<InputEvent>).inputType ?? ''
+                const at = selected.current ?? { start: value.length, end: value.length }
+                selected.current = null
+                // Letters typed, or deleted one by one, go on in a run; a paste, a cut or a drop is a step of its own.
+                const typing =
+                  kind === 'insertText' ? 'insert' : kind === 'deleteContentBackward' || kind === 'deleteContentForward' ? 'delete' : null
+                const field = e.target
+                history.wrote({ text: value, ...at }, { text: field.value, start: field.selectionStart, end: field.selectionEnd }, typing)
+              }
               onChange(e.target.value)
             }}
             onPaste={(e) => {
@@ -825,22 +873,6 @@ export function Composer({
               ) {
                 e.preventDefault()
                 onStopAgent()
-                return
-              }
-              /* Undo and Redo: an attachment's step where it is the last, else the field's own; where the field has none, the attachment's after all. */
-              const undoing = history === undefined || e.nativeEvent.isComposing ? null : historyKey(e)
-              if (undoing !== null) {
-                const field = e.currentTarget
-                if (step(undoing, field.value)) {
-                  e.preventDefault()
-                  return
-                }
-                asked.current = undoing
-                setTimeout(() => {
-                  if (asked.current !== undoing) return
-                  asked.current = null
-                  step(undoing, field.value, true)
-                })
                 return
               }
               /* While the commands are open, the arrows move along them, Tab takes one into the field, and Escape shuts them. */

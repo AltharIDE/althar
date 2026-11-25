@@ -12,7 +12,7 @@ import { Behind } from '../Behind/Behind'
 import { ModelPick } from '../ModelPick/ModelPick'
 import { isMac } from '../../foundations/keys'
 import { Composer, type ComposerFile, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
-import { createComposerHistory } from './history'
+import { createComposerHistory, putBack } from './history'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -122,9 +122,10 @@ function Example(
     const at = list.findIndex((one) => one.id === id)
     const one = list[at]
     if (one === undefined) return
+    const before = list.slice(0, at).map((x) => x.id)
     const off = () => set((now) => now.filter((x) => x.id !== id))
     off()
-    history.push({ undo: () => set((now) => [...now.slice(0, at), one, ...now.slice(at)]), redo: off }, value)
+    history.push({ undo: () => set((now) => putBack(now, one, before)), redo: off })
   }
   const [queue, setQueue] = useState(waiting.map((said, i) => ({ id: `q${i}`, ...(typeof said === 'string' ? { text: said } : said) })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
@@ -821,8 +822,8 @@ export const FilesOnly: Story = {
 const UNDO = isMac ? '{Meta>}z{/Meta}' : '{Control>}z{/Control}'
 const REDO = isMac ? '{Meta>}{Shift>}z{/Shift}{/Meta}' : '{Control>}y{/Control}'
 /**
- * Taken off by mistake: Undo puts it back where it was, as it was, and Redo takes it off again. The field takes the
- * focus its × had, so Undo is a key away; what was taken off goes back in the order it went.
+ * Taken off by mistake: Undo puts it back where it was, as it was, and Redo takes it off again. Words and attachments
+ * are one history, taken back in the order they happened; the composer takes the focus the × had, so Undo is a key away.
  */
 export const UndoBringsBackAnImage: Story = {
   render: () => (
@@ -832,24 +833,33 @@ export const UndoBringsBackAnImage: Story = {
     const c = within(canvasElement)
     const field = c.getByRole('textbox', { name: 'Tell the lead' })
     const shown = () => c.getAllByRole('img').map((one) => one.getAttribute('alt'))
+    const said = 'The refunds page before and after the fix.'
     await userEvent.click(c.getByRole('button', { name: 'Remove refunds-before.png' }))
+    await expect(canvasElement.querySelector('form')).toHaveFocus()
+    await userEvent.type(field, ' See the second.')
     await userEvent.click(c.getByRole('button', { name: 'Remove refund-spec.pdf' }))
     await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
-    await expect(field).toHaveFocus()
-    // The file went last, so it comes back first; then the image, before the other, where it was.
+    // The file went last, so it comes back first; then the words typed since the image went; then the image, where it was.
     await userEvent.keyboard(UNDO)
     await expect(c.getByText('refund-spec.pdf')).toBeInTheDocument()
+    await expect(field).toHaveValue(`${said} See the second.`)
+    await userEvent.keyboard(UNDO)
+    await expect(field).toHaveValue(said)
     await expect(shown()).toEqual(['refunds-after.png'])
     await userEvent.keyboard(UNDO)
     await expect(shown()).toEqual(['refunds-before.png', 'refunds-after.png'])
     await expect(c.getByRole('img', { name: 'refunds-before.png' })).toHaveAttribute('src', SHOT_BEFORE.src)
-    // Redo takes it off again, and Undo puts it back once more; the words stay as they were throughout.
+    // Redo, in the order they were taken back: the image off again, then the words.
     await userEvent.keyboard(REDO)
     await expect(shown()).toEqual(['refunds-after.png'])
+    await expect(field).toHaveValue(said)
+    await userEvent.keyboard(REDO)
+    await expect(field).toHaveValue(`${said} See the second.`)
+    await userEvent.keyboard(UNDO)
     await userEvent.keyboard(UNDO)
     await expect(shown()).toEqual(['refunds-before.png', 'refunds-after.png'])
     await expect(c.getByRole('list', { name: '3 attachments to send' })).toBeInTheDocument()
-    await expect(field).toHaveValue('The refunds page before and after the fix.')
+    await expect(field).toHaveValue(said)
   },
 }
 export const UndoBringsBackAnImageDark: Story = { ...UndoBringsBackAnImage, globals: { theme: 'dark' } }

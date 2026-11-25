@@ -116,12 +116,12 @@ describe('comments waiting in a draft', () => {
       takeOff('task:undo', 'a')
       expect(commentsOf('task:undo').map((one) => one.note)).toEqual(['Second'])
       expect(remove).toHaveBeenCalledWith('crop-a')
-      expect(draftHistory('task:undo').undo('')).toBe(true)
+      expect(draftHistory('task:undo').undo(() => undefined)).toBe(true)
       expect(commentsOf('task:undo').map((one) => one.note)).toEqual(['First', 'Second'])
       expect(commentsOf('task:undo')[0]?.crop).toBe(crop)
       // Its crop is kept again, so it lasts as long as it would have.
       expect(write).toHaveBeenCalledWith('crop-a', crop)
-      expect(draftHistory('task:undo').redo('')).toBe(true)
+      expect(draftHistory('task:undo').redo(() => undefined)).toBe(true)
       expect(commentsOf('task:undo').map((one) => one.note)).toEqual(['Second'])
     } finally {
       write.mockRestore()
@@ -210,6 +210,31 @@ describe('comments waiting in a draft', () => {
     takeComments(key).finish(true)
     forgetComments(false)
     expect(commentsOf(key)).toEqual([])
+  })
+
+  it('come back with their crop when taken off while it was read, whether Undo comes before the crop is read or after', async () => {
+    const write = vi.spyOn(draftCrop, 'write').mockResolvedValue('kept')
+    const on = { kind: 'page', picked, address: 'https://example.com/', viewport: 'fit' } as const
+    const history = (key: string) => draftHistory(key)
+    try {
+      // Back at once, while its crop is still read: the crop lands on it, and is kept.
+      savePageComment('thread:soon', null, 'Soon', on, dataUrl(png(616, 80)))
+      takeOff('thread:soon', commentsOf('thread:soon')[0]?.id ?? '')
+      expect(history('thread:soon').undo(() => undefined)).toBe(true)
+      await waitFor(() => expect(commentsOf('thread:soon')[0]?.crop).toMatchObject({ width: 616, height: 80 }))
+      expect(write).toHaveBeenCalled()
+      // Back once the crop was read meanwhile: it comes back with it.
+      write.mockClear()
+      savePageComment('thread:later', null, 'Later', on, dataUrl(png(616, 80)))
+      takeOff('thread:later', commentsOf('thread:later')[0]?.id ?? '')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(write).not.toHaveBeenCalled()
+      expect(history('thread:later').undo(() => undefined)).toBe(true)
+      expect(commentsOf('thread:later')[0]).toMatchObject({ note: 'Later', crop: { width: 616, height: 80 } })
+      expect(write).toHaveBeenCalledWith(commentsOf('thread:later')[0]?.cropId, expect.objectContaining({ width: 616 }))
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it('keeps the chip visible while its crop is being saved', async () => {
