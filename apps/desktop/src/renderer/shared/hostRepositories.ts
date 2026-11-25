@@ -11,7 +11,7 @@ import { useServices } from '../data/services'
 import { serviceBrand, serviceName, serviceOfProduct } from '../features/connections/ways'
 import { device } from './device'
 import { useFound } from './found'
-import { useProjectsHere } from './projectsHere'
+import { cloneFromHere, useProjectsHere } from './projectsHere'
 import { hostnameOf, remoteOf } from './remotes'
 import { ago } from './time'
 
@@ -152,7 +152,7 @@ export const useHostRepositories = (
   )
   // On another computer's home, this computer's projects, by where their code is: one the home lists already says so; the
   // rest are cloned by their address, with the home's own sign-in to that host where it has one.
-  const projectsHere = useProjectsHere()
+  const projectsHere = useProjectsHere(list)
   const onHere = `On ${device.this}`
   const homeHas = (one: { readonly host: string; readonly path: string }) =>
     all.findIndex((listed) => {
@@ -237,11 +237,12 @@ export const useHostRepositories = (
     cloneOf: (id) => {
       if (pastedClone !== null && pastedClone.id === id) return pastedClone
       const mine = projectsHere.find((one) => `here:${one.url}` === id)
-      if (mine !== undefined)
+      const source = mine === undefined ? null : cloneFromHere(mine, list)
+      if (mine !== undefined && source !== null)
         return {
           id,
           remote: mine.path,
-          from: { url: mine.url },
+          from: source,
           product: mine.product,
           hostName: mine.product === null ? mine.host : serviceName(serviceOfProduct(mine.product)),
           host: mine.host,

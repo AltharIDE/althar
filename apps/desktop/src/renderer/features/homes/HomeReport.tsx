@@ -5,6 +5,7 @@ import type { HomeProject, HomeProjectRemote } from '../../../homes'
 import { useMerging } from '../../data/merges'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { hostnameOf } from '../../shared/remotes'
 import { yoursByProject } from '../board/lanes'
 
 /*
@@ -28,7 +29,9 @@ export function HomeReport() {
   })
   const remotes = repositories.map((read): ReadonlyArray<HomeProjectRemote> =>
     (read.data ?? []).flatMap((one) =>
-      one.host?.url == null || !one.host.url.startsWith('https://') ? [] : [{ url: one.host.url, product: one.host.product }],
+      one.host?.url == null || !one.host.url.startsWith('https://')
+        ? []
+        : [{ url: one.host.url, product: one.host.product, host: hostnameOf(one.host.url), path: one.host.path }],
     ),
   )
   const said = remotes.map((one) => JSON.stringify(one)).join('\n')

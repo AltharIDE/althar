@@ -30,7 +30,13 @@ const projectName = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLengt
 const count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(MAX_COUNT))
 /** A repository's page on its code host, as a window says it: an https address with no sign-in in it, kept short. */
 const remoteUrl = Schema.String.check(Schema.isMaxLength(400), Schema.isPattern(/^https:\/\/[^\s/@]+\/[^\s@]+$/))
-const remote = Schema.Struct({ url: remoteUrl, product: Schema.NullOr(Schema.String.check(Schema.isMaxLength(40))) })
+const remote = Schema.Struct({
+  url: remoteUrl,
+  product: Schema.NullOr(Schema.String.check(Schema.isMaxLength(40))),
+  /** The host's address, as a remote names it, and the repository's path there: no sign-in, spaces or way out of it. */
+  host: Schema.String.check(Schema.isMaxLength(253), Schema.isPattern(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/)),
+  path: Schema.String.check(Schema.isMaxLength(300), Schema.isPattern(/^(?!.*(?:^|\/)\.\.?(?:\/|$))[\w.~-]+(?:\/[\w.~-]+)+$/)),
+})
 const reported = Schema.Struct({
   id: projectId,
   name: projectName,

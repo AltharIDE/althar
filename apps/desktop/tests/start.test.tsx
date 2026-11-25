@@ -997,7 +997,7 @@ it('signs an agent in on an empty remote home and connects a code host there, ea
         ink: 'teal',
         working: 0,
         yours: 0,
-        remotes: [{ url: 'https://github.com/acme/site', product: 'github' }],
+        remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }],
       },
     ],
   }

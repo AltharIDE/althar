@@ -825,7 +825,7 @@ describe('a new project on a home on another computer', () => {
           ink: 'teal',
           working: 0,
           yours: 0,
-          remotes: [{ url: 'https://github.com/acme/site', product: 'github' }],
+          remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }],
         },
       ],
     }
@@ -846,6 +846,36 @@ describe('a new project on a home on another computer', () => {
     await userEvent.click(row)
     await create('Site')
     await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { url: 'https://github.com/acme/site' }))
+  })
+
+  it('clones a Bitbucket Data Center project of this Mac’s through the home’s own connection to that server, and offers none it can’t reach', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = [
+      { url: 'https://git.acme.com/projects/PLAT/repos/site/browse', product: 'bitbucket_dc', host: 'git.acme.com', path: 'PLAT/site' },
+      { url: 'https://code.other.com/projects/OPS/repos/infra/browse', product: 'bitbucket_dc', host: 'code.other.com', path: 'OPS/infra' },
+    ]
+    const local = { live: true, list: [{ id: 'p_here', name: 'Site', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const server = {
+      ...githubConnection,
+      id: 'conn_dc',
+      product: 'bitbucket_dc' as const,
+      name: 'Bitbucket',
+      webUrl: 'https://git.acme.com',
+    }
+    const at = onHome(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [server] })), listHostRepositories: vi.fn(async () => []) },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    const row = await screen.findByRole('button', { name: 'Clone PLAT/site' })
+    // Its page isn't its git address, and the home isn't connected to the other server: that one isn't offered.
+    expect(screen.queryByRole('button', { name: 'Clone OPS/infra' })).toBeNull()
+    await userEvent.click(row)
+    await create('Site')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'site'] }),
+    )
   })
 
   it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {

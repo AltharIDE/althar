@@ -46,10 +46,17 @@ export interface HomeProject {
    */
   readonly remotes?: ReadonlyArray<HomeProjectRemote>
 }
-/** A project's repository on its code host: its page there (https://github.com/acme/site), and the host where Althar knows it. */
+/**
+ * A project's repository on its code host, as Althar knows it there: the host's address and the repository's path on it
+ * (git.acme.com, PLATFORM/site), which a home connected to that host clones it by; the product, where Althar knows it; and
+ * its page (https://github.com/acme/site), which is its git address too on GitHub, GitLab and Bitbucket Cloud, but not on
+ * Bitbucket Data Center.
+ */
 export interface HomeProjectRemote {
   readonly url: string
   readonly product: string | null
+  readonly host: string
+  readonly path: string
 }
 /** Where a home's projects stand: read now by a connected window on it (live), or as one last read them. */
 export interface HomeProjects {

@@ -143,7 +143,7 @@ export const useHomeWelcome = (
     onCheckAgain: updating.onCheckAgain,
   }
   // This computer's projects with their code on a host: a door of their own, each project once.
-  const projectsHere = useProjectsHere()
+  const projectsHere = useProjectsHere(list)
   const fromHere = [...new Map(projectsHere.map((one) => [one.projectId, one])).values()]
   const home = here !== null && here.current.kind !== 'local' ? here.current.home : null
 
