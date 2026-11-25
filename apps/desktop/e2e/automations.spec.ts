@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, say } from './support'
@@ -16,6 +16,38 @@ import { launch, openFirstProject, say } from './support'
  * screenshots are this change's own evidence (test-results/automations-*.png),
  * at 1x.
  */
+
+/**
+ * How its page says the next run of "the second Tuesday at 16:00" from now, as the window says it (its own way with days and dates): "Runs
+ * next on 13 Oct at 16:0x", where the runtime staggers a run by up to four minutes. The runtime's next one is the first whose time hasn't
+ * passed, so the two candidates cover a run just now due.
+ */
+const secondTuesdayWords = async (page: Page): Promise<RegExp> => {
+  const words = await page.evaluate(() => {
+    const now = new Date()
+    const startOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    const sentence = (at: Date) => {
+      const days = Math.round((startOf(at) - startOf(now)) / 864e5)
+      const day =
+        days === 0
+          ? 'today'
+          : days === 1
+            ? 'tomorrow'
+            : days < 7
+              ? `on ${at.toLocaleDateString(undefined, { weekday: 'long' })}`
+              : `on ${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+      return `Runs next ${day} at 16:0\\d`
+    }
+    const found: string[] = []
+    for (let month = 0; found.length < 2; month += 1) {
+      const first = new Date(now.getFullYear(), now.getMonth() + month, 1, 16)
+      const at = new Date(first.getFullYear(), first.getMonth(), 1 + ((9 - first.getDay()) % 7) + 7, 16)
+      if (at.getTime() + 5 * 60_000 > now.getTime()) found.push(sentence(at))
+    }
+    return found
+  })
+  return new RegExp(`^(${words.join('|')})$`)
+}
 
 test('makes an automation by asking the coordinator, turns it on from its card, and keeps it on its own page', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
@@ -64,12 +96,20 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
     await page.getByRole('combobox', { name: 'Weekday', exact: true }).click()
     await page.getByRole('option', { name: 'Tuesday' }).click()
     await page.getByRole('button', { name: 'Done' }).click()
+    // Its next run is the second Tuesday's at 16:00 (and no more than the stagger after it), not the Friday's it was: said at once, and read
+    // again from the runtime once the window starts over with nothing cached.
+    const nextRun = page.getByText(await secondTuesdayWords(page))
     await expect(page.getByRole('button', { name: 'Monthly, on the second Tuesday at 16:00' })).toBeVisible()
-    await expect(page.getByText(/Runs next (on .+|tomorrow|today) at 16:\d\d/)).toBeVisible()
-    await page.getByRole('button', { name: 'Automations', exact: true }).click()
+    await expect(nextRun).toBeVisible()
+    await page.reload()
+    await page
+      .getByRole('button', { name: 'Automations', exact: true })
+      .or(page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: /^Automations/ }))
+      .first()
+      .click()
     await page.getByRole('button', { name: 'Release notes' }).click()
     await expect(page.getByRole('button', { name: 'Monthly, on the second Tuesday at 16:00' })).toBeVisible()
-    await expect(page.getByText(/Runs next (on .+|tomorrow|today) at 16:\d\d/)).toBeVisible()
+    await expect(nextRun).toBeVisible()
     await page.screenshot({ path: 'test-results/automations-4b-monthly.png', animations: 'disabled', scale: 'css', fullPage: true })
 
     // Made by hand: a blank page, its prompt ready to type.
