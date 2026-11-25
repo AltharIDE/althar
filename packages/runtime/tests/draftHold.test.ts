@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Stream } from 'effect'
+import { Duration, Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { Draft } from '@althar/contracts'
@@ -40,6 +40,12 @@ const planOf = (slug: string) =>
       SELECT p.state, p.starts_at FROM task_plans p JOIN tasks t ON t.id = p.task_id WHERE t.slug = ${slug} ORDER BY p.rowid DESC`
     return plan
   })
+
+/**
+ * A countdown no slow machine runs out before Hold comes, for a plan held after it came: a moment's could start it first,
+ * after the turns and plans before the Hold.
+ */
+const heldLong = Duration.minutes(5)
 
 /** A draft_task call begins, as the coordinator's stream says, with nothing written yet: the key of the draft it makes. */
 const begins = (thread: Effect.Success<ReturnType<typeof opened>>, callId: string) =>
@@ -94,7 +100,7 @@ describe('a task held while it was drafted', () => {
       const key = told.drafts.find((draft) => draft.slug === 'add-a-retry')?.key ?? ''
       yield* (yield* Coordinator).holdDraft(threadId, key, (yield* Instance).personId)
       assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
-    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { countdown: heldLong }))))),
   )
 
   // The window may be behind: its card drawn after the task was made sends Hold with the task, one drawn before with its key only.
@@ -129,7 +135,7 @@ describe('a task held while it was drafted', () => {
         if (withTask) yield* (yield* Coordinator).holdDraft(threadId, key, personId, draft?.taskId ?? undefined)
         else yield* (yield* Coordinator).holdDraft(threadId, key, personId)
         assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
-      }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+      }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { countdown: heldLong }))))),
     )
 
   // The agent numbers its calls again each turn: a late Hold for the last turn's draft reaches that one, never this turn's.
@@ -185,7 +191,7 @@ describe('a task held while it was drafted', () => {
           })
         }
         assert.isNotNull((yield* planOf('fix-the-menu'))?.startsAt ?? null, 'the next one counts down as it would')
-      }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+      }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { countdown: heldLong }))))),
     )
 
   it.live('turns down a Hold for a draft it never had, so the window shows the card as it was', () =>

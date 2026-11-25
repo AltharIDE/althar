@@ -58,7 +58,8 @@ const shoot = async (page: Page, part: Locator, name: string) => {
  */
 const whatItSaw = async (page: Page, root: string) => {
   const words = async (part: Locator, last: number) => {
-    const text = await part.innerText({ timeout: 2_000 }).catch(() => '')
+    // Only what is there now: waiting for a part that never came would spend the failure's own time.
+    const text = (await part.count()) === 0 ? '' : await part.innerText().catch(() => '')
     const flat = text.replace(/\s+/g, ' ').trim()
     return flat === '' ? '(nothing)' : flat.length > last ? `…${flat.slice(-last)}` : flat
   }
