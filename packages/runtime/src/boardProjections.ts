@@ -11,8 +11,20 @@ export interface BoardRow {
   readonly state: string
   readonly createdAt: string
   readonly settledAt: string | null
+  /** When the person kept it for later, which moves its card with its state and settling untouched; left out where not read. */
+  readonly keptAt?: string | null
   readonly view?: string | null
 }
+
+/**
+ * Whether a card kept for its task still stands for its row as the store has it now: its state and settling, and whether it
+ * is kept for later, which Keep for later and writing to it again move alone. A card read kept stands for its row's keeping;
+ * one read otherwise for a row not kept, or kept with its pull request open, which reads as ready (worked out afresh then).
+ */
+export const standsFor = (card: Pick<BoardTask, 'state' | 'settledAt' | 'phase' | 'keptAt'>, row: BoardRow) =>
+  card.state === row.state &&
+  card.settledAt === row.settledAt &&
+  (row.keptAt === undefined || (card.phase === 'kept' ? card.keptAt === row.keptAt : row.keptAt === null))
 
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(BoardTask)))
 const KEEP = 1_000
@@ -39,7 +51,7 @@ export const boardProjections = Effect.gen(function* () {
             decoded.set(row.id, { json: row.view, cards })
             const oldest = decoded.keys().next().value
             if (decoded.size > KEEP && oldest !== undefined) decoded.delete(oldest)
-            if (cards.every((card) => card.state === row.state && card.settledAt === row.settledAt)) return cards
+            if (cards.every((card) => standsFor(card, row))) return cards
           }
         }
         // A new profile or task can show durable facts while the first Git read runs.
@@ -76,7 +88,7 @@ export const boardRows = (projectId: string, deviceId: string, settled: number, 
       : sql`LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id
           WHERE f.task_id = k.id AND f.device_id = ${deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)`
     const read = sql<BoardRow>`
-      SELECT k.id, k.state, k.created_at, k.settled_at, ${columns} FROM tasks k ${joins}
+      SELECT k.id, k.state, k.created_at, k.settled_at, k.kept_at, ${columns} FROM tasks k ${joins}
       WHERE k.project_id = ${projectId} AND k.artifact_chat = 0 AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
         SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned') AND artifact_chat = 0
         ORDER BY settled_at DESC, id DESC LIMIT ${settled}))

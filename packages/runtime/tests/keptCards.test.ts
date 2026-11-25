@@ -29,7 +29,7 @@ import { repository, runtime, until } from './support'
  */
 
 /** The statement a board reads its tasks with, once a read. */
-const BOARD_ROWS = 'SELECT k.id, k.state, k.created_at, k.settled_at, w.path AS worktree'
+const BOARD_ROWS = 'SELECT k.id, k.state, k.created_at, k.settled_at, k.kept_at, w.path AS worktree'
 
 /** Each card worked out, as its span says: its task, and whether it was kept, or why not; and how many boards were read. */
 const cardsWorkedOut = () => {
@@ -160,6 +160,13 @@ describe('a board read after one task moved', () => {
       assert.strictEqual(yield* projections.read({ ...row, view: '{}' }, fallback), facts)
       assert.strictEqual(yield* projections.read({ ...row, state: 'done' }, fallback), facts)
       assert.strictEqual(yield* projections.read({ ...row, settledAt: '2026-10-05T12:00:00Z' }, fallback), facts)
+      // Kept for later since the card was saved, or brought back since one saved kept: its state and settling the same, but
+      // the card it saved no longer stands (Keep for later's read after its answer).
+      const keptAt = '2026-10-05T12:00:00Z'
+      assert.strictEqual(yield* projections.read({ ...row, keptAt }, fallback), facts)
+      const keptView = JSON.stringify([{ ...card!, phase: 'kept', keptAt }])
+      assert.strictEqual(yield* projections.read({ ...row, view: keptView, keptAt: null }, fallback), facts)
+      assert.strictEqual((yield* projections.read({ ...row, view: keptView, keptAt }, fallback))[0]?.phase, 'kept')
       assert.deepEqual(projections.pending(10), [id])
 
       const saved = yield* projections.read(row, fallback)

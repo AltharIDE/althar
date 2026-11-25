@@ -3213,7 +3213,7 @@ export class Queries extends Context.Service<
             ...offering(yield* presetOfferOn(task.projectId, taskId)),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
           // Its row as the board reads it beside the card: one the board reads otherwise moved since.
-          return { projectId: task.projectId, card, row: `${task.state} ${task.createdAt} ${task.settledAt}` }
+          return { projectId: task.projectId, card, row: `${task.state} ${task.createdAt} ${task.settledAt} ${task.keptAt}` }
         })
 
       /** The automation whose run a task is, by its name now; null where none started it. */
@@ -3536,7 +3536,7 @@ export class Queries extends Context.Service<
         const served = Effect.gen(function* () {
           const kept = yield* keptOf(row.id)
           // Its row moved with nothing recorded: worked out afresh, as the store says it now.
-          if (kept === undefined || kept.row !== `${row.state} ${row.createdAt} ${row.settledAt}`) return undefined
+          if (kept === undefined || kept.row !== `${row.state} ${row.createdAt} ${row.settledAt} ${row.keptAt ?? null}`) return undefined
           if (kept.board !== undefined) return kept.board
           // Its card kept as the coordinator's thread read it, what its board adds is worked out on it.
           const [read, on] = yield* cardWorkedOut(row.id, boardOf(row, kept.card))
