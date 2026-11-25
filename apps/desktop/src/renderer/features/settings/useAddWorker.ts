@@ -220,6 +220,9 @@ export const useAddWorker = ({
   const [checks, setChecks] = useState(0)
   // Check again pressed and not yet answered: what it said before stays meanwhile, its button saying it's checking.
   const [checking, setChecking] = useState(false)
+  // A code asked again by Check again, where the home made none: its error stays shown until this one is answered.
+  const [codeAsking, setCodeAsking] = useState(false)
+  const codeAsked = useRef(0)
   const enrolled = useRef<string | null>(null)
 
   useEffect(() => {
@@ -331,6 +334,9 @@ export const useAddWorker = ({
     }
     setCode(null)
     setCodeFailed(null)
+    // A code asked again and not yet answered is dropped with the dialog.
+    codeAsked.current++
+    setCodeAsking(false)
     onClose()
   }, [bridge, onClose, setup])
 
@@ -371,12 +377,27 @@ export const useAddWorker = ({
           )
         : null,
     unavailable: unavailableOf(release),
-    checking,
+    checking: checking || codeAsking,
     check: () => {
-      // The home's code is asked again too, where it couldn't make one.
-      setCodeFailed(null)
       setChecking(true)
       setChecks((count) => count + 1)
+      if (codeFailed === null) return
+      // The home's code is asked again too, where it couldn't make one: its error and Checking… stay until it answers.
+      const asked = ++codeAsked.current
+      setCodeAsking(true)
+      client.createWorkerCode('Worker').then(
+        (made) => {
+          if (codeAsked.current !== asked) return
+          setCode(made)
+          setCodeFailed(null)
+          setCodeAsking(false)
+        },
+        (error: unknown) => {
+          if (codeAsked.current !== asked) return
+          setCodeFailed(error instanceof Error ? error.message : text.codeFailed)
+          setCodeAsking(false)
+        },
+      )
     },
     close,
     ssh: bridge !== undefined,

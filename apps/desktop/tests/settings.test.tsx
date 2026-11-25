@@ -970,6 +970,49 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(bridge.release).toHaveBeenLastCalledWith(true))
   })
 
+  it('asks the home for a code again on Check again, its error and Checking… shown until it answers', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    let answer: (made: { code: string; expiresAt: number }) => void = () => undefined
+    // Busy until Check again is pressed; then it answers once the test says.
+    let busy = true
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => (answer = resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    // The dialog as it is each time: it's drawn again as its way changes.
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    const before = createWorkerCode.mock.calls.length
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    // Asked again: what it said stays, and the button says it's checking, until the home answers.
+    expect(within(adding()).getByText('The home is busy.')).toBeTruthy()
+    expect((within(adding()).getByRole('button', { name: 'Checking…' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(createWorkerCode.mock.calls.length).toBe(before + 1))
+    act(() => answer({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 }))
+    expect(
+      await within(adding()).findByText(
+        /ALTHAR_RELEASE_BASE=https:\/\/example\.invalid\/host-v0\.2\.0 sh -s -- join 'althar-worker1\.e30'/,
+      ),
+    ).toBeTruthy()
+    expect(within(adding()).queryByText('The home is busy.')).toBeNull()
+  })
+
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {
     const host = fakeHost()
     const { client } = fakeClient()
