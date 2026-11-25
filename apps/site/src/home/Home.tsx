@@ -2,15 +2,15 @@ import '@fontsource-variable/instrument-sans'
 import '@fontsource/instrument-serif/400-italic.css'
 
 import { Footer } from '../shared/footer/Footer'
+import { Bar } from '../shared/Bar'
 import { Nav, NavSpace } from '../shared/Nav'
-import { Bar } from './Bar'
 import s from './Home.module.css'
 import { Hero } from './Hero'
 import { Story } from './story/Story'
 
 /*
- * The developer page, in daylight: its own bar across the top (Bar; on a
- * phone, the site's nav and its menu), the first screen with the flat orrery
+ * The developer page, in daylight: its own bar across the top (shared/Bar; on
+ * a phone, the site's nav and its menu), the first screen with the flat orrery
  * (Hero), the product told scene by scene as you scroll (story/), and the
  * footer (shared/footer).
  */

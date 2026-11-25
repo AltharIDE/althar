@@ -1,31 +1,33 @@
-import { type ReactNode, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { LINKS } from '../../content/facts'
+import { useMedia } from '../../lib/browser'
 import { cx } from '../../lib/cx'
 import { useDownload } from '../../lib/download'
 import { LightUnder } from '../../shared/lightUnder'
-import { AskOnce } from '../bodies/desktop/AskOnce'
-import { AtWork } from '../bodies/desktop/AtWork'
-import { ALSO, TILES } from '../bodies/desktop/Bento'
 import { GROUPS } from '../bodies/desktop/Connections'
 import { Review } from '../bodies/desktop/Review'
 import { SCREENS } from '../bodies/desktop/screens/list'
+import { CanvasScreen } from '../bodies/desktop/CanvasScreen'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
-import { Altitude } from './Altitude'
+import { Altitude, KM } from './Altitude'
+import { Community } from './Community'
+import { Flow } from './Flow'
+import { Patch, sides, STORY_S } from './Patch'
 import { Race } from './Race'
 import aurora from './aurora.webp'
-import menubar from './menubar.webp'
-import { END, SCENE } from './scenes'
+import { END, SCENE, VIEW_HEADS } from './scenes'
 import { useScrolled } from './scroll'
+import { VIEW_COUNT, Views } from './Views'
 import s from './Story.module.css'
 import { useWaterfall } from './waterfall'
 
 /*
  * The home page after its first screen: the product, one scene after
- * another, on the page's paper, the way down told by the scroll. The board
- * pins and plays its task through as you scroll, and pours cobalt where the
- * pointer goes (waterfall.ts); the coordinator's thread rises beside its
- * words; the review pins on a dark ground and plays as you scroll; the
+ * another, on the page's paper, the way down told by the scroll. First the
+ * race (Race.tsx); then three of the app's views at work in a row (Views),
+ * under a heading that pours cobalt where the pointer goes (waterfall.ts); the community's Discord, busy beside its
+ * words and the way in (Community.tsx); the review pins on a dark ground and plays as you scroll; the
  * features and the app's screens run sideways; the integrations light up
  * name by name; and the download sits on cobalt under its own light. The
  * words never move: only the pictures do. An altitude in the corner counts
@@ -34,17 +36,17 @@ import { useWaterfall } from './waterfall'
 
 type Id = keyof typeof SCENE
 
-/** How far down each scene stands, for the altitude in the corner. */
-const KM: Record<Id, number> = { independent: 38, coordinator: 31, review: 24, flow: 17, connections: 10, edge: 3, gallery: 0.5 }
-
-/** The board's round, and the review's loop, as far as the scroll plays them: short of the turn back to the start. */
-const BOARD_MS = 15400
+/** The review's loop, as far as the scroll plays it: short of the turn back to the start. */
 const REVIEW_S = 10.8
+/** How far the review's story has got, in s, by the time it settles into place: today's first copy under way. */
+const SETTLING = 1.2
+const clamp = (v: number) => Math.min(1, Math.max(0, v))
 
-function Head({ id, className, white }: { id: Id; className?: string; white?: boolean }) {
+/** `quiet`: the heading set as the menu bar's is (EdgeTour), smaller and plain, its beat in the same face. */
+function Head({ id, className, white, quiet }: { id: Id; className?: string; white?: boolean; quiet?: boolean }) {
   return (
     <div className={cx(s.head, className)} aria-hidden={white || undefined}>
-      <h2 id={white ? undefined : `${id}-h`} className={s.title}>
+      <h2 id={white ? undefined : `${id}-h`} className={cx(s.title, quiet && s.quiet)}>
         {SCENE[id].title}
       </h2>
       <p className={s.lead}>{SCENE[id].lead}</p>
@@ -52,134 +54,87 @@ function Head({ id, className, white }: { id: Id; className?: string; white?: bo
   )
 }
 
+/**
+ * The board scene's heading, one for each view (scenes.tsx VIEW_HEADS), the
+ * one for the view in front shown and the others there unseen, all in the
+ * one place, so the scene never moves as they change. `white`: the copy
+ * the cobalt shows through (waterfall.ts), never read.
+ */
+function ViewHeads({ at, white }: { at: number; white?: boolean }) {
+  return (
+    <div className={s.viewHeads}>
+      {VIEW_HEADS.map((head, i) => (
+        <div key={i} className={s.head} data-on={i === at || undefined} aria-hidden={white || i !== at || undefined}>
+          <h2 id={!white && i === at ? 'independent-h' : undefined} className={s.title}>
+            {head.title}
+          </h2>
+          <p className={s.lead}>{head.lead}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Board() {
   const box = useRef<HTMLElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
+  const pool = useRef<HTMLDivElement>(null)
   const dot = useRef<HTMLDivElement>(null)
   const white = useRef<HTMLDivElement>(null)
-  const [at, setAt] = useState<number | null>(null)
-  const still = useScrolled(box, { pin: 2.4 }, (p) => setAt(p * BOARD_MS), 0.62)
-  useWaterfall(box, canvas, dot, white, still)
+  const [at, setAt] = useState(0)
+  // Pinned for a window and a quarter per view: the scroll flips which is in front, then lets go.
+  const still = useScrolled(
+    box,
+    { pin: 1.25 * VIEW_COUNT, bare: true },
+    (p) => setAt(Math.min(VIEW_COUNT - 1, Math.floor(p * VIEW_COUNT))),
+    0,
+  )
+  useWaterfall(box, pool, dot, white, still)
   return (
     <section ref={box} id="independent" className={cx(s.scene, s.board)} aria-labelledby="independent-h" data-km={KM.independent}>
-      <canvas ref={canvas} className={s.fall} aria-hidden="true" />
       <div ref={dot} className={s.dot} aria-hidden="true" />
       <div className={s.stick} data-stick="">
+        <div ref={pool} className={s.fall} aria-hidden="true" />
         <div className={s.wrap}>
           <div className={s.heads}>
-            <Head id="independent" />
+            <ViewHeads at={at} />
             <div ref={white} className={s.white}>
-              <Head id="independent" white />
+              <ViewHeads at={at} white />
             </div>
           </div>
-          <div className={s.boardShot}>
-            <AtWork at={still ? null : at} />
-          </div>
         </div>
+        <Views at={at} />
       </div>
     </section>
   )
 }
 
-/** What you ask Tally's coordinator, set beside its thread. */
-const ASK = { who: 'Tally’s coordinator', text: 'Backfill idempotency keys on the refunds made before PR 1184.' }
-
-function Coordinator() {
-  const box = useRef<HTMLElement>(null)
-  useScrolled(box, { enter: true })
-  return (
-    <section ref={box} id="coordinator" className={s.scene} aria-labelledby="coordinator-h" data-km={KM.coordinator}>
-      <div className={cx(s.wrap, s.coord)}>
-        <div className={s.coordWords}>
-          <h2 id="coordinator-h" className={s.title}>
-            {SCENE.coordinator.title}
-          </h2>
-          <p className={s.lead}>{SCENE.coordinator.lead}</p>
-          <p className={s.ask}>
-            <span className={s.label}>{ASK.who}</span>
-            {ASK.text}
-          </p>
-        </div>
-        <div className={cx(s.frame, s.coordShot)}>
-          <AskOnce />
-        </div>
-      </div>
-    </section>
-  )
-}
-
+/**
+ * The review, drawn as a patch (Patch.tsx): today first, its preview your
+ * side of the drawing, the answers carried by hand, and a line taken out as
+ * each lands; then the preview pans to Althar's side, the heading's new line
+ * types in, and the review's hunks come in as Althar's side gets to each,
+ * all played by the scroll while pinned. On a tablet or a phone it isn't
+ * pinned: one column, all of it there, the drawing whole and playing as it
+ * scrolls by.
+ */
 function ReviewScene() {
   const box = useRef<HTMLElement>(null)
-  const [at, setAt] = useState<number | null>(null)
-  const still = useScrolled(box, { pin: 2.6 }, (p) => setAt(Math.min(REVIEW_S, p * 11.2)), 1)
+  const narrow = useMedia('(max-width: 900px)')
+  const [run, setRun] = useState<number | null>(null)
+  const [enter, setEnter] = useState(1)
+  // Its parts come in as it scrolls up into place (Patch), and today's first copy is under way as it settles.
+  useScrolled(box, { enter: true, bare: true }, setEnter, 1)
+  // Pinned, today's side of the drawing plays first and then Althar's (Patch); unpinned, the whole drawing plays as one.
+  const still = useScrolled(box, { pin: narrow ? 0 : 4.6, bare: true }, (p) => setRun(p * (narrow ? 11.2 : 24.6)), 1)
+  const at = run === null ? null : narrow ? Math.min(REVIEW_S, run) : Math.min(STORY_S, run + SETTLING * clamp((enter - 0.5) / 0.4))
+  const seen = at === null || still ? {} : narrow ? { at } : { at: sides(at).today, after: sides(at).althar }
   return (
     <section ref={box} id="review" className={cx(s.scene, s.review)} aria-labelledby="review-h" data-km={KM.review}>
       <LightUnder tone="ink" className={s.under} />
       <div className={s.stick} data-stick="">
         <div className={s.wrap}>
-          <Head id="review" />
-          <div className={s.revWrap}>
-            <Review at={still ? null : at} />
-          </div>
+          <Patch at={still || narrow ? Infinity : (at ?? 0)} enter={enter} preview={<Review {...seen} flush />} />
         </div>
-      </div>
-    </section>
-  )
-}
-
-/** The six features drawn large, the six drawn small, as the bento has them. */
-const LARGE = TILES.filter((t) => !t.compact || t.id === 'canvas')
-const SMALL = TILES.filter((t) => t.compact && t.id !== 'canvas')
-
-function Card({ no, title, lead, children }: { no: number; title: ReactNode; lead: string; children?: ReactNode }) {
-  return (
-    <article className={s.card}>
-      <div className={s.cardHead}>
-        <span className={s.no}>{String(no).padStart(2, '0')}</span>
-        <h3 className={s.cardTitle}>{title}</h3>
-        <p className={s.small}>{lead}</p>
-      </div>
-      {children && <div className={s.pic}>{children}</div>}
-    </article>
-  )
-}
-
-function Flow() {
-  const track = useRef<HTMLDivElement>(null)
-  useScrolled(track, { track: true })
-  return (
-    <section id="flow" className={s.scene} aria-labelledby="flow-h" data-km={KM.flow}>
-      <div className={s.wrap}>
-        <Head id="flow" />
-      </div>
-      <div ref={track} className={s.track}>
-        <div className={s.stick} data-stick="">
-          <div className={s.wrap}>
-            <div className={s.row} data-row="">
-              {LARGE.map((tile, i) => (
-                <Card key={tile.id} no={i + 1} title={tile.title} lead={tile.lead}>
-                  {tile.piece('light')}
-                </Card>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className={s.wrap}>
-        <div className={s.mini}>
-          {SMALL.map((tile, i) => (
-            <Card key={tile.id} no={LARGE.length + i + 1} title={tile.title} lead={tile.lead} />
-          ))}
-        </div>
-        <div className={s.also}>
-          <h3 className={s.label}>And also</h3>
-          <ul>
-            {ALSO.map((word) => (
-              <li key={word}>{word}</li>
-            ))}
-          </ul>
-        </div>
-        <p className={s.more}>And so, so much more.</p>
       </div>
     </section>
   )
@@ -196,16 +151,18 @@ function Connect() {
   return (
     <section ref={box} id="connections" className={cx(s.scene, s.connect)} aria-labelledby="connections-h" data-km={KM.connections}>
       <div className={s.wrap}>
-        <Head id="connections" />
+        <Head id="connections" quiet />
+        {/* As the old home page had it: a console seamed by one hairline, the agents across its top, then code, issues and everything else, each name with its mark. */}
         <ol className={s.groups}>
           {GROUPS.map((group, i) => (
-            <li key={group.name} className={cx(group.wide && s.wide)}>
-              <h3 className={s.label}>
-                {String(i + 1).padStart(2, '0')} {group.name}
+            <li key={group.name} className={cx(s.cell, group.wide && s.wide)}>
+              <h3 className={s.plate}>
+                <b>{String(i + 1).padStart(2, '0')}</b> {group.name}
               </h3>
-              <ul>
+              <ul className={s.marks}>
                 {group.items.map((item, k) => (
-                  <li key={item.id} data-on={starts[i]! + k < lit || undefined} data-first={k === 0 || undefined}>
+                  <li key={item.id} data-on={starts[i]! + k < lit || undefined}>
+                    {item.mark}
                     {item.name}
                   </li>
                 ))}
@@ -218,44 +175,14 @@ function Connect() {
   )
 }
 
-/** The menu bar, for a Mac without a notch: what it says, and where it is set. */
-const MENU = {
-  title: (
-    <>
-      No notch? <b>The menu bar.</b>
-    </>
-  ),
-  lead: 'On a Mac without one, or on a second screen, Althar sits in the menu bar. Click its mark and the same list drops down: answer, open, carry on.',
-  path: ['Settings', 'While you’re in another app', 'In the menu bar'],
-  alt: 'Althar’s list dropping down from the menu bar over a terminal',
-}
-
+/** Wherever you are: the tour round the notch, then the menu bar for a Mac without one (EdgeTour, which carries both), on the page's paper. */
 function Notch() {
   return (
-    <section id="edge" className={s.scene} aria-labelledby="edge-h" data-km={KM.edge}>
+    <section id="edge" className={cx(s.scene, s.edge)} aria-labelledby="edge-h" data-km={KM.edge}>
       <div className={s.wrap}>
         <Head id="edge" />
-        <div className={s.notch}>
-          <div className={s.tour}>
-            <EdgeTour tone="paper" />
-          </div>
-          <div>
-            <div className={s.frame}>
-              <img src={menubar} alt={MENU.alt} width={1240} height={1202} loading="lazy" />
-            </div>
-            <h3 className={s.menuTitle}>{MENU.title}</h3>
-            <p className={s.small}>{MENU.lead}</p>
-            <p className={s.crumbs}>
-              {MENU.path.map((step, i) => (
-                <span key={step}>
-                  {i > 0 && <i aria-hidden="true">›</i>}
-                  {step}
-                </span>
-              ))}
-            </p>
-          </div>
-        </div>
       </div>
+      <EdgeTour tone="paper" />
     </section>
   )
 }
@@ -267,18 +194,20 @@ function Screens() {
   const track = useRef<HTMLDivElement>(null)
   useScrolled(track, { track: true })
   return (
-    <section id="gallery" className={s.scene} aria-labelledby="gallery-h" data-km={KM.gallery}>
-      <div className={s.wrap}>
-        <Head id="gallery" />
-      </div>
+    <section id="gallery" className={cx(s.scene, s.gallery)} aria-labelledby="gallery-h" data-km={KM.gallery}>
+      {/* The heading holds over the screens while they run sideways, so what they are stays in sight. */}
       <div ref={track} className={s.track}>
         <div className={s.stick} data-stick="">
+          <div className={s.wrap}>
+            <Head id="gallery" />
+          </div>
           <div className={s.wrap}>
             <div className={cx(s.row, s.shots)} data-row="">
               {SCREENS.map((x) => (
                 <figure key={x.file} className={s.shot}>
                   <div className={s.frame}>
-                    <img src={screen(x.file)} alt={x.alt} loading="lazy" />
+                    {/* The canvas is drawn here, the sign-in page the carousel builds (CanvasScreen); the rest are the brand pack's screenshots. */}
+                    {x.file === 'canvas' ? <CanvasScreen label={x.alt} /> : <img src={screen(x.file)} alt={x.alt} loading="lazy" />}
                   </div>
                   <figcaption>
                     <b>{x.name}</b>
@@ -302,7 +231,7 @@ function End() {
   const download = useDownload()
   useScrolled(box, { enter: true })
   return (
-    <section ref={box} id="end" className={s.end} aria-label="Download Althar">
+    <section ref={box} id="end" className={s.end} aria-label="Download Althar" data-km={KM.end}>
       <LightUnder tone="light" className={s.under} />
       <div className={s.aurora} aria-hidden="true">
         <img src={aurora} alt="" />
@@ -334,7 +263,7 @@ export function Story() {
     <main id="main" tabIndex={-1} className={s.story}>
       <Race />
       <Board />
-      <Coordinator />
+      <Community />
       <ReviewScene />
       <Flow />
       <Connect />

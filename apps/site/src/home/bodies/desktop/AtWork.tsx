@@ -18,11 +18,14 @@ import { askedSecond, useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 import { BoardAtWork, type BoardStory, OUT_OF_USAGE, Tabs, type UsageOut } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
+import { type Aim, Pointer } from '../kit/Pointer'
 import { useInView, usePageShown } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
-import { CODEX, GEMINI_PRO, NEXT, OPUS, QWEN, READY_TWO_REPOS } from '../kit/world'
+import v from '../kit/views.module.css'
+import { CODEX, GEMINI_PRO, NEXT, OPUS, READY_TWO_REPOS, SONNET } from '../kit/world'
 import s from './AtWork.module.css'
+import { momentOf, Planning, pointerAt, type Running, STARTED } from './Planning'
 
 /*
  * Tally's board, in Althar's light on the dark of the panel, under "Every
@@ -43,9 +46,12 @@ import s from './AtWork.module.css'
  * lane. Still, on the backfill moved on and running, with motion reduced or
  * a moment held (`?t=`).
  *
- * Given `at`, the round is not timed but stands at that moment, in ms: the
- * home page's scroll is its clock, so it plays as far as you scroll, and back
- * the same way, flights and all.
+ * Given a `clock` (the home page's carousel), it is the project's home as
+ * the app opens it, the coordinator's conversation beside the board, and the
+ * story starts there: you ask for the backfill, the coordinator plans it, and
+ * you start it (Planning.tsx); only then does it come into Up next, and the
+ * board's story plays on from there, half as fast again. The round is not
+ * timed by itself but follows the clock, in ms.
  */
 
 const none = () => {}
@@ -60,12 +66,11 @@ const LABEL =
 const W = 1440
 const H = 780
 
-export function AtWork({ at = null }: { at?: number | null } = {}) {
+export function AtWork({ clock = null, active = true }: { clock?: (() => number) | null; active?: boolean } = {}) {
   const box = useRef<HTMLDivElement>(null)
   const seen = useInView(box, 0.2)
-  const watched = seen && at === null
-  const [ticks, setBeat] = useState(0)
-  const beat = at === null ? ticks : Math.floor(at / BEAT)
+  const watched = seen && clock === null
+  const [beat, setBeat] = useState(0)
   const phone = useNarrow()
   useEffect(() => {
     if (!watched) return
@@ -75,27 +80,58 @@ export function AtWork({ at = null }: { at?: number | null } = {}) {
   }, [watched])
   return (
     <div ref={box} className={s.wrap}>
-      <Flow beat={beat} watched={watched} phone={phone} at={at} />
+      <Flow beat={beat} watched={watched} phone={phone} clock={clock} active={active} />
     </div>
   )
 }
 
-function Window({ beat, story, out }: { beat: number; story: BoardStory; out?: UsageOut }) {
+/** The person's pointer on the board, when the board is on a clock (the carousel). */
+interface PointerOn {
+  aim: Aim
+  press: boolean
+  ms: number
+}
+
+function Window({
+  beat,
+  story,
+  out,
+  pointer,
+  talk,
+}: {
+  beat: number
+  story: BoardStory
+  out?: UsageOut
+  pointer?: PointerOn | null
+  /** The coordinator's conversation, beside the board: the project's home with both showing. */
+  talk?: ReactNode
+}) {
+  const board = <BoardAtWork beat={beat} story={story} {...(out ? { out } : {})} />
   return (
     <div className={app.window}>
       <Tabs
         current="tally"
         end={
           <>
-            <RoomSwitch value={Room.Board} onChange={none} text={{ key: () => '' }} />
+            <RoomSwitch value={talk ? Room.Both : Room.Board} onChange={none} text={{ key: () => '' }} />
             <WorkStatus yours={2} />
             <ChromeButton icon="plus" label="New task" />
           </>
         }
       />
-      <div className={app.board}>
-        <BoardAtWork beat={beat} story={story} {...(out ? { out } : {})} />
-      </div>
+      {/* What fades as its story starts over (kit/loop.ts): the conversation and the board, not the window's bar. */}
+      {talk ? (
+        <div className={cx(v.beside, v.besideBoard)} data-fade="">
+          {talk}
+          <div className={app.board}>{board}</div>
+          {pointer && <Pointer aim={pointer.aim} press={pointer.press} rest={[0.84, 0.88]} ms={pointer.ms} />}
+        </div>
+      ) : (
+        <div className={app.board} data-fade="">
+          {board}
+          {pointer && <Pointer aim={pointer.aim} press={pointer.press} rest={[0.82, 0.88]} ms={pointer.ms} />}
+        </div>
+      )}
     </div>
   )
 }
@@ -125,14 +161,14 @@ function heroIn(lane: BoardLane, at = 0, hand = 0): ReactNode {
           at={at}
           elapsed={`${4 + at * 7 + (hand > 1 ? 1 : 0)}m`}
           lead={hand > 1 ? CODEX : OPUS}
-          {...(at === 1 ? { onStep: [GEMINI_PRO, QWEN] } : {})}
+          {...(at === 1 ? { onStep: [GEMINI_PRO] } : at === 2 ? { onStep: [SONNET] } : {})}
           {...(hand === 2 ? { note: 'Moved to Codex' } : {})}
         />
       )
     case BoardLane.Yours:
       return <AcceptCard {...HERO} prs={[PR]} {...(READY_TWO_REPOS.host ? { host: READY_TWO_REPOS.host } : {})} checks={5} at="just now" />
     default:
-      return <SettledRow {...HERO} outcome={Outcome.Merged} meta={`PR ${PR.number} · 1 review round`} at="just now" />
+      return <SettledRow {...HERO} outcome={Outcome.Merged} meta={`PR ${PR.number} · 2 review rounds`} at="just now" />
   }
 }
 
@@ -146,7 +182,7 @@ const TRAVEL = FOLLOW + GLIDE
 const TURN = 320
 
 /** When each thing happens, in ms from the start of a round: in Up next a moment, then on its way. */
-const TO_RUNNING = 1300
+const TO_RUNNING = 2100
 const STEP = 1250
 /** How long it stands paused, out of usage, before it moves on. */
 const OUT = 1700
@@ -156,6 +192,11 @@ const PRESS = TO_YOURS + TRAVEL + 1300
 const TO_SETTLED = PRESS + 600
 const FADE = TO_SETTLED + TRAVEL + 1500
 const ROUND = FADE + TURN
+/** Just started, how long it takes to come into Up next. */
+const LANDING = 700
+
+/** Where your pointer presses on the task once it is yours: its card's accept. */
+const ACCEPT = `[data-story=""] [class*='strip']:last-child`
 
 /** Where it is at `ms` into a round. */
 function frameAt(ms: number) {
@@ -171,6 +212,9 @@ function frameAt(ms: number) {
     fading: ms >= FADE,
     // Just round again: back at Up next at once, with no glide across.
     cut: ms < TURN,
+    // Still being planned, on a clock: not on the board yet; then just started, coming into Up next.
+    absent: false,
+    landing: ms < LANDING,
   }
 }
 type Frame = ReturnType<typeof frameAt>
@@ -178,6 +222,21 @@ const same = (a: Frame, b: Frame) => (Object.keys(a) as (keyof Frame)[]).every((
 /** Still: the task moved on and running, on its second step. */
 const STILL = frameAt(RUNS + OUT + 2 * STEP)
 const FIRST = frameAt(TURN)
+
+/*
+ * On a clock: the conversation first, the task planned and started
+ * (Planning.tsx), then the board's story from the moment it is started,
+ * played half as fast again; the clock is in ms, the board's story in its
+ * own.
+ */
+const PACE = 1.5
+/** The board's story, `ms` into the clock's: before it is started, none. */
+const boardAt = (ms: number) => (ms - STARTED) * PACE
+/** How long the whole story is, as far as the board's round goes before it fades; and where it stands still, on the task moved on and running. */
+export const BOARD_STORY = STARTED + (FADE - 110) / PACE
+export const BOARD_STILL = STARTED + (RUNS + OUT + 2 * STEP) / PACE
+/** While it is planned: the board as it starts, without the task. */
+const PLANNING: Frame = { ...frameAt(0), absent: true, landing: false }
 
 /** The round's frame while `on`, carrying on where it stopped when it comes back. */
 function useRound(on: boolean) {
@@ -216,15 +275,51 @@ function placeIn(stage: Element, el: HTMLElement): Place {
 const TOP = 56
 const TALL = 480
 const SIDE = 8
+/** On a tablet, how much of the window across it shows. */
+const TABLET_W = 1100
 
 /** The board following the task; on a `phone`, a lane at a time, the view gliding along with it. */
-function Flow({ beat, watched, phone, at }: { beat: number; watched: boolean; phone: boolean; at: number | null }) {
+/** On a clock: its frame and beat, drawn again only when either changes, read on every frame the screen draws. */
+function useClocked(clock: (() => number) | null) {
+  const [now, setNow] = useState(() => ({ frame: PLANNING, beat: 0, moment: 0 }))
+  useEffect(() => {
+    if (!clock) return
+    let id = 0
+    const tick = () => {
+      const ms = clock()
+      const next = ms < STARTED ? PLANNING : frameAt(boardAt(ms))
+      const moment = momentOf(ms)
+      // On a clock the cards' own work ticks twice as often, so there is always something moving.
+      const beat = Math.floor((ms * PACE) / (BEAT / 2))
+      setNow((was) => (was.beat === beat && was.moment === moment && same(was.frame, next) ? was : { frame: next, beat, moment }))
+      id = requestAnimationFrame(tick)
+    }
+    id = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(id)
+  }, [clock])
+  return now
+}
+
+function Flow({
+  beat: ticked,
+  watched,
+  phone,
+  clock,
+  active,
+}: {
+  beat: number
+  watched: boolean
+  phone: boolean
+  clock: (() => number) | null
+  active: boolean
+}) {
   const box = useRef<HTMLDivElement>(null)
   const still = useStill()
   const shown = usePageShown()
   const round = useRound(watched && shown && !still)
-  const ms = at === null ? null : at % ROUND
-  const frame = ms !== null ? frameAt(ms) : still ? STILL : round
+  const clocked = useClocked(clock)
+  const frame = clock ? clocked.frame : still ? STILL : round
+  const beat = clock ? clocked.beat : ticked
   // Where the lanes are, read once laid out, before it is painted.
   const [lanes, setLanes] = useState<Place[]>([])
   useLayoutEffect(() => {
@@ -243,23 +338,59 @@ function Flow({ beat, watched, phone, at }: { beat: number; watched: boolean; ph
     const el = stage?.querySelector<HTMLElement>('[data-story=""]')
     if (!stage || !el) return
     const place = placeIn(stage, el)
-    if (ms === null) stood.current = { place, lane: frame.lane }
+    if (!clock) stood.current = { place, lane: frame.lane }
     else if (!frame.flying) placed.current[frame.lane] = place
   })
   // Scrubbed with nothing stood yet in the lane before (the page opened further down): from that lane's top.
   const before = lanes[Math.max(0, frame.lane - 1)]
-  const near = ms !== null && before ? { left: before.left + 12, top: 120, width: before.width - 24 } : null
-  const since = ms === null ? null : ms - [0, TO_RUNNING, TO_YOURS, TO_SETTLED][frame.lane]!
+  const near = clock && before ? { left: before.left + 12, top: 120, width: before.width - 24 } : null
+  const laneStart = [0, TO_RUNNING, TO_YOURS, TO_SETTLED][frame.lane]!
   const lane = LANES[frame.lane]!
   const story: BoardStory = {
     task: HERO.task,
     lane,
     card: heroIn(lane, frame.at, frame.hand),
     arriving: frame.flying,
+    absent: frame.absent,
+    landing: frame.landing && clock !== null,
     className: cx(s.hero, frame.pressed && s.pressed, frame.hand === 1 && s.paused, frame.hand > 1 && s.moved),
   }
   const out: UsageOut | null = frame.hand === 1 ? 'paused' : frame.hand > 1 ? 'moved' : null
+  // On a clock, your pointer: in the conversation, asking, starting the plan and going on to something else; then, once the task has come to you, to its accept, pressed as it is pressed, and then at rest.
+  const ms = clock ? clock() : 0
+  const pointer: PointerOn | null = clock
+    ? frame.lane < 2 || (frame.lane === 2 && frame.flying)
+      ? { ...pointerAt(ms), ms: clocked.moment }
+      : { aim: frame.lane === 2 ? ACCEPT : null, press: frame.pressed, ms: clocked.moment }
+    : null
+  // The task as the conversation has it, once it runs: its card keeps up with the board.
+  const running: Running | null =
+    clock === null || frame.absent || frame.lane === 0 || (frame.lane === 1 && frame.flying)
+      ? null
+      : {
+          status:
+            frame.lane === 1
+              ? frame.hand === 1
+                ? TaskStatus.Paused
+                : TaskStatus.Running
+              : frame.lane === 2
+                ? TaskStatus.Yours
+                : TaskStatus.Done,
+          steps: STEPS,
+          at: frame.lane === 1 ? frame.at : STEPS.length - 1,
+          lead: frame.hand > 1 ? CODEX : OPUS,
+        }
+  const talk = clock ? <Planning ms={clocked.moment} read={clock} active={active} running={running} /> : undefined
   const view = lanes[frame.lane] ?? { left: 22 + frame.lane * 356, width: 346 }
+  // On a phone or a tablet, filling the carousel's box: on a phone, the conversation's foot while the task is planned, then the lane the task is in; on a tablet, as much of the window as reads, its left first, then over to keep the task's lane in sight.
+  const fill = clock
+    ? {
+        phone: frame.absent
+          ? { x: 24, y: H, w: 456, h: 0, from: 'foot' as const }
+          : { x: view.left - SIDE, y: TOP, w: view.width + 2 * SIDE },
+        tablet: { x: frame.absent ? 0 : Math.min(W - TABLET_W, Math.max(0, view.left + view.width + 24 - TABLET_W)), y: 0, w: TABLET_W },
+      }
+    : undefined
   return (
     <div
       ref={box}
@@ -270,18 +401,19 @@ function Flow({ beat, watched, phone, at }: { beat: number; watched: boolean; ph
         w={W}
         h={H}
         phone={{ x: view.left - SIDE, y: TOP, w: view.width + 2 * SIDE, h: TALL }}
+        {...(fill ? { fill } : {})}
         label={LABEL}
-        frame={phone ? s.lane : s.frame}
+        frame={phone && !clock ? s.lane : s.frame}
       >
-        <Window beat={beat} story={story} {...(out ? { out } : {})} />
+        <Window beat={beat} story={story} {...(out ? { out } : {})} pointer={pointer} talk={talk} />
         {frame.flying && (
           <Flight
             key={frame.lane}
             lane={frame.lane}
             stood={stood}
-            placed={ms === null ? null : placed}
+            placed={clock ? placed : null}
             near={near}
-            since={since}
+            since={clock ? () => boardAt(clock()) - laneStart : null}
             leaving={heroIn(LANES[frame.lane - 1]!, STEPS.length - 1, 3)}
             arriving={heroIn(lane, 0, 0)}
           />
@@ -310,18 +442,14 @@ function Flight({
   /** Scrubbed: where it last stood in each lane, so it can set out from the lane before whichever way the scroll came; and where to start without one. */
   placed: RefObject<Record<number, Place>> | null
   near: Place | null
-  /** Scrubbed: how far into the flight, in ms, held there; null, it flies by itself. */
-  since: number | null
+  /** On a clock: how far into the flight it is, in ms, read on every frame; null, it flies by itself. */
+  since: (() => number) | null
   lane: number
   stood: RefObject<{ place: Place; lane: number } | null>
   leaving: ReactNode
   arriving: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const runsNow = useRef<Animation[]>([])
-  useLayoutEffect(() => {
-    if (since !== null) for (const run of runsNow.current) run.currentTime = since
-  })
   const scrubbed = since !== null
   const start = useRef(since)
   const fallback = useRef(near)
@@ -378,14 +506,19 @@ function Flight({
         ]
       }),
     ]
-    if (scrubbed)
-      for (const run of runs) {
-        run.pause()
-        run.currentTime = start.current ?? 0
+    // On a clock, held and moved to where the clock says on every frame the screen draws.
+    let id = 0
+    if (scrubbed) {
+      for (const run of runs) run.pause()
+      const follow = () => {
+        const t = Math.max(0, start.current?.() ?? 0)
+        for (const run of runs) run.currentTime = t
+        id = requestAnimationFrame(follow)
       }
-    runsNow.current = runs
+      follow()
+    }
     return () => {
-      runsNow.current = []
+      cancelAnimationFrame(id)
       runs.forEach((one) => one.cancel())
     }
   }, [lane, stood, placed, scrubbed])

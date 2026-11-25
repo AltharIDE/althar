@@ -20,12 +20,16 @@ import { useMedia } from '../../lib/browser'
 const UNDER_NAV = 76
 
 export type Measure =
-  /** Pinned for `run` windows: 0 as it pins, 1 as it lets go. */
-  | { pin: number }
+  /**
+   * Pinned for `run` windows: 0 as it pins, 1 as it lets go. `bare` where
+   * nothing in its CSS follows the scroll: its `--p` isn't written, as
+   * writing it restyles everything in the section, every frame.
+   */
+  | { pin: number; bare?: true }
   /** A sideways row, as far as it is wider than the window. */
   | { track: true }
-  /** From its top at the window's foot (0) to its top at the window's top (1). */
-  | { enter: true }
+  /** From its top at the window's foot (0) to its top at the window's top (1); `bare` as for a pin. */
+  | { enter: true; bare?: true }
 
 export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure, on?: (p: number) => void, rest = 1) {
   const still = useMedia('(prefers-reduced-motion: reduce)')
@@ -41,7 +45,7 @@ export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure
     const kind = JSON.parse(key) as Measure
     if (still) {
       el.style.removeProperty('height')
-      el.style.setProperty('--p', String(rest))
+      if (!('bare' in kind)) el.style.setProperty('--p', String(rest))
       call.current?.(rest)
       return
     }
@@ -53,7 +57,10 @@ export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure
       const vh = window.innerHeight
       if ('pin' in kind && kind.pin > 0 && stick) {
         stick.style.top = `${Math.min(UNDER_NAV, vh - stick.offsetHeight - 12)}px`
-        el.style.height = `${Math.max(stick.offsetHeight + vh * kind.pin, vh * 2)}px`
+        // The section's own padding (room under the picture once it lets go) is on top of the run, not taken from it.
+        const css = getComputedStyle(el)
+        const pad = css.boxSizing === 'border-box' ? parseFloat(css.paddingTop) + parseFloat(css.paddingBottom) : 0
+        el.style.height = `${Math.max(stick.offsetHeight + vh * kind.pin, vh * 2) + pad}px`
       }
       if ('track' in kind && row) {
         extra = Math.max(0, row.scrollWidth - window.innerWidth + 128)
@@ -69,7 +76,7 @@ export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure
       p = Math.min(1, Math.max(0, p))
       if (Math.abs(p - last) < 1e-4) return
       last = p
-      el.style.setProperty('--p', p.toFixed(4))
+      if (!('bare' in kind)) el.style.setProperty('--p', p.toFixed(4))
       if (row && 'track' in kind) row.style.setProperty('--x', `${(-p * extra).toFixed(1)}px`)
       call.current?.(p)
     }

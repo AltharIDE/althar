@@ -12,10 +12,13 @@ import review from './styled/review.html?raw'
  * reaches you.
  *
  * Given `at`, in seconds, it doesn't play by itself: it stands at that
- * moment of its loop, as the home page's scroll sets it.
+ * moment of its loop, as the home page's scroll sets it; `after`, Althar's
+ * side stands at a moment of its own (today's plays first, then Althar's).
+ * `flush`: as wide as its place, with no room of its own round it (a column
+ * of the scene).
  */
 
-export function Review({ at = null }: { at?: number | null } = {}) {
+export function Review({ at = null, after, flush = false }: { at?: number | null; after?: number; flush?: boolean } = {}) {
   const box = useRef<HTMLDivElement>(null)
   const driven = at !== null
   useEffect(() => {
@@ -24,10 +27,11 @@ export function Review({ at = null }: { at?: number | null } = {}) {
   }, [driven])
   useEffect(() => {
     if (at === null) return
-    box.current?.querySelector('.rp-task')?.dispatchEvent(new CustomEvent('rv-seek', { detail: at }))
-  }, [at])
+    const detail = after === undefined ? at : { t: at, tr: after }
+    box.current?.querySelector('.rp-task')?.dispatchEvent(new CustomEvent('rv-seek', { detail }))
+  }, [at, after])
   return (
-    <div ref={box} className={s.wrap}>
+    <div ref={box} className={flush ? s.flush : s.wrap}>
       <Fragment source={review} tone="dark" className={s.stage} />
     </div>
   )

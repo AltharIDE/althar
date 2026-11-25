@@ -9,6 +9,7 @@ import { OsMark } from '../shared/OsMark'
 import s from './Hero.module.css'
 import { useFeed } from './hero/feed'
 import { Rings } from './hero/Rings'
+import { KM } from './story/Altitude'
 
 /*
  * The first screen, in daylight: the page's paper, its ink and its cobalt,
@@ -16,7 +17,8 @@ import { Rings } from './hero/Rings'
  * line low down, the download under it; on the right the flat orrery,
  * running off the page's right edge. Along the foot, where it runs and how
  * to install it. A dot follows the pointer over it, and over the download
- * the agents feed the button (hero/feed.ts).
+ * the button takes the dot in, rippling, and the agents feed it
+ * (hero/feed.ts).
  */
 
 const SYSTEMS = [
@@ -36,7 +38,7 @@ export function Hero({ nav }: { nav?: ReactNode }) {
   useFeed(root, get, canvas, dot, still || !hydrated)
 
   return (
-    <header ref={root} className={s.hero}>
+    <header ref={root} className={s.hero} data-km={KM.hero}>
       {nav}
       <div ref={dot} className={s.dot} aria-hidden="true" />
       {/* Drawn only in the browser. */}
@@ -57,6 +59,8 @@ export function Hero({ nav }: { nav?: ReactNode }) {
             </h1>
             <div className={s.ctas}>
               <a ref={get} className={s.get} href={download.href}>
+                {/* Under the label: where the pointer's dot ripples as the button takes it in (hero/feed.ts). */}
+                <span className={s.pool} aria-hidden="true" data-pool="" />
                 {download.pending ? 'Download' : download.label}
                 <svg
                   aria-hidden="true"

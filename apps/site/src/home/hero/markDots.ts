@@ -83,3 +83,5 @@ export const MARK_DOTS: readonly number[] = [
 
 /** The eye: its place and radius, as the dots'. */
 export const MARK_EYE = { x: 0.0, y: 15.4, r: 10.4 } as const
+/** The foot of the mark, its lowest dot's edge, in the same px. */
+export const MARK_FOOT = 66.4

@@ -13,3 +13,16 @@
 /* The site's nav and its room, on a phone only: wider, the page's own bar stands in for it. */
 .narrow { display: none; }
 @media (max-width: 900px) { .narrow { display: contents; } }
+
+/*
+ * Pinch-zoomed in (lib/zoom.ts): every animation holds, so the browser draws
+ * the page once at its new size rather than flashing blank as moving
+ * pictures undo its tiles. Only the animations: the page's layers stay as
+ * they are, as taking them apart and making them again all at once, as it
+ * zooms back out, is its own flash.
+ */
+:global(html[data-zoomed]) .page *,
+:global(html[data-zoomed]) .page *::before,
+:global(html[data-zoomed]) .page *::after {
+  animation-play-state: paused !important;
+}

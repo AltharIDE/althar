@@ -15,7 +15,7 @@ export const HERO = {
   lines: ['Agents from', 'every lab, working as'],
   last: 'one team.',
   /** The subhead: what Althar is, the coordinator, the shared memory and where you come in. */
-  lead: 'An open source agentic development environment (ADE). A coordinator hands each step to the best agent. They share one project memory, and you step in only for the decisions that matter.',
+  lead: 'The open source agentic development environment (ADE) where agents from every lab work as one team. One place where your entire software team builds together, all from the same context.',
   /** The orrery's list of agents, for screen readers. */
   agents: 'Agents',
   agentsName: 'Althar at the centre, with the agents it runs in orbit',

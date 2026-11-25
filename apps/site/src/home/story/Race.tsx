@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef } from 'react'
+import { type CSSProperties, useLayoutEffect, useRef, useState } from 'react'
 
 import { useMedia } from '../../lib/browser'
 import { useDownload } from '../../lib/download'
 import { MARK_DOTS, MARK_EYE } from '../hero/markDots'
 import { Rings } from '../hero/Rings'
 import s from './Race.module.css'
+import { KM } from './Altitude'
 import { RACE } from './scenes'
 import { useScrolled } from './scroll'
 
@@ -21,9 +22,10 @@ import { useScrolled } from './scroll'
  * orrery (the same rings and agents, the project's notes on its inner
  * orbit) and the models fly into its orbits, under the download.
  *
- * Narrower than a tablet, or with reduced motion, nothing is pinned: the
- * timeline and the branch stand one under the other, whole, and scroll
- * sideways if they need to.
+ * On a phone it plays the same, fitted to the width: the timeline across the
+ * screen, the branches shorter, the orrery larger and running off the sides.
+ * With reduced motion nothing is pinned: the timeline and the branch stand
+ * one under the other, whole.
  */
 
 /** The timeline's months, January to September: the year so far. */
@@ -70,7 +72,31 @@ const BRANCHES = [
   { name: 'Next month’s model', when: '', orbit: 3, deg: 58, next: true },
 ]
 const LEFT = (i: number) => i % 2 === 0
-const branchY = (i: number) => 168 + i * 36
+/**
+ * Where the branches are down the line: the first under the core, then one
+ * every `step` px, 36 where there is room; pinned in a window too short for
+ * them all, closer together, so the last (the model you're on now, and the
+ * next) still shows under the heading. The names keep their size.
+ */
+const FIRST = 168
+/** The core's middle, how far under it its mark's foot is, and where the line starts, just under that. */
+const CORE_MIDDLE = 80
+const CORE_FOOT = 54
+const TRUNK_TOP = 140
+const STEP = 36
+const MIN_STEP = 16
+/** Room under the last branch, for its name; and between it and the window's foot, pinned. */
+const FOOT = 8
+const BELOW = 28
+const branchY = (i: number, step = STEP) => FIRST + i * step
+const branchHeight = (step: number) => branchY(BRANCHES.length - 1, step) + FOOT
+/** How far a branch reaches from the line: shorter on a phone, so the names fit either side. */
+const REACH = { wide: 196, narrow: 64 }
+const fork = (y: number, side: number, reach: number, step: number) => {
+  const bend = Math.min(70, reach * 0.7)
+  const rise = Math.min(18, step / 2)
+  return `M0 ${y - rise} C0 ${y - rise / 3} ${bend * 0.43 * side} ${y} ${bend * side} ${y} L${reach * side} ${y}`
+}
 
 /** The project's context, round the core: on the inner ring, and as words beside it. */
 const NOTES = ['Repo rules', 'Decisions', 'The plan', 'Review notes', 'Open task']
@@ -121,13 +147,13 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
     return
   }
 
-  // 0–0.46 builds the timeline, January to September (T, in months); 0.46–0.55 hands over; 0.53–0.82 grows the branch; 0.84–0.96 the last beat.
-  const a = clamp(p / 0.46)
-  const b = clamp((p - 0.53) / 0.29)
-  const k = smooth(clamp((p - 0.84) / 0.12))
+  // 0–0.404 builds the timeline, January to September (T, in months); 0.404–0.484 hands over; 0.466–0.721 grows the branch; 0.74–0.95 the last beat, given twice the scroll of the others.
+  const a = clamp(p / 0.404)
+  const b = clamp((p - 0.466) / 0.255)
+  const k = smooth(clamp((p - 0.74) / 0.21))
   const T = a * 9
-  const out = smooth(clamp((p - 0.46) / 0.045))
-  const inn = smooth(clamp((p - 0.5) / 0.05))
+  const out = smooth(clamp((p - 0.404) / 0.04))
+  const inn = smooth(clamp((p - 0.44) / 0.044))
   A.style.opacity = (1 - out).toFixed(3)
   A.style.transform = `translateY(${(-36 * out).toFixed(1)}px)`
   A.style.pointerEvents = out > 0.5 ? 'none' : ''
@@ -146,7 +172,8 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
 
   const core = one<HTMLElement>('[data-core]')
   core.toggleAttribute('data-on', b > 0.02)
-  one<SVGPathElement>('[data-trunk]').style.strokeDashoffset = (1 - clamp((b - 0.12) / 0.4)).toFixed(3)
+  const trunk = one<SVGPathElement>('[data-trunk]')
+  trunk.style.strokeDashoffset = (1 - clamp((b - 0.12) / 0.4)).toFixed(3)
   for (const el of all(sec, '[data-bi]')) {
     const i = Number(el.dataset.bi)
     const from = 0.28 + i * 0.075
@@ -159,8 +186,12 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
   const room = B.getBoundingClientRect()
   const fin = one<HTMLElement>('[data-fin]')
   const W = branch.width
+  const reach = Number(one<HTMLElement>('[data-branch]').dataset.reach)
+  const step = Number(one<HTMLElement>('[data-branch]').dataset.step) || STEP
   const zone = 44 + fin.offsetHeight + 24
-  const scale = Math.min(1, (room.width + 100) / 1400, (room.height - zone - 16) / 560)
+  // On a phone the orrery runs off the sides, so its middle stays large enough to read.
+  const wide = room.width >= 700
+  const scale = Math.min(1, (room.width + (wide ? 100 : 520)) / 1400, (room.height - zone - 16) / 560)
   const middle = zone + (room.height - zone) / 2
   const cx = room.left - branch.left + room.width / 2
   const cy = room.top - branch.top + middle
@@ -174,12 +205,17 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
   const ty = cy + 2.5 * scale + 2 * f
   core.style.transform =
     move > 0
-      ? `translate(${((cx - W / 2) * move).toFixed(1)}px, ${((ty - 80) * move).toFixed(1)}px) scale(${(1 + (f - 1) * move).toFixed(3)})`
+      ? `translate(${((cx - W / 2) * move).toFixed(1)}px, ${((ty - CORE_MIDDLE) * move).toFixed(1)}px) scale(${(1 + (f - 1) * move).toFixed(3)})`
       : ''
   core.style.opacity = k > 0 ? (1 - orrIn).toFixed(3) : ''
   for (const w of all(sec, '[data-word]')) w.style.opacity = k > 0 ? (1 - fade).toFixed(3) : ''
   orr.style.opacity = orrIn.toFixed(3)
   one<SVGSVGElement>('[data-lines]').style.opacity = (1 - move).toFixed(3)
+  // As the core comes down the line, the line goes from the top down ahead of it: none of it under the mark (its foot 54 px under its middle, as it is scaled), none above.
+  if (move > 0) {
+    const foot = CORE_MIDDLE + (ty - CORE_MIDDLE) * move + CORE_FOOT * (1 + (f - 1) * move)
+    trunk.style.strokeDashoffset = (-clamp((foot - TRUNK_TOP) / (branchHeight(step) - TRUNK_TOP))).toFixed(4)
+  }
   const headOut = smooth(clamp(k / 0.22))
   const finIn = smooth(clamp((k - 0.17) / 0.25))
   const head = one<HTMLElement>('[data-head]')
@@ -193,8 +229,8 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
     const m = BRANCHES[i]!
     const [rx, ry] = RINGS[m.orbit]!
     const th = (m.deg * Math.PI) / 180
-    const ax = W / 2 + (LEFT(i) ? -196 : 196)
-    const ay = branchY(i) - 2
+    const ax = W / 2 + (LEFT(i) ? -reach : reach)
+    const ay = branchY(i, step) - 2
     const tx = cx + rx * scale * Math.cos(th)
     const tyy = cy + 10 * scale + ry * scale * Math.sin(th)
     el.style.transform = move > 0 ? `translate(${((tx - ax) * move).toFixed(1)}px, ${((tyy - ay) * move).toFixed(1)}px)` : ''
@@ -208,15 +244,34 @@ export function Race() {
   const narrow = useMedia('(max-width: 900px)')
   const download = useDownload()
   const live = useRef(false)
-  const still = useScrolled(box, { pin: narrow ? 0 : 4.4 }, (p) => {
+  const reach = narrow ? REACH.narrow : REACH.wide
+  const still = useScrolled(box, { pin: 5, bare: true }, (p) => {
     if (box.current) draw(box.current, p, live.current)
   })
   useLayoutEffect(() => {
-    live.current = !narrow && !still
+    live.current = !still
   })
+  // Pinned, the branches close up to fit what the window has under the heading (the heading's own height changing with it).
+  const [fitted, setFitted] = useState(STEP)
+  useLayoutEffect(() => {
+    const after = box.current?.querySelector<HTMLElement>('[data-after]')
+    const branch = after?.querySelector<HTMLElement>('[data-branch]')
+    const head = after?.querySelector<HTMLElement>('[data-head]')
+    if (!after || !branch || !head) return
+    const ro = new ResizeObserver(() => {
+      const room = after.clientHeight - branch.offsetTop - BELOW - FIRST - FOOT
+      const next = Math.min(STEP, Math.max(MIN_STEP, Math.floor((room / (BRANCHES.length - 1)) * 10) / 10))
+      setFitted((was) => (was === next ? was : next))
+    })
+    ro.observe(after)
+    ro.observe(head)
+    return () => ro.disconnect()
+  }, [])
+  const step = still ? STEP : fitted
+  const tall = branchHeight(step)
 
   return (
-    <section ref={box} id="race" className={s.race} aria-labelledby="race-h">
+    <section ref={box} id="race" className={s.race} aria-labelledby="race-h" data-km={KM.race}>
       <div className={s.stick} data-stick="">
         <div className={s.wrap}>
           <div className={s.before} data-before="">
@@ -308,16 +363,24 @@ export function Race() {
               <p className={s.lead}>{RACE.after.lead}</p>
             </div>
             <div className={s.scroll}>
-              <div className={s.branch} role="img" aria-label={RACE.after.label} data-branch="">
-                <svg className={s.lines} viewBox="-400 0 800 500" aria-hidden="true" data-lines="">
-                  <path className={s.trunk} pathLength={1} d="M0 140 L0 500" data-trunk="" />
+              <div
+                className={s.branch}
+                role="img"
+                aria-label={RACE.after.label}
+                data-branch=""
+                data-reach={reach}
+                data-step={step}
+                style={{ '--reach': `${reach}px`, height: tall } as CSSProperties}
+              >
+                <svg className={s.lines} viewBox={`-400 0 800 ${tall}`} style={{ height: tall }} aria-hidden="true" data-lines="">
+                  <path className={s.trunk} pathLength={1} d={`M0 ${TRUNK_TOP} L0 ${tall}`} data-trunk="" />
                   {BRANCHES.map((m, i) => {
-                    const y = branchY(i)
+                    const y = branchY(i, step)
                     const side = LEFT(i) ? -1 : 1
                     return (
                       <g key={m.name} className={m.next ? s.next : s.fork} data-bi={i} data-on="" data-gone={i < 7 || undefined}>
-                        <path pathLength={1} d={`M0 ${y - 18} C0 ${y - 6} ${30 * side} ${y} ${70 * side} ${y} L${196 * side} ${y}`} />
-                        <circle cx={196 * side} cy={y} r="3.5" />
+                        <path pathLength={1} d={fork(y, side, reach, step)} />
+                        <circle cx={reach * side} cy={y} r="3.5" />
                       </g>
                     )
                   })}
@@ -333,7 +396,7 @@ export function Race() {
                     data-gone={i < 7 || undefined}
                     data-side={LEFT(i) ? 'left' : 'right'}
                     data-next={m.next || undefined}
-                    style={{ top: branchY(i) - 8 }}
+                    style={{ top: branchY(i, step) - 8 }}
                   >
                     <s className={s.pt} />
                     <b>{m.name}</b>

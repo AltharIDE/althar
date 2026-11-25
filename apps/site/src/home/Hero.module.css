@@ -68,6 +68,7 @@
 /* The download grows from its left edge as it is fed (hero/feed.ts), and the button beside it moves over. */
 .get {
   position: relative;
+  isolation: isolate;
   transform-origin: left center;
   background: var(--cobalt);
   color: #fff;
@@ -76,6 +77,11 @@
 .get svg { stroke: #b4bcff; transition: stroke var(--fast) var(--ease); }
 .get:hover { background: #1f35c8; }
 .hero[data-feeding] .get { background: #2433f0; }
+/* The ripples the dot leaves as the button takes it in: under the label, cut to the button (hero/feed.ts adds them). */
+.pool { position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.pool i { position: absolute; left: 0; top: 0; border-radius: 50%; pointer-events: none; }
+.pool i[data-kind='glow'] { background: radial-gradient(circle closest-side, rgba(170, 180, 255, 0.95), rgba(140, 152, 255, 0.5) 45%, rgba(140, 152, 255, 0)); }
+.pool i[data-kind='ring'] { border: 2px solid rgba(255, 255, 255, 0.75); box-shadow: 0 0 10px rgba(180, 188, 255, 0.6), inset 0 0 10px rgba(180, 188, 255, 0.45); }
 .hero[data-feeding] .get svg { stroke: #fff; animation: down 1.5s cubic-bezier(0.5, 0, 0.3, 1) infinite; }
 @keyframes down {
   0% { transform: translateY(-3px); opacity: 0; }
@@ -140,9 +146,9 @@
 }
 .install code { font: 14px var(--mono); color: var(--t-1); white-space: nowrap; }
 
-/* The pointer's dot, and the canvas the feeding is drawn on. */
+/* The pointer's dot, fixed to the window so it can go on below the first screen to the race's heading (hero/feed.ts); and the canvas the feeding is drawn on. */
 .dot {
-  position: absolute;
+  position: fixed;
   left: 0;
   top: 0;
   z-index: 4;
@@ -156,13 +162,15 @@
   transition: opacity 350ms var(--ease);
 }
 .dot[data-in] { opacity: 1; }
-.hero[data-feeding] .dot { opacity: 0; }
+/* Taken in by the download: gone at once, into its ripple. */
+.dot[data-gone] { opacity: 0; transition-duration: 90ms; }
 .feed { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; }
 
 @media (max-width: 900px) {
   .hero { min-height: 100svh; }
   .grid { grid-template-columns: minmax(0, 1fr); }
-  .art { position: relative; left: auto; top: auto; width: 100%; height: auto; aspect-ratio: 1400 / 760; transform: none; mask-image: none; }
+  /* On a phone, larger than the screen and cropped at its sides, so the agents' names can be read. */
+  .art { position: relative; left: auto; top: auto; width: 190%; height: auto; margin-left: -45%; aspect-ratio: 1400 / 760; transform: none; mask-image: none; }
   .foot { flex-direction: column; align-items: flex-start; }
   .runs { flex-wrap: wrap; gap: 16px 24px; }
   .h1 { font-size: clamp(30px, 8.6vw, 44px); }

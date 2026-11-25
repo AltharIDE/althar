@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { Agent, AGENTS } from '../../content/agents'
 import { HERO } from '../../content/home'
 import { useMedia } from '../../lib/browser'
+import { isZoomed } from '../../lib/zoom'
 import { AgentMark } from '../../shared/AgentMark'
 import { MARK_DOTS, MARK_EYE } from './markDots'
 import s from './Rings.module.css'
@@ -49,7 +50,7 @@ const RIDERS: ReadonlyArray<{ agent: Agent; orbit: number; at: number }> = [
 const nameOf = (agent: Agent) => AGENTS.find((a) => a.id === agent)?.name ?? agent
 
 /** The ticks on the third and fifth orbits: one every 3°, longer every 30°. */
-const TICKS = [3, 5].flatMap((orbit) => Array.from({ length: 120 }, (_, i) => ({ orbit, at: i * 3, long: i % 10 === 0 })))
+const TICK_ORBITS = [3, 5] as const
 
 /** Degrees an orbit has turned after `t` ms of the clock. */
 const turned = (orbit: number, t: number) => t * 0.006 * Math.pow(ORBITS[orbit]![0] / 150, -1.5)
@@ -57,6 +58,15 @@ const place = (orbit: number, deg: number) => {
   const [rx, ry] = ORBITS[orbit]!
   const a = (deg * Math.PI) / 180
   return { x: CX + rx * Math.cos(a), y: CY + ry * Math.sin(a), a }
+}
+/** An orbit's ticks, turned by `turn` degrees, as one path: each a short stroke down from its place. One attribute a frame for an orbit's 120 ticks, not 480. */
+const ticksOf = (orbit: number, turn: number) => {
+  let d = ''
+  for (let i = 0; i < 120; i++) {
+    const p = place(orbit, i * 3 - turn)
+    d += `M${p.x.toFixed(1)} ${p.y.toFixed(1)}v${i % 10 === 0 ? 5 : 2.5}`
+  }
+  return d
 }
 
 /** How far a name sits from its disc's middle, and a note's from its dot. */
@@ -87,34 +97,33 @@ export function Rings({ className, notes }: { className?: string; notes?: readon
       gap: Number(g.dataset.gap),
       w: -1,
     }))
-    const ticks = [...root.querySelectorAll<SVGLineElement>('[data-tick]')].map((line) => ({
-      line,
-      orbit: Number(line.dataset.orbit),
-      at: Number(line.dataset.at),
-      len: Number(line.dataset.len),
-    }))
+    const ticks = [...root.querySelectorAll<SVGPathElement>('[data-ticks]')].map((path) => ({ path, orbit: Number(path.dataset.ticks) }))
     let t = 0
+    // Each attribute is written only as it changes: an unchanged one, written every frame, still has it styled again.
+    const written = new WeakMap<Element, Record<string, string>>()
+    const set = (el: Element | null, name: string, value: string) => {
+      if (!el) return
+      let was = written.get(el)
+      if (!was) written.set(el, (was = {}))
+      if (was[name] === value) return
+      was[name] = value
+      el.setAttribute(name, value)
+    }
     const draw = () => {
-      for (const k of ticks) {
-        const p = place(k.orbit, k.at - turned(k.orbit, t))
-        k.line.setAttribute('x1', p.x.toFixed(1))
-        k.line.setAttribute('x2', p.x.toFixed(1))
-        k.line.setAttribute('y1', p.y.toFixed(1))
-        k.line.setAttribute('y2', (p.y + k.len).toFixed(1))
-      }
+      for (const k of ticks) set(k.path, 'd', ticksOf(k.orbit, turned(k.orbit, t)))
       for (const r of riders) {
         const p = place(r.orbit, r.at - turned(r.orbit, t))
         const depth = (Math.sin(p.a) + 1) / 2
-        r.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`)
-        r.g.setAttribute('opacity', (0.62 + depth * 0.38).toFixed(2))
-        r.disc?.setAttribute('transform', `scale(${(0.82 + depth * 0.18).toFixed(3)})`)
+        set(r.g, 'transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`)
+        set(r.g, 'opacity', (0.62 + depth * 0.38).toFixed(2))
+        set(r.disc, 'transform', `scale(${(0.82 + depth * 0.18).toFixed(3)})`)
         if (r.w < 0) r.w = r.name.getComputedTextLength()
         // The name on the side away from the middle; as it changes side it fades out and in.
         const c = Math.cos(p.a)
         let f = Math.min(1, Math.abs(c) / 0.22)
         f = f * f * (3 - 2 * f)
-        r.name.setAttribute('x', c >= 0 ? String(r.gap) : (-r.gap - r.w).toFixed(1))
-        r.name.setAttribute('opacity', f.toFixed(2))
+        set(r.name, 'x', c >= 0 ? String(r.gap) : (-r.gap - r.w).toFixed(1))
+        set(r.name, 'opacity', f.toFixed(2))
       }
     }
     draw()
@@ -140,34 +149,48 @@ export function Rings({ className, notes }: { className?: string; notes?: readon
     let lastY = window.scrollY
     let last = performance.now()
     let frame = 0
+    // Off screen nothing runs, not even the clock: nothing is read or drawn there, and the orbits carry on where they were.
+    let seen = false
+    const io = new IntersectionObserver(([e]) => {
+      const was = seen
+      seen = !!e?.isIntersecting
+      if (seen && !was) {
+        last = performance.now()
+        lastY = window.scrollY
+        frame = requestAnimationFrame(tick)
+      } else if (!seen) cancelAnimationFrame(frame)
+    })
+    io.observe(root)
     const tick = (now: number) => {
       const dt = Math.min(64, now - last)
       last = now
+      // Pinch-zoomed in, it holds still, drawing nothing, and goes on where it was (lib/zoom.ts).
+      if (isZoomed()) {
+        lastY = window.scrollY
+        frame = requestAnimationFrame(tick)
+        return
+      }
       // Scrolling quickens the orbits, by how fast you scroll, and lets go slowly.
       const y = window.scrollY
       boost = Math.min(14, boost * 0.93 + (Math.abs(y - lastY) / Math.max(1, dt)) * 1.6)
       lastY = y
       t += dt * (1 + boost)
-      // Off screen, only the clock runs.
-      const box = root.getBoundingClientRect()
-      if (box.bottom > 0 && box.top < window.innerHeight) {
-        draw()
-        let tx = px
-        let ty = py
-        if (now - moved > 2500) {
-          const k = now / 1000
-          tx = Math.sin(k * 0.55) * 0.55
-          ty = Math.sin(k * 0.37 + 1.2) * 0.4
-        }
-        ry += (tx * 22 - ry) * 0.06
-        rx += (-ty * 16 - rx) * 0.06
-        const bob = Math.sin(((now / 1000) * Math.PI * 2) / 3.6) * 7
-        lean.style.transform = `perspective(900px) translateY(${bob.toFixed(2)}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`
+      draw()
+      let tx = px
+      let ty = py
+      if (now - moved > 2500) {
+        const k = now / 1000
+        tx = Math.sin(k * 0.55) * 0.55
+        ty = Math.sin(k * 0.37 + 1.2) * 0.4
       }
+      ry += (tx * 22 - ry) * 0.06
+      rx += (-ty * 16 - rx) * 0.06
+      const bob = Math.sin(((now / 1000) * Math.PI * 2) / 3.6) * 7
+      lean.style.transform = `perspective(900px) translateY(${bob.toFixed(2)}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`
       frame = requestAnimationFrame(tick)
     }
-    frame = requestAnimationFrame(tick)
     return () => {
+      io.disconnect()
       cancelAnimationFrame(frame)
       window.removeEventListener('pointermove', onPointer)
     }
@@ -184,7 +207,8 @@ export function Rings({ className, notes }: { className?: string; notes?: readon
         <svg className={s.layer} viewBox={`0 0 ${W} ${H}`}>
           <g fill="var(--cobalt)">
             {dots}
-            <circle cx={CX + MARK_EYE.x} cy={CY + MARK_EYE.y} r={MARK_EYE.r} />
+            {/* The eye: in the race's orrery, the board's pointer dot is taken from it (story/waterfall.ts). */}
+            <circle cx={CX + MARK_EYE.x} cy={CY + MARK_EYE.y} r={MARK_EYE.r} data-eye="" />
           </g>
         </svg>
       </div>
@@ -195,23 +219,9 @@ export function Rings({ className, notes }: { className?: string; notes?: readon
           ))}
         </g>
         <g className={s.ticks}>
-          {TICKS.map((k) => {
-            const p = place(k.orbit, k.at)
-            const len = k.long ? 5 : 2.5
-            return (
-              <line
-                key={`${k.orbit}-${k.at}`}
-                data-tick=""
-                data-orbit={k.orbit}
-                data-at={k.at}
-                data-len={len}
-                x1={p.x}
-                x2={p.x}
-                y1={p.y}
-                y2={p.y + len}
-              />
-            )
-          })}
+          {TICK_ORBITS.map((orbit) => (
+            <path key={orbit} data-ticks={orbit} d={ticksOf(orbit, 0)} />
+          ))}
         </g>
         {RIDERS.map((r) => {
           const p = place(r.orbit, r.at)

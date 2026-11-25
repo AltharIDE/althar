@@ -28,6 +28,11 @@ describe('the gallery', () => {
     for (const screen of SCREENS) {
       expect(html).toContain(`<b>${screen.name}</b>`)
       expect(html).toContain(screen.line)
+      // The canvas is drawn in the page (CanvasScreen), a picture by its label; the rest are the brand pack's screenshots.
+      if (screen.file === 'canvas') {
+        expect(html).toContain(`role="img" aria-label="${screen.alt}"`)
+        continue
+      }
       expect(html).toContain(`alt="${screen.alt}"`)
       expect(html).toMatch(new RegExp(`${screen.file}-920h[^"]*\\.webp`))
     }

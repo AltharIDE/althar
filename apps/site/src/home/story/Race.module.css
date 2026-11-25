@@ -88,6 +88,7 @@
 .model[data-on] { opacity: 1; transform: none; }
 
 /* Althar's branch: the core at the top, the line down from it, and each model branching off it. */
+/* As tall as its branches (Race.tsx sets the height: closer together where a pinned window is short). */
 .branch { position: relative; height: 500px; margin-top: 32px; }
 .lines { position: absolute; left: 50%; top: 0; width: 800px; height: 500px; margin-left: -400px; overflow: visible; }
 .trunk { fill: none; stroke: var(--cobalt); stroke-width: 2; stroke-dasharray: 1; stroke-dashoffset: 0; }
@@ -102,8 +103,8 @@
 .lab { position: absolute; display: flex; gap: 8px; align-items: baseline; white-space: nowrap; opacity: 0; transition: opacity 400ms var(--ease) 250ms; }
 .lab[data-on] { opacity: 1; }
 .lab[data-gone] { opacity: 0.38; }
-.lab[data-side='left'] { right: calc(50% + 206px); flex-direction: row-reverse; }
-.lab[data-side='right'] { left: calc(50% + 206px); }
+.lab[data-side='left'] { right: calc(50% + var(--reach) + 10px); flex-direction: row-reverse; }
+.lab[data-side='right'] { left: calc(50% + var(--reach) + 10px); }
 .lab b { font: 500 12px/1 var(--mono); letter-spacing: 0.03em; color: var(--t-1); }
 .lab span, .lab i { font: 500 9.5px/1 var(--mono); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
 .lab i { color: var(--cobalt); }
@@ -128,7 +129,14 @@
 .orrery { position: absolute; left: 50%; top: 46%; width: 1400px; height: 760px; margin: -380px 0 0 -700px; transform-origin: 50% 50%; opacity: 0; pointer-events: none; }
 .rings { position: absolute; inset: 0; }
 .fin { position: absolute; left: 0; right: 0; top: 44px; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; opacity: 0; pointer-events: none; }
+/* The heading's period, a real one, unseen until the first screen's pointer dot lands on it as the pointer comes down out of the first screen (hero/feed.ts); where there is no pointer, it is simply there. */
+.title [data-period] { color: transparent; }
+.title [data-period][data-on] { color: inherit; }
+@media (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .title [data-period] { color: inherit; }
+}
 .fin .title { white-space: nowrap; }
+.fin .title b { display: block; }
 .get {
   display: inline-flex;
   align-items: center;
@@ -148,9 +156,26 @@
 .get:hover { background: #1f35c8; }
 .race:not([data-live]) .orrery, .race:not([data-live]) .fin { display: none; }
 
+/* On a phone, fitted to the screen: the heading tighter, the timeline across it, the branches short, only the tool in use named. */
 @media (max-width: 900px) {
-  .head { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .head { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-top: 24px; }
+  .race .title { font-size: clamp(30px, 8.4vw, 40px); }
+  .race .lead { font-size: 16px; }
+  .race[data-live] .line { min-height: 280px; margin-top: 24px; }
+  .key { flex-wrap: wrap; gap: 8px 16px; }
+  .tool[data-lost] { opacity: 0; }
+  .month { font-size: 9px; letter-spacing: 0.08em; }
+  .model { font-size: 9.5px; }
+  .model[data-low]:not([data-last]) { display: none; }
+  .branch { margin-top: 20px; }
+  .core { scale: 0.8; }
+  .lab b { font-size: 10.5px; }
+  .lab span { display: none; }
+  .fin { top: 24px; gap: 18px; }
+  .fin .title { white-space: normal; text-wrap: balance; }
+}
+/* With reduced motion on a phone, what doesn't fit scrolls sideways. */
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
   .scroll { overflow-x: auto; margin: 0 calc(-1 * var(--gut)); padding: 0 var(--gut); }
-  .line { min-width: 940px; }
-  .branch { min-width: 820px; }
+  .line { min-width: 640px; }
 }
