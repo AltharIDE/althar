@@ -1,0 +1,86 @@
+/* The few WSL parts the homes feature and the kit don't already draw. Tokens only. */
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.aside {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+
+/* WSL isn't there: what a distro would be here, and how it gets here. */
+.empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+}
+.emptyGlyph {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--n-2);
+  color: var(--t-3);
+}
+.emptyWords {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.emptyTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.emptyLine {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+/* A distro's agents, headed as the first run heads the agents on this computer. */
+.agents {
+  display: grid;
+  gap: 4px;
+}
+.section {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+
+.offer {
+  width: 100%;
+}
+.offerLine {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+/* Where a project's code lives, in a word. */
+.place {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}

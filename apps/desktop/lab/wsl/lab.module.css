@@ -1,0 +1,161 @@
+/* The page: a window of Althar's on a PC, filling it, and the lab's bar along the bottom, over any dialog's veil. */
+.lab {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100vh;
+  background: var(--n-2);
+}
+.stage {
+  position: relative;
+  display: flex;
+  min-height: 0;
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--base);
+}
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.screen > * {
+  flex: 1;
+  min-height: 0;
+}
+.end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* What the lab puts into a screen that has no slot for it yet. */
+.into {
+  display: contents;
+}
+.welcome {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.welcome[data-hide-agents] [class*='Welcome-module__agents'] {
+  display: none;
+}
+.where {
+  display: grid;
+  gap: 18px;
+}
+.quiet {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.findNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--n-1);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.stripWords {
+  flex: 1;
+  min-width: 0;
+}
+.said {
+  display: grid;
+  gap: 8px;
+}
+
+/* The lab's own bar. */
+.bar {
+  position: relative;
+  z-index: 2147483000;
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+  font-size: 12px;
+  pointer-events: auto;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.bar button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.bar button:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.bar kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-4);
+}
+.rule {
+  flex-shrink: 0;
+  width: 1px;
+  height: 16px;
+  margin: 0 8px;
+  background: var(--line-2);
+}
+.gap {
+  flex: 1;
+}
+.variants {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.variants > kbd {
+  padding: 0 6px 0 9px;
+}
+.caption {
+  flex: 1;
+  min-width: 0;
+  padding-left: 12px;
+  overflow: hidden;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
