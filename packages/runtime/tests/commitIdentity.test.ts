@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { identify, removeTreeSync, setConfig } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -218,9 +218,9 @@ describe('who a commit of Althar’s is written as', () => {
       '/work/repo',
       ['file:.git/config\tuser.name T', 'command line:\tuser.email t@t.test', 'file:/home/ada/.gitconfig\tAuthor.Name', ''].join('\n'),
     )
-    assert.deepStrictEqual(keys.get('user.name'), { value: 'T', key: 'user.name', origin: '/work/repo/.git/config' })
+    assert.deepStrictEqual(keys.get('user.name'), { value: 'T', key: 'user.name', origin: resolve('/work/repo', '.git/config') })
     assert.deepStrictEqual(keys.get('user.email'), { value: 't@t.test', key: 'user.email', origin: 'command line:' })
-    assert.deepStrictEqual(keys.get('author.name'), { value: '', key: 'author.name', origin: '/home/ada/.gitconfig' })
+    assert.deepStrictEqual(keys.get('author.name'), { value: '', key: 'author.name', origin: resolve('/home/ada/.gitconfig') })
     assert.strictEqual(keys.size, 3)
   })
 
