@@ -197,6 +197,7 @@ ipcRenderer.on('althar:homes-new-project', () => {
 
 contextBridge.exposeInMainWorld('althar', {
   workers: {
+    release: (fresh?: boolean) => ipcRenderer.invoke('althar:workers-release', fresh === true),
     setup: () => ipcRenderer.invoke('althar:workers-setup'),
     setUp: (target: unknown, here: boolean) => ipcRenderer.invoke('althar:workers-set-up', target, here),
     act: (action: WorkerSetupAction) => ipcRenderer.invoke('althar:workers-setup-act', action),

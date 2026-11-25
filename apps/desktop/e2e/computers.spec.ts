@@ -22,6 +22,8 @@ import { launch, openFirstProject, sizeWindow, still } from './support'
 
 const THIS = process.platform === 'darwin' ? 'This Mac' : process.platform === 'win32' ? 'This PC' : 'This computer'
 
+const RELEASE = 'https://releases.althar.invalid/host-v0.2.0'
+
 const shoot = async (page: Page, name: string) => {
   await still(page)
   await page.screenshot({ path: `test-results/computers/${name}.png`, scale: 'css', animations: 'disabled' })
@@ -31,7 +33,8 @@ test('lists the home with its readings, opens it to its Agents at once, and says
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
-  const { electronApp, page } = await launch(home)
+  // A release of its own, so the dialog asks nothing of GitHub: the code's line takes its files from beside its manifest.
+  const { electronApp, page } = await launch(home, { ALTHAR_HOST_RELEASE_MANIFEST: `${RELEASE}/althar-host-linux-x64.json` })
   const main = page.getByRole('main')
   try {
     await sizeWindow(electronApp, page, 1180, 760)
@@ -70,7 +73,13 @@ test('lists the home with its readings, opens it to its Agents at once, and says
     await still(page)
     await dialog.screenshot({ path: 'test-results/computers/add.png', scale: 'css', animations: 'disabled' })
     await dialog.getByRole('radio', { name: 'With a code' }).click()
-    await expect(dialog.getByText(/althar-worker\.sh \| sh -s -- join 'althar-worker1\./)).toBeVisible()
+    await expect(
+      dialog.getByText(`curl -fsSL ${RELEASE}/althar-worker.sh | ALTHAR_RELEASE_BASE=${RELEASE} sh -s -- join 'althar-worker1.`, {
+        exact: false,
+      }),
+    ).toBeVisible()
+    await still(page)
+    await dialog.screenshot({ path: 'test-results/computers/add-with-a-code.png', scale: 'css', animations: 'disabled' })
     await dialog.getByRole('button', { name: 'Close' }).click()
     await expect(dialog).toHaveCount(0)
   } finally {

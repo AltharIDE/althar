@@ -164,6 +164,53 @@ const later = (left: string, right: string) => {
 }
 
 /**
+ * Whether the newest host release can add a worker, asked before adding one: only a release that publishes the worker's
+ * bootstrap (`althar-worker.sh`) and its public key beside its signed manifests carries the worker (host-v0.1.0 came
+ * before it), and its manifest must check out under a pinned key. `base`: where that release's files are, for the code's
+ * line to take them from (the repository's latest release is the desktop's, not the host's). A release of your own
+ * (`manifest`) is taken as able, unread, its files beside its manifest. Only a release that came before workers is
+ * `none`; where it can't be found out (the network, a manifest that fails its check), it throws, and adding goes on.
+ */
+export type WorkerRelease =
+  | { readonly kind: 'ready'; readonly version: string; readonly base: string }
+  | { readonly kind: 'none'; readonly newest: string | null; readonly why: string }
+
+export const workerRelease = async (source: ReleaseSource, signal: AbortSignal): Promise<WorkerRelease> => {
+  const fetcher = source.fetch ?? fetch
+  const now = source.now?.() ?? Date.now()
+  if (source.manifest !== undefined)
+    return { kind: 'ready', version: 'own', base: source.manifest.slice(0, source.manifest.lastIndexOf('/')) }
+  const listed: unknown = JSON.parse(
+    new TextDecoder().decode(await read(fetcher, `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, 4_194_304, signal)),
+  )
+  let newest: { version: string; tag: string; assets: Map<string, string> } | undefined
+  for (const release of Array.isArray(listed) ? listed : []) {
+    if (typeof release !== 'object' || release === null) continue
+    const { draft, prerelease, tag_name: tag, assets } = release as Record<string, unknown>
+    const version = draft === true || prerelease === true || typeof tag !== 'string' ? undefined : versionOf(tag)
+    if (version === undefined || (newest !== undefined && !later(version, newest.version))) continue
+    const named = new Map<string, string>()
+    for (const one of Array.isArray(assets) ? assets : []) {
+      const { name, browser_download_url: url } = (typeof one === 'object' && one !== null ? one : {}) as Record<string, unknown>
+      if (typeof name === 'string' && typeof url === 'string') named.set(name, url)
+    }
+    newest = { version, tag: tag as string, assets: named }
+  }
+  if (newest === undefined) return { kind: 'none', newest: null, why: 'No host release is published.' }
+  const missing = ['althar-worker.sh', 'althar-host-release.pub', 'althar-host-linux-x64.json'].filter((name) => !newest.assets.has(name))
+  if (missing.length > 0)
+    return { kind: 'none', newest: newest.version, why: `${newest.tag} publishes no ${missing.join(', ')}: it came before workers.` }
+  const signed = authenticateRelease(
+    await read(fetcher, newest.assets.get('althar-host-linux-x64.json')!, MAX_MANIFEST_BYTES, signal),
+    source.keys,
+    'x64',
+    now,
+  )
+  if (signed.version !== newest.version) throw rejected()
+  return { kind: 'ready', version: newest.version, base: `https://github.com/${REPOSITORY}/releases/download/${newest.tag}` }
+}
+
+/**
  * The newest host release published, by its version (null where there's none), for the window to offer an older home's
  * update by: whether one would help, before it's run. Nothing of it is trusted beyond that, so it needs no pinned key:
  * the home's own updater authenticates what it takes. Where a release of your own is tried (`manifest`), its version,
