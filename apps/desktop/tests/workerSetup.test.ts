@@ -78,11 +78,20 @@ it('takes the newest host release with the worker’s bootstrap, once its manife
     version: '0.2.0',
     base: 'https://github.com/AltharIDE/althar/releases/download/host-v0.2.0',
   })
-  // Under a key Althar doesn't pin, it can't be taken.
-  expect(await workerRelease({ keys: [signed('0.2.0').pem], fetch: fetcher, now: () => now }, signal)).toMatchObject({
-    kind: 'none',
-    newest: '0.2.0',
-  })
+  // Under a key Althar doesn't pin, or where its manifest can't be read, it can't be found out: never said to have no worker.
+  await expect(workerRelease({ keys: [signed('0.2.0').pem], fetch: fetcher, now: () => now }, signal)).rejects.toThrow(/failed its check/)
+  const down = vi.fn(async (url: string, _init?: unknown) =>
+    new URL(url).host === 'api.github.com' ? Response.json(releases) : new Response('', { status: 503 }),
+  )
+  await expect(workerRelease({ keys: [pem], fetch: down, now: () => now }, signal)).rejects.toBeTruthy()
+  // A release of your own is taken unread, its files beside its manifest.
+  expect(await workerRelease({ keys: [pem], manifest: 'http://127.0.0.1:8080/r/althar-host-linux-x64.json', fetch: down }, signal)).toEqual(
+    {
+      kind: 'ready',
+      version: 'own',
+      base: 'http://127.0.0.1:8080/r',
+    },
+  )
 })
 
 /** A worker's machine, by the operation ssh.sh is given; and what went to main.log. */
@@ -154,6 +163,78 @@ it('keeps what SSH said where a step failed in main.log, with no secret in it', 
   const written = JSON.stringify(lines)
   expect(written).not.toContain('eyJob21lSWQiOiJob21lXzAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyIn0')
   expect(written).toContain('althar-worker1.…')
+})
+
+it('logs each step of a run that goes through, and nothing of the grant it hands the worker', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const { system, lines, log } = machine({
+    probe: { stdout: [event('reach', 'done'), event('look', 'done', { arch: 'arm64', freeKiB: 65_000_000, linger: true })].join('\n') },
+    'worker-install': { stdout: event('key', 'done', { publicKey: 'PUBLIC' }) },
+    'worker-enroll': { stdout: event('start', 'done', { agents: [] }) },
+  })
+  vi.mocked(system.release).mockResolvedValue({
+    envelope: new Uint8Array([1]),
+    key: 'KEY',
+    version: '0.2.0',
+    url: 'https://x.test/a.tar.gz',
+    sha256: 'a'.repeat(64),
+    bytes: 1,
+    unpackedBytes: 1,
+  })
+  const told: Array<WorkerSetup | null> = []
+  const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://x.test' }))
+  const setups = workerSetups(system, vi.fn(), (setup) => told.push(setup), vi.fn(), { log, release })
+  setups.start({ target: 'build@box' }, true)
+  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('enroll'))
+  const grant = { homeId: `home_${'1'.repeat(32)}`, workerId: `wrk_${'7'.repeat(32)}`, authority: 'CA', certificate: 'CERT' }
+  await setups.act({ kind: 'enroll', grant: grant as never })
+  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('done'))
+  expect(lines.filter((line) => line.message === 'Adding a worker: step').map((line) => line.fields?.step)).toEqual([
+    'look',
+    'get',
+    'enroll',
+    'start',
+    'done',
+  ])
+  expect(lines.map((line) => line.message)).toContain('Adding a worker: started')
+  expect(lines.some((line) => line.level !== 'INFO')).toBe(false)
+  expect(JSON.stringify(lines)).not.toContain(Buffer.from(JSON.stringify(grant)).toString('base64url'))
+})
+
+it('logs a sign-in’s failure with its words, and its other steps by kind only', async () => {
+  const { system, lines, log } = machine({})
+  const { PassThrough } = await import('node:stream')
+  const { EventEmitter } = await import('node:events')
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    stdin: new PassThrough(),
+    kill: vi.fn(),
+  })
+  const said = vi.fn()
+  const setups = workerSetups(system, (() => child) as never, vi.fn(), said, {
+    log,
+    release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://x.test' })),
+  })
+  await setups.signIn('build@box', 'codex', 'device')
+  const event = (more: Record<string, unknown>) => `${JSON.stringify({ protocol: 1, step: 'sign-in', ...more })}\n`
+  child.stdout.write(event({ state: 'started', kind: 'device', code: 'WXYZ-1234', page: 'https://x.test/device', minutes: 15 }))
+  child.stdout.write(event({ state: 'done', kind: 'refused', message: 'Pasted ABCD-9876 was wrong' }))
+  child.stdout.write(event({ state: 'failed', kind: 'failed', message: 'The provider stopped answering.' }))
+  await vi.waitFor(() => expect(said).toHaveBeenCalledTimes(3))
+  expect(lines).toContainEqual(
+    expect.objectContaining({
+      level: 'WARN',
+      message: 'Worker sign-in failed',
+      fields: expect.objectContaining({ message: 'The provider stopped answering.' }),
+    }),
+  )
+  const written = JSON.stringify(lines)
+  expect(written).toContain('"kind":"device"')
+  expect(written).not.toContain('WXYZ-1234')
+  expect(written).not.toContain('ABCD-9876')
+  child.emit('exit', 255)
+  setups.stop()
 })
 
 it('leaves codes, grants and keys out of what it logs, and keeps the last lines', () => {

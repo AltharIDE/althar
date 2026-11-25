@@ -79,6 +79,7 @@ export interface AddWorkerText {
   codeLasts: (time: string) => string
   shows: string
   checkAgain: string
+  checking: string
 }
 
 export const addWorkerText: AddWorkerText = {
@@ -114,6 +115,7 @@ export const addWorkerText: AddWorkerText = {
   codeLasts: (time) => `Works for ${time}`,
   shows: 'It shows in Computers once it connects.',
   checkAgain: 'Check again',
+  checking: 'Checking…',
 }
 
 export interface AddWorkerDialogProps {
@@ -137,8 +139,10 @@ export interface AddWorkerDialogProps {
   code: WorkerCodeView | null
   /** No release can add a worker yet: said in place of both ways, until a setup has started. */
   unavailable?: { title: string; body?: string | undefined } | null | undefined
-  /** Asks again whether one can. */
+  /** Asks again whether one can, or for the code where it couldn't be given. */
   onCheck?: (() => void) | undefined
+  /** Check again is pressed and not yet answered. */
+  checking?: boolean | undefined
   onClose: () => void
   text?: Partial<AddWorkerText> | undefined
 }
@@ -162,6 +166,7 @@ export function AddWorkerDialog({
   code,
   unavailable,
   onCheck,
+  checking = false,
   onClose,
   text,
 }: AddWorkerDialogProps) {
@@ -171,14 +176,20 @@ export function AddWorkerDialog({
   const going = setup !== null && setup.phase !== 'failed' && setup.phase !== 'done'
   const chosen = ssh ? way : 'code'
   const blocked = setup === null && unavailable != null
+  const checkAgain = onCheck !== undefined && (
+    <Button variant="signal" onClick={onCheck} disabled={checking}>
+      {checking ? t.checking : t.checkAgain}
+    </Button>
+  )
   const actions = blocked ? (
     <>
       <Button onClick={onClose}>{t.close}</Button>
-      {onCheck !== undefined && (
-        <Button variant="signal" onClick={onCheck}>
-          {t.checkAgain}
-        </Button>
-      )}
+      {checkAgain}
+    </>
+  ) : chosen === 'code' && code?.failed != null ? (
+    <>
+      <Button onClick={onClose}>{t.close}</Button>
+      {checkAgain}
     </>
   ) : chosen === 'code' ? (
     <Button onClick={onClose}>{t.close}</Button>

@@ -116,6 +116,24 @@ export const AStepFailed: Story = {
   },
 }
 
+/** The release couldn't be found out, for the code's line: said, with Check again. */
+export const CodeWithoutARelease: Story = {
+  args: {
+    way: 'code',
+    code: {
+      command: null,
+      lasts: null,
+      failed: 'Couldn’t find out which release to install from. Check your connection, then check again.',
+    },
+    onCheck: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.click(page.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheck).toHaveBeenCalled()
+  },
+}
+
 /** A machine without SSH: a one-time code, and the one line that takes it. */
 export const WithACode: Story = {
   args: {
@@ -128,7 +146,7 @@ export const WithACode: Story = {
   },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
-    await expect(page.getByText(/althar-worker\.sh \| sh -s -- join/)).toBeInTheDocument()
+    await expect(page.getByText(/althar-worker\.sh \| ALTHAR_RELEASE_BASE=\S+\/host-v0\.11\.0 sh -s -- join/)).toBeInTheDocument()
     await expect(page.getByText('Works for 10 minutes')).toBeInTheDocument()
   },
 }

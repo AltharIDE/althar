@@ -168,7 +168,8 @@ const later = (left: string, right: string) => {
  * bootstrap (`althar-worker.sh`) and its public key beside its signed manifests carries the worker (host-v0.1.0 came
  * before it), and its manifest must check out under a pinned key. `base`: where that release's files are, for the code's
  * line to take them from (the repository's latest release is the desktop's, not the host's). A release of your own
- * (`manifest`) is taken as able, its files beside its manifest.
+ * (`manifest`) is taken as able, unread, its files beside its manifest. Only a release that came before workers is
+ * `none`; where it can't be found out (the network, a manifest that fails its check), it throws, and adding goes on.
  */
 export type WorkerRelease =
   | { readonly kind: 'ready'; readonly version: string; readonly base: string }
@@ -177,10 +178,8 @@ export type WorkerRelease =
 export const workerRelease = async (source: ReleaseSource, signal: AbortSignal): Promise<WorkerRelease> => {
   const fetcher = source.fetch ?? fetch
   const now = source.now?.() ?? Date.now()
-  if (source.manifest !== undefined) {
-    const version = await newestHostVersion(source, signal)
-    return { kind: 'ready', version: version ?? '0.0.0', base: source.manifest.slice(0, source.manifest.lastIndexOf('/')) }
-  }
+  if (source.manifest !== undefined)
+    return { kind: 'ready', version: 'own', base: source.manifest.slice(0, source.manifest.lastIndexOf('/')) }
   const listed: unknown = JSON.parse(
     new TextDecoder().decode(await read(fetcher, `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, 4_194_304, signal)),
   )
@@ -201,18 +200,13 @@ export const workerRelease = async (source: ReleaseSource, signal: AbortSignal):
   const missing = ['althar-worker.sh', 'althar-host-release.pub', 'althar-host-linux-x64.json'].filter((name) => !newest.assets.has(name))
   if (missing.length > 0)
     return { kind: 'none', newest: newest.version, why: `${newest.tag} publishes no ${missing.join(', ')}: it came before workers.` }
-  try {
-    const signed = authenticateRelease(
-      await read(fetcher, newest.assets.get('althar-host-linux-x64.json')!, MAX_MANIFEST_BYTES, signal),
-      source.keys,
-      'x64',
-      now,
-    )
-    if (signed.version !== newest.version) throw rejected()
-  } catch (error) {
-    if (signal.aborted) throw error
-    return { kind: 'none', newest: newest.version, why: `${newest.tag}’s manifest didn’t pass its check: ${String(error)}` }
-  }
+  const signed = authenticateRelease(
+    await read(fetcher, newest.assets.get('althar-host-linux-x64.json')!, MAX_MANIFEST_BYTES, signal),
+    source.keys,
+    'x64',
+    now,
+  )
+  if (signed.version !== newest.version) throw rejected()
   return { kind: 'ready', version: newest.version, base: `https://github.com/${REPOSITORY}/releases/download/${newest.tag}` }
 }
 

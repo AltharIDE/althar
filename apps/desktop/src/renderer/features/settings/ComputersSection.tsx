@@ -207,6 +207,7 @@ export function ComputersSection({
           code={adder.code}
           unavailable={adder.unavailable}
           onCheck={adder.check}
+          checking={adder.checking}
           onClose={adder.close}
         />
       )}

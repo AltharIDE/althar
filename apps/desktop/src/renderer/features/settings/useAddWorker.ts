@@ -179,7 +179,9 @@ export interface AddWorkerModel {
   readonly code: WorkerCodeView | null
   /** Where no release can add a worker: said in place of both ways. */
   readonly unavailable: { readonly title: string; readonly body: string } | null
-  /** Asks afresh whether a release can. */
+  /** Check again is pressed and not yet answered. */
+  readonly checking: boolean
+  /** Asks afresh whether a release can, and the home for a code where it made none. */
   readonly check: () => void
   /** Closes it; a setup that went on stays as it is, and one that ended is put away. */
   readonly close: () => void
@@ -216,6 +218,8 @@ export const useAddWorker = ({
   const [release, setRelease] = useState<WorkerReleaseState | null>(null)
   const [releaseFailed, setReleaseFailed] = useState(false)
   const [checks, setChecks] = useState(0)
+  // Check again pressed and not yet answered: what it said before stays meanwhile, its button saying it's checking.
+  const [checking, setChecking] = useState(false)
   const enrolled = useRef<string | null>(null)
 
   useEffect(() => {
@@ -257,8 +261,14 @@ export const useAddWorker = ({
         if (!live) return
         setRelease(found)
         setReleaseFailed(false)
+        setChecking(false)
       },
-      () => live && setReleaseFailed(true),
+      () => {
+        if (!live) return
+        setRelease(null)
+        setReleaseFailed(true)
+        setChecking(false)
+      },
     )
     return () => {
       live = false
@@ -361,9 +371,11 @@ export const useAddWorker = ({
           )
         : null,
     unavailable: unavailableOf(release),
+    checking,
     check: () => {
-      setRelease(null)
-      setReleaseFailed(false)
+      // The home's code is asked again too, where it couldn't make one.
+      setCodeFailed(null)
+      setChecking(true)
       setChecks((count) => count + 1)
     },
     close,

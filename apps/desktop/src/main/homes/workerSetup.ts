@@ -518,13 +518,10 @@ export const workerSetups = (
         partial = lines.pop() ?? ''
         for (const one of eventsIn(lines.join('\n'))) {
           if (one.step === 'sign-in' && typeof one.kind === 'string') {
-            // Its kind only: a device code, a link and who signed in stay out of the log.
-            log.info('Worker sign-in', {
-              target: ssh,
-              agent,
-              kind: one.kind,
-              message: one.kind === 'refused' ? textOf(one.message) : undefined,
-            })
+            // Its kind only: a device code, a link, who signed in and a refusal's words stay out of the log; a failure's
+            // words go in, cut as every line is.
+            if (one.kind === 'failed') log.warn('Worker sign-in failed', { target: ssh, agent, message: forTheLog(textOf(one.message), 3) })
+            else log.info('Worker sign-in', { target: ssh, agent, kind: one.kind })
             said(one as unknown as WorkerSignInEvent)
           } else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
           else if (one.state === 'failed') {
