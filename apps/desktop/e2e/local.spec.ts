@@ -64,7 +64,14 @@ const whatItSaw = async (page: Page, root: string) => {
   }
   const header = await words(page.getByRole('banner').filter({ visible: true }).last(), 200)
   const thread = await words(page.getByRole('region', { name: 'Thread' }).filter({ visible: true }).last(), 500)
-  const checkout = `${git(root, 'branch', '--show-current')}, ${git(root, 'status', '--porcelain') || 'all committed'}`
+  // A git that can't read it says why, rather than losing what the window showed and the failure itself.
+  const checkout = (() => {
+    try {
+      return `${git(root, 'branch', '--show-current')}, ${git(root, 'status', '--porcelain') || 'all committed'}`
+    } catch (error) {
+      return `unread: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`
+    }
+  })()
   return `It saw: header: ${header} | thread: ${thread} | checkout: ${checkout}`
 }
 
