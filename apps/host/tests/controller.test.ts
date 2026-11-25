@@ -127,9 +127,24 @@ describe('controlled host activation and recovery', () => {
     expect(at.calls).toEqual(['stop', `start:${at.nextId}`, 'stop', `start:${at.oldId}`])
   })
 
+  it('applies a release that only moves the data once allowed, saying what that means until then', async () => {
+    const at = await updateFixture({ storage: 'c'.repeat(64) })
+    await expect(applyStaged(at.root, false, at.dependencies)).rejects.toMatchObject({
+      code: 'UpdateIncompatible',
+      message: expect.stringContaining('This release moves the home’s data to a new format.'),
+    })
+    expect(at.calls).toEqual([])
+    expect(await applyStaged(at.root, true, at.dependencies)).toBe(NEXT_VERSION)
+    expect(at.calls).toEqual(['stop', `start:${at.nextId}`])
+    expect((await readState(at.root)).current).toBe(at.nextId)
+  })
+
   it('requires approval for incompatible changes and never restarts old code after a failed incompatible startup', async () => {
     const at = await updateFixture({ apiVersion: 2, storage: 'c'.repeat(64) })
-    await expect(applyStaged(at.root, false, at.dependencies)).rejects.toMatchObject({ code: 'UpdateIncompatible' })
+    await expect(applyStaged(at.root, false, at.dependencies)).rejects.toMatchObject({
+      code: 'UpdateIncompatible',
+      message: expect.stringContaining('This release serves API version 2, and this home serves 1'),
+    })
     expect(at.calls).toEqual([])
     at.failStartup(true)
     await expect(applyStaged(at.root, true, at.dependencies)).rejects.toMatchObject({ code: 'UpdateRecoveryRequired' })

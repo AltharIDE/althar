@@ -16,6 +16,8 @@ const signed = (version: string) => {
     publishedAt: '2025-11-01T00:00:00.000Z',
     expiresAt: '2026-05-01T00:00:00.000Z',
     platform: 'linux',
+    apiVersion: 1,
+    storage: 'c'.repeat(64),
     arch: 'x64',
     archive: { url: 'https://example.test/a.tar.gz', sha256: 'b'.repeat(64), bytes: 40_000_000 },
     unpackedBytes: 120_000_000,
@@ -180,6 +182,8 @@ it('logs each step of a run that goes through, and nothing of the grant it hands
     sha256: 'a'.repeat(64),
     bytes: 1,
     unpackedBytes: 1,
+    apiVersion: 1,
+    storage: 'c'.repeat(64),
   })
   const told: Array<WorkerSetup | null> = []
   const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://x.test' }))

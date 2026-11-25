@@ -28,6 +28,9 @@ export interface HostRelease {
   /** The pinned key it checked out under, as PEM. */
   readonly key: string
   readonly version: string
+  /** The API version it serves, and the fingerprint of how it stores its data (apps/host/src/updates/info.ts). */
+  readonly apiVersion: number
+  readonly storage: string
   readonly url: string
   readonly sha256: string
   readonly bytes: number
@@ -92,6 +95,10 @@ export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<strin
       typeof archive.sha256 !== 'string' ||
       !/^[a-f0-9]{64}$/.test(archive.sha256) ||
       typeof archive.url !== 'string' ||
+      typeof manifest.apiVersion !== 'number' ||
+      !Number.isSafeInteger(manifest.apiVersion) ||
+      typeof manifest.storage !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(manifest.storage) ||
       expires <= published ||
       published > now + 300_000 ||
       expires <= now
@@ -103,6 +110,8 @@ export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<strin
       envelope: bytes,
       key,
       version: manifest.version,
+      apiVersion: manifest.apiVersion,
+      storage: manifest.storage,
       url: url.href,
       sha256: archive.sha256,
       bytes: natural(archive.bytes, MAX_ARCHIVE_BYTES),
