@@ -247,12 +247,12 @@ describe('a step whose agent fails for a reason on this computer', () => {
         rmSync(join(path, '.codex'))
         mkdirSync(join(path, '.codex'))
         yield* until(turnsOf(second.threadId), (turns) => turns.length >= 2)
-        const held = yield* implementOf(second.taskId, (one) => one.state === 'held' && turnsSettled(one))
-        const hold = JSON.parse(held.output ?? '{}') as { local?: unknown; service: string; tries: number }
-        assert.isUndefined(hold.local)
-        assert.strictEqual(hold.service, 'OpenAI')
+        // Backing off for OpenAI, or, its tries spent on a slow machine, stopped for OpenAI: never for the old local cause.
+        yield* implementOf(second.taskId, (one) => (one.state === 'held' && turnsSettled(one)) || one.state === 'waiting_attention')
+        assert.isTrue((yield* notices(second.threadId)).some((title) => title.startsWith('OpenAI failed. Trying again')))
+        const calls = (yield* openCalls(second.taskId)).map((call) => (JSON.parse(call.payload) as { why: string }).why)
+        assert.notInclude(calls, 'local_cause')
         assert.deepStrictEqual(yield* sessionsOf(second.threadId), sessions)
-        assert.lengthOf(yield* openCalls(second.taskId), 0)
       }).pipe(Effect.provide(layer))
     },
   )

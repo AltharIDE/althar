@@ -1021,9 +1021,10 @@ export class Runs extends Context.Service<
       /**
        * A step needs the person (docs/architecture/05): its attempt waits on
        * them, and a call in the task says why. A run has one such call open at
-       * a time.
+       * a time. True where this asked, or held the step on another task's
+       * call; false where the step was asked about, or moved on, already.
        */
-      const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
+      const stuckAsked = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // An agent that couldn't start because it is signed out, its sign-in ended or it isn't installed stops for that:
@@ -1078,6 +1079,9 @@ export class Runs extends Context.Service<
               const [now] = yield* sql<{ attempt: string | null }>`
                 SELECT (SELECT state FROM node_attempts WHERE id = ${attempt?.id ?? ''}) AS attempt`
               if (!(yield* going(run)) || now?.attempt === 'cancelled') return false
+              // A local cause is asked about only for a step still at work: the second look into one failure finds it
+              // held on another task's call, or asked about, already.
+              if (info.why === 'local_cause' && attempt !== null && now?.attempt !== 'running') return false
               if (attempt !== null) {
                 // One held for a limit, whose handover didn't go through, waits on the person instead.
                 const revision = yield* change('node_attempts', attempt.id, { state: 'waiting_attention', holdReason: null })
@@ -1116,6 +1120,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (opened) yield* touchCard(run.taskId)
+          if (!opened) return false
           // A local cause is said once for the project, in the coordinator's thread, where the person looks across tasks.
           if (opened && info.why === 'local_cause' && info.agentId !== null) {
             const [home] = yield* sql<{ id: string }>`
@@ -1129,7 +1134,11 @@ export class Runs extends Context.Service<
                 description: `It stopped “${task?.title ?? 'a task'}” without retrying, and stops any other task here the same way. Its card offers the coordinator’s fix.`,
               })
           }
+          return true
         })
+
+      const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
+        Effect.asVoid(stuckAsked(run, attempt, asked))
 
       /**
        * A step whose agent can't start for the local cause another task of the project already asks the person about
@@ -1145,8 +1154,10 @@ export class Runs extends Context.Service<
           const until = new Date(Date.parse(yield* timestamp) + Duration.toMillis(connectivity.every)).toISOString()
           const held = yield* sql.withTransaction(
             Effect.gen(function* () {
+              // Only a step still at work: both the agent's warning and its turn's end look into one failure, and the
+              // second to see it finds the step held already, or gone on.
               const [now] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
-              if (now === undefined || now.state === 'cancelled' || !(yield* going(run))) return false
+              if (now?.state !== 'running' || !(yield* going(run))) return false
               const revision = yield* change('node_attempts', attemptId, {
                 state: 'held',
                 holdReason: 'agent_unavailable',
@@ -1173,7 +1184,7 @@ export class Runs extends Context.Service<
               return true
             }),
           )
-          if (!held) return
+          if (!held) return false
           yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
@@ -1182,6 +1193,7 @@ export class Runs extends Context.Service<
           })
           yield* touchCard(run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
+          return true
         })
 
       /** The model and effort a step's agent last ran on, on the step's own thread. */
@@ -2598,7 +2610,7 @@ export class Runs extends Context.Service<
         sessions,
         stepOn,
         stepsOf,
-        stuck,
+        stuck: stuckAsked,
         usageLimitOfRun,
       })
       const { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, placeFirst, workToward, worksInOf } =
