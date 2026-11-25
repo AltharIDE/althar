@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import { Ids, newId, now } from '@althar/domain'
+import { waitFor } from '@althar/testing'
 import { bundledCodex } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -359,9 +360,7 @@ describe.skipIf(!bubblewrapStarts() || codex === null)("Codex's sandbox, killed"
 
     // Killed as a whole, as a lead that won't stop in its grace period is: no sandbox of it is left to take its folders away.
     const running = sandboxed(worktree, home, ['sleep', '30'])
-    const deadline = Date.now() + 10_000
-    while (!existsSync(join(worktree, '.codex')) && Date.now() < deadline) await new Promise((done) => setTimeout(done, 50))
-    assert.isTrue(existsSync(join(worktree, '.codex')), "Codex's sandbox mounted its protected folders")
+    await waitFor(() => existsSync(join(worktree, '.codex')), Boolean, "Codex's sandbox mounted its protected folders")
     // Mounted on while it runs: none of them is taken away.
     for (const path of recorded) assert.notStrictEqual(await settle(path, await mountPoints()), 'removed')
     process.kill(-(running.pid ?? 0), 'SIGKILL')
@@ -376,5 +375,5 @@ describe.skipIf(!bubblewrapStarts() || codex === null)("Codex's sandbox, killed"
     const code = await new Promise((done) => started.once('exit', done))
     assert.strictEqual(code, 0)
     assert.isFalse(existsSync(join(worktree, '.codex')))
-  }, 30_000)
+  })
 })
