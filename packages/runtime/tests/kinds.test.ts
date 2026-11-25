@@ -19,6 +19,7 @@ import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
+import { words } from '../src/words'
 
 /*
  * A task's kind is read from what it has, never stored (DEV-96): a plain
@@ -414,6 +415,11 @@ describe('settling a task that isn’t a change', () => {
         // Its pull request open, it waits on that, on its host: refused, saying why, and not kept.
         const refused = yield* Effect.flip(keep(opened.taskId))
         assert.deepInclude(refused, { _tag: 'TaskRefused', why: 'pull_open' })
+        // As the window gets it: the line its row says, rolled back.
+        assert.deepInclude(
+          words(refused, (id) => id),
+          { reason: 'TaskRefused', message: 'Its pull request is open, so it waits there: merge or close it first.' },
+        )
         assert.isNull((yield* row(opened.taskId)).keptAt)
         // Commits of it held for Ship, waiting to be accepted: kept all the same, held still, its Ship there when it opens.
         const [worktree] = yield* sql<{ id: string }>`SELECT id FROM workspaces WHERE task_id = ${sketch.taskId} LIMIT 1`

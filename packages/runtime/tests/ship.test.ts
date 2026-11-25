@@ -828,6 +828,28 @@ describe('a Ship', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('reads a stopped task held for Ship kept at its first board read after Keep, before its card is worked out again', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      const tasks = yield* Tasks
+      const task = yield* opened(working, '[coordinator:plan-no-review]', 'none')
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Stopped, its hold surviving: it waits on Ship, ready, and Keep for later keeps it.
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${task.taskId}`
+      const card = Effect.map(queries.board(task.projectId, true), (board) => board.tasks.find((one) => one.taskId === task.taskId))
+      yield* until(card, (one) => one?.phase === 'ready' && one.held !== undefined)
+      assert.isTrue(yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: task.taskId }), taskId: task.taskId }))
+      // The window's read right after the answer, with no card of it saved since: worked out without its worktrees, it is
+      // kept still, never stopped.
+      yield* sql`DELETE FROM board_card_views WHERE task_id = ${task.taskId}`
+      assert.strictEqual((yield* card)?.phase, 'kept')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live(
     'keeps a task held for Ship, and its pull request opening after reads ready with Ship on the board as the window reads it',
     () => {

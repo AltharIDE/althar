@@ -2289,12 +2289,17 @@ export class Queries extends Context.Service<
        * hold, and how many commits, those ahead of its open pull requests and those in none yet. The latter are already known
        * when it has a pull request history. Read them for a branch with no pull request only if it has a hold.
        */
+      /**
+       * What of the task waits for Ship (`held`, its commits counted from git), and whether it is held at all (`waits`), which
+       * decides its phase: a read without worktree details (the board's while its projection is worked out) counts no commits,
+       * but a hold still has it wait, as kept or ready, rather than read stopped until the full read comes.
+       */
       const heldOf = (taskId: string, after: number | undefined) =>
         Effect.gen(function* () {
-          if (!(yield* WorktreeDetails)) return undefined
           const changes = yield* Changes
           const [first] = yield* changes.holds(taskId).pipe(Effect.orElseSucceed(() => []))
-          if (first === undefined) return undefined
+          if (first === undefined) return { held: undefined, waits: false }
+          if (!(yield* WorktreeDetails)) return { held: undefined, waits: true }
           const open = yield* changes.aheadOfOpen(taskId).pipe(Effect.orElseSucceed(() => []))
           const unpublished =
             after ??
@@ -2304,7 +2309,7 @@ export class Queries extends Context.Service<
             )
           const commits = open.reduce((sum, one) => sum + one.count, unpublished)
           // Held with nothing left to send, as where the person pushed it by hand, it waits on nothing: Ship lets go of it.
-          return commits === 0 ? undefined : { since: first.heldAt, commits }
+          return commits === 0 ? { held: undefined, waits: false } : { held: { since: first.heldAt, commits }, waits: true }
         })
 
       const cardOf = (row: ItemRow) =>
@@ -2743,7 +2748,7 @@ export class Queries extends Context.Service<
                 }
           // Held for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): what the person's turns with its lead
           // committed after its plan waits on its branch, on its open pull requests or after the last, and only Ship sends it up.
-          const held = yield* heldOf(taskId, shipping?.changes === 0 ? undefined : (unshipped?.commits ?? 0))
+          const { held, waits: heldWaits } = yield* heldOf(taskId, shipping?.changes === 0 ? undefined : (unshipped?.commits ?? 0))
           // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
           // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
           const replied = yield* repliedAt(taskId)
@@ -2900,7 +2905,7 @@ export class Queries extends Context.Service<
             if (afterMerge?.state === 'found') return 'ready'
             // Held for Ship, it waits on the person's word, whatever its pushed head's checks say: Ship replaces that head. Not while
             // a run is under way, as Ship's own is as it reviews and sends what waited.
-            if (held !== undefined && task.runState !== 'running') return 'ready'
+            if (heldWaits && task.runState !== 'running') return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet, or its lead answered the person since
             // they last had it open.
             if (task.state === 'done') return unshipped === null && replied === undefined ? 'settled' : 'ready'

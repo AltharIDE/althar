@@ -104,6 +104,23 @@ describe('Done and Keep for later, from a card', () => {
     expect(view.result.current.failed['t1']?.message).toBe(unmovedText.pullOpen)
   })
 
+  it('brings a stale card back where its pull request opened before Keep, with the runtime’s refusal, its row as read', async () => {
+    // Pressed on a card read before its pull request opened: the runtime refuses, and the read after says it is open.
+    const view = actions(async () => [{ ...ready, change: change() }])
+    view.read([ready])
+    vi.mocked(view.client.keepTaskForLater).mockRejectedValue(
+      new ApiError({ reason: 'TaskRefused', why: 'pull_open', message: unmovedText.pullOpen }),
+    )
+    let went = true
+    await act(async () => {
+      went = await view.result.current.keep('t1')
+    })
+    expect(went).toBe(false)
+    expect(view.phase()).toBe('ready')
+    expect(view.result.current.settling.has('t1')).toBe(false)
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.pullOpen)
+  })
+
   it('brings the card back where the runtime refused, saying why on it', async () => {
     const view = actions(async () => [ready])
     vi.mocked(view.client.keepTaskForLater).mockRejectedValue(
