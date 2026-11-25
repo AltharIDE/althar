@@ -482,7 +482,7 @@ describe('automations', () => {
   )
 
   it.live('are proposed and run monthly: on a day of the month or the nth weekday, a short month on its last day', () => {
-    const clock = clockAt('2026-10-21T10:00:00Z')
+    const clock = clockAt('1998-10-21T10:00:00Z')
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
@@ -516,9 +516,9 @@ describe('automations', () => {
       assert.deepStrictEqual(first?.definition.schedule, { every: 'month', on: { weekday: 1, nth: 1 }, at: '09:00' })
       assert.deepStrictEqual(last?.definition.schedule, { every: 'month', on: { weekday: 5, nth: -1 }, at: '16:00' })
       // The first Monday of November is the 2nd, at 9:00 in London, once its clocks are back.
-      assert.strictEqual(first?.nextAt, '2026-11-02T09:00:00.000Z')
+      assert.strictEqual(first?.nextAt, '1998-11-02T09:00:00.000Z')
       // The last Friday of October is the 30th, at 16:00 in London, whose clocks went back on the 25th.
-      assert.strictEqual(last?.nextAt, '2026-10-30T16:00:00.000Z')
+      assert.strictEqual(last?.nextAt, '1998-10-30T16:00:00.000Z')
 
       // It is one way of saying it: a day of the month with days of the week, or two kinds at once, says nothing.
       for (const when of [
@@ -533,10 +533,10 @@ describe('automations', () => {
       // Turned on, the first Monday's run comes then, and once.
       const automationId = (yield* automations.list(projectId)).find((one) => one.name === 'Dependencies')?.id ?? ''
       yield* automations.turnOn(automationId, instance.personId)
-      clock.set('2026-11-02T09:00:05Z')
+      clock.set('1998-11-02T09:00:05Z')
       const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.deepInclude(ran, { cause: 'schedule', slot: '2026-11-02T09:00' })
-      assert.strictEqual((yield* automations.read(automationId)).nextAt, '2026-12-07T09:00:00.000Z')
+      assert.deepInclude(ran, { cause: 'schedule', slot: '1998-11-02T09:00' })
+      assert.strictEqual((yield* automations.read(automationId)).nextAt, '1998-12-07T09:00:00.000Z')
 
       // Changed to another day of the month, it waits for the person, its card saying what it was.
       assert.match(
