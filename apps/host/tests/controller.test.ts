@@ -15,7 +15,7 @@ import {
   writeJSON,
   type Transaction,
 } from '../src/updates/store'
-import { HOME_ID, NOW, updateFixture } from './updateFixture'
+import { HOME_ID, NOW, updateFixture, NEXT_VERSION } from './updateFixture'
 import { reserveDatabase } from '../src/updates/reservation'
 
 const dead = { pid: 0, boot: 'previous boot', started: '1' }
@@ -67,7 +67,7 @@ describe('controlled host activation and recovery', () => {
   })
 
   it('rejects a service that starts without authenticated readiness or a durable healthy commit', async () => {
-    for (const status of ['{}', JSON.stringify({ state: 'ready', homeId: HOME_ID, version: '0.1.1' })]) {
+    for (const status of ['{}', JSON.stringify({ state: 'ready', homeId: HOME_ID, version: NEXT_VERSION })]) {
       const at = await updateFixture()
       const services = { ...at.services, start: async () => undefined }
       await expect(
@@ -97,14 +97,14 @@ describe('controlled host activation and recovery', () => {
   })
   it('preserves the home and data through an explicit verified activation', async () => {
     const at = await updateFixture()
-    expect(await applyStaged(at.root, false, at.dependencies)).toBe('0.1.1')
+    expect(await applyStaged(at.root, false, at.dependencies)).toBe(NEXT_VERSION)
     expect(at.calls).toEqual(['stop', `start:${at.nextId}`])
     expect(at.notes()).toEqual(['before update'])
     const state = await readState(at.root)
     expect(state.current).toBe(at.nextId)
     expect(state.transaction).toBeUndefined()
     expect(state.staged).toBeUndefined()
-    expect((await updateStatus(at.root)).version).toBe('0.1.1')
+    expect((await updateStatus(at.root)).version).toBe(NEXT_VERSION)
   })
 
   it('restores a failed migration before any candidate runtime has started', async () => {
