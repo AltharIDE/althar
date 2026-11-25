@@ -49,15 +49,30 @@ export const isSettleable = (task: {
 
 /**
  * Whether a finished task takes Keep for later: any kind, a prototype or a chat that ends on its branch included, waiting
- * in Needs you and not settled (a merged one's later commits wait for a pull request), with no pull request of its own open
- * and nothing held for Ship. Those wait on the person in their own ways (accepting, Ship), which a kept row doesn't show.
+ * in Needs you and not settled (a merged one's later commits wait for a pull request), with no pull request of its own open:
+ * that waits on the person on its host, which a kept row doesn't show. Commits held for Ship keep too: they stay held, and
+ * Accept or Ship are there when it is opened.
  */
-export const takesKeep = (task: {
-  readonly phase: string
-  readonly state?: string | undefined
-  readonly pullOpen: boolean
-  readonly held?: unknown
-}): boolean => task.phase === 'ready' && task.state !== 'done' && task.state !== 'abandoned' && !task.pullOpen && task.held == null
+export const takesKeep = (task: { readonly phase: string; readonly state?: string | undefined; readonly pullOpen: boolean }): boolean =>
+  task.phase === 'ready' && task.state !== 'done' && task.state !== 'abandoned' && !task.pullOpen
+
+/** What the window says where Done or Keep for later was answered and the task didn't move, by why it didn't. */
+export const unmovedText = {
+  pullOpen: 'Its pull request is open, so it waits there: merge or close it first.',
+  atWork: 'Its lead took it up again meanwhile, so it stays as it was.',
+  waits: 'Something of it waits on you, so it stays as it was.',
+  other: 'Althar couldn’t move it, so it stays as it was.',
+}
+
+/** Why a task Done or Keep for later didn't move, as it reads now: its pull request open, its lead at work, a call on the person. */
+export const unmovedWhy = (task: { readonly phase: string; readonly pullOpen: boolean }): string =>
+  task.pullOpen
+    ? unmovedText.pullOpen
+    : task.phase === 'running'
+      ? unmovedText.atWork
+      : task.phase === 'waiting'
+        ? unmovedText.waits
+        : unmovedText.other
 
 /**
  * What a finished lead's report leaves to the person, in a line: the last line of it that asks, else its last line. Null where

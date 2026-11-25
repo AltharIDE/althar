@@ -804,17 +804,22 @@ describe('a Ship', () => {
       const held = board.tasks.find((card) => card.taskId === task.taskId)
       assert.strictEqual(held?.phase, 'ready')
       assert.isAbove(held?.held?.commits ?? 0, 0)
-      assert.isFalse(yield* keep)
+      // Kept for later while its commits wait for Ship: out of Needs you, its commits held still, and Ship there.
+      assert.isTrue(yield* keep)
+      const kept = (yield* queries.board(task.projectId)).tasks.find((card) => card.taskId === task.taskId)
+      assert.strictEqual(kept?.phase, 'kept')
+      assert.isAbove(kept?.held?.commits ?? 0, 0)
       // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
       // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
       yield* until(heldAt(task.taskId), (at) => at === null)
       assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       assert.lengthOf(github.changes, 0)
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].held === undefined)
-      assert.isTrue(yield* keep)
-      const kept = yield* queries.board(task.projectId)
-      assert.strictEqual(kept.tasks.find((card) => card.taskId === task.taskId)?.phase, 'kept')
+      // Shipped, it stays kept: nothing waits on the person now.
+      yield* until(
+        Effect.map(queries.board(task.projectId), (board) => board.tasks.find((card) => card.taskId === task.taskId)),
+        (card) => card?.phase === 'kept' && card.held === undefined,
+      )
       // The person opens its pull request on purpose, from its Change card: a draft.
       yield* runs.publish(task.taskId)
       assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])

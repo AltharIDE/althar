@@ -2912,10 +2912,10 @@ export class Queries extends Context.Service<
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
           })()
-          // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it. Not while a
-          // pull request of its own is open or commits wait for Ship, however that came after it was kept: those wait on the
-          // person in their own ways (accepting, Ship), which a kept row doesn't show.
-          const keptStands = !changes.some((one) => one.state === 'open') && held === undefined
+          // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it, commits
+          // held for Ship included (Ship is there when it is opened). Not while a pull request of its own is open, however that
+          // came after it was kept: that waits on the person on its host, which a kept row doesn't show.
+          const keptStands = !changes.some((one) => one.state === 'open')
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null && keptStands ? 'kept' : ready
           // Stopped with no agent on it: what stopped its lead (the person declining a call, or interrupting; else Althar, or
           // nothing says), and when, so the board puts it among what waits on the person and says so.

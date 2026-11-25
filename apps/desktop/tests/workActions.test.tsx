@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type BoardTask } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
-import { useWorkActions, workText } from '../src/renderer/features/board/useWorkActions'
-import { card, fakeClient } from './fixtures'
+import { useWorkActions } from '../src/renderer/features/board/useWorkActions'
+import { unmovedText } from '../src/renderer/shared/calls'
+import { card, change, fakeClient } from './fixtures'
 import { servicesFor } from './render'
 
 /*
@@ -87,7 +88,14 @@ describe('Done and Keep for later, from a card', () => {
     })
     expect(went).toBe(false)
     expect(view.phase()).toBe('ready')
-    expect(view.result.current.failed['t1']?.message).toBe(workText.stillOpen)
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.other)
+  })
+
+  it('brings a kept card back where its pull request is open, saying so rather than that something opened', async () => {
+    const view = actions(async () => [{ ...ready, change: change() }])
+    await act(() => view.result.current.keep('t1'))
+    expect(view.phase()).toBe('ready')
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.pullOpen)
   })
 
   it('brings the card back where the runtime refused, saying why on it', async () => {
