@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { agentServers } from '@althar/provider-adapters'
@@ -7,7 +6,7 @@ import { agentServers } from '@althar/provider-adapters'
 import { fakeAgents, GITHUB_NPX, homeWith, stringify } from './agentHome'
 import { describe, expect, it } from 'vitest'
 
-import { keepOut, pickWay, putBack, reconcile, readRecord, syncState, type SyncIo, turnOff, turnOn, undoSince } from '../src/mcpSync'
+import { keepOut, pickWay, putBack, reconcile, readRecord, syncState, turnOff, turnOn, undoSince } from '../src/mcpSync'
 
 /*
  * Keeping the person's agents' MCP servers the same, against a temporary

@@ -4,6 +4,7 @@ import { afterEach, beforeEach } from 'vitest'
 
 import { forgetArrived } from '../src/renderer/features/board/arrived'
 import { forgetFolds } from '../src/renderer/features/board/folds'
+import { forgetRunningOrder } from '../src/renderer/features/board/runningOrder'
 import { forgetPages } from '../src/renderer/features/browser/pages'
 import { forgetHiddenCards } from '../src/renderer/features/project/FirstConnectionsView'
 import { welcome } from '../src/renderer/features/start/welcome'
@@ -57,6 +58,7 @@ if (typeof window !== 'undefined') {
     window.localStorage.clear()
     forgetChosenFaces()
     forgetFolds()
+    forgetRunningOrder()
     forgetArrived()
     forgetDrafts()
     forgetSessions()

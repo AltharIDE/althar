@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
 import {
-  type BoardTask,
   type CheckFailures,
   type ChangeSummary,
   checkFailuresOf,

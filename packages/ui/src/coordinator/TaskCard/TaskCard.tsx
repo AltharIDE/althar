@@ -56,6 +56,8 @@ export interface TaskCardProps {
   seen?: number
   /** What it is doing now, in a line. */
   now?: string
+  /** Why it stands where it does, under its title, where a word isn't enough: who stopped it, and why. */
+  why?: string
   /** When it started, short: 12m ago. */
   started: string
   lead: ModelInfo
@@ -92,6 +94,7 @@ export function TaskCard({
   at,
   seen = at,
   now,
+  why,
   started,
   lead,
   effort,
@@ -125,12 +128,21 @@ export function TaskCard({
           <TaskGlyph status={status} />
           {t.status[status]}
         </span>
-        {now && <span className={s.nowText}>{now}</span>}
+        {now && (
+          <span className={s.nowText} title={now}>
+            {now}
+          </span>
+        )}
         {started && <span className={s.at}>{started}</span>}
       </div>
       <p className={s.title} id={titleId}>
         {title}
       </p>
+      {why !== undefined && why !== '' && (
+        <p className={s.why} title={why}>
+          {why}
+        </p>
+      )}
       {errands?.map((line) => (
         <p className={s.errand} key={line} title={line}>
           {line}

@@ -1,7 +1,6 @@
 import { createElement, isValidElement } from 'react'
 
 import * as board from '../../../../../../packages/ui/src/fixtures/board'
-import * as chrome from '../../../../../../packages/ui/src/fixtures/chrome'
 import * as coordinator from '../../../../../../packages/ui/src/fixtures/coordinator'
 import * as edge from '../../../../../../packages/ui/src/fixtures/edge'
 import * as home from '../../../../../../packages/ui/src/fixtures/home'
@@ -42,14 +41,13 @@ export function renamed<T>(x: T): T {
 }
 
 export const { CALLS, NEXT, READY_TWO_REPOS, SETTLED } = renamed({ ...board })
-export const { NOTES_KEPT, NOTES_SEEN } = renamed({ ...chrome })
 const planned = renamed({ ...coordinator })
 export const { DRAFT_LINEAR, FROM_231 } = planned
 /** Task 432's team as the site shows it: the lead and its reviewers, without the kit's dry run. */
 export const PLAN_432 = planned.PLAN_432.filter((step) => step.id !== 'dry')
 export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
-export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
+export const { HALYARD, MERIDIAN: TALLY } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
 export const { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } = renamed({ ...models })
 export const { PROJECT } = renamed({ ...review })

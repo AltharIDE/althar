@@ -153,6 +153,32 @@ export const OlderFailed: Story = {
   },
 }
 
+/** No published release makes projects from a window yet: said in place of the update, with Check again. */
+export const OlderNoRelease: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', release: 'unreleased' } },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement)
+    await expect(await page.findByText('No newer release yet')).toBeVisible()
+    await expect(page.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+    await expect(page.queryByRole('button', { name: 'How to update it' })).toBeNull()
+    await fireEvent.click(page.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheckAgain).toHaveBeenCalledOnce()
+  },
+}
+
+/** While the newest release is looked for, before anything is offered. */
+export const OlderChecking: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', release: 'checking' } },
+}
+
+/** A download that failed, said in a line: what failed, where the home's updater says. */
+export const OlderDownloadFailed: Story = {
+  args: {
+    ...OLDER,
+    update: { command: UPDATE, installed: 'known', run: { state: 'failed', problem: 'runner-1’s DNS didn’t answer for api.github.com.' } },
+  },
+}
+
 /** An older home paired over HTTPS: the window can't run it, so Check again once it's updated there, and the command folded away. */
 export const OlderPaired: Story = {
   args: { ...OLDER, update: { command: UPDATE, installed: 'unknown' } },

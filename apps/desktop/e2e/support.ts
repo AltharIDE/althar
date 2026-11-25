@@ -39,6 +39,16 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
  */
 const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
 
+/**
+ * Chromium's switches for the display the run was given (scripts/display.ts): on Linux without Xvfb, its headless
+ * Ozone platform, which draws the windows in memory and shows them on no display, on a screen as big as Xvfb's (it
+ * would be 1 × 1 px otherwise).
+ */
+export const displaySwitches: ReadonlyArray<string> =
+  process.platform === 'linux' && process.env.ALTHAR_E2E_OZONE === 'headless'
+    ? ['--ozone-platform=headless', '--ozone-override-screen-size=1280,1024']
+    : []
+
 /** The commands the app runs as it would on any computer: git, Node and its npm, and Bun. */
 const TOOLS = ['git', 'node', 'npm', 'npx', 'bun', 'bunx'] as const
 
@@ -133,7 +143,7 @@ export const launch = async (
     timeout: budget.medium,
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
     // And Chromium's switches a spec asks for, as for a camera where the machine has none.
-    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), ...switches],
+    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), ...displaySwitches, ...switches],
     ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,

@@ -52,10 +52,14 @@ export interface Found {
 export const USUAL = 'main'
 
 /** The agent didn't sign an account out, so it and its folder stay: the line that signs it out by hand. */
-export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
+export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', {
+  line: Schema.String,
+  /** Only signing out, not removing: the account stays either way, so there is nothing to remove anyway. */
+  staying: Schema.optional(Schema.Boolean),
+}) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
-  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal', 'host']),
+  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal', 'host', 'no_sign_out']),
 }) {}
 
 /**
@@ -128,6 +132,12 @@ export class Accounts extends Context.Service<
       accountId: string,
       options?: { readonly anyway?: boolean },
     ): Effect.Effect<void, AccountRefused | SignOutFailed | NotFound | Failure>
+    /**
+     * Signs an account out with its agent's own tool, in its home, and keeps it, to sign in again, as the same sign-in or
+     * another: the usual folder's account too, which signs the agent's own command out with it, as that is where it reads
+     * its sign-in. Where the agent has no tool that signs out, it is refused; where it didn't sign out, the line that does.
+     */
+    signOut(accountId: string): Effect.Effect<void, AccountRefused | SignOutFailed | NotFound | SqlError.SqlError>
     /** Puts an agent's accounts in the order given; any left out keep theirs, after. */
     order(agentId: string, accountIds: ReadonlyArray<string>): Effect.Effect<void, Failure>
     /** Folders known switchers keep the agent's accounts in that aren't accounts here yet. */
@@ -436,6 +446,22 @@ export class Accounts extends Context.Service<
                   yield* sql`DELETE FROM settings WHERE key = ${hostKey(account.id)}`
                 }),
               )
+            }),
+          ),
+        signOut: (accountId) =>
+          provide(
+            Effect.gen(function* () {
+              const account = yield* get(accountId)
+              const definition = definitionOf(account.agentId)
+              const logout = definition?.native === undefined ? definition?.signIn.logout : undefined
+              if (definition === undefined || logout === undefined) return yield* new AccountRefused({ reason: 'no_sign_out' })
+              const home = env(account)
+              if (yield* signOut(definition, adapterNode(), home)) return
+              const folder = home[definition.home.variable]
+              return yield* new SignOutFailed({
+                line: folder === undefined ? logout.line : `${definition.home.variable}=${quoted(folder)} ${logout.line}`,
+                staying: true,
+              })
             }),
           ),
         order: (agentId, accountIds) =>

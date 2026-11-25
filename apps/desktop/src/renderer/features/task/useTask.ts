@@ -368,6 +368,8 @@ export interface TaskModel {
   readonly stopHolding: (threadId: string, id: string) => Promise<void>
   /** Puts the task, waiting for a free agent, at the front of its project's line. */
   readonly moveToFront: () => Promise<void>
+  /** Starts it now, held back though it is, as the person's own start: it shows as no longer waiting at once. */
+  readonly startAnyway: () => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -1370,6 +1372,12 @@ export const useTask = (threadId: string): TaskModel => {
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
+    startAnyway: () =>
+      onTask(
+        (taskId) => client.startAnyway(taskId),
+        presses.act,
+        (task) => ({ ...task, queued: null }),
+      ),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: async (runnableId = null) => {
       let went = true

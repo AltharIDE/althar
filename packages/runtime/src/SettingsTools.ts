@@ -7,7 +7,6 @@ import {
   AfterMergeRule,
   NewProjectDefaults,
   PlansAndReviews,
-  PROJECT_SETTINGS_SECTIONS,
   ProjectInk,
   ProjectTracker,
   RepositoryFilesSetting,
@@ -15,7 +14,6 @@ import {
   RepositorySetup,
   RuleKind,
   SealStyle,
-  SETTINGS_SECTIONS,
   ShipRoute,
   settingsSectionOf,
   type SettingChangeCard,
@@ -1527,12 +1525,6 @@ export class SettingsTools extends Context.Service<
   )
 }
 
-/** The sections read_settings covers, by their addresses: every one the Settings screens list. */
-export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
-  ...PROJECT_SETTINGS_SECTIONS.map((id) => `project/${id}`),
-  ...SETTINGS_SECTIONS.map((id) => `althar/${id}`),
-]
-
 /**
  * Every change a Settings screen makes, by the API call or the window's preference it makes it with, and how the
  * coordinator or a lead makes it too: a section's setting (`section.key`, through change_settings), another tool
@@ -1584,6 +1576,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   renameAccount: 'person: an agent’s accounts and their sign-ins',
   orderAccounts: 'person: an agent’s accounts and their sign-ins',
   removeAccount: 'person: an agent’s accounts and their sign-ins',
+  signOutAccount: 'person: an agent’s accounts and their sign-ins',
   // althar/skills
   stageSkill: 'person: installing a skill is the person’s',
   approveSkill: 'person: installing a skill is the person’s',
@@ -1593,6 +1586,9 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   disconnect: 'person: connections and their sign-ins',
   // althar/computers
   removeWorker: "person: taking a worker out of the home revokes its certificate, the person's (althar/computers says so)",
+  addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
+  createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
+  setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',

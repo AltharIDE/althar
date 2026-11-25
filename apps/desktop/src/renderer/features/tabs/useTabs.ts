@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
-import { type ProjectTab, Room } from '@althar/ui'
+import type { ProjectTab } from '@althar/ui'
 
 import { useMerging } from '../../data/merges'
 import { reads } from '../../data/reads'

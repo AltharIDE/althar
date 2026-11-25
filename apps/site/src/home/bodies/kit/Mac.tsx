@@ -70,26 +70,6 @@ export function Desktop({
   )
 }
 
-/** A window: rounded, with the system's shadow. Its content draws its own bar. */
-export function MacWindow({
-  children,
-  className,
-  style,
-  front = true,
-}: {
-  children: ReactNode
-  className?: string
-  style?: CSSProperties
-  /** Behind another: its shadow lighter. */
-  front?: boolean
-}) {
-  return (
-    <div className={cx(s.window, !front && s.behind, className)} style={style}>
-      {children}
-    </div>
-  )
-}
-
 /** Another app's window, for behind Althar's: a code editor, its text as bars. */
 export function EditorWindow({ className, style }: { className?: string; style?: CSSProperties }) {
   const lines = [62, 48, 0, 30, 72, 66, 54, 0, 40, 76, 58, 0, 44, 70, 36, 64, 50, 0, 28, 60, 74, 46, 0, 38, 68, 52]

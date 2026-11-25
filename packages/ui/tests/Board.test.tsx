@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Profiler } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { Board, BoardColumn, boardText, NO_FOLDS, RAIL, railsOf } from '../src/board/Board/Board'
+import { Board, BoardColumn, BoardDivider, boardText, NO_FOLDS, RAIL, railsOf } from '../src/board/Board/Board'
 import { BoardLane } from '../src/foundations/vocabulary'
 
 /* Up next 2, Running 3, Needs you 1, Settled 40: an afternoon's board. */
@@ -281,5 +281,22 @@ describe('a lane holding two things', () => {
     expect(screen.getByRole('button', { name: 'Settled 28', pressed: true })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Kept 3', pressed: false }))
     expect(onChange).toHaveBeenCalledWith('kept')
+  })
+})
+
+describe('a divider in a lane', () => {
+  it('keeps its words whole where asked, its end going under them, and cuts them otherwise', () => {
+    render(
+      <>
+        <BoardDivider whole end={<span>1 of 4 at a time</span>}>
+          Held back until memory frees up
+        </BoardDivider>
+        <BoardDivider>Planned</BoardDivider>
+      </>,
+    )
+    const [whole, plain] = screen.getAllByText(/Held back|Planned/).map((label) => label.closest('p'))
+    expect(whole?.className).toMatch(/whole/)
+    expect(plain?.className).not.toMatch(/whole/)
+    expect(screen.getByText('1 of 4 at a time')).toBeTruthy()
   })
 })

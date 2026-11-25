@@ -107,6 +107,24 @@ const cells: ReadonlyArray<readonly [string, Partial<StartedTaskProps>]> = [
 ]
 
 /** Each state the chip is in as the task moves, in the theme the toolbar picks. */
+/** Stopped with a long reason, in a narrow thread: the reason is cut with "…", whole on hover, and the title keeps its share. */
+export const StoppedWithALongReason: Story = {
+  args: {
+    tone: TaskStatus.Stopped,
+    word: 'Stopped',
+    detail: 'The person asked for this work to be done in the pairing task instead, along with the reconnect rewrite',
+  },
+  render: (args) => (
+    <div style={{ width: 400 }}>
+      <StartedTask {...args} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    // Whole on hover, however much of it shows.
+    await expect(within(canvasElement).getByTitle(/^The person asked for this work/)).toBeInTheDocument()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => <States size="thread" cells={cells.map(([state, over]) => ({ state, node: <StartedTask {...args} {...over} /> }))} />,
 }

@@ -335,6 +335,9 @@ export const words = (
       case 'NotFound':
         // A push with nowhere to go: none of its repositories has a remote.
         if (text(error, 'kind') === 'remote') return 'Its repositories have no remote to push to. Add one with git, then push again.'
+        // A model only an account the project keeps out offers.
+        if (text(error, 'kind') === 'offered_model')
+          return 'No account this project uses offers that model. Allow the account that does in the project’s settings, or pick another model.'
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
         return `Althar has no agent called ${text(error, 'agentId')}.`
@@ -503,7 +506,9 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`
+        return fieldOf(error, 'staying') === true
+          ? `Couldn't sign this account out. Try again, or run ${text(error, 'line')} in Terminal.`
+          : `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -838,4 +843,5 @@ const accountRefused = {
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
   host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
+  no_sign_out: 'This agent has no command that signs it out. Sign in again to switch accounts.',
 } as const satisfies Record<AccountRefused['reason'], string>

@@ -1257,6 +1257,23 @@ const playRole = async (
         await told('canvas_publish', { name: 'sign-in-page', title: 'Sign-in page', note: 'Direction A, as a page' })
         return said.join('\n\n')
       }
+      // Asked what is on an app that isn't open, it calls launch wrong first, then opens it by its name and reads it,
+      // saying what each call answered.
+      if (text.includes('[lead:computer-launch]') && available.has('computer')) {
+        const said: Array<string> = []
+        const told = async (args: Record<string, unknown>) => {
+          const answer = await call('computer', args)
+          said.push(answer)
+          return answer
+        }
+        await told({ op: 'request', reason: 'Open Planner and read today’s list.' })
+        await told({ op: 'launch', target: 'Planner' })
+        const opened = await told({ op: 'launch', app: 'Planner' })
+        const window = /"id":"([0-9a-f-]{36})"/.exec(opened)?.[1]
+        if (window !== undefined) await told({ op: 'observe', target: window })
+        await told({ op: 'release' })
+        return said.join('\n\n')
+      }
       // The two native test apps pass a file using their own UI.
       if (text.includes('[lead:computer]') && available.has('computer')) {
         const ask = (args: Record<string, unknown>) => call('computer', args)

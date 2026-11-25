@@ -94,9 +94,16 @@ jobs:
           binary: 'false'
       - run: bun run check
       - run: bun run test --maxWorkers=1
+      # A worker installs from the same release a home does: its native worker goes in it.
+      - name: Build the native worker
+        working-directory: .
+        run: |
+          rustup show
+          cargo build --locked --release -p althar-worker
       - name: Assemble and sign the complete native Linux release
         env:
           ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
+          ALTHAR_WORKER_BINARY: ${{ github.workspace }}/target/release/althar-worker
           RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.check.outputs.tag }}/
           RELEASE_SEQUENCE: ${{ github.run_number }}
         run: |
@@ -129,6 +136,15 @@ jobs:
           pattern: host-release-*
           path: host-release
           merge-multiple: true
+      # A machine without SSH adds itself as a worker with the bootstrap script and a one-time code; the release's
+      # public key, beside it, is the one its later updates must be signed by.
+      - name: Add the worker's bootstrap script and the release's public key
+        env:
+          ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          cp apps/host/bootstrap/ssh.sh host-release/althar-worker.sh
+          printf '%s\n' "$ALTHAR_HOST_RELEASE_SIGNING_KEY" | openssl pkey -pubout -out host-release/althar-host-release.pub
       - name: Create one draft with both architectures
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,7 +152,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(find host-release -type f | wc -l)" -eq 4
+          test "$(find host-release -type f | wc -l)" -eq 6
           gh release create "$RELEASE_TAG" host-release/* --target "$GITHUB_SHA" \
             --draft --latest=false --title "Althar host $RELEASE_VERSION" \
             --notes-file "apps/host/release-notes/$RELEASE_VERSION.md"

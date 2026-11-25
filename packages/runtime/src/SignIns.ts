@@ -36,6 +36,8 @@ interface AgentChecks {
 /** An agent signed in: found so the first time this launch, or an account of its that was signed out signed in. */
 export interface SignedIn {
   readonly agentId: string
+  /** The account found or signed in. */
+  readonly accountId?: string
   readonly how: 'found' | 'signed_in'
 }
 
@@ -127,7 +129,7 @@ export class SignIns extends Context.Service<
           if (checked.status === 'signed_in') {
             const how: SignedIn['how'] | null = before === 'signed_out' ? 'signed_in' : found.has(of.agentId) ? null : 'found'
             found.add(of.agentId)
-            if (how !== null) yield* PubSub.publish(arrived, { agentId: of.agentId, how })
+            if (how !== null) yield* PubSub.publish(arrived, { agentId: of.agentId, accountId: of.id, how })
           }
           return yield* paid(of, checked)
         })

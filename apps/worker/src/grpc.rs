@@ -13,6 +13,9 @@ pub struct WorkerEnrollment<'a> {
     pub home_ca_pem: &'a [u8],
     pub worker_certificate_pem: &'a [u8],
     pub worker_private_key_pem: &'a [u8],
+    /// The name the home's certificate carries, checked whatever address it is reached at: a home that is its own
+    /// authority names itself so. None checks the address's own host name.
+    pub server_name: Option<&'a str>,
 }
 
 pub(crate) fn endpoint(
@@ -30,12 +33,15 @@ pub(crate) fn endpoint(
         )
         .into());
     }
-    let tls = ClientTlsConfig::new()
+    let mut tls = ClientTlsConfig::new()
         .ca_certificate(Certificate::from_pem(enrollment.home_ca_pem))
         .identity(Identity::from_pem(
             enrollment.worker_certificate_pem,
             enrollment.worker_private_key_pem,
         ));
+    if let Some(name) = enrollment.server_name {
+        tls = tls.domain_name(name);
+    }
     Ok(endpoint.tls_config(tls)?)
 }
 

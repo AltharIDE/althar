@@ -34,7 +34,7 @@ import { forgetPages, pages } from '../src/renderer/features/browser/pages'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { clock } from '../src/renderer/shared/time'
 import type { Client } from '../src/renderer/data/client'
-import { keys, reads } from '../src/renderer/data/reads'
+import { reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
 
@@ -1636,7 +1636,7 @@ describe('a task', () => {
     expect(composer.value).toBe('/goal ')
     expect(setThreadGoal).not.toHaveBeenCalled()
     await userEvent.type(composer, 'Verify staging{Enter}')
-    const goal = within(screen.getByRole('region', { name: 'Goal' }))
+    let goal = within(screen.getByRole('region', { name: 'Goal' }))
     expect(goal.getByRole('status').textContent).toBe('Active')
     expect(setThreadGoal).toHaveBeenLastCalledWith({ threadId: 'th1', control: { action: 'set', objective: 'Verify staging' } })
 
@@ -1646,10 +1646,27 @@ describe('a task', () => {
     expect(goal.getByRole('status').textContent).toBe('Active')
     await act(async () => accept())
 
+    // /goal opens into the goal itself on the composer's edge, its own line stepping aside meanwhile; Enter does its first.
     await userEvent.type(composer, '/goal{Enter}')
+    expect(composer.value).toBe('/goal ')
+    expect(screen.queryByRole('region', { name: 'Goal' })).toBeNull()
+    const commands = within(screen.getByRole('listbox', { name: 'Commands' }))
+    expect(commands.getAllByRole('option').map((row) => row.textContent)).toEqual([
+      'pauseStop working toward it for now',
+      'editChange the objective',
+      'clearRemove the goal',
+    ])
+    expect(screen.getByText('Active · 0 of 12 turns')).toBeTruthy()
+    await userEvent.keyboard('{Enter}')
     expect(composer.value).toBe('')
+    expect(setThreadGoal).toHaveBeenLastCalledWith({ threadId: 'th1', control: { action: 'pause' } })
+    goal = within(screen.getByRole('region', { name: 'Goal' }))
+    expect(goal.getByRole('status').textContent).toBe('Paused')
+    await userEvent.click(goal.getByRole('button', { name: 'Resume' }))
+    expect(goal.getByRole('status').textContent).toBe('Active')
     await userEvent.click(goal.getByRole('button', { name: 'Pause' }))
     expect(goal.getByRole('status').textContent).toBe('Paused')
+    await userEvent.click(goal.getByRole('button', { expanded: false }))
     await userEvent.click(goal.getByRole('button', { name: 'Edit' }))
     const objective = goal.getByRole('textbox', { name: 'Objective' })
     await userEvent.clear(objective)
@@ -1838,6 +1855,43 @@ describe('a task', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Over to you'))
     expect(screen.getByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+  })
+
+  it('keeps the agent taking over in the picker while its switch is on its way, moves a pick made then to it, and asks for the switch once', async () => {
+    const base = thread()
+    let landed = false
+    // Once the runtime has the switch, the thread says Codex takes over, as the runtime does the moment the lead going out lets go.
+    const taking = (): ThreadSnapshot => ({
+      ...base,
+      session:
+        base.session === null
+          ? null
+          : { ...base.session, held: false, handover: true, nextLead: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null } },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => (landed ? taking() : base)) })
+    let release: () => void = () => {}
+    vi.mocked(client.switchAgent).mockImplementationOnce(() => new Promise<string>((resolve) => (release = () => resolve('s2'))))
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(box, 'Over to you{Enter}')
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledTimes(1))
+    // The switch is open: the picker is on the agent taking over, not the one going out, and a pick on it is for it.
+    const lead = await screen.findByRole('button', { name: /^Lead: gpt-5\.2-codex/ })
+    await userEvent.click(lead)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Extra high' })).toBeTruthy()
+    // Said again meanwhile, it is not another switch.
+    await userEvent.type(box, 'And this{Enter}')
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
+    expect(client.setEffort).not.toHaveBeenCalled()
+    landed = true
+    release()
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'extra-high' }))
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
   })
 
   it('leaves a queued message in the queue when its images wouldn’t fit beside those waiting', async () => {
