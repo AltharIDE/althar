@@ -1,13 +1,17 @@
 import type { StartupStage } from '../../startup'
 import type { HomesHost } from '../../homes'
+import type { WorkersHost } from '../../workers'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
-import type { WatchEvent } from '@althar/contracts'
+import type { CanvasDownload, CanvasDownloaded, WatchEvent } from '@althar/contracts'
+import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
 import type { PageKey, PageMove, PagePin, PageState, Pointed } from '../../main/browser/page'
+import type { CanvasGroundNews, CanvasPointed } from '../../main/canvases/boards'
+import type { GroundChange, GroundPin } from '../../overlay/ground'
 import type { DesktopChrome } from '../../main/desktop'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
@@ -183,10 +187,26 @@ export interface StorageHost {
   readonly show: (place: StoragePlace) => Promise<void>
 }
 
+/** The welcome's own milestones passed to main. */
+export type WelcomeMilestone =
+  | [action: 'step', step: import('@althar/ui/screens').WelcomeStep]
+  | [action: 'project', source: 'folder' | 'clone' | 'new', outcome: 'created' | 'not_created']
+  | [action: 'completed']
+
 export interface Host {
+  readonly computer?: {
+    readonly states: () => Promise<ReadonlyArray<ComputerState>>
+    readonly allow: (task: string, decision: ComputerDecision) => Promise<boolean>
+    readonly control: (task: string, action: 'pause' | 'resume' | 'stop') => Promise<boolean>
+    readonly subscribe: (listener: (state: ComputerState) => void) => () => void
+  }
   readonly homes?: HomesHost
+  /** Adding workers over SSH, and signing their agents in; none where this build can't, as a browser's can't. */
+  readonly workers?: WorkersHost
+  readonly saveWorkerSnapshot?: (request: { readonly projectId: string; readonly taskId: string }) => Promise<void>
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
+  readonly welcomeUsage?: (...milestone: WelcomeMilestone) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
@@ -253,8 +273,11 @@ export interface Host {
   readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
-  /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
-  readonly onOpen: (listener: (threadId: string) => void) => () => void
+  /**
+   * Calls `listener` with the thread a notification the person clicked is about, until the returned function is called; `asked`
+   * where the thread raised a prompt itself, rather than the person clicking.
+   */
+  readonly onOpen: (listener: (threadId: string, asked: boolean) => void) => () => void
   /**
    * Where Althar shows while the person is in another app (`shared/edge`): the place chosen, whether a screen has a notch to
    * choose the island by, the system, and whether it has a tray to put the mark in; null before the main process knows.
@@ -310,7 +333,14 @@ export interface CanvasesHost {
   /** Lays a version over the window where it keeps its place, in the window's pixels; null takes it off. */
   readonly show: (
     threadId: string,
-    target: { readonly projectId: string; readonly canvasId: string; readonly version: number; readonly manifest: string },
+    target: {
+      readonly projectId: string
+      readonly canvasId: string
+      readonly version: number
+      readonly manifest: string
+      /** A canvas of boards, drawn on Althar's ground. */
+      readonly boards?: boolean
+    },
     panel: { x: number; y: number; width: number; height: number } | null,
   ) => void
   /** Takes the thread's canvas view away. */
@@ -321,6 +351,25 @@ export interface CanvasesHost {
   readonly still: (threadId: string) => Promise<string | null>
   /** Hides the view while something of the window's is over it (ADR-100), and shows it again after. */
   readonly cover: (threadId: string, covered: boolean) => Promise<void>
+  /** A canvas of boards: changes how it shows (its view, page, board, zoom or tool). */
+  readonly ground?: (threadId: string, change: GroundChange) => void
+  /**
+   * Beside a conversation, what a canvas of boards or a page draws in its own view of what it is: its name, and whether it
+   * takes a comment on all of it there (null for none); its Open, close and Comment come back as the ground's keys.
+   */
+  readonly chip?: (threadId: string, chip: { readonly title: string; readonly comment: boolean } | null) => void
+  /** Draws the comments' pins on their parts; the numbers of those found, or null where it isn't shown. */
+  readonly pins?: (threadId: string, pins: ReadonlyArray<GroundPin>) => Promise<ReadonlyArray<number> | null>
+  /** A part found again, outlined, with a picture to write its comment over; null where it isn't there. */
+  readonly find?: (threadId: string, part: { page: string; board: string; selector: string }) => Promise<CanvasPointed | null>
+  /** Takes the outline off a part pointed at. */
+  readonly clear?: (threadId: string) => void
+  /** The picture kept of a version as drawn (a page, or a canvas of boards), by its manifest; null where none was kept. */
+  readonly picture?: (manifest: string) => Promise<string | null>
+  /** Hears what a canvas of boards' ground says, for every thread's; returns how to stop. */
+  readonly onGround?: (listener: (threadId: string, news: CanvasGroundNews) => void) => () => void
+  /** Saves the chosen version in the format the person picked. */
+  readonly download?: (request: CanvasDownload) => Promise<CanvasDownloaded>
 }
 
 /**

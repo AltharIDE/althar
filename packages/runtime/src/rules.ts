@@ -74,7 +74,6 @@ export {
   type Verdict,
   RULES,
   type RuleId,
-  type CommandRule,
   type AllowRule,
   type ProjectRuleSet,
   sayAllowRule,
@@ -83,8 +82,8 @@ export {
   type RuleContext,
 } from './ruleContext'
 export { commandOf, commandIn, essentials, pathsOf } from './rulePaths'
-export { type Parsed, parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
-export { type ReaderVerdict, ALTHAR_TOOL, OFFLINE, type ReaderOptions, decideReader } from './readerRules'
+export { parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
+export { ALTHAR_TOOL, OFFLINE, decideReader } from './readerRules'
 
 /** Visible irreversible code-host actions. Unknown operations run (ADR-097). */
 const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
@@ -281,6 +280,13 @@ const hostRuleOf = (text: string, rules: ProjectRuleSet['commands'], system: Sys
   })
   return met.find((rule) => rule.decision === 'never') ?? met[0]
 }
+
+/**
+ * Whether a never rule kept for this pattern refuses more than its own words: one that reads as a host meets a request
+ * for that host or any host under it, and a command naming them, however it was kept (`hostRuleOf`). An allow rule
+ * meets only its own words.
+ */
+export const refusesHostsUnder = (pattern: string): boolean => hostPatternOf(pattern) !== undefined
 
 // ---- Commands --------------------------------------------------------------
 

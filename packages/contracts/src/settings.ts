@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   'code-hosts',
   'tasks',
   'pull-requests',
+  'computers',
   'this-mac',
   'notifications',
   'appearance',

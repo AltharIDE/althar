@@ -7,7 +7,7 @@ import { thisDevice } from './device'
 import { errandLines } from './Errands'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
-import { PUSHED, git } from './git'
+import { PUSHED, git, looking } from './git'
 import { HANDED_OVER, type Recent, TOOK_OVER, coordinatorRecord, notesSection } from './handover'
 import type { InstanceInfo } from './Instance'
 import { quickIn } from './kinds'
@@ -200,11 +200,11 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const [first] = thread.repositories
       const errands = yield* errandLines(thread.projectId, thread.taskId)
       // A conversation brought in from another tool carries on here: its first session reads it, as a fresh one would.
-      const { brought } = yield* asideState(thread.taskId)
+      const brought = why.kind === 'start' && (yield* asideState(thread.taskId)).brought
       return [
-        why.kind === 'start'
+        why.kind === 'start' || why.kind === 'compaction'
           ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
-          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
+          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' ? (why.lost === true ? 'because the session before was lost' : 'because its folder moved') : 'to carry on the conversation'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
         ...askedFor(thread),
         first === undefined
           ? `Read and search ${thread.cwd} to answer.`
@@ -217,16 +217,56 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         `read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool.${errands.length === 0 ? '' : ` Open errands concerning it:\n${errands.join('\n')}`}`,
         ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
         STANDING_DICTATED,
-        ...(brought && why.kind === 'start'
+        ...(brought
           ? ['This conversation was brought in from another tool, where the person had it: carry it on from where it stands.']
           : []),
-        ...(why.kind === 'start' && !brought ? [] : yield* threadSoFar(thread.threadId)),
+        ...(why.kind === 'compaction' || (why.kind === 'start' && !brought) ? [] : yield* threadSoFar(thread.threadId)),
+      ].join('\n\n')
+    })
+
+  /**
+   * An artifact's own chat's brief (ADR-104, "Talking to an artifact"): the artifact is what the conversation is about, and
+   * changing it is publishing a new version of it. Light, as an aside's is, with the artifact named, or what to draw where it
+   * draws a new one; never a task's, nor anything that waits on the person.
+   */
+  const artifactBrief = (thread: TaskThread, why: Why, canvasId: string | null) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [canvas] =
+        canvasId === null
+          ? []
+          : yield* sql<{ name: string; title: string; kind: string; version: number }>`
+              SELECT c.name, v.title, v.kind, v.number AS version FROM canvases c
+              JOIN canvas_versions v ON v.canvas_id = c.id AND v.number = (SELECT max(number) FROM canvas_versions WHERE canvas_id = c.id)
+              WHERE c.id = ${canvasId}`
+      const [first] = thread.repositories
+      const about =
+        canvas === undefined
+          ? 'The person asked for a new artifact, in the words below: draw it, then publish it with canvas_publish. For design work, lay its designs out as a canvas of boards (canvas.json), as canvas_publish describes; for anything else, the kind that shows it best. Its first version makes it the artifact this conversation is about.'
+          : `The artifact is ${canvas.title} (${canvas.name}, ${canvasId}), a ${canvas.kind === 'boards' ? 'canvas of boards' : canvas.kind} at v${canvas.version}. To change it, get it with canvas_get, which puts its files in .althar/canvases/${canvas.name}/ in your folder, change them there, and publish a new version of the same canvas with canvas_publish, based on the version you got. Read its comments with canvas_read; the person's pointed comments come with their messages, each on a part of a board.`
+      return [
+        why.kind === 'start'
+          ? "You are an artifact's own chat in Althar: the person opened an artifact, a design, a diagram or a page the project's agents drew, and talks to it here, beside it, to ask about it or have it changed. Answer in your reply, briefly. When they ask for a change, make it and publish the artifact again: they see the new version beside the conversation as you publish it. There is no step to finish, no report, no finish_step or evidence to give, and nothing waits on the person: ask in your reply where you must."
+          : `You are carrying on an artifact's own chat in Althar: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer; publishing a new version is how the artifact changes.`,
+        about,
+        ...askedFor(thread),
+        first === undefined
+          ? `Your folder is ${thread.cwd}.`
+          : `Your folder is ${first.worktree}: a copy of ${withRole(first.name, first.role)} at ${first.baseRef}, with no branch and nothing installed, to read the project's own design (its kit, its tokens, its screens) where the artifact draws on it.`,
+        'Change nothing outside .althar/canvases/ in your folder: this conversation makes and changes artifacts, never the project’s code. Where the person wants it built in the product, say in a line that a task builds it, which the coordinator starts.',
+        ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
+        STANDING_DICTATED,
+        ...(why.kind === 'start' ? [] : yield* threadSoFar(thread.threadId)),
       ].join('\n\n')
     })
 
   const taskBrief = (thread: TaskThread, why: Why, replayed = true): Effect.Effect<string, SqlError.SqlError, Store> =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // An artifact's own chat is about its artifact, never a task's work, nor an aside of the coordinator's.
+      const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+        SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${thread.taskId}`
+      if (artifact?.artifactChat === 1) return yield* artifactBrief(thread, why, artifact.artifactCanvasId)
       // An aside the person started, still one, is briefed lightly: a quick word, not a task's work.
       if (replayed && (yield* asideState(thread.taskId)).aside) return yield* asideBrief(thread, why)
       // The project's repositories the task doesn't change, which it may read where the person keeps them.
@@ -254,11 +294,11 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const cap = (text: string) => (text.length > 4_000 ? `${text.slice(0, 4_000)}\n…` : text)
       const several = thread.repositories.length > 1
       // Where each repository stands, by name where there are several.
-      const states = yield* Effect.forEach(thread.repositories, (repository) =>
+      const states = yield* Effect.forEach(why.kind === 'compaction' ? [] : thread.repositories, (repository) =>
         Effect.gen(function* () {
           const changed =
             repository.baseCommit === null ? '' : yield* quiet(git(repository.worktree, 'diff', '--stat', repository.baseCommit))
-          const status = yield* quiet(git(repository.worktree, 'status', '--short'))
+          const status = yield* quiet(looking(git(repository.worktree, 'status', '--short')))
           const named = (text: string) => (several && text !== '' ? `${repository.name}:\n${text}` : text)
           const commits =
             why.kind === 'start' || repository.baseCommit === null
@@ -337,12 +377,12 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       const changes = thread.repositories.some((repository) => repository.change != null)
       const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
       return [
-        why.kind === 'start'
+        why.kind === 'start' || why.kind === 'compaction'
           ? several
             ? `You are working on a task across several repositories, each ${local ? "in the person's own checkout of it" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
             : `You are working on a task ${local ? "in the person's own checkout of its repository" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
           : why.kind === 'handover'
-            ? `You are carrying on a task an earlier session of yours worked on, in the same ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
+            ? `You are carrying on a task an earlier session of yours worked on, in the ${why.lost === true ? 'same' : 'new'} ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'because its folder moved'}. Its record so far is below.`
             : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${folders}. Its record so far is below.`,
         `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
         ...(why.kind === 'start' && standing?.state === 'done'
@@ -465,7 +505,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         ...(commits === '' ? [] : [`Commits so far:\n${cap(commits)}`]),
         ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
         ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
-        ...(replayed ? yield* threadSoFar(thread.threadId) : []),
+        ...(replayed && why.kind !== 'compaction' ? yield* threadSoFar(thread.threadId) : []),
       ].join('\n\n')
     })
 
@@ -508,6 +548,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         "- page_snapshot, page_screenshot and page_logs, to read the page beside your conversation with the person, and page_open, page_click, page_type and the other page_ tools to drive it: it is the project's own page, in a session of its own, and the person sees you at work in it; you need not ask.",
         "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
         "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
+        "- start_artifact, when what the person wants is a thing to look at rather than work in the repository: a mockup, design directions, a mood board, a diagram, a page. It is an artifact with its own chat, which draws it (a Claude model for design), never a task on the board nor an aside; it shows in the project's Artifacts at once, where they open it and talk to it to change it. Don't draw it yourself.",
         "- rename_task, whenever a task's scope or shape changes and its title no longer says what it does, including a prototype becoming a change: give it one that does, in a few words. An open pull request Althar opened follows the new title too. What the person asked stays in its thread.",
         '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
         "- find_tasks, when the person asks about a task by what it did rather than its name (the retry fix, PR 143, the task that changed the login page): it finds the project's tasks by words from their titles, what was asked, what their leads reported and built, pull request numbers, branches and files.",
@@ -526,7 +567,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         "- attach_pull_request, when a task should follow an open pull request it didn't open: one opened by hand, or upstream after the task's own went to the fork. The task then hears its reviews, comments, checks and conflicts, its lead's pull request tools act on it, and its work goes to that pull request's branch, never a new one. Where its branch isn't based on that pull request's head, it starts from the head at once in a turn the person's message started, keeping the task's commits on top; otherwise ask them before you call it again with start_from_head. A task drafted to work on an open pull request, such as to answer its review, takes it as draft_task's pull_request, and starts on its head.",
         "- message_lead, to pass something to a task's lead. Leads have your tools too (ADR-097): a lead may draft, plan and start tasks from its own, which its card says it was started by, and move other tasks; read_task_diff shows any task's change as it stands, and show_pictures shows the person pictures from your copies.",
         `- change_part and change_lead, for a task's parts: ${PARTS_CHANGE}`,
-        "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, stop_following, change_lead (another model, effort or agent on its lead from its next turn, or its reviewer; or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, add_issue, mark_ready and rename_task.",
+        "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, start_anyway (a task held back while this computer lets fewer agents work than the number), stop_following, change_lead (another model, effort or agent on its lead from its next turn, or its reviewer; or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, add_issue, mark_ready and rename_task.",
         "- read_settings and change_settings, for the project's settings and Althar's, everything the Settings screens show. A change that tightens, or changes nothing about what asks, goes at once with a line and Undo; one that loosens what asks goes only on the person's own message in this turn, and is a card for them otherwise.",
         // Release branches (ADR-093): made, and brought back, on the person's word, as a merge is.
         "- create_branch and open_pull_request, for release branches, only when the person asks, never on your own initiative, as for merging: create_branch makes a branch on the code host from a branch, a tag or a commit (release/0.8.0 from main, or from v0.7.0); open_pull_request opens a pull request from one branch into another, such as a release branch back into the default branch. To put a merged fix on another branch too, when they ask, draft a task toward that branch (toward) whose description names the fix's pull request and its merge commit, for its lead to cherry-pick with `git cherry-pick -x`: it has a pull request of its own, into that branch.",
@@ -583,53 +624,44 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
   /** Names models by what each agent says of them, or by their ids where that can't be read. */
   const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
 
-  /**
-   * A coordinator session's brief (ADR-031): its role, then the record
-   * of the project and the conversation, the same for every session it
-   * starts, on opening the project or taking over from another agent or a
-   * full context. Only how much of the conversation it carries word for
-   * word differs: a session handed a full context over carries its last
-   * few messages, any other as much of the thread as a brief holds. And
-   * how many tasks are open.
-   */
-  const coordinatorRecordOf = (thread: CoordinatorThread, recent: Recent) =>
+  /** A coordinator's project records, with conversation history when opening a fresh session. */
+  const coordinatorRecordOf = (thread: CoordinatorThread, recent?: Recent) =>
     Effect.gen(function* () {
       const modelOf = yield* modelNamer.pipe(
         Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId)),
       )
-      const [role, record] = yield* Effect.all(
-        [
-          Effect.map(Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId)]), ([worksIn, towards]) =>
-            coordinatorRole(thread, worksIn, towards),
-          ),
-          coordinatorRecord({
-            projectId: thread.projectId,
-            threadId: thread.threadId,
-            modelOf,
-            working: (threadId) => threads.get(threadId)?.turnRunning === true,
-            copies: thread.folder.repositories,
-            recent,
-          }),
-        ],
-        { concurrency: 'unbounded' },
-      )
-      return { role, record }
+      return yield* coordinatorRecord({
+        projectId: thread.projectId,
+        threadId: thread.threadId,
+        modelOf,
+        working: (threadId) => threads.get(threadId)?.turnRunning === true,
+        copies: thread.folder.repositories,
+        ...(recent === undefined ? {} : { recent }),
+      })
     })
 
+  const coordinatorBriefOf = (thread: CoordinatorThread, recent?: Recent, recovery?: string) =>
+    Effect.map(
+      Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId), coordinatorRecordOf(thread, recent)], {
+        concurrency: 'unbounded',
+      }),
+      ([worksIn, towards, record]) =>
+        [...coordinatorRole(thread, worksIn, towards), ...(recovery === undefined ? [] : [recovery]), ...record.sections].join('\n\n'),
+    )
+
   /** The coordinator's brief as a session starts: its role, the record, and as much of the thread as a brief holds. */
-  const coordinatorBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, { budget: PROMPT_BUDGET }), ({ role, record }) => [...role, ...record.sections].join('\n\n'))
+  const coordinatorBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, { budget: PROMPT_BUDGET })
 
-  /**
-   * A fresh coordinator session's brief, when Althar hands the
-   * conversation over (ADR-031): its role, that it took over, then the
-   * record with the last few messages. And how many tasks are open.
-   */
-  const handoverBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, HANDED_OVER), ({ role, record }) => ({
-      text: [...role, TOOK_OVER, ...record.sections].join('\n\n'),
-      open: record.open,
-    }))
+  /** A fresh coordinator's brief after its agent lost the earlier session. */
+  const handoverBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, HANDED_OVER, TOOK_OVER)
 
-  return { asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
+  /** Standing instructions and current records go alongside the agent's own summary on its next ordinary turn. */
+  const afterCompaction = (thread: ThreadContext) =>
+    Effect.gen(function* () {
+      if (thread.role === 'reviewer' || (thread.role === 'task' && (thread.review !== null || thread.helper !== undefined))) return null
+      const brief = thread.role === 'coordinator' ? yield* coordinatorBriefOf(thread) : yield* taskBrief(thread, { kind: 'compaction' })
+      return `Current Althar records after compaction. Earlier conversation is available through read_thread.\n\n${brief}`
+    })
+
+  return { afterCompaction, asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
 }

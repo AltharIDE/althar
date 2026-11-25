@@ -109,7 +109,65 @@ export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   )
 }
 
+/**
+ * What updating the window's home to the newest release changes, by what the home says it runs (its `release-info`) and
+ * what the newest release's signed manifest says: `none`, the same API and data; `data`, the same API as this app but
+ * its data moves to a new format, which the home can't come back from to its old release; `api`, an API this app
+ * doesn't speak, so the window doesn't update it.
+ */
+export interface HomeUpdateCheck {
+  /** The release the home runs, and the newest published. */
+  readonly from: string
+  readonly to: string
+  readonly change: 'none' | 'data' | 'api'
+}
+
+/**
+ * A home updated from its window: the release it runs now, where it said; or, where the newest moves its data to a
+ * new format and that wasn't accepted yet, nothing done, with what it changes, to ask first.
+ */
+export type HomeUpdated =
+  | { readonly state: 'applied'; readonly version?: string }
+  | { readonly state: 'confirm'; readonly check: HomeUpdateCheck }
+
+/**
+ * The newest host release published, by its version: null where none is. The window offers a home's update by it,
+ * and the home's own updater still authenticates whatever it takes.
+ */
+export interface HostReleaseNews {
+  readonly newest: string | null
+}
+
+/**
+ * The newest host release that can't make projects from a window: #1150 brought that after it. An older home's update
+ * helps only once a release past it is out.
+ */
+export const LAST_WITHOUT_MAKING_PROJECTS = '0.1.0'
+
+const newer = (left: string, right: string) => {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0)
+  return false
+}
+/** Whether a published release brings making projects from a window: one past the last without it. */
+export const releaseMakesProjects = (news: HostReleaseNews) => news.newest !== null && newer(news.newest, LAST_WITHOUT_MAKING_PROJECTS)
+
 export interface HomesHost {
+  /**
+   * The newest host release published, as main last found it (a few minutes ago at most), or found afresh where
+   * `fresh`; fails where it couldn't be found out.
+   */
+  readonly release?: (fresh?: boolean) => Promise<HostReleaseNews>
+  /**
+   * The window's home, reached over SSH, updated by its own managed updater: answers once the new release runs, or
+   * fails with a line saying why. The window's connection drops while the home restarts. Where the newest release
+   * moves the home's data to a new format, it goes only once `accept` names that release's version; otherwise it
+   * answers `confirm`, having done nothing.
+   */
+  readonly update?: (accept?: string) => Promise<HomeUpdated>
+  /** What updating the window's home, over SSH, would change: asked before it's offered, so a data change is asked about at once. */
+  readonly updateCheck?: () => Promise<HomeUpdateCheck>
   /** A home being set up over SSH, or none; with the calls that start and steer it. */
   readonly setup?: () => Promise<HomeSetup | null>
   readonly setUp?: (target: SshHomeTarget) => Promise<void>
@@ -128,6 +186,8 @@ export interface HomesHost {
   readonly save: (checkId: string, name: string) => Promise<void>
   /** Its window, opened or brought forward; on one of its projects, where one is given. */
   readonly open: (id: string, projectId?: string) => Promise<void>
+  /** Its window, opened or brought forward, on New project. */
+  readonly openNew: (id: string) => Promise<void>
   readonly rename: (id: string, name: string) => Promise<void>
   /** A saved home's connection, from a check that found the same home there. */
   readonly change: (id: string, checkId: string) => Promise<void>
@@ -143,6 +203,8 @@ export interface HomesHost {
   readonly onOpen: (listener: () => void) => () => void
   /** A project to show, asked from another window's Manage homes: held until the window listens. */
   readonly onProject: (listener: (projectId: string) => void) => () => void
+  /** New project, asked from another window's Manage homes: held until the window listens. */
+  readonly onNewProject: (listener: () => void) => () => void
 }
 
 export const isHomeState = (value: unknown): value is HomeState => {

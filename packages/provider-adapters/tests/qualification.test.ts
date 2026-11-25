@@ -37,6 +37,9 @@ describe('external agent compatibility', () => {
     ['reader-shell', 'reading mode allowed a shell'],
     ['no-request', 'did not ask'],
     ['no-mcp', 'did not call the MCP'],
+    ['no-reader-mcp', 'did not retain Althar’s MCP tools'],
+    ['no-read', 'did not read the test file'],
+    ['no-http', 'does not accept Althar’s tools over HTTP'],
     ['no-cancel', 'did not confirm cancellation'],
     ['no-version', 'did not report a version'],
   ] as const)

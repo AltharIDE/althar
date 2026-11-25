@@ -1,8 +1,10 @@
 import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
+import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { taskWorker } from './workerExecution'
 import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
@@ -73,7 +75,8 @@ import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schem
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Database, Ledger } from '@althar/persistence-sqlite'
-import { type BoardRow, boardProjections, boardRows, committedAt, homeRows, putProjection } from './boardProjections'
+import { type BoardRow, boardProjections, boardRows, committedAt, putProjection } from './boardProjections'
+import { homeRows, readHomeCards } from './readHomeCards'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
@@ -125,6 +128,7 @@ import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
 import { toolCallMoves } from './toolMoves'
+import { stopSaid, suspendedOf } from './stopSaid'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
@@ -138,6 +142,10 @@ import { toolCallMoves } from './toolMoves'
 
 /** A card's offer of a preset, as its content takes it: none where there is none. */
 const offering = <A>(presetOffer: A | undefined) => (presetOffer === undefined ? {} : { presetOffer })
+
+/** Who a thread leads as from its next turn, as its summary says it: null where nothing waits. */
+const nextLeadOf = (lead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined) =>
+  lead === undefined ? null : { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null }
 
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
@@ -866,7 +874,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           name: text(content, 'name'),
           title: text(content, 'title'),
           canvasKind:
-            canvasKind === 'markdown' || canvasKind === 'mermaid' || canvasKind === 'svg' || canvasKind === 'picture' ? canvasKind : 'html',
+            canvasKind === 'markdown' ||
+            canvasKind === 'mermaid' ||
+            canvasKind === 'svg' ||
+            canvasKind === 'picture' ||
+            canvasKind === 'boards'
+              ? canvasKind
+              : 'html',
           version: typeof version === 'number' ? version : 1,
           note: note === '' ? null : note,
           action: text(content, 'action') === 'opened' ? 'opened' : 'published',
@@ -1061,6 +1075,7 @@ type Store =
   | Instance
   | Agents
   | ModelFacts
+  | Limits
   | PlanUsage
   | Sessions
   | Coordinator
@@ -1422,6 +1437,7 @@ export class Queries extends Context.Service<
             LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC`
           const running = yield* sessions.running(threadId)
+          const handing = Option.getOrUndefined(yield* sessions.handingOver(threadId))
           // The runtime's own session when it holds one, which a switch's newer, still-starting row is not; else the newest recorded one.
           const session = Option.isSome(running) ? (rows.find((row) => row.id === running.value.sessionId) ?? rows[0]) : rows[0]
           if (session === undefined) return null
@@ -1432,7 +1448,7 @@ export class Queries extends Context.Service<
             : undefined
           const values = field(modelOption, 'values')
           // Handed the thread by a usage limit, it stands in for the lead the task was given, which takes over again at its reset.
-          const standsIn = Option.getOrUndefined(yield* standInOf(session.id))
+          const standsIn = Option.getOrUndefined(yield* standInOf(session.id, (yield* Limits).sameModel))
           return {
             id: session.id,
             agentId: session.agentId,
@@ -1454,14 +1470,9 @@ export class Queries extends Context.Service<
             // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),
-            nextLead:
-              Option.isSome(running) && running.value.nextLead !== undefined
-                ? {
-                    agentId: running.value.nextLead.agentId,
-                    model: running.value.nextLead.model ?? null,
-                    effort: running.value.nextLead.effort ?? null,
-                  }
-                : null,
+            ...(handing === undefined ? {} : { handover: true }),
+            // Let go by the one going out, the thread leads as the session taking it over will.
+            nextLead: nextLeadOf(Option.isSome(running) ? running.value.nextLead : handing),
             standsIn:
               standsIn === undefined
                 ? null
@@ -2343,11 +2354,12 @@ export class Queries extends Context.Service<
         return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
       })
 
-      /** A task never waits behind itself. Its own places are shown in the board's machine-wide total. */
+      /** A task never waits behind itself: its own places aren't among those it waits for. Held back for now, it says why. */
       const queuedNow = (taskId: string) =>
-        Effect.map(workPlaces, (now) => {
+        Effect.gen(function* () {
+          const [now, held] = [yield* workPlaces, (yield* (yield* Busy).held).get(taskId)]
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          return { ...now, busy: holders.length, holders }
+          return { ...now, busy: holders.length, holders, ...(held === undefined ? {} : { held }) }
         })
 
       /** A project's line, read once in a read: the cards that read it at once share it. */
@@ -2914,18 +2926,12 @@ export class Queries extends Context.Service<
                   // Suspended, its run stopped when its latest attempt ended: what stopped it is the turn that attempt ended in, not
                   // one its lead was sent after without the run carried on, so a later turn doesn't make it stopped "just now".
                   // Who suspended it is on record: Althar, as an automation's run out of time, or the coordinator, is no one's call.
-                  const [suspended] =
-                    task.runState === 'suspended'
-                      ? yield* sql<{ endedAt: string | null; actorId: string | null }>`
-                          SELECT
-                            (SELECT a.ended_at FROM run_attempts a WHERE a.run_id = r.id ORDER BY a.attempt_number DESC LIMIT 1) AS ended_at,
-                            (SELECT e.actor_id FROM record_events e WHERE e.aggregate_type = 'run' AND e.aggregate_id = r.id AND e.type = 'run.suspended'
-                              ORDER BY e.sequence DESC LIMIT 1) AS actor_id
-                          FROM runs r WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-                      : []
+                  const suspended = task.runState === 'suspended' ? yield* suspendedOf(taskId) : undefined
                   const until = suspended?.endedAt ?? null
+                  // Who stopped it, as stop_task recorded it: the coordinator or a lead, with why and where its work went on.
+                  const said = yield* stopSaid(taskId, suspended?.sequence ?? null, task.parentId)
                   if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
-                    return { by: 'althar' as const, at: until ?? task.runAt }
+                    return { by: 'althar' as const, at: until ?? task.runAt, ...said }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
                     WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
@@ -2934,8 +2940,10 @@ export class Queries extends Context.Service<
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
                   // Null where nothing says when: the card then shows no time.
                   const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? task.createdAt
+                  // The person's own Stop, on its card or in its menu; a reason or a fold said after it, by whoever said it.
+                  const theirs = { ...(suspended?.kind === 'person' ? { who: 'person' as const } : {}), ...said }
                   if (turn === undefined || turn.state !== 'interrupted')
-                    return { by: run?.endedAt == null ? null : ('althar' as const), at }
+                    return { by: run?.endedAt == null ? null : ('althar' as const), at, ...theirs }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
                   const [refused] = yield* sql<{ id: string }>`
                     SELECT d.id FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
@@ -2944,7 +2952,7 @@ export class Queries extends Context.Service<
                       AND d.decided_by_actor_id NOT IN (${instance.systemId}, ${instance.coordinatorId})
                       AND d.decided_at >= ${turn.startedAt} AND d.decided_at <= ${turn.endedAt ?? at}
                     LIMIT 1`
-                  return { by: refused === undefined ? ('interrupted' as const) : ('declined' as const), at }
+                  return { by: refused === undefined ? ('interrupted' as const) : ('declined' as const), at, ...theirs }
                 })
           const parameters = parse(task.parameters)
           const steps = field(parameters, 'steps')
@@ -3641,7 +3649,6 @@ export class Queries extends Context.Service<
           return {
             cursor: at,
             tasks: cards,
-            ...(cards.some((task) => task.queued !== null) ? { workPlaces: yield* workPlaces } : {}),
             calls: calls.map((one) => one.call),
             settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot
@@ -3680,17 +3687,17 @@ export class Queries extends Context.Service<
        */
       const homeTasks = (cached = false) =>
         Effect.gen(function* () {
-          const rows = yield* homeRows(SETTLED_SHOWN, cached)
-          const tasks = yield* Effect.forEach(
-            rows,
-            (row) =>
-              Effect.map(cached ? getProjected(row) : onBoard(row), (read) =>
-                read.flatMap((task) =>
-                  // A task kept for later waits on its board, not here.
-                  onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
-                ),
-              ),
-            { concurrency: AT_ONCE },
+          const sessions = yield* Sessions
+          const changes = yield* Changes
+          const rows = yield* homeRows(instance.deviceId, SETTLED_SHOWN, cached, AT_ONCE)
+          const active = new Set((yield* sessions.onTasks).map((one) => one.taskId))
+          // Give other calls a turn between cards. Keep the original history window for pruning worktree facts.
+          const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
+            Effect.gen(function* () {
+              if (!row.candidate && !active.has(row.id) && !(yield* changes.openingNext(row.id))) return []
+              const read = yield* cached ? getProjected(row) : onBoard(row)
+              return read.flatMap((task) => (onHome(task) ? [{ ...task, projectId: row.projectId }] : []))
+            }),
           )
           return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
         })
@@ -4439,6 +4446,9 @@ export class Queries extends Context.Service<
               SELECT max(x.rowid) FROM record_events x
               WHERE x.aggregate_type = 'workspace' AND x.aggregate_id = w.id AND x.type = 'workspace.move_waits')
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
+          // An artifact's own chat opens as the artifact (ADR-104, "Talking to an artifact"): the canvas it is about.
+          const [artifact] = yield* sql<{ artifactChat: number; artifactCanvasId: string | null }>`
+            SELECT artifact_chat, artifact_canvas_id FROM tasks WHERE id = ${head.taskId}`
           return {
             threadId,
             accepting,
@@ -4460,6 +4470,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(artifact?.artifactChat === 1 ? { artifact: { canvasId: artifact.artifactCanvasId } } : {}),
               ...(!severalChanges
                 ? {}
                 : {
@@ -4586,6 +4597,7 @@ export class Queries extends Context.Service<
                 }),
               ],
               planId: standing.planId,
+              workerId: yield* taskWorker(head.taskId),
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {

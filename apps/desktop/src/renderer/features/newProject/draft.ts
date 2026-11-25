@@ -4,7 +4,6 @@ import {
   ApiError,
   inkFor,
   type FolderReading,
-  type Product,
   type ProjectInk,
   type ProjectSummary,
   type ProjectTracker,
@@ -419,10 +418,11 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
       const name = at?.name.trim() ?? ''
       if (at === null || name === '' || at.fresh !== null) return
       const key = begin(at.id, {})
-      const grant = await host.pickPlace(name)
-      // Cancelled: nothing to say.
-      if (grant === null) return finish(at.id, key)
+      // Asking where it goes can fail too, on another computer's home: it's said, and Create isn't held by it.
       try {
+        const grant = await host.pickPlace(name)
+        // Cancelled: nothing to say.
+        if (grant === null) return finish(at.id, key)
         const placed = await client.placeRepository(grant, name)
         finish(at.id, key, (now) => ({
           ...now,

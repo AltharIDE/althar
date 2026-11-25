@@ -126,7 +126,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     // The check's lead works until it is stopped; meanwhile it commits the update, which reaches GitHub, then brings main in after.
     await startTask(page, 'Nightly dependency check, 27 Oct', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await expect(shown(page, 'Implementing', { exact: true }).first()).toBeVisible()
     const nightly = worktreeOf(repo, /branch refs\/heads\/althar\/nightly/)
     for (const [n, path] of MANIFESTS.entries())
       write(

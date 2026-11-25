@@ -46,7 +46,7 @@ person can change a task's team at any time.
 
 ## Goals
 
-A lead’s conversation can keep one goal. The person sets it with `/goal <objective>` and can view, edit, pause, resume or clear it above the composer. Althar keeps the objective, the lead’s latest progress report and the outcome with the thread, so a different lead or a restarted runtime can carry on from the current work.
+A lead’s conversation can keep one goal. The person sets it with `/goal <objective>`, and views, edits, pauses, resumes or clears it from `/goal` in the composer ([Commands in the composer](desktop-app.md#commands-in-the-composer)) or from its line above the composer. Each change the person makes is said in the thread as Althar’s line (“You set a goal: …”, “You paused the goal.”): a goal is the thread’s, not said to the lead. A goal given to the coordinator becomes a task’s: it drafts a task, sets the goal on it with `set_goal` and plans it, and the goal waits for the plan to start, so its countdown and Hold still stand ([A goal is a task's](coordinator.md#a-goal-is-a-tasks)). Althar keeps the objective, the lead’s latest progress report and the outcome with the thread, so a different lead or a restarted runtime can carry on from the current work.
 
 A goal’s automatic turns use the usual queue, agent places and permissions. Messages already waiting go first. A goal can yield to the task’s existing waits, including waiting for a person or an external change while a step is open. Goals get twelve automatic turns at a time. Resume grants a fresh allowance when they reach the limit.
 
@@ -598,7 +598,9 @@ stored, so it cannot go stale.
 
 
 **Auto moves a lead's next step to a lighter model of the same agent** when
-the plan's tightest window is 90% used or more. A line in the thread says
+the plan's tightest window is 90% used or more, unless another agent has room on
+the same model: then it stays on its model, and goes to that agent once the plan
+is nearly out. A line in the thread says
 from which model to which, the share used, the window and when it resets.
 Keep turns it back, for the whole task; Undo puts the move back. How models
 are picked is in [agents.md](agents.md).
@@ -761,3 +763,5 @@ optionally a model, an agent, an effort and the change.
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
 - 12 Nov 2026: every part changes either way on the person's word to the lead or the coordinator, the lead's own task included: `change_part` sets Checked by, the ending and another preset's parts at once, `change_lead` acts on a lead's own task, Ship honours an ending of its branch alone, and the task menu has Make it a change; a prototype becomes a change in one move, and a change goes back.
 - 17 Nov 2026: a conversation brought in from another tool is an aside, its first brief the conversation so far.
+- 23 Nov 2026: `/goal` opens into the goal in the composer's commands, and each change the person makes to a goal is said in the thread as Althar's line ([Goals](#goals)).
+- 24 Nov 2026: a goal given to the coordinator is set on a task it plans, and a goal on a task whose plan hasn't started waits for it ([Goals](#goals)).

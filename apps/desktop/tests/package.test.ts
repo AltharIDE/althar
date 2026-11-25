@@ -75,22 +75,33 @@ describe('the packaged app', () => {
     expect(nodeProgram('win32')).toBe('node.exe')
   })
 
-  it('looks for Codex, Claude Code and the speech engine where the runtime finds them, as .exe on Windows', () => {
+  it('checks the agents, speech engine and computer-use driver at their platform paths', () => {
     expect(binariesFor('win32', 'x64')).toEqual([
       { parent: '@openai/codex', name: '@openai/codex-win32-x64', file: 'vendor/x86_64-pc-windows-msvc/bin/codex.exe' },
       { parent: '@anthropic-ai/claude-agent-sdk', name: '@anthropic-ai/claude-agent-sdk-win32-x64', file: 'claude.exe' },
       { parent: 'sherpa-onnx-node', name: 'sherpa-onnx-win-x64', file: 'sherpa-onnx.node' },
+      { parent: '@trycua/cua-driver', name: '@trycua/cua-driver-win32-x64-msvc', file: 'cua_driver_node_runtime.node' },
+      { parent: '@trycua/cua-driver', name: '@trycua/cua-driver-win32-x64-msvc', file: 'cua_driver_sdk.dll' },
     ])
     expect(binariesFor('darwin', 'arm64').map(({ name, file }) => `${name}/${file}`)).toEqual([
       '@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
       '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
       'sherpa-onnx-darwin-arm64/sherpa-onnx.node',
+      '@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node',
+      '@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib',
     ])
     expect(binariesFor('darwin', 'x64').map(({ name, file }) => `${name}/${file}`)).toEqual([
       '@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex',
       '@anthropic-ai/claude-agent-sdk-darwin-x64/claude',
       'sherpa-onnx-darwin-x64/sherpa-onnx.node',
+      '@trycua/cua-driver-darwin-x64/cua_driver_node_runtime.node',
+      '@trycua/cua-driver-darwin-x64/libcua_driver_sdk.dylib',
     ])
+    expect(binariesFor('linux', 'x64')).toContainEqual({
+      parent: '@trycua/cua-driver',
+      name: '@trycua/cua-driver-linux-x64-gnu',
+      file: 'libcua_driver_sdk.so',
+    })
     expect(speechPackage('linux', 'x64')).toBe('sherpa-onnx-linux-x64')
     expect(() => binariesFor('win32', 'ia32')).toThrow(/no build for win32-ia32/)
   })

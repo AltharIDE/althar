@@ -78,7 +78,8 @@ test('draws About Althar, and Free up space lands on the task folders, lit and f
       await page.emulateMedia({ colorScheme: scheme })
       await section(/^About Althar/)
       await expect(main.getByText('Early access')).toBeVisible()
-      await expect(main.getByRole('link', { name: /What’s new/ })).toHaveAttribute('href', 'https://althar.ai/changelog')
+      // What's new is Althar's own page, in the window: a press, not a link out.
+      await expect(main.getByRole('button', { name: 'What’s new' })).toBeVisible()
       await expect(main.getByRole('switch', { name: 'Usage data' })).toBeVisible()
       await expect(tasksTile).toContainText(/4\d MB/)
       await expect(tasksTile.getByText(/^\d+%$/)).toBeVisible()

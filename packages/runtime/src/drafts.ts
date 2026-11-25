@@ -71,9 +71,6 @@ export interface Drafts {
 
 export const noDrafts: Drafts = { drafts: [], calls: new Map() }
 
-/** The tools followed. */
-export const FOLLOWED = new Set(['draft_task', 'propose_plan'])
-
 const blank = (key: string): Draft => ({
   key,
   title: null,

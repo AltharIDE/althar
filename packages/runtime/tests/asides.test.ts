@@ -330,7 +330,7 @@ describe('an aside opened with +', () => {
   )
 
   it.live(
-    'carries on lightly in a fresh session, lost or full, and made a task, its lead is told a lead’s whole brief once, with its sandbox',
+    'carries on lightly after a lost session or in-place compaction, then reads the full lead brief and sandbox once it becomes a task',
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -392,12 +392,16 @@ describe('an aside opened with +', () => {
           assert.notInclude(lost, 'gather evidence')
           assert.isTrue(lost.endsWith('And the backoff? [lead:lost-once]'))
 
-          // Words to it while it is an aside still are only the words; its context full, the next goes to a fresh session.
+          // A manual compaction refreshes the aside's brief and current project records.
           const again = yield* said('Look again. [context:25/1000000]')
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
-          const fresh = yield* said('And now? [context:1/1000000]')
-          assert.match(fresh, /^You are carrying on an aside of this project's coordinator.+to keep your context small\./)
-          assert.notInclude(fresh, WORK)
+          yield* client.CompactContext({ commandId: commandId(), threadId: aside.threadId })
+          const afterCompact = yield* said('And now? [context:1/1000000]')
+          assert.include(afterCompact, 'Current Althar records after compaction.')
+          assert.include(afterCompact, "You are an aside of this project's coordinator")
+          assert.notInclude(afterCompact, "When you have done the task, call Althar's finish_step tool")
+          assert.notInclude(afterCompact, 'The thread so far')
+          assert.notInclude(afterCompact, WORK)
 
           // Made a task, its next turn is told a lead's whole brief and its sandbox, but not the thread, which it has; once.
           yield* client.ShelveTask({ commandId: commandId(), taskId, shelf: null })
@@ -431,7 +435,7 @@ describe('an aside opened with +', () => {
             next.endsWith('And the tests?'),
             `The delivered prompt began:\n${next.slice(0, 160)}\nand ended:\n${next.slice(-800)}`,
           )
-          assert.notInclude(next, WORK)
+          assert.notInclude(afterCompact, WORK)
           assert.notInclude(next, SANDBOX)
           assert.notInclude(next, 'gather evidence')
           assert.notInclude(next, 'You are taking over a task')

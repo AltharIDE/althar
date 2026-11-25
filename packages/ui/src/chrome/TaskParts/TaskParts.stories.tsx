@@ -156,6 +156,35 @@ export const AWorktree: Story = {
   },
 }
 
+const workerCopies = (pending: boolean): ReadonlyArray<TaskPartModel> => {
+  const worktree = PARTS[0]
+  if (worktree === undefined) return []
+  // On a worker: where it works is the worker, and its files come to this computer as a copy.
+  return [
+    {
+      ...worktree,
+      facts: [...(worktree.facts ?? []).filter(([key]) => key !== 'Where'), ['Where', 'Linux worker 3f9a2c']],
+      actions: [
+        { label: 'See the changes', onClick: fn() },
+        { label: pending ? 'Copying…' : 'Copy to this Mac…', onClick: fn(), disabled: pending, variant: 'quiet', icon: 'download' },
+      ],
+    },
+  ]
+}
+
+export const WorkerCopy: Story = {
+  args: { parts: workerCopies(false) },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Parts, 1/ }))
+    await userEvent.click(within(document.body).getByRole('button', { name: 'Worktree' }))
+  },
+}
+
+export const SavingWorkerCopy: Story = {
+  ...WorkerCopy,
+  args: { parts: workerCopies(true) },
+}
+
 /** A failing check, open: its last lines and Ask the lead to fix it. */
 export const AFailingCheck: Story = {
   play: async ({ canvasElement }) => {

@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { AgentRunOutcome, type AgentManagedExit, type AgentRunExit } from '@althar/worker-protocol'
 import type { AgentWorkerPool, WorkerAgentProcess } from '@althar/worker-protocol/agent-runs'
 import { assert, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber } from 'effect'
 
 import { workerExecution } from '../src/workerHome/execution'
 import { workerTestDirectory as temporary } from './workerTestFiles'
@@ -52,12 +52,14 @@ it.live('keeps each repository’s own baseline and sends commands to the select
       let fenceChecks = 0
       const stopped: AgentRunExit = {
         $typeName: 'althar.worker.v1.AgentRunExit',
+        workerBusy: false,
         runId: 'war_' + '5'.repeat(32),
         outcome: AgentRunOutcome.STOPPED,
       }
       const service = workerExecution(() => ({
         connect: () => assert.fail('No transport fixture needed'),
         connectPreview: () => assert.fail('No transport fixture needed'),
+        connected: () => [],
         openTools: () => undefined,
         list: () => [
           {
@@ -276,16 +278,20 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     const input = request(worktree)
     const exit: AgentRunExit = {
       $typeName: 'althar.worker.v1.AgentRunExit',
+      workerBusy: false,
       runId: 'war_' + '4'.repeat(32),
       outcome: AgentRunOutcome.STOPPED,
     }
     let outcome: (exit: AgentRunExit) => void = () => undefined
     let stopping = 0
     let reachable = true
+    let canCapture = true
     let toolsAvailable = true
     let losesConnection = false
     let launchError: Error | undefined
     let refusesClose = false
+    const copying = yield* Deferred.make<void>()
+    const finishCopy = yield* Deferred.make<void>()
     const written: Uint8Array[] = []
     const worker: WorkerAgentProcess = {
       workspacePath: '/worker/project',
@@ -310,16 +316,23 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         return exit
       },
       ownsRun: () => true,
-      readPatch: async (baseline, parent) => {
+      readPatch: async (baseline, parent, _workspaceId, capture) => {
         if (!reachable) throw new Error('Worker disconnected.')
         assert.strictEqual(baseline, tree)
         assert.strictEqual(parent, head)
-        return { tree, head, patch: Buffer.alloc(0), commits: Buffer.alloc(0) }
+        return {
+          tree,
+          head,
+          patch: Buffer.alloc(0),
+          commits: Buffer.alloc(0),
+          ...(capture && canCapture ? { index: { tree, patch: Buffer.alloc(0) } } : {}),
+        }
       },
     }
     const pool: AgentWorkerPool = {
       connect: () => assert.fail('No transport fixture needed'),
       connectPreview: () => assert.fail('No transport fixture needed'),
+      connected: () => [],
       openTools: () => undefined,
       list: () => [{ workerId: input.workerId, busy: false, capabilities: [{ projectId: input.projectId, providerId: input.providerId }] }],
       start: async (id, placement, options) => {
@@ -333,7 +346,11 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
           void exit.catch(() => undefined)
           return { ...worker, exit }
         }
-        if (toolsAvailable) return worker
+        if (toolsAvailable) {
+          await Effect.runPromise(Deferred.succeed(copying, undefined))
+          await Effect.runPromise(Deferred.await(finishCopy))
+          return worker
+        }
         return {
           workspacePath: worker.workspacePath,
           output: worker.output,
@@ -350,7 +367,13 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     assert.deepStrictEqual(service.list(input.projectId), [{ workerId: input.workerId, providers: ['codex'], busy: false }])
     yield* Effect.scoped(
       Effect.gen(function* () {
-        const running = yield* service.open(input)
+        const opening = yield* Effect.forkScoped(service.open(input))
+        yield* Deferred.await(copying)
+        assert.isTrue(service.list(input.projectId)[0]?.busy)
+        const concurrent = yield* Effect.flip(service.open(input))
+        assert.include(concurrent.reason, 'preparing another task')
+        yield* Deferred.succeed(finishCopy, undefined)
+        const running = yield* Fiber.join(opening)
         assert.strictEqual(running.path, '/worker/project')
         assert.strictEqual(running.toolPort, 4517)
         const openHelper = service.openHelper
@@ -365,6 +388,13 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         assert.include((yield* Effect.flip(checkpoint({ ...input, workerId: 'another worker' }))).message, 'assigned worker')
         assert.include((yield* Effect.flip(checkpoint({ ...input, worktree: 'missing' }))).message, 'assigned worker')
         yield* Effect.scoped(command({ ...input, command: 'build', directory: '', id: 'proc_' + 'a'.repeat(32), output: () => undefined }))
+        const capture = service.captureCheckouts
+        if (capture === undefined) return assert.fail('No worker checkout capture service')
+        for (const change of [{ workerId: 'another worker' }, { projectId: 'another project' }, { worktree: 'missing' }])
+          assert.include((yield* Effect.flip(capture({ ...input, ...change }))).message, 'assigned worker')
+        assert.deepStrictEqual(yield* capture(input), new Map([[worktree, { head, tree, index: tree }]]))
+        canCapture = false
+        assert.include((yield* Effect.flip(capture(input))).message, 'did not return its staged files')
         reachable = false
         assert.strictEqual((yield* Effect.flip(running.checkpoint)).message, 'Worker disconnected.')
         outcome(exit)
@@ -405,4 +435,63 @@ it.live('refuses a worker start when its network listener is unavailable', () =>
       assert.include(failure.reason, 'worker listener is unavailable')
     }),
   ),
+)
+
+it.live('lists the home’s enrolled workers, connected or not, and takes one out through its ledger', () =>
+  Effect.gen(function* () {
+    const online = 'wrk_' + '1'.repeat(32)
+    const offline = 'wrk_' + '9'.repeat(32)
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_000, freeDiskMib: 90_000 } as const
+    const pool = {
+      connected: () => [
+        {
+          workerId: online,
+          busy: true,
+          capacity,
+          capabilities: [
+            { projectId: 'proj_a', providerId: 'codex' },
+            { projectId: 'proj_b', providerId: 'codex' },
+            { projectId: 'proj_b', providerId: 'claude-code' },
+          ],
+        },
+      ],
+    } as unknown as AgentWorkerPool
+    let enrolled = [
+      { workerId: online, projectIds: ['proj_a', 'proj_b'] },
+      { workerId: offline, projectIds: ['proj_a'] },
+    ]
+    const removed: string[] = []
+    const service = workerExecution(
+      () => pool,
+      () => ({
+        workers: () => enrolled,
+        revoke: (workerId) => {
+          if (!enrolled.some((one) => one.workerId === workerId)) throw new Error('No worker has that identity')
+          removed.push(workerId)
+          enrolled = enrolled.filter((one) => one.workerId !== workerId)
+        },
+      }),
+    )
+    assert.deepStrictEqual(service.enrolled?.(), [
+      { workerId: online, connected: true, busy: true, capacity, providers: ['codex', 'claude-code'], projectIds: ['proj_a', 'proj_b'] },
+      { workerId: offline, connected: false, busy: false, providers: [], projectIds: ['proj_a'] },
+    ])
+    yield* service.revoke!(offline)
+    assert.deepStrictEqual(removed, [offline])
+    assert.deepStrictEqual(
+      service.enrolled?.()?.map(({ workerId }) => workerId),
+      [online],
+    )
+    assert.strictEqual(yield* Effect.flip(service.revoke!(offline)), 'No worker has that identity')
+    // One at work keeps its task: it can't be taken out under it.
+    assert.strictEqual(yield* Effect.flip(service.revoke!(online)), 'It runs a task. Remove it once that finishes.')
+    assert.deepStrictEqual(removed, [offline])
+    // A home that isn't listening for workers has no list of them, and nothing to take out.
+    const off = workerExecution(
+      () => undefined,
+      () => undefined,
+    )
+    assert.isNull(off.enrolled?.())
+    assert.strictEqual(yield* Effect.flip(off.revoke!(online)), 'This home takes no workers.')
+  }),
 )

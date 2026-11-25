@@ -51,6 +51,11 @@ export interface EdgeHost {
   readonly pictures: string
   /** The end-to-end tests' quiet run (main.ts): the island is drawn clear and never takes the pointer. */
   readonly quiet?: boolean
+  /**
+   * Chromium draws on no display (`--ozone-platform=headless`, the end-to-end tests' run on Linux without Xvfb): the sheet
+   * is made, but no mark goes in a tray, which there would fall back to GTK's, and GTK aborts the app without a display.
+   */
+  readonly headless?: boolean
 }
 
 /** The island's window: room for it open, and for a call said beside the notch. Clicks go through what it doesn't draw. */
@@ -292,11 +297,13 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   const showTray = () => {
     if (tray !== undefined && !tray.isDestroyed()) return
-    tray = new Tray(picture(waiting > 0))
-    tray.setToolTip('Althar')
-    tray.on('click', toggleSheet)
-    // Off a Mac the sheet's click may never come (AppIndicator), so the menu carries what it would.
-    if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
+    if (host.headless !== true) {
+      tray = new Tray(picture(waiting > 0))
+      tray.setToolTip('Althar')
+      tray.on('click', toggleSheet)
+      // Off a Mac the sheet's click may never come (AppIndicator), so the menu carries what it would.
+      if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
+    }
     // Made now and kept hidden, so the first click opens it at once, already read.
     if (sheet === undefined || sheet.isDestroyed()) makeSheet()
   }

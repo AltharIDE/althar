@@ -50,7 +50,7 @@ describe('the model picked for a task with no lead on it', () => {
     emit(changed('provider_session', 's1'))
     await screen.findByRole('button', { name: /^Lead: Claude Sonnet/ })
     await pickFromDialog('Use Claude Opus')
-    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'opus' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' }))
 
     // The task stops, its last lead on Opus, as the runtime says.
     current = stopped('opus')

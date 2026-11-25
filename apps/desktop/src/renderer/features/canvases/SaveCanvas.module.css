@@ -1,0 +1,4 @@
+/* Save to repo while the project's place is read, the first time it opens: where its first line will be. */
+.waiting {
+  margin: 18px 14px;
+}

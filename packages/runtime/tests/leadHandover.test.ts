@@ -1,30 +1,22 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
-import { dueForLeadHandover, LEAD_HANDOVER_TOKENS, shrinks } from '../src/handover'
+import { COMPACT, contextFull } from '../src/compact'
+import { keepNote } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { notices, repository, runtime, until } from './support'
+import { notices, onTestClock, repository, runtime, until } from './support'
 
-/*
- * Althar hands a task's lead to a fresh session, briefed from the task,
- * only once its context is full (a task is a conversation plus parts, "A
- * lead's session lasts until it's full"): past 200,000 tokens, or 80% of
- * its window, whichever comes first. A break in its work (a step done, the
- * task made a change, a pause past its prompt cache's life) hands nothing
- * over, at any size. Never in a turn, and never while something it left
- * running still runs. The fake
- * agent says its context is as full as a message ending `[context:25/1000000]`
- * says: a quarter of a million-token window.
- */
+const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+const cacheExpired = TestClock.adjust(Duration.minutes(61))
 
 const opened = Effect.gen(function* () {
   const projects = yield* Projects
@@ -116,54 +108,80 @@ const titles = (threadId: string) => Effect.map(notices(threadId), (said) => sai
 
 const AFRESH = 'Started Fake codex afresh.'
 
-describe('when to hand a lead over', () => {
-  it('past its mark, or 80% of a smaller window, whichever comes first, and at no other size', () => {
-    assert.strictEqual(LEAD_HANDOVER_TOKENS, 200_000)
-    assert.isFalse(dueForLeadHandover(null))
-    assert.isFalse(dueForLeadHandover({ used: 199_999, size: 1_000_000 }))
-    assert.isTrue(dueForLeadHandover({ used: 200_000, size: 1_000_000 }))
-    // A 200,000-token window fills to 80% first.
-    assert.isFalse(dueForLeadHandover({ used: 159_999, size: 200_000 }))
-    assert.isTrue(dueForLeadHandover({ used: 160_000, size: 200_000 }))
-    // What a break once handed over, past 80,000, now carries on.
-    assert.isFalse(dueForLeadHandover({ used: 100_000, size: 1_000_000 }))
-    // An agent that hasn't said its window's size is never due.
-    assert.isFalse(dueForLeadHandover({ used: 500_000, size: 0 }))
+describe('compacting a full lead', () => {
+  it('is due at 200,000 tokens or 80% of a known window, whichever comes first', () => {
+    assert.isFalse(contextFull(null, true))
+    assert.isFalse(contextFull({ used: 199_999, size: 1_000_000 }, true))
+    assert.isTrue(contextFull({ used: 200_000, size: 1_000_000 }, true))
+    assert.isFalse(contextFull({ used: 159_999, size: 200_000 }, true))
+    assert.isTrue(contextFull({ used: 160_000, size: 200_000 }, true))
+    assert.isFalse(contextFull({ used: 500_000, size: 0 }, true))
   })
 
-  it('only where its brief is well under the context it replaces', () => {
-    assert.isTrue(shrinks('x'.repeat(4 * 10_000), { used: 100_000 }))
-    assert.isFalse(shrinks('x'.repeat(4 * 60_000), { used: 100_000 }))
-    assert.isTrue(shrinks('a brief', null))
-  })
-})
+  it.effect.each(['claude-code', 'codex', 'opencode'])(
+    '%s answers a full lead promptly, then compacts while idle in the same session',
+    (agentId) =>
+      onTestClock(
+        Effect.gen(function* () {
+          const projectId = yield* opened
+          const task = yield* started(projectId, 'Do it. [lead:finish]', agentId)
+          yield* finished(task.threadId)
+          yield* say(task.threadId, 'Look again. [context:25/1000000]')
+          yield* answered(task.threadId, 2)
+          const [first] = yield* sessionsOn(task.threadId)
+          yield* TestClock.adjust(Duration.minutes(30))
+          assert.lengthOf(yield* prompts(task.threadId), 2)
+          yield* keepNote({ envelope: yield* Runtime.envelope('note.keep', {}), projectId, body: 'Ship on Thursdays.' })
+          yield* say(task.threadId, 'And now?')
+          yield* answered(task.threadId, 3)
+          // The previous turn warmed the cache again.
+          yield* TestClock.adjust(Duration.minutes(40))
+          assert.lengthOf(yield* prompts(task.threadId), 3)
+          yield* TestClock.adjust(Duration.minutes(21))
+          yield* answered(task.threadId, 4)
+          yield* say(task.threadId, 'What next?')
+          yield* answered(task.threadId, 5)
 
-describe('handing a lead to a fresh session', () => {
-  it.live('hands one past its mark over before its next turn, on the same agent and account, briefed from the task', () =>
-    Effect.gen(function* () {
-      const projectId = yield* opened
-      const task = yield* started(projectId, 'Do it. [lead:finish]')
-      yield* finished(task.threadId)
-      // A turn that leaves a quarter of a million-token window full: past the lead's mark, though nowhere near 80%.
-      yield* say(task.threadId, 'Look again. [context:25/1000000]')
-      yield* answered(task.threadId, 2)
-      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+          const turns = yield* prompts(task.threadId)
+          assert.match(turns[2]?.prompt ?? '', /And now\?$/)
+          assert.strictEqual(turns[3]?.prompt, COMPACT)
+          assert.isTrue(turns.every((turn) => turn.providerSessionId === first?.id))
+          const next = turns[4]?.prompt ?? ''
+          assert.include(next, 'Task: Lead\n\nDo it. [lead:finish]')
+          assert.include(next, "When you have done the task, call Althar's finish_step tool")
+          assert.include(next, 'Ship on Thursdays.')
+          assert.include(next, 'Open errands concerning this task')
+          assert.notInclude(next, 'The thread so far')
+          assert.match(next, /What next\?$/)
+          assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+          assert.notInclude(yield* titles(task.threadId), AFRESH)
+        }).pipe(Effect.provide(withQueries())),
+      ),
+  )
 
-      // Its next turn starts in a fresh session, which takes what the person said after its brief.
-      yield* say(task.threadId, 'And now?')
-      const rows = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
-      const [old, fresh] = rows
-      assert.strictEqual(old?.state, 'superseded')
-      assert.strictEqual(old?.supersededBySessionId, fresh?.id)
-      assert.deepStrictEqual([fresh?.agentId, fresh?.accountId], [old?.agentId, old?.accountId])
-      assert.include(yield* titles(task.threadId), AFRESH)
-      const [, , first] = yield* until(prompts(task.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
-      assert.strictEqual(first?.providerSessionId, fresh?.id)
-      assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktree/)
-      assert.include(first?.prompt, 'Task: Lead')
-      assert.include(first?.prompt, 'The thread so far, oldest first')
-      assert.match(first?.prompt ?? '', /\n\nAnd now\?$/)
-    }).pipe(Effect.provide(withQueries())),
+  it.effect('keeps taking messages after a failed compaction without retrying it on every turn', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const projectId = yield* opened
+        const task = yield* started(projectId, 'Do it. [lead:finish] [lead:compact-fails]')
+        yield* finished(task.threadId)
+        yield* say(task.threadId, 'Look again. [context:85]')
+        yield* answered(task.threadId, 2)
+        yield* cacheExpired
+        yield* answered(task.threadId, 3)
+        yield* say(task.threadId, 'And now?')
+        yield* answered(task.threadId, 4)
+        yield* cacheExpired
+        yield* say(task.threadId, 'One more question.')
+        yield* answered(task.threadId, 5)
+        const turns = yield* prompts(task.threadId)
+        assert.strictEqual(turns[2]?.prompt, COMPACT)
+        assert.match(turns[3]?.prompt ?? '', /And now\?$/)
+        assert.match(turns[4]?.prompt ?? '', /One more question\.$/)
+        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+        assert.include(yield* titles(task.threadId), "Fake codex couldn't compact its context.")
+      }).pipe(Effect.provide(withQueries())),
+    ),
   )
 
   it.live('carries the conversation on across a break, at any size under its mark', () =>
@@ -193,23 +211,69 @@ describe('handing a lead to a fresh session', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('leaves one as it is while something it left running still runs, which a fresh session would stop', () =>
+  it.effect('compacts while a background command keeps running on the same session', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const projectId = yield* opened
+        const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+        yield* finished(task.threadId)
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
+          (left) => left.length === 1,
+        )
+        yield* say(task.threadId, 'Look again. [context:25/1000000]')
+        yield* answered(task.threadId, 2)
+        yield* cacheExpired
+        yield* answered(task.threadId, 3)
+        assert.strictEqual((yield* prompts(task.threadId))[2]?.prompt, COMPACT)
+        const live = Option.getOrUndefined(yield* sessions.running(task.threadId))
+        assert.lengthOf(live?.background ?? [], 1)
+        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+        assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
+      }).pipe(Effect.provide(withQueries())),
+    ),
+  )
+})
+
+it.effect.each(['completed', 'failed'] as const)('delivers a message queued during idle compaction once it has %s', (state) => {
+  let asked = false
+  let release = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const compactionAsked = Effect.sync(() => asked)
+  const promptAsked = (prompt: string) => {
+    if (prompt !== COMPACT) return
+    asked = true
+    return held
+  }
+  return onTestClock(
     Effect.gen(function* () {
-      const sessions = yield* Sessions
+      yield* Effect.addFinalizer(() => Effect.sync(release))
       const projectId = yield* opened
-      const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+      const task = yield* started(projectId, state === 'failed' ? 'Do it. [lead:finish] [lead:compact-lost]' : 'Do it. [lead:finish]')
       yield* finished(task.threadId)
-      yield* until(
-        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
-      yield* say(task.threadId, 'Look again. [context:25/1000000]')
+      yield* say(task.threadId, 'Look again. [context:85]')
       yield* answered(task.threadId, 2)
-      yield* say(task.threadId, 'And now?')
-      yield* answered(task.threadId, 3)
-      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
-      assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
-    }).pipe(Effect.provide(withQueries())),
+      yield* cacheExpired
+      yield* until(compactionAsked, Boolean)
+      yield* say(task.threadId, 'What next?')
+      assert.lengthOf(yield* prompts(task.threadId), 3)
+      release()
+      yield* answered(task.threadId, 4)
+      const [old, fresh] = yield* sessionsOn(task.threadId)
+      const [, , compact, next] = yield* prompts(task.threadId)
+      assert.deepStrictEqual([compact?.prompt, compact?.providerSessionId, compact?.state], [COMPACT, old?.id, state])
+      assert.strictEqual(next?.providerSessionId, state === 'failed' ? fresh?.id : old?.id)
+      if (state === 'failed') {
+        assert.include(yield* titles(task.threadId), 'Fake codex had lost this conversation. Started it afresh.')
+      } else {
+        assert.isUndefined(fresh)
+      }
+      assert.match(next?.prompt ?? '', /\n\nWhat next\?$/)
+      assert.strictEqual((next?.prompt ?? '').split('What next?').length, 2)
+    }).pipe(Effect.provide(withQueries(':memory:', { promptAsked }))),
   )
 })
 

@@ -23,7 +23,7 @@ import { PlanUsage } from '../src/PlanUsage'
 import { Queries } from '../src/Queries'
 import { SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, fakeSignInEnds, runtime, task, until } from './support'
+import { fakeAgents, fakeSignInEnds, onTestClock, runtime, task, until } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -63,6 +63,7 @@ const withUsage = (
     readonly signedOut?: ReadonlyArray<string>
     readonly database?: string
     readonly agents?: Layer.Layer<Agents>
+    readonly every?: Duration.Duration
   } = {},
 ) =>
   runtime(
@@ -73,7 +74,7 @@ const withUsage = (
       ...(more.signedOut === undefined ? {} : { signedOut: more.signedOut }),
       ...(more.agents === undefined ? {} : { agents: more.agents }),
       usage: {
-        every: Duration.zero,
+        every: more.every ?? Duration.zero,
         kept: Duration.zero,
         ...(usage.readAgent === undefined ? {} : { readAgent: usage.readAgent }),
         ...(usage.readCredentials === undefined ? {} : { readCredentials: usage.readCredentials }),
@@ -192,10 +193,20 @@ describe('Codex’s plan, asked of its app-server', () => {
         assert.strictEqual(accountOf(yield* usage.now(true), 'codex').windows.length, 1)
         answer = { kind: 'failed', message: 'Not signed in with ChatGPT.' }
         const view = accountOf(yield* usage.now(true), 'codex')
-        assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'Not signed in with ChatGPT.' })
+        assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' })
         assert.strictEqual(view.windows.length, 1)
+        // Its sign-in expired, as ChatGPT says it: one short line, never the address, the status or the body it answered.
+        answer = {
+          kind: 'failed',
+          message:
+            'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=text/plain; body={ "error": { "code": "token_expired" } }',
+        }
+        assert.deepStrictEqual(accountOf(yield* usage.now(true), 'codex').fault, {
+          kind: 'sign_in_again',
+          message: 'Signed out. Sign in again to read usage.',
+        })
         answer = { kind: 'failed', message: 'Codex stopped before it answered.' }
-        assert.strictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'unreachable')
+        assert.deepStrictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'unreachable')
       }).pipe(Effect.provide(layer))
     }),
   )
@@ -287,7 +298,7 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
         reply = { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }
         const view = accountOf(yield* usage.now(true), 'claude-code')
         assert.strictEqual(view.fault?.kind, 'expired')
-        assert.include(view.fault?.message ?? '', 'renews it the next time it runs on this account')
+        assert.include(view.fault?.message ?? '', 'renews it on its next run')
         assert.deepStrictEqual(
           view.windows.map((window) => window.usedPercent),
           [30],
@@ -771,6 +782,69 @@ describe('a window as it resets, and what a restart reads back', () => {
 describe('OpenCode’s accounts, by their own sign-ins', () => {
   const openCode = (view: PlanUsageView) => accountOf(view, 'opencode')
 
+  it.effect('does not let a superseded listing replace the newer account classification', () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => (release = resolve))
+    let listings = 0
+    const layer = withUsage({
+      readCredentials: async () => {
+        if (++listings === 1) {
+          await waiting
+          return credentials(['openai', 'plan'])
+        }
+        return credentials(['openai', 'key'])
+      },
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('opencode')
+        const first = yield* Effect.forkChild(usage.refresh([account!.id], true))
+        yield* until(
+          Effect.sync(() => listings),
+          (count) => count === 1,
+        )
+        yield* usage.refresh([account!.id], true)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+        release()
+        yield* Fiber.join(first)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+      }).pipe(Effect.ensuring(Effect.sync(() => release())), Effect.provide(layer)),
+    )
+  })
+
+  it.effect('does not let an older Go limit answer restore a forgotten classification', () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => (release = resolve))
+    let listings = 0
+    let limits = 0
+    const layer = withUsage({
+      readCredentials: async () => (++listings === 1 ? credentials(['opencode-go', 'plan']) : credentials(['openai', 'key'])),
+      readGoUsage: async () => {
+        limits++
+        await waiting
+        return read(used(100))
+      },
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('opencode')
+        const first = yield* Effect.forkChild(usage.refresh([account!.id], true))
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 1,
+        )
+        yield* (yield* SignIns).forget('opencode')
+        yield* usage.refresh([account!.id], true)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+        release()
+        yield* Fiber.join(first)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+      }).pipe(Effect.ensuring(Effect.sync(() => release())), Effect.provide(layer)),
+    )
+  })
+
   it.effect('are keys, with no fault, when every sign-in is a key', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
@@ -787,6 +861,27 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
       Effect.provide(withUsage({ readCredentials: async () => ({ kind: 'failed', message: 'OpenCode would not list its sign-ins.' }) })),
     ),
   )
+
+  it.effect('tries a failed explicit listing again instead of returning to the old cached classification', () => {
+    let listings = 0
+    const layer = withUsage({
+      readCredentials: async () => (++listings === 2 ? { kind: 'failed', message: 'Listing failed.' } : credentials(['openai', 'key'])),
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        yield* TestClock.adjust(Duration.minutes(5))
+        assert.strictEqual(openCode(yield* usage.now(true)).fault?.kind, 'cannot_classify')
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => listings),
+          (count) => count === 3,
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+  })
 
   it.effect('are a fault for a sign-in whose method it cannot classify', () =>
     Effect.gen(function* () {
@@ -856,6 +951,137 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
   })
   const goAndZen = async () => credentials(['opencode-go', 'plan'], ['opencode', 'key'])
 
+  it.effect('does not list an unclassified idle account on its first timer tick, but reads a reported limit', () => {
+    let listings = 0
+    let reads = 0
+    const layer = withUsage(
+      { readCredentials: async () => (listings++, goAndZen()), readGoUsage: async () => (reads++, go(used(20))) },
+      { every: Duration.minutes(5) },
+    )
+    return onTestClock(
+      Effect.gen(function* () {
+        yield* PlanUsage
+        const tick = Effect.gen(function* () {
+          const events = yield* (yield* Live).subscribe
+          const told = yield* Effect.forkChild(
+            events.pipe(
+              Stream.filter((event) => event._tag === 'PlanUsage'),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          )
+          yield* TestClock.adjust(Duration.minutes(5))
+          yield* Fiber.join(told)
+        })
+        yield* tick
+        assert.deepStrictEqual([listings, reads], [0, 0])
+        const sql = yield* SqlClient.SqlClient
+        const [account] = yield* (yield* Accounts).of('opencode')
+        assert.isUndefined(yield* (yield* SignIns).cached(account!))
+        const principalId = yield* newId(Ids.principal)
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+        yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'opencode', accountId: account!.id, deviceId: (yield* Instance).deviceId, subjectHint: 'Fake', authMode: 'vendor_cli', observedAt: at })}`
+        yield* sql`INSERT INTO account_statuses ${sql.insert({ id: yield* newId(Ids.accountStatus), principalId, state: 'limited', windows: JSON.stringify([{ kind: 'usage', resetsAt: RESET }]), source: 'error', observedAt: at })}`
+        yield* tick
+        assert.deepStrictEqual([listings, reads], [1, 1])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it.effect('leaves an idle Go account alone on the timer, but polls it when a limit is waiting', () => {
+    let reads = 0
+    let listings = 0
+    const layer = withUsage(
+      { readCredentials: async () => (listings++, goAndZen()), readGoUsage: async () => (reads++, go(used(20))) },
+      { every: Duration.minutes(5) },
+    )
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        assert.strictEqual(reads, 1)
+        const tick = Effect.gen(function* () {
+          const events = yield* (yield* Live).subscribe
+          const told = yield* Effect.forkChild(
+            events.pipe(
+              Stream.filter((event) => event._tag === 'PlanUsage'),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          )
+          yield* TestClock.adjust(Duration.minutes(5))
+          yield* Fiber.join(told)
+        })
+        yield* tick
+        assert.strictEqual(reads, 1)
+        const sql = yield* SqlClient.SqlClient
+        const [account] = yield* (yield* Accounts).of('opencode')
+        const { project, task: created } = yield* task('OpenCode in use')
+        const sessionId = yield* newId(Ids.providerSession)
+        const turnId = yield* newId(Ids.turnDelivery)
+        const started = new Date(yield* Clock.currentTimeMillis).toISOString()
+        yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: project.projectId, threadId: created.threadId, agentId: 'opencode', accountId: account!.id, state: 'active', startedAt: started })}`
+        yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId: project.projectId, threadId: created.threadId, providerSessionId: sessionId, controllerGeneration: 1, state: 'pending', requestedAt: started })}`
+        yield* tick
+        assert.strictEqual(reads, 2)
+        yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${started} WHERE id = ${turnId}`
+        yield* usage.heard(account!.id, 'opencode', [used(100)])
+        yield* TestClock.adjust(Duration.seconds(1))
+        yield* tick
+        assert.strictEqual(reads, 3)
+        const principalId = yield* newId(Ids.principal)
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+        yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'opencode', accountId: account!.id, deviceId: (yield* Instance).deviceId, subjectHint: 'Fake', authMode: 'vendor_cli', observedAt: at })}`
+        yield* sql`INSERT INTO account_statuses ${sql.insert({ id: yield* newId(Ids.accountStatus), principalId, state: 'limited', windows: JSON.stringify([{ kind: 'usage', resetsAt: RESET }]), source: 'error', observedAt: at })}`
+        yield* tick
+        assert.strictEqual(reads, 4)
+        yield* sql`UPDATE account_statuses SET state = 'ok' WHERE principal_id = ${principalId}`
+        yield* (yield* SignIns).forget('opencode')
+        yield* tick
+        assert.deepStrictEqual([listings, reads], [1, 4])
+        yield* usage.refresh([account!.id], true)
+        assert.deepStrictEqual([listings, reads], [2, 5])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it.effect('reuses the listing on background reads, still reads Go, and lists again when the connection is forgotten or refreshed', () => {
+    let listings = 0
+    let limits = 0
+    const layer = withUsage({
+      readCredentials: async () => (listings++, credentials(['opencode-go', 'plan'], ['opencode', 'key'])),
+      readGoUsage: async () => (limits++, go(used(20))),
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        assert.deepStrictEqual([listings, limits], [1, 1])
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 2,
+        )
+        assert.strictEqual(listings, 1)
+        const [account] = yield* (yield* Accounts).of('opencode')
+        yield* usage.refresh([account!.id], true)
+        assert.deepStrictEqual([listings, limits], [1, 3])
+        yield* (yield* SignIns).forget('opencode')
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 4,
+        )
+        assert.strictEqual(listings, 2)
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now(true)
+        assert.deepStrictEqual([listings, limits], [3, 5])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it.effect('shows Go’s rolling five hours, week and month, read through its OpenCode Console sign-in', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
@@ -912,9 +1138,10 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.deepInclude(view, { paidBy: 'plan', plan: 'OpenCode Go' })
-      assert.deepStrictEqual(view.fault, { kind: 'unreachable', message: 'OpenCode couldn’t read Go’s usage: timed out.' })
+      // In a short line of Althar's own: OpenCode's own words go to the log.
+      assert.deepStrictEqual(view.fault, { kind: 'unreachable', message: 'No reply. Tries again soon.' })
       // Never read before: why is all it has to show, so its row still says Go is there.
-      assert.strictEqual(view.noReading, 'OpenCode couldn’t read Go’s usage: timed out.')
+      assert.strictEqual(view.noReading, 'No reply. Tries again soon.')
     }).pipe(
       Effect.provide(
         withUsage({

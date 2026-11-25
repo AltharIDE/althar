@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, fakeClient, items, snapshot } from './fixtures'
+import { change, fakeClient, fakeHost, items, snapshot } from './fixtures'
 import type { ChangeSummary } from '@althar/contracts'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ApiError } from '@althar/contracts'
@@ -54,6 +54,28 @@ describe('a task’s parts', () => {
     const popover = await parts()
     await userEvent.click(popover.getByRole('button', { name: 'Merge PR #714, then PR #715' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith(base.task.id, 'def456', above.url))
+  })
+
+  it('saves a separate copy from a worker worktree and shows while it is being saved', async () => {
+    let finish!: () => void
+    const saveWorkerSnapshot = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const working = snapshot({ task: { ...base.task, worktree: '/tmp/w/api', workerId: 'wrk_' + '1'.repeat(32) } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => working) })
+    withServices(<Task />, client, fakeHost({ saveWorkerSnapshot }))
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    // Where it works is the worker, not the home's copy of its folder.
+    expect(popover.getByText('Linux worker 111111')).toBeTruthy()
+    await userEvent.click(await popover.findByRole('button', { name: 'Copy to this Mac…' }))
+    expect(saveWorkerSnapshot).toHaveBeenCalledWith({ projectId: base.project.id, taskId: base.task.id })
+    expect(popover.getByRole('button', { name: 'Copying…' })).toHaveProperty('disabled', true)
+    finish()
+    expect(await popover.findByRole('button', { name: 'Copy to this Mac…' })).toBeTruthy()
   })
 
   it('moves a running task to Local from its folder’s row, and asks before switching a branch of the person’s own', async () => {

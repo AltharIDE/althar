@@ -49,6 +49,8 @@ said=$("$claude" --version 2>&1) && ok "Claude Code: $said" || bad "claude.exe d
 # The speech engine's addon is Node-API, so the app's Node loads it as Electron's utility process does.
 said=$("$node" -e "if (typeof require(process.argv[1]).OfflineRecognizer !== 'function') process.exit(1)" "$(cygpath -w "$modules/sherpa-onnx-node")" 2>&1) \
   && ok "the speech engine loads" || bad "sherpa-onnx doesn't load: $said"
+said=$("$node" --input-type=module -e 'import { pathToFileURL } from "node:url"; if (typeof (await import(pathToFileURL(process.argv[1]))).CuaDriver.create !== "function") process.exit(1)' "$(cygpath -w "$modules/@trycua/cua-driver/dist/index.js")" 2>&1) \
+  && ok "the computer-use driver loads" || bad "the computer-use driver doesn't load: $said"
 for adapter in @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp; do
   [ -f "$modules/$adapter/package.json" ] && ok "$adapter" || bad "no $adapter"
 done

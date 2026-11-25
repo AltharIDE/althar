@@ -50,6 +50,8 @@ export interface AboutHeaderProps {
   website?: string
   notes?: string
   community?: string
+  /** What's new, in the window: where given, it opens there rather than the notes in the browser. */
+  onNotes?: () => void
   /** Report a problem; without it, the app can't report. */
   onReport?: () => void
   /** Checks for a newer version now, under the name while no update is ready; without it, the app doesn't update. */
@@ -66,6 +68,7 @@ export function AboutHeader({
   website,
   notes,
   community,
+  onNotes,
   onReport,
   onCheck,
   checking = false,
@@ -88,7 +91,13 @@ export function AboutHeader({
       </span>
       <span className={s.ways}>
         <Out href={website}>{t.website}</Out>
-        <Out href={notes}>{t.notes}</Out>
+        {onNotes !== undefined ? (
+          <Button size="small" onClick={onNotes}>
+            {t.notes}
+          </Button>
+        ) : (
+          <Out href={notes}>{t.notes}</Out>
+        )}
         <Out href={community} mark={<DiscordMark />}>
           {t.community}
         </Out>

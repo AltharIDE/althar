@@ -59,8 +59,8 @@ export interface RepositoryPickProps {
   picked: readonly string[]
   /** Ticks a repository, or unticks it. */
   onPick: (id: string) => void
-  /** Asks for a folder to add. */
-  onAdd: () => void
+  /** Asks for a folder to add; without it, only those found are offered, as on a home on another computer. */
+  onAdd?: () => void
   className?: string
   text?: Partial<RepositoryPickText>
 }
@@ -112,12 +112,14 @@ export function RepositoryPick({ repositories, picked, onPick, onAdd, className,
 
   return (
     <div className={cx(s.pick, className)}>
-      <div className={s.choose}>
-        <Button size="small" icon="folder" kbd={t.add.kbd} onClick={onAdd}>
-          {t.add.title}
-        </Button>
-        <span className={s.note}>{t.add.note}</span>
-      </div>
+      {onAdd !== undefined && (
+        <div className={s.choose}>
+          <Button size="small" icon="folder" kbd={t.add.kbd} onClick={onAdd}>
+            {t.add.title}
+          </Button>
+          <span className={s.note}>{t.add.note}</span>
+        </div>
+      )}
       <label className={s.find}>
         <Icon name="search" size={14} />
         <input

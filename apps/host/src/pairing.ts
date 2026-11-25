@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 
-import { API_VERSION, ApiError } from '@althar/contracts'
+import { API_VERSION, ApiError, pairingLinkOf } from '@althar/contracts'
 import { apiClient, encodePairingCode, openLocalConnection, TransportError } from '@althar/transport-node'
 import { Effect } from 'effect'
 
@@ -29,25 +29,29 @@ export const issuePairing = (options: HostOptions) =>
         })
       const files = yield* networkFiles(options, network)
       files.key.fill(0)
-      const { api } = yield* apiClient(yield* openLocalConnection(options.profile))
+      const connection = yield* openLocalConnection(options.profile)
+      const { api } = yield* apiClient(connection)
+      if (connection.networkFingerprint !== files.networkFingerprint)
+        return yield* new HostError({
+          code: 'InvalidConfig',
+          message: 'Direct access settings have changed. Restart the host before creating a pairing code.',
+        })
       const token = randomBytes(32).toString('base64url')
       const invitation = yield* api.IssueDevicePairing({
         commandId: commandId(),
         tokenHash: createHash('sha256').update(token).digest('hex'),
       })
-      return {
-        homeId: invitation.homeId,
-        expiresAt: invitation.expiresAt,
-        code: encodePairingCode({
-          ...invitation,
-          protocol: 1,
-          apiVersion: API_VERSION,
-          origin: files.config.origin,
-          tlsKeyPin: files.tlsKeyPin,
-          tlsCertificate: files.tlsCertificate,
-          token,
-        }),
-      }
+      const code = encodePairingCode({
+        ...invitation,
+        protocol: 1,
+        apiVersion: API_VERSION,
+        origin: files.config.origin,
+        tlsKeyPin: files.tlsKeyPin,
+        tlsCertificate: files.tlsCertificate,
+        token,
+      })
+      // The link a phone's camera opens, to show as a QR: Althar where the phone has it, its store where it hasn't.
+      return { homeId: invitation.homeId, expiresAt: invitation.expiresAt, code, link: pairingLinkOf(code) }
     }),
   ).pipe(Effect.mapError(safeError))
 

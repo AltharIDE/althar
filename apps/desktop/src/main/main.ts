@@ -38,8 +38,14 @@ import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
+import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
+import { computerChannel, handleComputerWindow } from './computer/ipc'
+import { displayInputProblem } from './computer/display'
+import { computerSessions } from './computer/sessions'
+import { computerWorker } from './computer/worker'
+import { testComputerWorker } from './computer/testNative'
 import { type Canvases, startCanvases } from './canvases/views'
 import { type Resize, servePicture } from './pictures'
 import type { Shot } from '@althar/runtime'
@@ -48,14 +54,14 @@ import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
-import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from './repositories'
+import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from '@althar/runtime/repositories'
 import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
-import { installOf, usageData } from './usageData'
+import { installOf, usageData, WELCOME_STEPS } from './usageData'
 import { masker } from '../logs/mask'
 import { outsideOf } from './browser/addresses'
 import { browserAgent } from './browser/devices'
@@ -63,6 +69,7 @@ import { type Bridge, bridgeOf } from './browser/bridge'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
 import { workerPreviews } from './browser/workerPreview'
+import { saveWorkerSnapshot } from './workerSnapshot'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -76,6 +83,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  globalShortcut,
   nativeTheme,
   net,
   Notification,
@@ -83,6 +91,7 @@ import {
   powerSaveBlocker,
   protocol,
   safeStorage,
+  screen,
   shell,
   systemPreferences,
   type UtilityProcess,
@@ -304,6 +313,7 @@ interface RuntimeMessage {
   readonly value?: unknown
   /** A usage event, as the runtime says it; usageData.ts keeps only what it names. */
   readonly usage?: unknown
+  readonly usageAt?: unknown
   /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
   readonly crash?: unknown
   /** A screenshot an agent asked for (screenshots.ts). */
@@ -338,6 +348,8 @@ let waiting = 0
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
 const crashPolicy = crashConsent(() => preferences.crashReports && !doNotTrack(process.env))
+const usagePolicy = crashConsent(() => preferences.usageData && !doNotTrack(process.env))
+let usageSince = 0
 
 /*
  * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
@@ -375,19 +387,43 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
  * and an update installed when it opens on another version than last time.
  */
 const install = preferencesRead.then(() => installOf(locations().profile, app.getVersion()))
+const startedAtLogin = () =>
+  app.isPackaged &&
+  openedAtLogin(process.platform, process.argv, process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin)
 const usage = Promise.all([install, ready]).then(([install]) => {
   const sender = usageData({
     ...usageTarget,
     installId: install.id,
     app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-    allowed: () => preferences.usageData && !doNotTrack(process.env),
+    allowed: usagePolicy.allowed,
+    generation: usagePolicy.generation,
     fetch: (url, options) => net.fetch(url, options),
   })
-  sender.record({ name: 'app_opened' })
+  sender.record({
+    name: 'app_opened',
+    properties: { launch: startedAtLogin() ? 'login' : 'foreground', install: install.first ? 'new' : 'returning' },
+  })
   if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
   return sender
 })
-const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
+const recordUsage = (said: unknown, at = Date.now()) => {
+  if (!usagePolicy.allowed() || at <= usageSince) return
+  const generation = usagePolicy.generation()
+  void usage.then((sender) => {
+    if (usagePolicy.generation() === generation) sender.record(said, at)
+  })
+}
+
+let lastWindowDay: number | undefined
+const windowOpenedForUsage = () => {
+  if (!usagePolicy.allowed()) return
+  const at = Date.now()
+  if (at <= usageSince) return
+  const day = Math.floor(at / 86_400_000)
+  if (day === lastWindowDay) return
+  lastWindowDay = day
+  recordUsage({ name: 'app_window_opened' }, at)
+}
 
 /* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
 const names = factsAsker('names')
@@ -502,7 +538,7 @@ const homes = startHomeConnections({
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
-  open: (home, projectId) => {
+  open: (home, projectId, fresh) => {
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
@@ -512,16 +548,41 @@ const homes = startHomeConnections({
       existing.show()
       if (!quiet) existing.focus()
       if (projectId !== undefined) existing.webContents.send('althar:homes-project', projectId)
+      if (fresh === true) existing.webContents.send('althar:homes-new-project')
       return
     }
     const opened = openWindow(home)
-    // Its preload holds the project until the page listens, once the window has drawn its first projects.
+    // Its preload holds the project, or New project, until the page listens, once the window has drawn its first projects.
     if (projectId !== undefined)
       opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-project', projectId))
+    if (fresh === true) opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-new-project'))
   },
   log: (message) => logs.error(message),
+  logs,
+  usage: recordUsage,
 })
 const mineLocal = (contents: WebContents) => mine(contents) && homes.state(contents.id).current.kind === 'local'
+const welcomeSeen = new Set<string>()
+ipcMain.on('althar:welcome-usage', (event, action: unknown, value: unknown, outcome: unknown) => {
+  if (!mineLocal(event.sender) || event.senderFrame !== event.sender.mainFrame || !usagePolicy.allowed()) return
+  if (
+    action === 'project' &&
+    (value === 'folder' || value === 'clone' || value === 'new') &&
+    (outcome === 'created' || outcome === 'not_created')
+  ) {
+    recordUsage({ name: 'onboarding_project_attempt', properties: { source: value, outcome } })
+  }
+  if (action === 'step') {
+    const step = WELCOME_STEPS.find((one) => one === value)
+    if (step === undefined || welcomeSeen.has(step)) return
+    welcomeSeen.add(step)
+    recordUsage({ name: 'onboarding_step_seen', properties: { step } })
+  }
+  if (action === 'completed' && !welcomeSeen.has(action)) {
+    welcomeSeen.add(action)
+    recordUsage({ name: 'onboarding_completed' })
+  }
+})
 const localWindows = () =>
   new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
 const handleLocal: typeof ipcMain.handle = (channel, listener) =>
@@ -552,13 +613,54 @@ const bringForward = () => {
   return raiseWindow(availableWindows(localWindows(), closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
-/** Opens the window on a thread, as a notification or the edge asks. */
-const openThread = (threadId: string) => {
+/**
+ * Brings the window forward on a thread, as a notification or the edge asks. `asked` is a prompt the thread raised itself: the
+ * window comes forward, but stays where it was where the thread is an aside, whose prompt shows in place.
+ */
+const openThread = (threadId: string, asked = false) => {
   const { window, fresh } = bringForward()
-  const send = () => window.webContents.send('althar:open', threadId)
+  const send = () => window.webContents.send('althar:open', threadId, asked)
   if (fresh || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
   else send()
 }
+
+const computers = computerSessions({
+  worker: () => (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1' ? testComputerWorker() : computerWorker(here)),
+  available: () =>
+    // The tests' stand-in drives no display, so it runs where there is none, as on Linux headless (scripts/display.ts).
+    (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1') ||
+    process.platform === 'darwin' ||
+    process.platform === 'win32' ||
+    (process.platform === 'linux' && Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)),
+  canAsk: () => !quitting && localWindows().size > 0,
+  // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
+  canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
+  // macOS lets Althar see and use other apps only once the person switches these on for it.
+  ...(process.platform === 'darwin' && !(__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_TEST_COMPUTER === '1')
+    ? {
+        grants: () => ({
+          screen: systemPreferences.getMediaAccessStatus('screen') === 'granted',
+          access: systemPreferences.isTrustedAccessibilityClient(false),
+        }),
+      }
+    : {}),
+  desktopInputProblem: (action, frame) => {
+    const focused = BrowserWindow.getFocusedWindow()
+    const protectedWindows = BrowserWindow.getAllWindows()
+      .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
+      .map((window) => window.getBounds())
+    const inFront = focused !== null && mine(focused.webContents)
+    const { bounds, workArea } = screen.getPrimaryDisplay()
+    // macOS keeps the menu bar above the work area; elsewhere a top panel there is the system’s too.
+    const menuBar = { x: bounds.x, y: bounds.y, width: bounds.width, height: Math.max(0, workArea.y - bounds.y) }
+    return displayInputProblem(action, frame, bounds, protectedWindows, inFront, menuBar)
+  },
+  changed: (state) => {
+    for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
+    if (state.phase === 'asking') openThread(state.threadId, true)
+  },
+})
+const computerConnection = computerChannel(computers)
 
 /**
  * What the runtime says needs the person: a notification of each kind they
@@ -713,7 +815,11 @@ const startRuntime = () => {
       for (const port of Array.isArray(message.ports) ? message.ports : []) if (Number.isInteger(port)) listening.add(port as number)
       return
     }
-    if (message.type === 'settled') return void pages?.moment('settled', ownersIn(message.owners)).catch(() => undefined)
+    if (message.type === 'settled') {
+      const owners = ownersIn(message.owners)
+      for (const owner of owners) computers.stop(owner, 'The task ended.')
+      return void pages?.moment('settled', owners).catch(() => undefined)
+    }
     if (message.type === 'settled-among') {
       if (message.requestId !== undefined) settling.get(message.requestId)?.(ownersIn(message.value))
       if (message.requestId !== undefined) settling.delete(message.requestId)
@@ -722,10 +828,18 @@ const startRuntime = () => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'page' || message.type === 'page-cancel') return pageCall(child, message)
+    if ((message.type === 'computer' || message.type === 'computer-cancel' || message.type === 'computer-turn-ended') && runtime === child)
+      return computerConnection.handle(message, (requestId, done) => {
+        if (runtime === child) child.postMessage({ type: 'computer-done', requestId, ...done })
+      })
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
-    if (message.type === 'usage') return recordUsage(message.usage)
+    if (message.type === 'usage') {
+      const at = message.usageAt
+      if (typeof at === 'number' && Number.isSafeInteger(at) && at > 0 && at <= Date.now()) recordUsage(message.usage, at)
+      return
+    }
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed' || message.type === 'profile-in-use') {
       storeFailure = storeFailureOf(message)
@@ -745,6 +859,7 @@ const startRuntime = () => {
     stopAttention()
     stopWatchingOnline()
     runtime = undefined
+    computerConnection.stop('The task runtime stopped.')
     if (quitting) logs.info('Runtime exited', { code })
     else logs.error('Runtime exited', { code })
     // Nothing runs without the runtime; a new one says again.
@@ -806,13 +921,21 @@ const connect = (window: BrowserWindow) => {
   startupMark('port-handed-over', undefined, window.webContents.id)
 }
 
-const showWorkerPreview = workerPreviews(async (window, signal) => {
+const workerHomePort = async (window: BrowserWindow, signal: AbortSignal) => {
   const id = window.webContents.id
   if (homes.state(id).current.kind !== 'local') return homes.previewPort(id, signal)
-  if (runtime === undefined) throw new Error('Start the local home before opening a worker preview.')
+  if (runtime === undefined) throw new Error('Start the local home before connecting to the worker.')
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
   return port2
+}
+const showWorkerPreview = workerPreviews(workerHomePort)
+const copyWorkerSnapshot = saveWorkerSnapshot(workerHomePort)
+ipcMain.handle('althar:save-worker-snapshot', async (event, value: unknown) => {
+  if (!mine(event.sender)) throw new Error('Select the task from the Althar window.')
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null) return
+  await copyWorkerSnapshot(window, value)
 })
 
 /**
@@ -956,6 +1079,8 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   // A document of the window's gone, as it reloads when the runtime restarts, takes with it what said where its pages show: they hide until the new one says.
   window.webContents.on('did-navigate', () => pages?.hideIn(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
+  window.on('show', windowOpenedForUsage)
+  window.on('focus', windowOpenedForUsage)
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (showWorkerPreview(window, url)) return { action: 'deny' }
@@ -1158,14 +1283,20 @@ ipcMain.handle('althar:preferences', async () => {
 })
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
-  // Stop crash reporting before any asynchronous work, including the preference's disk write.
-  const finish = key === 'crashReports' && typeof value === 'boolean' ? crashPolicy.changing() : undefined
+  // Pause reporting before any asynchronous work, including the preference's disk write.
+  const changingUsage = key === 'usageData' && typeof value === 'boolean'
+  const finish = changingUsage
+    ? usagePolicy.changing()
+    : key === 'crashReports' && typeof value === 'boolean'
+      ? crashPolicy.changing()
+      : undefined
   try {
     await preferencesRead
     // Merged into the preferences as they stand once it is kept, so changes made together each stay.
     const kept = await writeAppPreference(locations().profile, key, value)
     preferences = { ...preferences, [key]: kept }
   } finally {
+    if (changingUsage) usageSince = Date.now()
     finish?.()
   }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
@@ -1273,17 +1404,35 @@ void ready.then(() => {
     quitting: () => quitting,
   })
   handlePages(pages, mineLocal)
+  handleComputerWindow(computers, mineLocal)
+  powerMonitor.on('lock-screen', () => computerConnection.stop('The screen locked.'))
+  powerMonitor.on('suspend', () => computerConnection.stop('The computer went to sleep.'))
+  powerMonitor.on('user-did-resign-active', () => computerConnection.stop('The graphical session changed.'))
+  screen.on('display-added', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-removed', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-metrics-changed', () => computerConnection.stop('The screen layout changed.'))
+  globalShortcut.register('CommandOrControl+Shift+Escape', () => computerConnection.stop('Computer access stopped by you.'))
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
+  // The ground a canvas of boards is drawn on, read once it is first wanted.
+  let groundScript: string | null = null
+  let chipScript: string | null = null
+  const artifacts = join(locations().profile, 'artifacts')
   canvases = startCanvases({
-    root: join(locations().profile, 'artifacts'),
+    root: artifacts,
     tokens: () => canvasTokens(),
+    ground: () => (groundScript ??= readFileSync(join(here, '../overlay/ground.js'), 'utf8')),
+    chip: () => (chipScript ??= readFileSync(join(here, '../overlay/chip.js'), 'utf8')),
+    stills: join(locations().profile, 'canvas-stills'),
+    tell: (window, key, news) => {
+      if (!window.isDestroyed()) window.webContents.send('althar:canvas-ground', key, news)
+    },
     listening: () => listening,
     outside: (address) => {
       const out = outsideOf(address)
       if (out !== null) void shell.openExternal(out)
     },
   })
-  handleCanvases(canvases, mineLocal)
+  handleCanvases(canvases, mineLocal, downloadCanvas(artifacts, canvases))
   bridge = bridgeOf({
     pages,
     isRuntime: (from) => from !== undefined && from === runtime,
@@ -1331,7 +1480,7 @@ void ready.then(() => {
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
   // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
-  const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
+  const background = startedAtLogin()
   if (background) {
     firstScreenDrawn = true
     releaseBackground()
@@ -1369,6 +1518,7 @@ void ready.then(() => {
     mine: mineLocal,
     address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
     email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
+    sent: () => recordUsage({ name: 'problem_reported' }),
   })
   edge = startEdge({
     profile: () => locations().profile,
@@ -1379,6 +1529,7 @@ void ready.then(() => {
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
     quiet,
+    headless: process.platform === 'linux' && app.commandLine.getSwitchValue('ozone-platform') === 'headless',
   })
   // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
   // Moving between Althar's windows blurs one before the other has focus, so it settles first.
@@ -1403,6 +1554,7 @@ app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
+  computerConnection.stop('The Althar window closed.')
   // With no window left to draw, macOS still carries on with its background work.
   firstScreenDrawn = true
   releaseBackground()
@@ -1520,6 +1672,7 @@ app.on('before-quit', (event) => {
   }
   event.preventDefault()
   quitting = true
+  computerConnection.stop('Althar is quitting.')
   dictation?.stop()
   // Pages whose cookies are kept only until Althar quits clear them as it goes, a few seconds at most.
   const cleared = Promise.race([pages?.moment('quit'), new Promise((resolve) => setTimeout(resolve, 4_000))]).catch(() => undefined)

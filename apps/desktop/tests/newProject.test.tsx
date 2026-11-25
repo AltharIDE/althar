@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  SOCKET_CALLS,
   type ConnectionList,
   type FolderReading,
   type FoundRepository,
@@ -14,15 +15,17 @@ import {
 
 import { newProjectId } from '../src/renderer/data/client'
 import { makeQueryClient } from '../src/renderer/data/reads'
-import type { FoundRepositories } from '../src/renderer/data/services'
+import type { FoundRepositories, Host } from '../src/renderer/data/services'
 import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
 import { unsent } from '../src/renderer/features/elsewhere/unsent'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
-import { connectionList, fakeClient, fakeHost, githubConnection, project } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, onLinuxHome, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { USUAL_LAUNCHER } from '../src/renderer/features/homes/useHomes'
 
 /*
  * A new project, in a tab of its own: named on its left, set up on its right.
@@ -778,5 +781,146 @@ describe('where code is hosted', () => {
       account: null,
     })
     expect([changesOn('gitlab'), changesOn('github'), changesOn(null)]).toEqual(['merge requests', 'pull requests', 'pull requests'])
+  })
+})
+
+describe('a new project on a home on another computer', () => {
+  const SITE = repo('/home/althar/code/site', 'git@github.com:acme/site.git')
+  /** What the home refuses this window, as it does a socket: putting a repository on a host, and a project's tracker. */
+  const refused = () =>
+    vi.fn(async () => {
+      throw new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' })
+    })
+  /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
+  const onHome = (
+    overrides: Parameters<typeof fakeClient>[0] = {},
+    calls: ReadonlyArray<string> | null = SOCKET_CALLS,
+    host: Host = fakeHost(),
+  ) => {
+    const fake = fakeClient({
+      connection: remoteConnection(calls),
+      readFolder: vi.fn(async (grant: string) =>
+        grant === 'grant_site' ? { kind: 'repository' as const, name: 'site', repositories: [SITE], project: null } : readings.grant_ops!,
+      ),
+      publishRepository: refused(),
+      listRepositoryOwners: refused(),
+      setProjectTracker: refused(),
+      listContainers: refused(),
+      ...overrides,
+    })
+    const onCreated = vi.fn()
+    draftsOf(fake.client).start()
+    withServices(<NewProject onCreated={onCreated} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
+    return { ...fake, host, onCreated }
+  }
+
+  it('offers the repositories the home found, each read by the grant the home made, and no folder picker', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^A folder/))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    await userEvent.click(within(list).getByRole('checkbox', { name: /^site/ }))
+    await waitFor(() => expect(at.client.readFolder).toHaveBeenCalledWith('grant_site'))
+    expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
+    expect(at.host.pickFolders).not.toHaveBeenCalled()
+    expect(at.host.findRepositories).not.toHaveBeenCalled()
+  })
+
+  it('starts a new repository where the home keeps code, with nowhere else to choose', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalledWith('grant_code', 'Tide Tables'))
+    expect(screen.queryByRole('button', { name: /^Change/ })).toBeNull()
+    expect(at.host.pickPlace).not.toHaveBeenCalled()
+  })
+
+  it('makes it with a code host and a tracker connected there, offering neither where the home won’t let this window use them', async () => {
+    const at = onHome({ listConnections: vi.fn(async () => connected) })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    expect(screen.queryByRole('radiogroup', { name: 'Where its code lives' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /Linear/ })).toBeNull()
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+    expect(at.client.makeRepository).toHaveBeenCalled()
+    expect(at.client.openProject).toHaveBeenCalled()
+    for (const call of [at.client.publishRepository, at.client.listRepositoryOwners, at.client.setProjectTracker, at.client.listContainers])
+      expect(call).not.toHaveBeenCalled()
+  })
+
+  it('says where it couldn’t ask the home where a new repository goes, and lets Create go on once it can', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    expect(await screen.findByText('The home disconnected.')).not.toBeNull()
+    expect(draftsOf(at.client).get()?.reading).toEqual([])
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+  })
+
+  it('says it couldn’t look on the home, rather than that it found nothing there, and looks again', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^A folder/))
+    expect(await screen.findByText('Couldn’t look on this home just now.')).not.toBeNull()
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Look again' }))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    expect(within(list).getByRole('checkbox', { name: /^site/ })).not.toBeNull()
+    expect(at.client.findHomeFolders).toHaveBeenCalled()
+  })
+
+  it('asks before an update that stops tasks running on the home, and updates only once the person says so', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const update = vi.fn(async () => ({ state: 'applied' as const }))
+    const busy: Host['homes'] = {
+      ...homes,
+      update,
+      overview: vi.fn(async () => ({
+        homes: [],
+        windows: {},
+        projects: { [`home_${'6'.repeat(32)}`]: { live: true, list: [{ id: 'p1', name: 'Site', ink: 'teal', working: 2, yours: 0 }] } },
+        opened: {},
+      })),
+    }
+    onHome({}, null, fakeHost({ homes: busy }))
+    expect(await screen.findByText('2 tasks are running on runner-1. They stop while it restarts.')).not.toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(screen.getByText('Stop 2 running tasks?')).not.toBeNull()
+    expect(update).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update anyway' }))
+    expect(update).toHaveBeenCalledOnce()
+    await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+  })
+
+  it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {
+    const at = onHome({}, null)
+    expect(await screen.findByText(/this home runs an older Althar. Once it’s updated/)).not.toBeNull()
+    // Not read how the home was installed: where Althar installs one, folded away, and said so.
+    await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+    await waitFor(() => expect(document.querySelector('code')?.textContent).toBe(`sh ${USUAL_LAUNCHER} update --apply --wait`))
+    expect(screen.getByText(/That’s for a home Althar installed/)).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy the update command' })).not.toBeNull()
+    expect(at.client.findHomeFolders).not.toHaveBeenCalled()
   })
 })

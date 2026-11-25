@@ -1,0 +1,272 @@
+/* Save to repo: the place it goes, named in place; the repository's folders as a tree for somewhere else; the project's rule; Save. */
+
+.save {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: 100%;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 10px;
+}
+.headWords {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.now {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.link {
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.link:hover {
+  color: var(--t-1);
+}
+.stop {
+  flex: none;
+}
+
+.body {
+  padding: 0 14px 12px;
+}
+
+/* the place, with the artifact's folder named in place */
+.spot {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px 11px;
+  border-radius: 10px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.spotGlyph {
+  flex: none;
+  display: inline-flex;
+  margin-top: 3px;
+  color: var(--t-3);
+}
+.spotWords {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  font: 12.5px var(--mono);
+  color: var(--t-2);
+}
+.trail {
+  white-space: nowrap;
+}
+.slash {
+  margin: 0 3px;
+  color: var(--t-4);
+}
+.why {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+.name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.nameInput {
+  min-width: 4ch;
+  max-width: 220px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 12.5px var(--mono);
+  color: var(--t-1);
+  outline: 0;
+}
+.nameInput:focus {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.nameWrong {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font: 500 10.5px var(--font);
+  color: var(--signal-ink);
+  background: var(--signal-dim);
+}
+.tag[data-tag='git'] {
+  color: var(--ok-ink);
+  background: var(--n-2);
+}
+.tag[data-tag='moves'] {
+  color: var(--t-1);
+  background: var(--n-3);
+}
+
+/* somewhere else: the repository's folders */
+.treeBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.find {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-3);
+}
+.find:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.tree {
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px 0;
+  border-radius: 10px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding-right: 10px;
+  color: var(--t-2);
+}
+.row[data-new] {
+  gap: 7px;
+  color: var(--signal-ink);
+  background: var(--signal-dim);
+}
+.here .folder {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.twist,
+.twistSpace {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--t-3);
+}
+.twist:hover {
+  color: var(--t-1);
+}
+.folder {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font: 12.5px var(--mono);
+  color: inherit;
+  text-align: left;
+}
+.folder:hover {
+  background: var(--hover-paper);
+}
+.folderName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quiet {
+  margin: 6px 12px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* the project's rule, and making the folder picked its place */
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+.problem {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+.fromNow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.rule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.sep {
+  margin: 0 6px;
+  color: var(--t-4);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+.gap {
+  flex: 1;
+}

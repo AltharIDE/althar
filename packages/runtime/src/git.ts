@@ -219,6 +219,18 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/** A git command with text on stdin, for lists too large to pass in its arguments. */
+export const gitWithInput = (cwd: string, input: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+  run(60_000, cwd, args, {}, false, input)
+
+/** Who git commits as: the person, or Althar where this computer names no one. */
+export const committerIn = (cwd: string) =>
+  Effect.map(gitOutcome(cwd, 'config', 'user.email'), (email) =>
+    email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
+      ? []
+      : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
+  )
+
 /** A blob's bytes, as base64, every byte as it was: a picture at a commit, which text would spoil. */
 export const blobBase64 = (cwd: string, object: string): Effect.Effect<string, GitFailed> =>
   runProcess(60_000, cwd, ['cat-file', 'blob', object], {}, undefined, true).pipe(
@@ -580,18 +592,6 @@ export const fetchedRefs = (
     signedIn(target),
   ).pipe(Effect.asVoid)
 
-/** As fetchedRefs: whether git could, the reason only in the log. */
-export const fetchRefs = (
-  cwd: string,
-  target: { readonly url: string; readonly header: string | null },
-  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
-) =>
-  fetchedRefs(cwd, target, refs).pipe(
-    Effect.as(true),
-    Effect.tapError(loggedFetch('refs')),
-    Effect.orElseSucceed(() => false),
-  )
-
 /**
  * Where git fetches from: a URL with the header that signs Althar in, or a
  * remote by name, with no header, as the person's own git reaches it.
@@ -926,7 +926,7 @@ export const restoreWorktree = (repository: string, path: string, branch: string
  * separately by the merge.
  */
 export const trackedStatus = (cwd: string, submodules: 'all' | 'dirty' = 'all'): Effect.Effect<string, GitFailed> =>
-  git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`)
+  looking(git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`))
 
 /** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
 export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>

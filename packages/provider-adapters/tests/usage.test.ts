@@ -6,7 +6,16 @@ import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { normalize } from '../src/events'
-import { claudeRateLimitWindows, codexUsage, leftOf, readAgentUsage, tightestWindow, windowKind } from '../src/usage'
+import {
+  claudeRateLimitWindows,
+  codexUsage,
+  leftOf,
+  readAgentUsage,
+  tightestWindow,
+  usageFailureOf,
+  usageSaid,
+  windowKind,
+} from '../src/usage'
 
 const NOW = new Date('2026-10-15T12:00:00.000Z')
 
@@ -413,5 +422,24 @@ describe('the tightest window', () => {
       kind: 'weekly',
     })
     expect(tightestWindow([], now)).toBeUndefined()
+  })
+})
+
+describe('a failed reading, as Plan usage says it', () => {
+  it('is one short line, never the address, status or body an agent answered with', () => {
+    const expired =
+      'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=text/plain; body={ "error": { "code": "token_expired" } }'
+    expect(usageFailureOf(expired)).toEqual({ signedOut: true, said: usageSaid.signedOut })
+    expect(usageFailureOf('Not signed in with ChatGPT.').signedOut).toBe(true)
+    expect(usageFailureOf('GET https://chatgpt.com/x failed: 429 Too Many Requests').said).toBe(usageSaid.rateLimited)
+    expect(usageFailureOf('Codex didn’t answer in time.').said).toBe(usageSaid.noReply)
+    expect(usageFailureOf('connect ECONNREFUSED 127.0.0.1:443').said).toBe(usageSaid.noReply)
+    expect(usageFailureOf('GET https://chatgpt.com/x failed: 502 Bad Gateway').said).toBe(usageSaid.providerError)
+    expect(usageFailureOf('Codex answered with something Althar does not know (a bucket that is no object).')).toEqual({
+      signedOut: false,
+      said: usageSaid.unknown,
+    })
+    for (const said of Object.values(usageSaid).map((one) => (typeof one === 'string' ? one : one('Codex'))))
+      expect(said).not.toMatch(/https?:|\{|\b\d{3}\b/)
   })
 })

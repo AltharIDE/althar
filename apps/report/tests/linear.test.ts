@@ -160,6 +160,36 @@ describe('what is kept between reports', () => {
     expect((await run(post(formOf()), { linear, cache, fetch })).response.status).toBe(201)
     expect(operationsOf(linear)).toEqual(['ReportTeam', 'ReportLabel', 'ReportTeam', 'ReportLabel', 'ReportIssueCreate'])
   })
+
+  it('shares one setup for concurrent reports that need a new label', async () => {
+    const linear = makeFakeLinear()
+    const cache: SetupCache = new Map()
+    const bothAllowed = Promise.withResolvers<void>()
+    let reports = 0
+    const env = envOf({
+      REPORTS_PER_INSTALL: {
+        limit: async () => {
+          reports += 1
+          if (reports === 2) bothAllowed.resolve()
+          await bothAllowed.promise
+          return { success: true }
+        },
+      },
+    })
+    const results = await Promise.all([run(post(formOf()), { linear, cache, env }), run(post(formOf()), { linear, cache, env })])
+    expect(results.map(({ response }) => response.status)).toEqual([201, 201])
+    expect(operationsOf(linear)).toEqual(['ReportTeam', 'ReportLabel', 'ReportLabelCreate', 'ReportIssueCreate', 'ReportIssueCreate'])
+  })
+
+  it('retries a failed setup on the next report', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const linear = makeFakeLinear({ label: 'team' })
+    const cache: SetupCache = new Map()
+    const unavailable: Fetch = async () => new Response(null, { status: 503 })
+
+    expect((await run(post(formOf()), { linear, cache, fetch: unavailable })).response.status).toBe(502)
+    expect((await run(post(formOf()), { linear, cache })).response.status).toBe(201)
+  })
 })
 
 /** A fetch that answers `operation` (or the storage's PUT) with `answer`, and passes the rest to the fake. */
@@ -191,12 +221,33 @@ const failures: ReadonlyArray<readonly [string, string, () => Promise<Response>,
     'team',
     'HTTP 200, INVALID_INPUT: Entity not found: Team',
   ],
+  [
+    'a GraphQL error with a message but no extension code',
+    'ReportTeam',
+    async () => Response.json({ errors: [{ message: 'Team unavailable' }] }),
+    'team',
+    'HTTP 200, error: Team unavailable',
+  ],
+  [
+    'a GraphQL error with neither a code nor a message',
+    'ReportTeam',
+    async () => Response.json({ errors: [null] }),
+    'team',
+    'HTTP 200, error',
+  ],
   ['an answer with no data', 'ReportTeam', data(null), 'team', 'unexpected answer: no data'],
   ['no team', 'ReportTeam', data({ team: null }), 'team', 'unexpected answer: no team'],
   [
     'Triage on with no triage state',
     'ReportTeam',
     data({ team: { triageEnabled: true, states: { nodes: [{ id: 's', type: 'backlog' }] } } }),
+    'team',
+    'unexpected answer: triage is on but the team has no triage state',
+  ],
+  [
+    'Triage on with no states connection',
+    'ReportTeam',
+    data({ team: { triageEnabled: true } }),
     'team',
     'unexpected answer: triage is on but the team has no triage state',
   ],
@@ -219,6 +270,20 @@ const failures: ReadonlyArray<readonly [string, string, () => Promise<Response>,
     'an upload address that is not http',
     'ReportFileUpload',
     data({ fileUpload: { success: true, uploadFile: { uploadUrl: 'file:///etc/passwd', assetUrl: 'https://x.test/a', headers: [] } } }),
+    'upload',
+    'unexpected answer: no upload address',
+  ],
+  [
+    'an upload with an invalid asset address',
+    'ReportFileUpload',
+    data({ fileUpload: { success: true, uploadFile: { uploadUrl: 'https://x.test/u', assetUrl: 'bad address' } } }),
+    'upload',
+    'unexpected answer: no upload address',
+  ],
+  [
+    'an upload with no file data',
+    'ReportFileUpload',
+    data({ fileUpload: { success: true, uploadFile: null } }),
     'upload',
     'unexpected answer: no upload address',
   ],

@@ -19,6 +19,7 @@ import {
   EdgeMini,
   EdgePlaces,
   EdgeSpot,
+  fewerOf,
   Icon,
   KeepAwake,
   LinkButton,
@@ -52,6 +53,7 @@ import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
+import { usePlaces } from '../../shared/usePlaces'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { CHANGELOG, COMMUNITY, WEBSITE } from '../../shared/links'
@@ -64,6 +66,7 @@ import { type ConnectionsModel, useConnections } from '../connections/useConnect
 import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
+import { ComputersSection } from './ComputersSection'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
 import { ChangedBy } from './ChangedBy'
@@ -109,6 +112,8 @@ export interface SettingsPageProps {
   focus?: SettingsFocus
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
+  /** About Althar's What's new: Althar's own page, in the window. Without it, the notes in the browser. */
+  onWhatsNew?: () => void
   /**
    * An agent to sign in again, by its id, as a signed-out agent's error asks:
    * its tab opens, with its sign-in started, once while the page shows.
@@ -118,9 +123,25 @@ export interface SettingsPageProps {
   account?: string
   /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
   agent?: string
+  /** The computer opened out in Computers, as the tab's address says it: the home, or a worker by its id. */
+  worker?: string
+  /** Opens a computer out in Computers, or none: all of them. */
+  onComputer?: (id: string | null) => void
 }
 
-export function SettingsPage({ start, section, onSection, focus, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
+export function SettingsPage({
+  start,
+  section,
+  onSection,
+  focus,
+  onTask,
+  onWhatsNew,
+  signIn,
+  account: meant,
+  agent: shown,
+  worker,
+  onComputer,
+}: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -188,8 +209,11 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
         looks={looks}
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
+        {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
         lit={focus === 'task-folders'}
         onFreeUp={() => onSection('this-mac', 'task-folders')}
+        computer={worker ?? null}
+        onComputer={onComputer ?? (() => onSection('computers'))}
       />
       <div hidden={section !== 'agents'}>
         <AgentCatalogSection start={start} active={section === 'agents'} />
@@ -212,8 +236,11 @@ function SectionBody({
   looks,
   asked,
   onTask,
+  onWhatsNew,
   lit,
   onFreeUp,
+  computer,
+  onComputer,
 }: {
   section: Section
   start: StartModel
@@ -223,10 +250,14 @@ function SectionBody({
   /** The agent the person was sent here to sign in again. */
   asked?: string
   onTask?: (threadId: string) => void
+  onWhatsNew?: () => void
   /** The task folders' row comes into view and lights for a moment: the person was sent there to free space. */
   lit: boolean
   /** Sends the person to the task folders' row, from About's storage. */
   onFreeUp: () => void
+  /** The computer opened out in Computers. */
+  computer: string | null
+  onComputer: (id: string | null) => void
 }) {
   switch (section) {
     case 'agents':
@@ -237,6 +268,8 @@ function SectionBody({
       return <SkillsSection start={start} />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
+    case 'computers':
+      return <ComputersSection start={start} opened={computer} onOpen={onComputer} onTask={onTask} />
     case 'this-mac':
       return <ThisMacSection lit={lit} {...(onTask === undefined ? {} : { onTask })} />
     case 'tasks':
@@ -264,7 +297,7 @@ function SectionBody({
         </>
       )
     case 'about':
-      return <AboutSection start={start} onFreeUp={onFreeUp} />
+      return <AboutSection start={start} onFreeUp={onFreeUp} {...(onWhatsNew === undefined ? {} : { onWhatsNew })} />
   }
 }
 
@@ -365,6 +398,7 @@ const opensAtLogin = platform === 'darwin' || platform === 'win32'
 function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const places = usePlaces(true)
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
   return (
@@ -384,6 +418,7 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
             machine={atOnce.atOnce.machine}
             most={MOST_AT_ONCE}
             onChange={atOnce.set}
+            fewer={places === null ? null : fewerOf(places)}
             text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
           />
         )}
@@ -770,7 +805,7 @@ function BrowserSection() {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => void }) {
+function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
@@ -786,6 +821,7 @@ function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => 
         checking={update.checking}
         website={WEBSITE}
         notes={CHANGELOG}
+        {...(onWhatsNew === undefined ? {} : { onNotes: onWhatsNew })}
         community={COMMUNITY}
         {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
       />

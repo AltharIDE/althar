@@ -162,6 +162,16 @@
   text-transform: uppercase;
   color: var(--t-3);
 }
+/* held back: the glyph in the load meter's warm, and until when under the head */
+.heldGlyph {
+  color: var(--warm);
+}
+.heldLine {
+  margin: 0;
+  padding: 0 9px 6px;
+  font-size: 12px;
+  color: var(--t-2);
+}
 .headAside {
   margin-left: auto;
   font: 500 11px/1 var(--font);

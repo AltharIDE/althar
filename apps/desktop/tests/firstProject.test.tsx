@@ -19,7 +19,7 @@ import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Start({ onProject = vi.fn() }: { onProject?: (id: string) => void }) {
   const start = useStart()
-  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} home={() => null} />
+  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} onNew={() => {}} home={() => null} />
 }
 
 const found = (name: string, at = '/w') => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })

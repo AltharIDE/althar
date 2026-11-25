@@ -1,14 +1,14 @@
 import { useState } from 'react'
 
 import {
-  type BoardTask,
   type CheckFailures,
   type ChangeSummary,
   checkFailuresOf,
   type ThreadItem,
   type ThreadSnapshot,
+  workerNameOf,
 } from '@althar/contracts'
-import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
+import { Button, device, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
 import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
@@ -29,6 +29,9 @@ import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 export const partsText = {
   worktree: 'Worktree',
+  /** A task on a worker: its files, as they are there, copied into a folder the person picks. */
+  copyWorker: `Copy to ${device.this}…`,
+  copyingWorker: 'Copying…',
   local: 'Local',
   /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
   toLocal: 'Move to Local',
@@ -102,6 +105,7 @@ export const partsText = {
   issueStatus: 'Status',
   inTracker: (tracker: string) => `In ${tracker}`,
   running: 'Running',
+  runningOn: (worker: string) => `Running on ${worker}`,
   open: 'Open',
   stop: 'Stop',
   answersAt: 'Address',
@@ -140,6 +144,7 @@ export interface PartsActions {
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
+  readonly copyWorker?: { readonly pending: boolean; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
@@ -214,7 +219,8 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       facts: [
         ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
         ...(task.toward === undefined ? [] : [[t.into, <code key="t">{task.toward}</code>] as const]),
-        [t.where, <code key="w">{task.worktree}</code>],
+        // On a worker, its folder is there: the home's copy of it is no place to open.
+        [t.where, task.workerId == null ? <code key="w">{task.worktree}</code> : workerNameOf(task.workerId)],
       ],
       ...(task.files.length === 0 && act.workToward === undefined
         ? {}
@@ -250,6 +256,17 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 onClick: act.openInEditor.open,
                 variant: 'quiet' as const,
                 icon: 'external' as const,
+              },
+            ]),
+        ...(act.copyWorker === undefined
+          ? []
+          : [
+              {
+                label: act.copyWorker.pending ? t.copyingWorker : t.copyWorker,
+                onClick: act.copyWorker.open,
+                disabled: act.copyWorker.pending,
+                variant: 'quiet' as const,
+                icon: 'download' as const,
               },
             ]),
         ...(act.removeFolder === undefined
@@ -420,13 +437,15 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
   }
   for (const launch of task.launches.filter((one) => one.ended === null)) {
     const address = launch.url
+    // One on a worker answers through the home, at an address of Althar's own: it goes by what it runs, and where.
+    const on = launch.workerId === undefined ? null : workerNameOf(launch.workerId)
     parts.push({
       id: `run:${launch.id}`,
       icon: address === null ? 'play' : 'globe',
-      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : addressOf(address)),
-      detail: t.running,
+      name: launch.name ?? (address === null || on !== null ? (launch.label ?? launch.command) : addressOf(address)),
+      detail: on === null ? t.running : t.runningOn(on),
       tone: 'live',
-      facts: address === null ? [] : [[t.answersAt, <code key="a">{launch.workerId === undefined ? address : addressOf(address)}</code>]],
+      facts: address === null || on !== null ? [] : [[t.answersAt, <code key="a">{address}</code>]],
       actions: [
         ...(address === null ? [] : [{ label: t.open, onClick: () => act.openUrl(address), icon: 'external' as const }]),
         { label: t.stop, onClick: () => act.stopLaunch(launch.id), variant: 'quiet' as const, end: true },

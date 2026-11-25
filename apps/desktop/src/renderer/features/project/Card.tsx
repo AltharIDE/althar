@@ -1,24 +1,14 @@
 import { useState } from 'react'
 
-import {
-  type AgentStatus,
-  type ChangeSummary,
-  type PlanStep,
-  type Product,
-  type ProjectWorker,
-  type TaskEnd as End,
-  type WorksIn as Where,
-  workerPlanProblem,
-  workerProblem,
-} from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   AsideCard,
   AsideState,
+  device,
   type IssueRefProps,
   type LaunchStep,
   LinkButton,
   PresetOffer,
-  Select,
   TaskCard,
   TaskEnd,
   TaskLaunch,
@@ -36,10 +26,12 @@ import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText, stoppedWords } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
+import { useHomeState } from '../homes/useHomes'
+import { HOME, placementOf, runsOnText } from './runsOn'
 import s from './Card.module.css'
 
 /*
@@ -259,48 +251,27 @@ function PlanCard({
     if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
-  const workers = actions.workers ?? []
-  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
-  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : 'home'
-  const selection = workers.find((worker) => worker.workerId === selected)
-  const planProblem = workerPlanProblem(plan.workerRequirements, worksIn, steps)
-  const startProblem =
-    selected === 'home' ? undefined : (planProblem ?? workerProblem(selection, steps, plan.workerRequirements?.repositoryCount))
-  const from = fromOf(card)
-  const placementNote =
-    startProblem ?? planProblem ?? (selected === 'home' ? undefined : 'Setup and lead run on the worker. Review runs on this home.')
+  // Where it runs, while it is held: the home, or one of its workers (ADR-103). The runtime checks the choice again as it starts.
+  const homes = useServices().host.homes
+  const here = useHomeState(homes)
+  // The home by the window's name for it: This Mac, or the remote home's own; until the window has read which, neither.
+  const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : here === null ? null : here.current.home.name
+  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: HOME })
+  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : HOME
   const placement =
-    card.phase !== 'held' || (workers.length === 0 && selected === 'home') ? undefined : (
-      <>
-        {(planProblem === undefined || selected !== 'home') && (
-          <Select
-            label="Run on"
-            variant="filled"
-            value={selected}
-            options={[
-              { value: 'home', label: 'This home' },
-              ...workers.map((worker) => {
-                const problem = planProblem ?? workerProblem(worker, steps, plan.workerRequirements?.repositoryCount)
-                const label = 'Linux worker ' + worker.workerId.slice(-6)
-                return {
-                  value: worker.workerId,
-                  label: problem === undefined ? label : `${label} · ${problem}`,
-                  disabled: problem !== undefined,
-                }
-              }),
-              ...(selected !== 'home' && selection === undefined ? [{ value: selected, label: 'Worker unavailable', disabled: true }] : []),
-            ]}
-            onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
-          />
-        )}
-        {placementNote !== undefined && (
-          <>
-            {' '}
-            <span role="status">{placementNote}</span>
-          </>
-        )}
-      </>
-    )
+    card.phase === 'held'
+      ? placementOf({
+          workers: actions.workers ?? [],
+          selected,
+          steps,
+          requirements: plan.workerRequirements,
+          worksIn,
+          home: homeName,
+          agentName: (id) => actions.agentName(id),
+        })
+      : null
+  const startProblem = placement?.problem
+  const from = fromOf(card)
   return (
     <TaskLaunch
       task={card.slug}
@@ -349,7 +320,7 @@ function PlanCard({
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
-      text={{ ruleNote: (_project, note) => note }}
+      text={{ ruleNote: (_project, note) => note, ...(homeName === null ? { useHome: () => runsOnText.useHome } : {}) }}
       // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-091).
       {...(worksIn === undefined
         ? {}
@@ -377,17 +348,19 @@ function PlanCard({
                   },
                 }),
           })}
-      {...(card.presetOffer === undefined && placement === undefined
+      {...(placement === null || !placement.shown
         ? {}
         : {
-            footNote: (
-              <>
-                {' '}
-                {placement} {card.presetOffer === undefined ? undefined : <Offer card={card} />}{' '}
-              </>
-            ),
+            runsOn: {
+              value: selected,
+              places: placement.places,
+              note: placement.note,
+              ...(startProblem === undefined ? {} : { problem: startProblem }),
+              onChange: (workerId: string) => setPlace({ planId: plan.id, workerId }),
+            },
           })}
-      onStart={() => actions.onStart(plan.id, selected === 'home' ? undefined : selected)}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
+      onStart={() => actions.onStart(plan.id, selected === HOME ? undefined : selected)}
       startDisabled={startProblem !== undefined}
     />
   )
@@ -518,21 +491,24 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Beside it, why, or what of its pull request stands first, as the board's card says it: a failed check, checks running.
   const standing = said === null ? undefined : (why ?? (card.change === null ? undefined : factsOf(card.change)[0]?.words))
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
-  const now = discarded
-    ? undefined
-    : standing !== undefined
-      ? standing
-      : status === TaskStatus.Done
-        ? card.summary?.split('\n')[0]
-        : card.externalWait !== undefined
-          ? externalWaitWords(card.externalWait, clock)
-          : card.queued !== null
-            ? queuedWords(card.queued)
-            : card.waits !== null
-              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-              : card.reconnects != null
-                ? reconnectsWords(card.reconnects, clock)
-                : stepNow(card.step, card.shipAt)
+  // Stopped: who stopped it and why, or the task its work went on in, under its title, rather than the step it was cut short in.
+  const stoppedWhy = status === TaskStatus.Stopped && card.phase === 'stopped' ? stoppedWords(card.stopped) : undefined
+  const now =
+    discarded || (status === TaskStatus.Stopped && card.phase === 'stopped')
+      ? undefined
+      : standing !== undefined
+        ? standing
+        : status === TaskStatus.Done
+          ? card.summary?.split('\n')[0]
+          : card.externalWait !== undefined
+            ? externalWaitWords(card.externalWait, clock)
+            : card.queued !== null
+              ? queuedWords(card.queued)
+              : card.waits !== null
+                ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+                : card.reconnects != null
+                  ? reconnectsWords(card.reconnects, clock)
+                  : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
@@ -552,6 +528,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       steps={steps}
       at={status === TaskStatus.Done || said !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
+      {...(stoppedWhy === undefined ? {} : { why: stoppedWhy })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
       {...(effort === null ? {} : { effort })}
@@ -609,7 +586,7 @@ function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardA
       case AsideState.Failed:
         return answer
       case AsideState.Stopped:
-        return card.stopped?.by == null ? undefined : stepText.stoppedBy[card.stopped.by]
+        return stoppedWords(card.stopped)
       case AsideState.Waiting:
         return card.queued !== null
           ? queuedWords(card.queued)

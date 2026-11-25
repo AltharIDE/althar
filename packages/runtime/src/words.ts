@@ -118,13 +118,36 @@ export const stuckWhyOf = (words: string | null | undefined): 'signed_out' | 'si
         ? 'not_installed'
         : undefined
 
+/** Where the agent came with Althar, as Claude Code and Codex do, or the person installed it: whose copy to put right. */
+export interface Whose {
+  readonly bundled: boolean
+}
+
+/** Putting right a copy Althar brings: its install again, whichever way it was installed. */
+const reinstallWords = 'Reinstall Althar (in a checkout of Althar, run bun install), then try again.'
+
+/** A program and what drives it at different versions, in what it said: the copy to update. */
+export const mismatchWords = (said: string, whose?: Whose) =>
+  `${sentence(`Its program and what drives it are different versions: ${said}`)} ${whose?.bundled === true ? reinstallWords : 'Update it, then try again.'}`
+
+/** A part of an agent that comes with Althar, missing: Althar's install to finish. */
+export const incompleteWords = (said: string) => `${sentence(`A part of it is missing: ${said}`)} ${reinstallWords}`
+
+/** An agent that stopped under its adapter while it started. */
+export const crashedWords = (said: string) => sentence(`It stopped while starting: ${said}`)
+
+/** An agent that answered no more than JSON-RPC's "Internal error": where what it wrote is. */
+export const noReasonWords = 'It gave no reason. What it wrote is in Althar’s agents log.'
+
 /**
  * Why an agent couldn't start or be reached, in one plain line, where it is a
  * class the person can act on: not installed, not signed in, its sign-in
- * ended, or the network in the way (DEV-196). Undefined for anything else,
- * which the agent's own first error line says.
+ * ended, the network in the way (DEV-196), its program at another version
+ * than what drives it, a part of it missing, or its stopping on the way.
+ * Undefined for anything else, which the agent's own first error line says.
+ * `said` is that line, which the last three say too.
  */
-const classWords = (failure: StartFailure | undefined, command: string): string | undefined => {
+const classWords = (failure: StartFailure | undefined, command: string, said: string, whose?: Whose): string | undefined => {
   switch (failure) {
     case 'not_installed':
       return notInstalledWords(command)
@@ -134,14 +157,23 @@ const classWords = (failure: StartFailure | undefined, command: string): string 
       return signInEndedWords
     case 'unreachable':
       return unreachableWords(thisDevice())
+    case 'version_mismatch':
+      return mismatchWords(own(said), whose)
+    case 'incomplete':
+      return incompleteWords(own(said))
+    case 'crashed':
+      return crashedWords(own(said))
     case undefined:
       return undefined
   }
 }
 
 /** The class of one answer an agent gave, such as a spawn's error or a refused request, in words. */
-const classed = (said: string, command: string, authRequired = false): string | undefined =>
-  classWords(startFailureOf(said, authRequired), command)
+const classed = (said: string, command: string, authRequired = false, whose?: Whose): string | undefined =>
+  classWords(startFailureOf(said, authRequired), command, firstErrorLine(said), whose)
+
+/** JSON-RPC's own words for an error that says nothing more. */
+const bareInternal = /^\s*internal error:?\s*$/i
 
 /**
  * A line of an agent's own, as the window and the step's call show it and the
@@ -150,7 +182,7 @@ const classed = (said: string, command: string, authRequired = false): string | 
 const own = (line: string): string => redact(line)
 
 /** What an agent's own error says, when the runtime can put it in words. */
-export const agentSaid = (error: unknown): string | undefined => {
+export const agentSaid = (error: unknown, whose?: Whose): string | undefined => {
   switch (tagOf(error)) {
     case 'StartTimedOut':
     case 'ModelSwitchedOff':
@@ -161,7 +193,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       if (/ENOENT/.test(reason)) return notInstalledWords(command)
-      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${own(firstErrorLine(reason))}`)
+      return classed(reason, command, false, whose) ?? sentence(`${command} wouldn't start: ${own(firstErrorLine(reason))}`)
     }
     case 'AgentExited': {
       const stderr = text(error, 'stderr')
@@ -171,15 +203,22 @@ export const agentSaid = (error: unknown): string | undefined => {
       // Its class from its last lines alone, and the line said from them: what it wrote further up, an MCP server's 401 or a
       // hook's "command not found", is no reason it stopped.
       const said = own(closingErrorLine(stderr))
-      return classWords(closingFailureOf(stderr), '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
+      return (
+        classWords(closingFailureOf(stderr), '', said, whose) ??
+        (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
+      )
     }
-    case 'AgentRequestFailed':
+    case 'AgentRequestFailed': {
+      const message = text(error, 'message')
+      // "Internal error" alone is no reason to show, whatever its class: the log keeps the whole answer.
+      const bare = bareInternal.test(message)
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return classed(text(error, 'message'), '', true) ?? signedOutWords
+          return (bare ? undefined : classed(message, '', true, whose)) ?? signedOutWords
         // A connection that failed, said as what to look at; a server's own trouble stays in its words.
         case 'transient':
-          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
+          if (bare) return noReasonWords
+          return classed(message, '', false, whose) ?? sentence(own(firstErrorLine(message)))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -189,8 +228,10 @@ export const agentSaid = (error: unknown): string | undefined => {
         case 'session_lost':
           return lostWords('The agent')
         default:
-          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
+          if (bare) return noReasonWords
+          return classed(message, '', false, whose) ?? sentence(own(firstErrorLine(message)))
       }
+    }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`
     case 'TurnInProgress':
@@ -213,9 +254,9 @@ const gitFailed = (error: unknown): string | undefined =>
   tagOf(error) === 'GitFailed' ? sentence(gitSummary(error as GitFailure)) : undefined
 
 /** A cause, summed up for a person: what the agent said, what the host said no to, or the first line of what went wrong. */
-export const summarize = (cause: Cause.Cause<unknown>): string => {
+export const summarize = (cause: Cause.Cause<unknown>, whose?: Whose): string => {
   const error = Cause.findErrorOption(cause)
-  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value) ?? gitFailed(error.value)) : undefined
+  const said = Option.isSome(error) ? (agentSaid(error.value, whose) ?? hostFailed(error.value) ?? gitFailed(error.value)) : undefined
   if (said !== undefined) return said
   const first = lastLine(Cause.pretty(cause).split('\n')[0] ?? '').replace(/^\w*Error: /, '')
   return first === '' ? '' : sentence(first)
@@ -322,6 +363,9 @@ export const words = (
       case 'NotFound':
         // A push with nowhere to go: none of its repositories has a remote.
         if (text(error, 'kind') === 'remote') return 'Its repositories have no remote to push to. Add one with git, then push again.'
+        // A model only an account the project keeps out offers.
+        if (text(error, 'kind') === 'offered_model')
+          return 'No account this project uses offers that model. Allow the account that does in the project’s settings, or pick another model.'
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
         return `Althar has no agent called ${text(error, 'agentId')}.`
@@ -490,7 +534,9 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`
+        return fieldOf(error, 'staying') === true
+          ? `Couldn't sign this account out. Try again, or run ${text(error, 'line')} in Terminal.`
+          : `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -825,4 +871,5 @@ const accountRefused = {
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
   host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
+  no_sign_out: 'This agent has no command that signs it out. Sign in again to switch accounts.',
 } as const satisfies Record<AccountRefused['reason'], string>

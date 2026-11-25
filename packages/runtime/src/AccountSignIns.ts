@@ -1,5 +1,5 @@
 import { signInHost } from '@althar/contracts'
-import { type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
+import { openSignInProxy, type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
 import { Clock, Context, Effect, Fiber, Layer, Schema, Scope } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -9,6 +9,7 @@ import type { NotFound, UnknownAgent } from './errors'
 import { SignIns } from './SignIns'
 import { PlanUsage } from './PlanUsage'
 import { Copilot } from './Copilot'
+import { Models } from './Models'
 
 /*
  * Signing an agent's account in inside Althar (ADR-012), rather than in a
@@ -62,7 +63,7 @@ export class AccountSignIns extends Context.Service<
     cancel(flowId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/AccountSignIns') {
-  static readonly layer: Layer.Layer<AccountSignIns, never, Agents | Accounts | SignIns | PlanUsage | RuntimeConfig | Copilot> =
+  static readonly layer: Layer.Layer<AccountSignIns, never, Agents | Accounts | SignIns | PlanUsage | RuntimeConfig | Copilot | Models> =
     Layer.effect(
       AccountSignIns,
       Effect.gen(function* () {
@@ -72,6 +73,7 @@ export class AccountSignIns extends Context.Service<
         const planUsage = yield* PlanUsage
         const config = yield* RuntimeConfig
         const copilot = yield* Copilot
+        const models = yield* Models
         const scope = yield* Scope.Scope
         const flows = new Map<string, Flow>()
         let made = 0
@@ -127,6 +129,8 @@ export class AccountSignIns extends Context.Service<
                       if (config.openUrl) Effect.runFork(config.openUrl(challenge.page))
                     })
                     .pipe(
+                      // Signed in again, it may be someone else's sign-in, offered other models: its models are asked afresh.
+                      Effect.andThen(models.forgetAccount(accountId)),
                       Effect.andThen(signIns.account(account, true)),
                       Effect.andThen(planUsage.retell),
                       Effect.andThen(
@@ -160,6 +164,11 @@ export class AccountSignIns extends Context.Service<
                 return { flowId, state: flow.state }
               }
               const holder: { flow?: Flow } = {}
+              // The runtime's own services, its logger among them, for what the flow's events log: runtime.log, not the console.
+              const context = yield* Effect.context<never>()
+              // Codex's login on macOS goes out through a proxy of its own that finds addresses itself: a system resolver
+              // that stalls on a name can't fail the token exchange that ends it (provider-adapters' signInProxy).
+              const proxy = yield* Effect.promise(() => openSignInProxy(entry.definition).catch(() => null))
               const handle = startSignInFlow(
                 entry.definition,
                 (event) => {
@@ -182,12 +191,20 @@ export class AccountSignIns extends Context.Service<
                       return
                     case 'failed':
                       flow.state = { state: 'failed', message: event.message }
+                      // The person reads the short line; what the agent said goes to the log.
+                      Effect.runForkWith(context)(
+                        Effect.logWarning('A sign-in failed').pipe(
+                          Effect.annotateLogs({ agent: account.agentId, account: accountId, error: event.detail ?? event.message }),
+                        ),
+                      )
                       return
                     case 'done':
                       // Signed in: checked again, so every screen shows it, before the window hears it; plan usage told again
                       // with it, so a warning that the old sign-in was ending goes from the bar at once (DEV-196).
+                      // Signed in again, it may be someone else's sign-in, offered other models: its models are asked afresh.
                       Effect.runFork(
-                        signIns.account(account, true).pipe(
+                        models.forgetAccount(accountId).pipe(
+                          Effect.andThen(signIns.account(account, true)),
                           Effect.flatMap(() =>
                             planUsage.retell.pipe(
                               Effect.ensuring(
@@ -206,6 +223,7 @@ export class AccountSignIns extends Context.Service<
                   way,
                   ...(host === undefined ? {} : { host }),
                   home: accounts.env(account),
+                  proxy,
                   ...(config.openUrl === undefined
                     ? {}
                     : { openUrl: (url: string) => void Effect.runFork(config.openUrl?.(url) ?? Effect.void) }),

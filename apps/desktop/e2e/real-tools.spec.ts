@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, mainWindow, openFirstProject, say } from './support'
+import { connectGitHub, displaySwitches, mainWindow, openFirstProject, say } from './support'
 
 /*
  * What a real agent does through Althar's tools rather than around its
@@ -89,7 +89,7 @@ test('a real coordinator and lead install, run, screenshot, stop, and run checks
     ),
   )
   const app = await electron.launch({
-    args: [join(import.meta.dirname, '..')],
+    args: [join(import.meta.dirname, '..'), ...displaySwitches],
     env: {
       ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),

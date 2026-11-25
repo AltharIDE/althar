@@ -26,6 +26,10 @@ message AgentWorkerFrame {
     AgentManagedRef managed_ready = 9;
     AgentManagedOutput managed_output = 10;
     AgentManagedExit managed_exit = 11;
+    AgentFileResult file_result = 12;
+    AgentFileChunk file_chunk = 13;
+    AgentRunBytes index_patch = 14;
+    AgentRunAccepted accepted = 15;
   }
 }
 
@@ -48,6 +52,7 @@ message AgentHomeFrame {
     AgentRunBytes skills_chunk = 15;
     AgentManagedInput helper_skills_chunk = 16;
     AgentManagedInput helper_checkout_chunk = 17;
+    AgentFileRequest file_request = 18;
   }
 }
 
@@ -56,6 +61,26 @@ message AgentWorkerHello {
   uint32 version = 2;
   repeated AgentWorkerCapability capabilities = 3;
   string journal_id = 4;
+  AgentWorkerCapacity capacity = 5;
+  bool reserve_before_transfer = 6;
+  // A worker its home set up offers each agent for any project the home grants
+  // it, as a capability whose project_id is "*". The home's grants decide.
+  bool any_project = 7;
+  // It says which of its providers are signed in on it.
+  bool reports_sign_in = 8;
+  repeated string signed_in = 9;
+  // The Althar release it runs, where it was installed from one.
+  string release = 10;
+}
+
+message AgentWorkerCapacity {
+  // These refer to the worker and its workspace volume, never the home.
+  string platform = 1;
+  string architecture = 2;
+  uint32 cpu_cores = 3;
+  uint32 free_memory_mib = 4;
+  uint32 free_disk_mib = 5;
+  bool account_reserved = 6;
 }
 
 // A worker can only start a provider that its operator enabled for the project.
@@ -70,6 +95,8 @@ message AgentWorkerCapability {
   bool skill_files = 8;
   bool helper_skill_files = 9;
   bool helper_checkouts = 10;
+  bool file_reads = 11;
+  bool workspace_index = 12;
 }
 
 message AgentHomeHello {
@@ -77,6 +104,7 @@ message AgentHomeHello {
   string worker_id = 2;
   uint32 version = 3;
   uint32 lease_ms = 4;
+  bool reserve_before_transfer = 5;
 }
 
 // Provider executable, provider arguments, and account credentials stay on the worker.
@@ -134,6 +162,10 @@ message AgentWorkspaceSource {
   uint32 size = 1;
   bytes sha256 = 2;
   string head = 3;
+}
+
+message AgentRunAccepted {
+  string run_id = 1;
 }
 
 message AgentRunReady {
@@ -241,6 +273,7 @@ message AgentRunExit {
   AgentRunOutcome outcome = 2;
   // Present only for a confirmed process exit with an exit code.
   optional uint32 exit_code = 3;
+  bool worker_busy = 4;
 }
 
 enum AgentRunOutcome {
@@ -253,6 +286,34 @@ enum AgentRunOutcome {
 
 message AgentWorkerHeartbeat {
   uint32 sequence = 1;
+  AgentWorkerCapacity capacity = 2;
+  // Which of its providers are signed in now, where it says: an agent signed
+  // in or out during a run reaches the home without the worker starting again.
+  bool reports_sign_in = 3;
+  repeated string signed_in = 4;
+}
+
+message AgentFileRef {
+  string run_id = 1;
+  string file_id = 2;
+}
+
+message AgentFileRequest {
+  AgentFileRef file = 1;
+  string workspace_id = 2;
+  string relative_path = 3;
+}
+
+message AgentFileResult {
+  AgentFileRef file = 1;
+  bool unavailable = 2;
+  uint32 size = 3;
+  bytes sha256 = 4;
+}
+
+message AgentFileChunk {
+  AgentFileRef file = 1;
+  bytes data = 2;
 }
 
 message AgentSnapshotRequest {
@@ -261,6 +322,7 @@ message AgentSnapshotRequest {
   string base_head = 3;
   // Either the task repository ID or an active helper's scoped command ID.
   string workspace_id = 4;
+  bool capture_index = 5;
 }
 
 // A Git binary patch against the requested tree. The home verifies its own
@@ -275,6 +337,13 @@ message AgentSnapshotResult {
   uint32 commits_size = 7;
   bytes commits_sha256 = 8;
   string workspace_id = 9;
+  AgentSnapshotIndex index = 10;
+}
+
+message AgentSnapshotIndex {
+  string tree = 1;
+  uint32 size = 2;
+  bytes sha256 = 3;
 }
 
 // A connection to just the home tool server for this active run. Tool

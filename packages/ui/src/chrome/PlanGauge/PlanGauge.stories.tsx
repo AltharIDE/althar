@@ -4,10 +4,12 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import {
   CLAUDE_AHEAD,
   CLAUDE_PLENTY,
+  CLAUDE_RATE_LIMITED,
   CLAUDE_RESETS,
   CLAUDE_TWO,
   CLAUDE_UNREAD,
   CODEX_BEHIND,
+  CODEX_EXPIRED,
   CODEX_NEARLY,
   CODEX_PLENTY,
   CODEX_SIGNED_OUT,
@@ -83,7 +85,7 @@ export const SignedOut: Story = {
     await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_SIGNED_OUT.id)
     // Its saved numbers stay in its detail, with why it runs nothing.
     await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
-    await expect(page.getByText('Sign in to Codex to see its usage.')).toBeInTheDocument()
+    await expect(page.getByText('Signed out. Sign in again to read usage.')).toBeInTheDocument()
     await expect(page.getByText('80%')).toBeInTheDocument()
   },
 }
@@ -119,6 +121,39 @@ export const ResetsTwoAccounts: Story = {
   },
 }
 
+/** Codex's sign-in expired, on both its accounts: one short line for them both, under the row's Sign in again, and their last week quieter. */
+export const ReadingFailed: Story = {
+  args: { agents: [CLAUDE_PLENTY, CODEX_EXPIRED], defaultOpen: true, onSignIn: fn() },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
+    await expect(page.getAllByText('Signed out. Sign in again to read usage.')).toHaveLength(1)
+    await expect(page.getAllByText('read 20m ago')).toHaveLength(2)
+    await expect(page.queryByTitle(/of the way through/)).toBeNull()
+  },
+}
+
+/** Claude Code rate limited on both accounts: the line once, and the last numbers each account read, quieter. */
+export const ReadingFailedOther: Story = {
+  args: { agents: [CLAUDE_RATE_LIMITED, CODEX_PLENTY], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getAllByText('Rate limited. Tries again later.')).toHaveLength(1)
+  },
+}
+
+/** One account's last read got no reply: its line under it, and its numbers quieter than the other's, which are fresh. */
+export const StaleReading: Story = {
+  args: { agents: [CLAUDE_TWO], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getByText('No reply. Tries again soon.')).toBeInTheDocument()
+    await expect(page.getByText('read 2 hours ago')).toBeInTheDocument()
+  },
+}
+
 /** Claude Code's windows all reset since it was read: no figure, never all of its plan left, and its detail says why it wasn't read again. */
 export const Unread: Story = {
   args: { agents: [CODEX_PLENTY, CLAUDE_UNREAD], defaultOpen: true },
@@ -128,7 +163,7 @@ export const Unread: Story = {
     await expect(page.getByText('Not read since reset')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
     await expect(page.getByText('read 2 days ago')).toBeInTheDocument()
-    await expect(page.getByText(/Its sign-in has expired/)).toBeInTheDocument()
+    await expect(page.getByText(/Sign-in expired/)).toBeInTheDocument()
   },
 }
 

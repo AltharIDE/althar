@@ -1,5 +1,20 @@
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
+import type { HomeUpdateOffer, HomeUpdateRun } from '@althar/ui/screens'
+
+import {
+  releaseMakesProjects,
+  type HomeSetup,
+  type HomeState,
+  type HomeUpdateCheck,
+  type HomesHost,
+  type HomesOverview,
+  type RemoteHome,
+  type WindowHome,
+} from '../../../homes'
+
+import { useServices } from '../../data/services'
+import { device } from '../../shared/device'
 
 /*
  * What the window's homes share: where its own home stands, what main knows
@@ -39,6 +54,151 @@ const useFollowed = <A>(read: (() => Promise<A>) | undefined, follow: ((listener
 
 export const useHomeState = (homes: HomesHost | undefined): HomeState | null => useFollowed(homes?.state, homes?.onState)
 
+/** The launcher a home's SSH connection runs where none is saved for it (transport-node's sshArguments): where Althar installs one. */
+export const USUAL_LAUNCHER = '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher"'
+
+const quoted = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+
+/**
+ * How the window's home updates, run there (apps/host/README.md, Managed
+ * releases and updates), and how sure the window is of it. Over SSH, by the
+ * launcher and profile its connection runs, so it's the very installation
+ * the window talks to: `known` where that's where Althar installs one,
+ * `custom` where it's one saved for the home, which may be a source
+ * checkout's. Paired, or before the window knows, the window can't see how
+ * it was installed: `unknown`, by where Althar installs one.
+ */
+export interface HomeUpdate {
+  readonly command: string
+  readonly installed: 'known' | 'custom' | 'unknown'
+}
+
+export const updateOf = (current: WindowHome | undefined): HomeUpdate => {
+  const ssh = current === undefined || current.kind === 'local' ? undefined : current.home.ssh
+  const launcher = ssh?.launcher === undefined ? USUAL_LAUNCHER : quoted(ssh.launcher)
+  const profile = ssh?.profile === undefined ? '' : ` --profile ${quoted(ssh.profile)}`
+  return {
+    command: `sh ${launcher} update --apply --wait${profile}`,
+    installed: ssh === undefined ? 'unknown' : ssh.launcher === undefined ? 'known' : 'custom',
+  }
+}
+
+/** How the home the window is on updates, as its connection says. */
+export const useHomeUpdate = (): HomeUpdate => {
+  const { host } = useServices()
+  return updateOf(useHomeState(host.homes)?.current)
+}
+
+type Running = 'idle' | 'running' | 'done' | { readonly problem: string } | { readonly confirm: HomeUpdateCheck }
+
+/**
+ * An older home's update, for its window to offer: run by the window itself where it reaches the home over SSH by the
+ * launcher Althar installs (`known`), each step as it really stands (the release coming down while the connection
+ * holds, the home restarting once it drops), and the window reconnecting onto the new release once it answers; where
+ * the window can't, the command to run there and Check again. `onDone` goes just before the window reconnects.
+ *
+ * Only where a published release would help: the newest is looked for first, and where it's no newer than the last
+ * without making projects, the home is told none is out yet (`release: 'unreleased'`), with Check again looking anew.
+ * A home run from its own launcher may be a source checkout's, which pulling brings it, so it isn't asked; where the
+ * newest can't be found out, the update is offered, and says itself how it went.
+ *
+ * Where the newest release moves the home's data to a new format (a migration, nearly every release), it's asked
+ * about first, in a word: the window looks at what the update changes as it's offered, so the press asks at once, and
+ * where it hadn't yet, main answers that it needs asking. Accepted, it goes for that release only.
+ */
+export const useHomeUpdating = (
+  older: boolean,
+  onDone?: () => void,
+): {
+  readonly offer: HomeUpdateOffer
+  readonly onUpdate?: () => void
+  readonly onCancelUpdate?: () => void
+  readonly onCheckAgain: () => void
+} => {
+  const { host } = useServices()
+  const homes = host.homes
+  const state = useHomeState(homes)
+  const overview = useHomesOverview(homes)
+  const { command, installed } = updateOf(state?.current)
+  const [running, setRunning] = useState<Running>('idle')
+  const asked = homes?.release
+  const [fresh, setFresh] = useState(0)
+  const news = useQuery({
+    queryKey: ['homes', 'hostRelease', fresh],
+    queryFn: () => asked?.(fresh > 0) ?? Promise.resolve(null),
+    enabled: older && asked !== undefined && installed !== 'custom' && state !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+    placeholderData: (previous) => previous,
+  })
+  // Its restart stops what's running there: the tasks this window, or another on the home, last counted.
+  const home = state !== null && state.current.kind !== 'local' ? state.current.home.homeId : null
+  const busy = home === null ? 0 : (overview?.projects[home]?.list.reduce((sum, one) => sum + one.working, 0) ?? 0)
+  const connected = state?.connection === 'connected'
+  const reconnect = () => void homes?.reconnect().catch(() => undefined)
+  const update = homes?.update
+  const asking = homes?.updateCheck
+  const checked = useQuery({
+    queryKey: ['homes', 'updateCheck', home],
+    queryFn: () => asking?.() ?? Promise.reject(new Error('No check')),
+    enabled: older && asking !== undefined && update !== undefined && installed === 'known' && home !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+  }).data
+  const moving = checked?.change === 'data' ? checked : undefined
+  if (asked !== undefined && installed !== 'custom' && running === 'idle') {
+    if (news.isPending || news.isFetching) return { offer: { command, installed, release: 'checking' }, onCheckAgain: reconnect }
+    if (news.data != null && !releaseMakesProjects(news.data))
+      return { offer: { command, installed, release: 'unreleased' }, onCheckAgain: () => setFresh((at) => at + 1) }
+  }
+  if (update === undefined || installed !== 'known') return { offer: { command, installed }, onCheckAgain: reconnect }
+  const run: HomeUpdateRun =
+    running === 'idle'
+      ? { state: 'idle', ...(busy > 0 ? { busy } : {}), ...(moving === undefined ? {} : { moves: true }) }
+      : typeof running === 'object' && 'confirm' in running
+        ? { state: 'confirm', from: running.confirm.from, to: running.confirm.to, ...(busy > 0 ? { busy } : {}) }
+        : running === 'running' || running === 'done'
+          ? {
+              state: 'running',
+              step: running === 'done' ? 'reconnecting' : connected ? 'getting' : 'restarting',
+            }
+          : // The connection dropped on the way: the home may be serving its old release again, for a Reconnect.
+            { state: 'failed', problem: running.problem, ...(connected ? {} : { offline: true }) }
+  return {
+    offer: { command, installed, run },
+    onUpdate: () => {
+      if (running === 'running' || running === 'done') return
+      const accepted = typeof running === 'object' && 'confirm' in running ? running.confirm.to : undefined
+      // Known to move its data: asked at once, before anything runs.
+      if (accepted === undefined && moving !== undefined) return setRunning({ confirm: moving })
+      setRunning('running')
+      update(accepted).then(
+        (updated) => {
+          if (updated.state === 'confirm') return setRunning({ confirm: updated.check })
+          setRunning('done')
+          onDone?.()
+          reconnect()
+        },
+        (error: unknown) => setRunning({ problem: homeProblem(error) }),
+      )
+    },
+    onCancelUpdate: () => setRunning('idle'),
+    onCheckAgain: reconnect,
+  }
+}
+
+/**
+ * The home the window is on, as its words name it: another computer's by its
+ * name (runner-1), this one's as this computer is named (this Mac).
+ */
+export const useHomeName = (): { readonly remote: boolean; readonly name: string } => {
+  const { client, host } = useServices()
+  const state = useHomeState(host.homes)
+  const remote = client.connection !== undefined
+  if (!remote) return { remote, name: device.this }
+  return { remote, name: state !== null && state.current.kind !== 'local' ? state.current.home.name : 'this home' }
+}
+
 /** Every home, as main knows it; null until first read. */
 export const useHomesOverview = (homes: HomesHost | undefined): HomesOverview | null => useFollowed(homes?.overview, homes?.onOverview)
 
@@ -48,7 +208,7 @@ export const useHomeSetup = (homes: HomesHost | undefined): HomeSetup | null => 
 /** Asks the window to show its homes, as File › Homes… does: the chip's menu, or Connect a home where there's no chip yet. */
 export const showHomes = () => window.dispatchEvent(new Event('althar:show-homes'))
 
-export type HomesDialog = 'connect' | 'manage' | null
+export type HomesDialog = 'connect' | 'manage' | 'phones' | null
 interface HomesUi {
   readonly menu: boolean
   readonly dialog: HomesDialog

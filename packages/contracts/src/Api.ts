@@ -1,4 +1,4 @@
-import { PairingInvitation, PairingTokenHash } from './pairing'
+import { PairingCodeMade, PairingInvitation, PairingStatus, PairingTokenHash, PhoneAccess } from './pairing'
 import { GoalControl, ThreadGoal } from './goals'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
@@ -15,14 +15,39 @@ import {
   ClientPage,
 } from './identities'
 
-import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
+import {
+  ArtifactDrawing,
+  ArtifactsHow,
+  ArtifactsPlace,
+  CanvasDetail,
+  CanvasKind,
+  CanvasSummary,
+  CanvasText,
+  RepositoryFolders,
+  SentCanvasComment,
+} from './canvases'
 import { BroughtIn, Elsewhere } from './elsewhere'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
-import { WorkerPreviewRequest, WorkerPreviewResponse } from './workerPreview'
+import {
+  WorkerPreviewRequest,
+  WorkerPreviewResponse,
+  WorkerPreviewRun,
+  WorkerPreviewSocketData,
+  WorkerPreviewSocketId,
+} from './workerPreview'
+import {
+  WorkerFile,
+  WorkerFileRequest,
+  WorkerSnapshot,
+  WorkerSnapshotChunk,
+  WorkerSnapshotChunkRequest,
+  WorkerSnapshotId,
+  WorkerSnapshotRequest,
+} from './workerSnapshot'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -404,6 +429,8 @@ export const AgentStatus = Schema.Struct({
   accounts: Schema.Array(AccountStatus),
   /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
   addsAccounts: Schema.Boolean,
+  /** Its own command signs an account out, so each can be signed out from Althar, its usual folder's included. */
+  signsOut: Schema.optional(Schema.Boolean),
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
@@ -1166,9 +1193,62 @@ export const FolderReading = Schema.Struct({
 })
 export type FolderReading = typeof FolderReading.Type
 
+/** A repository found on a home's disk where people keep code, by the grant it opens by and where it is as the person knows it (~/code/site). */
+export const HomeRepository = Schema.Struct({
+  grant: Schema.String,
+  name: Schema.String,
+  where: Schema.String,
+  /** The branch checked out, or null where none is. */
+  branch: Schema.NullOr(Schema.String),
+  /** When it was last worked on, as ms since the epoch. */
+  worked: Schema.Number,
+})
+export type HomeRepository = typeof HomeRepository.Type
+
+/**
+ * Where on a home a new project's code can come from and go, as the home
+ * finds it, for a window that can't show its folder picker there: the
+ * repositories in the usual places (~/code, ~/projects and the like), newest
+ * work first, and the folder a clone or a new repository goes in. Each by a
+ * grant the home made, so the window still names no path of its own.
+ */
+export const HomeFolders = Schema.Struct({
+  /** The places looked in that there are, as the person knows them. */
+  lookedIn: Schema.Array(Schema.String),
+  repositories: Schema.Array(HomeRepository),
+  /** Where a clone or a new repository goes: the folder most of those found are in, else the usual one, made when first used. */
+  place: Schema.Struct({ grant: Schema.String, where: Schema.String }),
+})
+export type HomeFolders = typeof HomeFolders.Type
+
+/** What a home's computer is, as it says when asked: for the window to say what it's on. */
+export const Machine = Schema.Struct({
+  /** As the system names itself: Ubuntu 24.04.1 LTS, macOS 26.1. */
+  system: Schema.String,
+  cores: Schema.Int,
+  /** In bytes. */
+  memory: Schema.Number,
+  /** The room on the disk projects go on, in bytes; null where it can't be read. */
+  disk: Schema.NullOr(Schema.Struct({ free: Schema.Number, size: Schema.Number })),
+  /** git's version (2.43.0), or null where it isn't installed. */
+  git: Schema.NullOr(Schema.String),
+})
+export type Machine = typeof Machine.Type
+
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
+
+/** Each kind of request in words, as an always answer keeps it: "Always allow ___", in the window and on the home's page. */
+export const ruleKindWords = {
+  'default-branch': 'pushes to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushes of every branch, tags or a pattern of branches',
+  'delete-branch': 'deleting branches that aren’t the task’s',
+  deploy: 'deploying and publishing',
+  outside: 'writing outside the task’s worktree',
+  speak: 'posting for you',
+} as const satisfies Record<RuleKind, string>
 
 /**
  * A command the person named: asked about, refused, or let through without
@@ -2153,6 +2233,15 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
  * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
@@ -2169,8 +2258,13 @@ export const NoticeItem = Schema.Struct({
     description: Schema.NullOr(Schema.String),
     /** What the line is built on, kept apart from it: a host's raw answer, pretty-printed, drawn folded under "Details". */
     details: Schema.optional(Schema.String),
-    /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
-    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+    /**
+     * Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. `at`, where
+     * given, is where the label starts in the title, for a label that also stands earlier in it ("test" in "test / linux").
+     */
+    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String, at: Schema.optional(Schema.Number) }))),
+    /** The failed checks the line names, such as the merge queue's: the end of each one's log, or why it couldn't be read, folded under it. */
+    logs: Schema.optional(Schema.Array(CheckLogShown)),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
@@ -2400,15 +2494,6 @@ export const CanvasItem = Schema.Struct({
   }),
 })
 
-/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
-export const CheckLogShown = Schema.Struct({
-  name: Schema.String,
-  url: Schema.NullOr(Schema.String),
-  log: Schema.NullOr(Schema.String),
-  missing: Schema.NullOr(Schema.String),
-})
-export type CheckLogShown = typeof CheckLogShown.Type
-
 /**
  * Something heard from outside, written by someone else: a comment or a
  * review on the task's pull request, its checks finishing, its being merged,
@@ -2447,14 +2532,91 @@ export const ArrivalItem = Schema.Struct({
   }),
 })
 
+export const WorkerCapacity = Schema.Struct({
+  platform: Schema.Literals(['linux', 'macos', 'windows']),
+  architecture: Schema.Literals(['x64', 'arm64']),
+  cpuCores: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
+  freeMemoryMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+  freeDiskMib: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffffffff })),
+})
+
+export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
+  /** As the person added it; none for one enrolled by command, or from an older home. */
+  name: Schema.optionalKey(Schema.String),
   providers: Schema.Array(Schema.String),
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
+  capacity: Schema.optionalKey(WorkerCapacity),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
+export type WorkerCapacity = typeof WorkerCapacity.Type
+
+/**
+ * A worker the home enrolled, as Settings › Computers and the load popover
+ * list it (ADR-103): whether it is connected now, whether it runs a task (one
+ * at a time) and which, what it reported last, the agents it can run and the
+ * projects it may work on.
+ */
+export const HomeWorker = Schema.Struct({
+  workerId: Schema.String,
+  /** As the person added it: the computer's name or its SSH address; none for one enrolled by command, or from an older home. */
+  name: Schema.optionalKey(Schema.String),
+  /** The SSH address it was set up at, where it was: a window signs its agents in there. */
+  ssh: Schema.optionalKey(Schema.String),
+  connected: Schema.Boolean,
+  /** Running a task; or, offline, still holding the workspace of the task it went offline during, until it says it stopped. */
+  busy: Schema.Boolean,
+  /** What it reported last, while that is current; none while it is offline or hasn't said. */
+  capacity: Schema.optionalKey(WorkerCapacity),
+  /** The agents it can run, by id; empty while it is offline. */
+  providers: Schema.Array(Schema.String),
+  /**
+   * Of `providers`, those signed in on it, as it said when it connected; none where it doesn't say, as one set up by hand
+   * or an older worker doesn't.
+   */
+  signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The Althar release it runs, where it says. */
+  release: Schema.optionalKey(Schema.String),
+  /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
+  anyProject: Schema.optionalKey(Schema.Boolean),
+  projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** The home's task it runs now, or went offline during, where it holds one. */
+  task: Schema.NullOr(Schema.Struct({ taskId: Schema.String, threadId: Schema.String, title: Schema.String, project: Schema.String })),
+})
+export type HomeWorker = typeof HomeWorker.Type
+
+/**
+ * The home's workers: whether it takes workers at all (it is set up to listen for them), each it enrolled, and whether
+ * it adds them itself (`adds`): it is its own authority, and signs a worker's key as the window asks. A home that only
+ * takes workers by its operator's certificates, or an older one, doesn't.
+ */
+export const HomeWorkers = Schema.Struct({
+  enabled: Schema.Boolean,
+  workers: Schema.Array(HomeWorker),
+  adds: Schema.optionalKey(Schema.Boolean),
+})
+
+/** A worker the home signed, as the window hands it to the worker it sets up: all it needs to reach the home and prove who it is. */
+export const WorkerGrant = Schema.Struct({
+  homeId: Schema.String,
+  workerId: Schema.String,
+  /** The home's own authority's certificate, PEM: all the worker trusts. */
+  authority: Schema.String,
+  /** The worker's certificate, PEM, signed for its own key. */
+  certificate: Schema.String,
+  /** The name the home's certificate carries, wherever the worker reaches it. */
+  serverName: Schema.String,
+  port: Schema.Int,
+  /** Where the worker may reach the home, `host:port`, best first. */
+  addresses: Schema.Array(Schema.String),
+})
+export type WorkerGrant = typeof WorkerGrant.Type
+const WorkerId = Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))
+export type HomeWorkers = typeof HomeWorkers.Type
 
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
 export const PlanStep = Schema.Struct({
@@ -2512,6 +2674,10 @@ export const Holder = Schema.Struct({
 })
 export type Holder = typeof Holder.Type
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export const PlacesWhy = Schema.Literals(['memory', 'cpu'])
+export type PlacesWhy = typeof PlacesWhy.Type
+
 /**
  * Work waiting for a place among the agents this machine runs at once
  * (ADR-032), as it says why: how many tasks' agents are busy, which hold the
@@ -2524,6 +2690,11 @@ export const Queued = Schema.Struct({
   holders: Schema.optional(Schema.Array(Holder)),
   configured: Schema.optional(Schema.Int),
   offline: Schema.optional(Schema.Boolean),
+  /**
+   * Held back for now, and why: with the person's number it would have a place, but this computer's memory or CPU lets
+   * fewer agents work (`atOnce` < `configured`). It starts as that frees up, or at once where the person starts it anyway.
+   */
+  held: Schema.optional(PlacesWhy),
 })
 export const WorkPlaces = Schema.Struct({
   ...Queued.fields,
@@ -2533,6 +2704,26 @@ export const WorkPlaces = Schema.Struct({
 })
 export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
+
+/**
+ * The agents the home runs at once (ADR-032) as they stand, for the window's
+ * load popover and the Agents at once slider: how many are at work, the
+ * person's number (or the default), how many may work for now, fewer while
+ * the home's computer is under load, and why, and how many tasks wait for
+ * one. The number counts every agent the home starts, wherever it runs:
+ * `onWorkers` says how many of those at work run on its workers.
+ */
+export const Places = Schema.Struct({
+  busy: Schema.Int,
+  configured: Schema.Int,
+  atOnce: Schema.Int,
+  /** Null while as many may work as the number says. */
+  why: Schema.NullOr(PlacesWhy),
+  waiting: Schema.Int,
+  /** Of `busy`, those on the home's workers rather than its own computer; none where an older home doesn't say. */
+  onWorkers: Schema.optionalKey(Schema.Int),
+})
+export type Places = typeof Places.Type
 
 /**
  * Commits on a task's branch after its last pull request merged or closed,
@@ -2760,6 +2951,26 @@ export const CardIssue = Schema.Struct({
 })
 export type CardIssue = typeof CardIssue.Type
 
+/** Another task, as a stopped task's card names it: by its title, and its thread, which opens it. */
+export const TaskNamed = Schema.Struct({ threadId: Schema.String, title: Schema.String })
+export type TaskNamed = typeof TaskNamed.Type
+
+/**
+ * What stopped a task's lead, and when. `by` is what its lead's turn ended in: the person declining a call or interrupting it,
+ * else Althar, or null where nothing says. `who` is who stopped it, where it is on record: the person, the coordinator, or a
+ * lead (another task's, named in `lead`); with `why`, the reason they gave, and `into`, the task its work went on in, where it
+ * was folded into another. A task folded into another is settled in all but name: Resume still carries it on.
+ */
+export const TaskStopped = Schema.Struct({
+  by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])),
+  at: Schema.NullOr(Schema.String),
+  who: Schema.optional(Schema.Literals(['person', 'coordinator', 'lead'])),
+  lead: Schema.optional(TaskNamed),
+  why: Schema.optional(Schema.String),
+  into: Schema.optional(TaskNamed),
+})
+export type TaskStopped = typeof TaskStopped.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2773,11 +2984,7 @@ export const TaskCard = Schema.Struct({
    * `at` where nothing says when. Only a task an agent worked on is stopped, or one drafted whose plan never came: one whose
    * lead is on its way is under way.
    */
-  stopped: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-    ),
-  ),
+  stopped: Schema.optional(Schema.NullOr(TaskStopped)),
   /**
    * Stopped, with its open pull request ready to merge as it stands (not a draft, no conflict, every check passed): the
    * person can accept it all the same, next to Carry on. Absent otherwise.
@@ -3788,6 +3995,12 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /**
+   * A switch or a fresh session is taking the thread over, until it holds it, even after the one going out has let it go
+   * (`held` false then): a model or effort picked now is the incoming session's, sent as on a held thread, never as a start.
+   * `nextLead` is what that session leads as then.
+   */
+  handover: Schema.optional(Schema.Boolean),
   /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
@@ -4202,6 +4415,11 @@ export const ThreadSnapshot = Schema.Struct({
     /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
     scratch: Schema.optional(Schema.Boolean),
     /**
+     * An artifact's own chat (ADR-104, "Talking to an artifact"): the canvas it is about, or null while it draws its first
+     * version. It opens as the artifact, never as a task. Absent for any other task.
+     */
+    artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
+    /**
      * Its changes, where it holds several (a task is a conversation plus parts, "The header lists every change"): each by
      * name and branch, the change it is stacked on or waits for, its pull request's link, whether commits wait for Ship on
      * it, and the helper at work on it. Absent with one change, whose row is the worktree's and its pull request's.
@@ -4254,11 +4472,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
     /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
-    stopped: Schema.optional(
-      Schema.NullOr(
-        Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
-      ),
-    ),
+    stopped: Schema.optional(Schema.NullOr(TaskStopped)),
     /** Stopped, with its open pull request ready to merge as it stands: it can be accepted all the same, as its card says. */
     mergeable: Schema.optional(Schema.Literal(true)),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
@@ -4342,6 +4556,8 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** The worker assigned to this task's accepted plan. */
+    workerId: Schema.optional(Schema.NullOr(Schema.String)),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -4482,8 +4698,6 @@ export const BoardSnapshot = Schema.Struct({
   position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
-  /** The machine-wide places while a task on this board waits for one. */
-  workPlaces: Schema.optional(WorkPlaces),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
 })
@@ -4824,6 +5038,8 @@ export const FinderQuery = Schema.Struct({
   text: Schema.String.check(Schema.isMaxLength(500)),
   projectId: Schema.optional(Schema.String),
   kinds: Schema.optional(Schema.Array(DocumentKind).check(Schema.isMaxLength(6))),
+  /** Find related documents that contain at least one of the search words. */
+  matchAny: Schema.optional(Schema.Boolean),
 })
 export type FinderQuery = typeof FinderQuery.Type
 
@@ -5026,6 +5242,10 @@ export const AttentionApi = RpcGroup.make(
 
 const socketCalls = new Set<string>([
   'IssueDevicePairing',
+  'CreatePairingCode',
+  'GetPairingStatus',
+  'GetPhoneAccess',
+  'SetPhoneAccess',
   'ListClientDevices',
   'RevokeConnectionDevice',
   'GetConnectionInfo',
@@ -5040,6 +5260,7 @@ const socketCalls = new Set<string>([
   'ReadOutput',
   'ReadDocument',
   'ListCanvases',
+  'ListArtifactsDrawing',
   'GetCanvas',
   'ReadCanvasText',
   'FindCode',
@@ -5052,8 +5273,15 @@ const socketCalls = new Set<string>([
   'GetHome',
   'GetCoordinator',
   'GetModels',
+  'GetPlanUsage',
   'GetSettings',
   'GetLoad',
+  'GetPlaces',
+  'GetWorkers',
+  'AddWorker',
+  'CreateWorkerCode',
+  'SetWorkerProjects',
+  'RemoveWorker',
   'SearchTasks',
   'GetSearchDocuments',
   'GetSearchFiles',
@@ -5073,8 +5301,30 @@ const socketCalls = new Set<string>([
   'SwitchAgent',
   'SetModel',
   'SetEffort',
+  'SetAgent',
   'GetRepositoryScripts',
   'ReadLaunchPreview',
+  'OpenLaunchPreviewSocket',
+  'ReadLaunchPreviewSocket',
+  'WriteLaunchPreviewSocket',
+  'CloseLaunchPreviewSocket',
+  'PrepareWorkerSnapshot',
+  'ReadWorkerSnapshotChunk',
+  'ReleaseWorkerSnapshot',
+  'ReadWorkerFile',
+  // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
+  // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
+  'FindHomeFolders',
+  'GetMachine',
+  'ListConnections',
+  'ListHostRepositories',
+  'GetRepositories',
+  'ReadFolder',
+  'PlaceRepository',
+  'MakeRepository',
+  'PrepareFolder',
+  'CloneRepository',
+  'OpenProject',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
@@ -5101,6 +5351,11 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
   command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  // A call, not a command: a command's receipt would keep the code, a bearer, in the profile's database.
+  call('CreatePairingCode', {}, PairingCodeMade),
+  call('GetPairingStatus', { tokenHash: PairingTokenHash }, PairingStatus),
+  call('GetPhoneAccess', {}, PhoneAccess),
+  command('SetPhoneAccess', { on: Schema.Boolean }, PhoneAccess),
   command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(
@@ -5121,6 +5376,10 @@ const ProjectApi = RpcGroup.make(
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
+  /** Where on the home a new project's code can come from and go: what it finds where people keep code, and where a new one goes. */
+  call('FindHomeFolders', {}, HomeFolders),
+  /** What the home's computer is: its system, cores, memory, room and git. */
+  call('GetMachine', {}, Machine),
   /**
    * Where a new repository named after `name` would go, in the folder the
    * person chose by `grant`, read without making anything: refused where a
@@ -5417,10 +5676,16 @@ const ProjectApi = RpcGroup.make(
   call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
   /** A project's canvases (ADR-104), each with its latest version, newest first; archived ones only where asked. */
   call('ListCanvases', { projectId: Schema.String, archived: Schema.optional(Schema.Boolean) }, Schema.Array(CanvasSummary)),
+  /** A project's artifacts whose own chat is drawing their first version, newest first: each shows among its artifacts at once. */
+  call('ListArtifactsDrawing', { projectId: Schema.String }, Schema.Array(ArtifactDrawing)),
   /** One of a project's canvases whole: its versions, and the comments sent on it. */
   call('GetCanvas', { canvasId: Schema.String }, CanvasDetail),
   /** A version's entry as the window draws it, for a document, a diagram or an SVG: its words, read from the artifact store. */
   call('ReadCanvasText', { canvasId: Schema.String, version: Schema.Number }, CanvasText),
+  /** Where a project's artifacts go when saved to a repository: its place for them, or Althar's pick for the first save. */
+  call('GetArtifactsPlace', { projectId: Schema.String }, ArtifactsPlace),
+  /** One of a project's repositories' folders at the head of its default branch: where an artifact could be saved. */
+  call('ListRepositoryFolders', { projectId: Schema.String, repositoryId: Schema.String }, RepositoryFolders),
   /**
    * What the names in a thread's messages name, where its agent works
    * (CodePlace): for each message, by the item it is where it has one, so
@@ -5464,7 +5729,7 @@ const ProjectApi = RpcGroup.make(
     'StartTask',
     {
       projectId: Schema.String,
-      workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))),
+      workerId: Schema.optional(WorkerSelection),
       title: Schema.String,
       description: Schema.optional(Schema.String),
       steps: Schema.Array(PlanStep),
@@ -5484,15 +5749,17 @@ const ProjectApi = RpcGroup.make(
       chat: Schema.optional(Schema.Boolean),
       /** The id the window made for it, as a project's may be: an aside's pill is keyed by it from the moment + is pressed. */
       taskId: Schema.optional(Schema.String),
+      /**
+       * With `chat`, an artifact's own chat (ADR-104, "Talking to an artifact") rather than an aside: about the canvas by its
+       * id, or a new artifact it draws first with null. It is never listed as a task or an aside, nor waits on the person. An
+       * artifact has one: asked again for a canvas that has one open, the runtime answers with that one.
+       */
+      artifact: Schema.optional(Schema.Struct({ canvasId: Schema.NullOr(Schema.String) })),
     },
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command(
-    'StartPlan',
-    { planId: Schema.String, workerId: Schema.optional(Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/))) },
-    Schema.Void,
-  ),
+  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
@@ -5600,11 +5867,17 @@ const ProjectApi = RpcGroup.make(
   /**
    * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
    * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
-   * said in the thread, and the lead stays as it was.
+   * said in the thread, and the lead stays as it was. `agentId` is the agent whose model it is, as the picker showed it: the
+   * one on the thread where left out; while another takes the thread over, the one going out takes it back.
    */
-  command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
+  command('SetModel', { threadId: Schema.String, agentId: Schema.optional(Schema.String), model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
-  command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
+  command('SetEffort', { threadId: Schema.String, agentId: Schema.optional(Schema.String), effort: Schema.String }, Schema.Void),
+  /**
+   * The thread's agent picked with nothing of its model or effort chosen, as `SetModel` is: the one on the thread picked back
+   * over another waiting to take over keeps the thread, as it is; the one going out, picked while another takes over, takes it back.
+   */
+  command('SetAgent', { threadId: Schema.String, agentId: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */
@@ -5840,6 +6113,12 @@ const WorkApi = RpcGroup.make(
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   /**
+   * Starts what of a task waits for a place now, whatever is free, as the person's own start, which never waits (ADR-037):
+   * Start anyway, on a task held back while this computer lets fewer agents work than the number. False, and nothing
+   * changes, where nothing of it waits any more.
+   */
+  command('StartAnyway', { taskId: Schema.String }, Schema.Boolean),
+  /**
    * Stops the turn the thread's agent is in. Between turns, where a turn Althar asked of a task's lead or reviewer waits for a
    * place up next, that turn is let go instead: it leaves Up next, and its agent reads what it would have said with its next.
    */
@@ -6031,6 +6310,35 @@ const WorkApi = RpcGroup.make(
   command('StopHelper', { taskId: Schema.String, helper: Schema.String }, Schema.Void),
   /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
   command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
+  /** Sets the project's place for artifacts, or clears it with null: where Save to repo puts one unless someone picks elsewhere. */
+  command(
+    'SetArtifactsHome',
+    {
+      projectId: Schema.String,
+      home: Schema.NullOr(Schema.Struct({ repositoryId: Schema.String, folder: Schema.String, how: ArtifactsHow, follow: Schema.Boolean })),
+    },
+    Schema.Void,
+  ),
+  /**
+   * Saves a canvas's latest version to a folder of its own in one of the project's repositories (`path`, with a trailing
+   * slash), in a pull request of its own or straight to the default branch, or moves it there where it was saved elsewhere.
+   * It answers at once, the canvas saying it is saving; the commit follows, and the canvas says how it went. `makeHome`
+   * makes the folder it is in the project's place for artifacts from now on.
+   */
+  command(
+    'SaveCanvas',
+    {
+      canvasId: Schema.String,
+      repositoryId: Schema.String,
+      path: Schema.String,
+      how: ArtifactsHow,
+      follow: Schema.Boolean,
+      makeHome: Schema.optional(Schema.Boolean),
+    },
+    Schema.Void,
+  ),
+  /** Stops saving a canvas to its repository: what was committed stays there, and new versions stay in Althar. */
+  command('StopSavingCanvas', { canvasId: Schema.String }, Schema.Void),
   /**
    * Points a running task at another branch to work toward, or its default with null (a task is a conversation plus parts):
    * rebased where nothing is pushed, else onto a fresh branch whose pull request opens into it. What it did, in words.
@@ -6047,8 +6355,8 @@ const WorkApi = RpcGroup.make(
     },
     Schema.Void,
   ),
-  /** The connections on this Mac, and the code hosts and trackers a person can connect. */
-  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
+  /** The connections on the home, and the code hosts and trackers a person can connect. */
+  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }).annotate(SocketAllowed, socketCanCall('ListConnections')),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
   command(
     'StartSignIn',
@@ -6105,6 +6413,11 @@ const WorkApi = RpcGroup.make(
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
   /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
   command('RemoveAccount', { accountId: Schema.String, anyway: Schema.optional(Schema.Boolean) }, Schema.Void),
+  /**
+   * Signs an account out with its agent's own tool, and keeps it, to sign in again: the usual folder's too, which signs the
+   * agent's own command out with it. Not for an agent without a command that signs out (AgentStatus' `signsOut`).
+   */
+  command('SignOutAccount', { accountId: Schema.String }, Schema.Void),
   /** Puts an agent's accounts in the person's order: the first that can runs work first. */
   command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
   /** Folders account switchers keep the agent's accounts in, not added yet. */
@@ -6296,6 +6609,34 @@ const WorkApi = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
+  /** The agents this computer runs at once as they stand: at work, the number, fewer for now and why, what waits. */
+  call('GetPlaces', {}, Places),
+  /** The workers this home enrolled, connected or not, and what each runs and reported. */
+  call('GetWorkers', {}, HomeWorkers),
+  /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
+  command('RemoveWorker', { workerId: WorkerId }, Schema.Void),
+  /**
+   * Adds a worker: the home signs the worker's own P-256 public key (SPKI DER, base64url) as its certificate, enrolls it
+   * by that key under the name the person knows it by, and opens its worker port where it hasn't yet. Again for the same
+   * key, the same worker. The home's operator or the person's own client only, as pairing a device is.
+   */
+  command(
+    'AddWorker',
+    {
+      publicKey: Schema.String.check(Schema.isMaxLength(512)),
+      name: Schema.String.check(Schema.isMaxLength(80)),
+      ssh: Schema.optional(Schema.String.check(Schema.isMaxLength(255))),
+    },
+    WorkerGrant,
+  ),
+  /** A one-time code a machine without SSH adds itself with, good for ten minutes and one worker. Not a command: no receipt keeps the code. */
+  call(
+    'CreateWorkerCode',
+    { name: Schema.String.check(Schema.isMaxLength(80)) },
+    Schema.Struct({ code: Schema.String, expiresAt: Schema.Number }),
+  ),
+  /** The projects a worker may work on, as the person picks them: one taken off stops its run there. */
+  command('SetWorkerProjects', { workerId: WorkerId, projectIds: Schema.Array(Schema.String).check(Schema.isMaxLength(256)) }, Schema.Void),
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */
@@ -6509,12 +6850,33 @@ export const AcpApi = RpcGroup.make(
   command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
 ).middleware(ClientAuthority)
 
-export const WorkerPreviewApi = RpcGroup.make(call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse)).middleware(
-  ClientAuthority,
-)
+export const WorkerPreviewApi = RpcGroup.make(
+  call('ReadLaunchPreview', WorkerPreviewRequest.fields, WorkerPreviewResponse),
+  call('OpenLaunchPreviewSocket', WorkerPreviewRun.fields, WorkerPreviewSocketId),
+  Rpc.make('ReadLaunchPreviewSocket', {
+    payload: { socket: WorkerPreviewSocketId },
+    success: WorkerPreviewSocketData,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
+  call('WriteLaunchPreviewSocket', { socket: WorkerPreviewSocketId, data: WorkerPreviewSocketData }, Schema.Void),
+  call('CloseLaunchPreviewSocket', { socket: WorkerPreviewSocketId }, Schema.Void),
+).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi)
+export const WorkerSnapshotApi = RpcGroup.make(
+  call('ReadWorkerFile', WorkerFileRequest.fields, WorkerFile),
+  call('PrepareWorkerSnapshot', WorkerSnapshotRequest.fields, WorkerSnapshot),
+  call('ReadWorkerSnapshotChunk', WorkerSnapshotChunkRequest.fields, WorkerSnapshotChunk),
+  call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
 export type Api = typeof Api
+
+/** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
+export const SOCKET_CALLS: ReadonlyArray<string> = [...Api.requests.values()]
+  .filter((rpc) => Context.get(rpc.annotations, SocketAllowed))
+  .map((rpc) => rpc._tag)
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
 
@@ -6529,6 +6891,9 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         WorkerPreviewApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerPreviewApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
+          handlers,
+        ),
+        WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
           handlers,
         ),
       ),

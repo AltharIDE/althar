@@ -57,8 +57,16 @@ export interface LineActions {
   readonly oldestFirst: () => void
   /** Lets go of the turn Althar asked of a task's agent that waits for a place, by its thread: it leaves Up next. */
   readonly cancelTurn: (threadId: string) => void
+  /**
+   * Starts a task held back now, whatever is free, as the person's own start: it goes from Up next to Running at once, and
+   * back, saying why, where the runtime refuses it.
+   */
+  readonly startAnyway: (taskId: string) => void
   readonly failed: string | null
 }
+
+/** A task started anyway, as shown from the press until a read says so: at work, out of Up next. */
+const startedOf = (task: BoardTask): BoardTask => ({ ...task, queued: null, inLine: false, continues: false })
 
 /** Settled tasks, most recent first. */
 const recentFirst = (a: BoardTask, b: BoardTask) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '') || b.taskId.localeCompare(a.taskId)
@@ -81,6 +89,8 @@ export const useBoard = (projectId: string): BoardModel => {
   const loading = useRef(false)
   const [olderError, setOlderError] = useState<string | null>(null)
   const [lineFailed, setLineFailed] = useState<string | null>(null)
+  // The tasks started anyway, shown at work from the press until a read has them no longer waiting.
+  const [anyway, setAnyway] = useState<ReadonlySet<string>>(new Set())
   const lined = (go: () => Promise<void>) => {
     setLineFailed(null)
     return go().catch((error: unknown) => {
@@ -89,6 +99,14 @@ export const useBoard = (projectId: string): BoardModel => {
     })
   }
   const snapshot = read.data ?? null
+  const begun = snapshot === null ? [] : [...anyway].filter((id) => snapshot.tasks.find((task) => task.taskId === id)?.queued == null)
+  if (begun.length > 0) setAnyway((now) => new Set([...now].filter((id) => !begun.includes(id))))
+  const unstart = (taskId: string) =>
+    setAnyway((now) => {
+      const next = new Set(now)
+      next.delete(taskId)
+      return next
+    })
   const readBoard = useMemo(() => {
     if (snapshot === null) return null
     if (kept.current.projectId !== projectId) kept.current = { projectId, tasks: new Map() }
@@ -101,7 +119,16 @@ export const useBoard = (projectId: string): BoardModel => {
   }, [snapshot, projectId, loaded])
   // The board as the person's presses left it: a card Done or kept for later moved at once. Older pages go by the board as read.
   const { over } = actions
-  const board = useMemo(() => (readBoard === null ? null : { ...readBoard, tasks: over(readBoard.tasks) }), [readBoard, over])
+  const board = useMemo(
+    () =>
+      readBoard === null
+        ? null
+        : {
+            ...readBoard,
+            tasks: over(readBoard.tasks).map((task) => (anyway.has(task.taskId) && task.queued !== null ? startedOf(task) : task)),
+          },
+    [readBoard, over, anyway],
+  )
   const settled = readBoard?.tasks.filter((task) => task.phase === 'settled').toSorted(recentFirst) ?? []
   const oldest = settled.at(-1)
   const showOlder = () => {
@@ -135,6 +162,13 @@ export const useBoard = (projectId: string): BoardModel => {
       oldestFirst: () => void lined(() => client.lineOldestFirst(projectId)).catch(() => undefined),
       // Stopping its lead's turn between turns lets go of the one that waits (`Interrupt`).
       cancelTurn: (threadId) => void lined(() => client.interrupt(threadId)).catch(() => undefined),
+      startAnyway: (taskId) => {
+        setAnyway((now) => new Set(now).add(taskId))
+        void lined(async () => {
+          // Nothing of it waited any more: it shows as the board reads it.
+          if (!(await client.startAnyway(taskId))) unstart(taskId)
+        }).catch(() => unstart(taskId))
+      },
       failed: lineFailed,
     },
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),

@@ -1,4 +1,4 @@
-import { ApiError, workerPlanProblem, workerProblem } from '@althar/contracts'
+import { ApiError, automaticWorker, automaticWorkerUnavailable, workerPlanProblem, workerProblem } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -336,12 +336,19 @@ export class Plans extends Context.Service<
             homeOnly: parameters.here === true,
             readOnly: parameters.reads === true,
           })
-          const worker = config.workers?.list(plan.projectId).find((one) => one.workerId === workerId)
+          const available = config.workers?.list(plan.projectId) ?? []
+          const worker =
+            workerId === 'auto'
+              ? automaticWorker(available, parameters.steps, requirements.repositoryCount)
+              : available.find((one) => one.workerId === workerId)
           const message =
             workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ??
-            workerProblem(worker, parameters.steps, requirements.repositoryCount)
-          if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
-          return { parameters: JSON.stringify({ ...parameters, workerId }) }
+            (workerId === 'auto' && worker === undefined
+              ? automaticWorkerUnavailable
+              : workerProblem(worker, parameters.steps, requirements.repositoryCount))
+          if (worker === undefined || message !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
+          return { parameters: JSON.stringify({ ...parameters, workerId: worker.workerId }) }
         })
 
       const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>
@@ -362,7 +369,7 @@ export class Plans extends Context.Service<
             placeOn(workerId),
           )
           if (!accepted && workerId !== undefined)
-            return yield* new ApiError({ reason: 'Invalid', message: 'That task already started. Choose a worker before starting it.' })
+            return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
           // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).

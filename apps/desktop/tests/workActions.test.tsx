@@ -100,6 +100,22 @@ describe('Done and Keep for later, from a card', () => {
     expect(view.result.current.failed['t1']?.message).toBe('That task isn’t there any more.')
   })
 
+  it('settles a row abandoned from Up next at once, as abandoned, and brings it back where the runtime refused', async () => {
+    const view = actions(async () => undefined)
+    const planned = { ...ready, phase: 'planned' as const }
+    view.read([planned])
+    const answer = later()
+    vi.mocked(view.client.abandonTask).mockReturnValue(answer.promise)
+    let went: Promise<boolean> = Promise.resolve(true)
+    act(() => void (went = view.result.current.abandon('t1')))
+    expect(view.client.abandonTask).toHaveBeenCalledWith('t1')
+    expect(view.result.current.over([planned])[0]).toMatchObject({ phase: 'settled', state: 'abandoned' })
+    await act(async () => answer.reject(new ApiError({ reason: 'NotFound', message: 'Gone.' })))
+    expect(await went).toBe(false)
+    expect(view.phase()).toBe('planned')
+    expect(view.result.current.failed['t1']?.message).toBe('Gone.')
+  })
+
   it('keeps each of two cards moved at once by its own press, whichever answers first', async () => {
     const other = task({ taskId: 't2', threadId: 'th2', phase: 'ready', kind: 'plain' })
     const view = actions(async () => undefined)

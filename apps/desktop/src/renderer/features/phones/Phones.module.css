@@ -1,0 +1,19 @@
+/* The phones a home has paired, under the code. */
+.paired {
+  display: grid;
+  gap: 6px;
+  margin: 22px -8px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.pairedHead {
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.problem {
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--danger);
+}

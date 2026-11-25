@@ -5,6 +5,10 @@
   "description": "Althar's site: the developer page, the shifts and the thesis, built with Vite+ and @althar/ui.",
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./changelog": "./src/content/changelog.ts",
+    "./highlights": "./src/changelog/takes/LogData.ts"
+  },
   "scripts": {
     "dev": "vp dev",
     "build": "vp build && vp build --ssr src/entry-server.tsx --outDir .ssr && bun scripts/prerender.ts && bun scripts/test-built.ts",

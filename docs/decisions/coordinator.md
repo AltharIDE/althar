@@ -127,44 +127,34 @@ A refusal is explained in the same turn, with the command and its reason,
 never held for the next message. It may install and run tests in its
 copies; a change to code is still a task.
 
-## Handover before its context fills
+## Compaction and session recovery
 
-The coordinator's conversation is one long thread. Agents compact their own
-context at a moment of their choosing, into a summary of their own, and a
-decision the person made only in conversation may not survive that. So
-Althar hands the coordinator over itself.
+The coordinator keeps the same conversation and session as its context fills.
+If the agent compacts on its own, Althar carries on with the agent's summary.
+At 80% of the window, the coordinator is eligible to compact after an hour
+of inactivity, including when a late usage update reports that it is full.
+ACP doesn't report the provider's cache expiry, so Althar uses one hour as an
+estimate. A full coordinator can stay awake past its usual retirement time
+to compact. A message takes priority until Althar dispatches the command.
+Once the agent has the command, Althar lets it finish and delivers queued
+messages as soon as the session is available. A failed attempt leaves the
+session available for the next turn if the provider still has it.
 
-- **At 80% of its context** (`HANDOVER_AT`), between turns, never in one,
-  Althar starts a fresh session on the same agent, account, model and effort,
-  and stops the old one. What the person says in the meantime waits for the
-  fresh session.
-- **The fresh session is briefed from Althar's records,** not the raw
-  thread:
-  - its role and tools;
-  - a line saying it took over;
-  - the project overview and the project's notes;
-  - what the repositories tell agents;
-  - every open task, with where it stands, who leads it and what waits on
-    the person, and the newest 25 tasks with their plan and their lead's
-    last report;
-  - the ten tasks finished last, and how each ended;
-  - the earlier conversation in short: every line the person wrote, up to
-    500 characters, and the start of each reply, up to 200, with the tasks,
-    issues and questions that came of it, in up to 20,000 characters, the
-    newest kept. Althar cuts it from the record itself, with no agent, so
-    the handover waits for no model;
-  - the last twelve messages, word for word.
+After compaction the next ordinary turn gets the coordinator's role and
+current Althar records alongside the agent's summary. The records include the
+project overview, notes, repository instructions, open and recently finished
+tasks, and open errands. The full thread remains available through
+`read_thread` and in the window.
 
-  It reads anything earlier, or whole, with `read_thread`, a part at a time.
-- **The person sees one quiet line** in the thread, and the whole
-  conversation stays theirs to scroll.
-- **Nothing Althar owns moves.** Plans counting down, held plans, drafts and
-  running tasks belong to Althar, not to the session, and carry on.
-- **A handover that fails leaves the old session going,** compacting by
-  itself, and Althar doesn't try again for that session. Neither does it hand
-  over where the brief would take 40% or more of a fresh context.
+If the agent has lost its session, Althar starts it afresh on the same account,
+model and effort. The replacement receives its role, the project records, the
+last twelve messages within a 16,000-character budget, and a bounded excerpt
+of the earlier conversation. What is queued goes with the first turn. Althar
+says in the thread when it starts a session afresh. Plans, drafts and running
+tasks are stored independently of the session.
 
-A task's lead is handed over the same way, once its context is full ([agents.md](agents.md)).
+See [Agents](agents.md#keeping-context-small) for the lead's threshold and the
+person's Compact command.
 
 ## The project's notes
 
@@ -225,8 +215,8 @@ own button. Enter and Escape never forget.
   thread, so every window and every reload agrees. Nothing is deleted:
   `read_thread`, a handover's brief and the agent's own memory still reach
   everything before the mark. It is asked from a "Coordinator" bar above the
-  thread, and with `/clear` in the composer, which isn't sent to the
-  coordinator.
+  thread, and with `/clear` among the composer's commands, which isn't sent
+  to the coordinator.
 - **Forget the conversation too.** This is red, and says it can't be
   undone. The session ends, and every item of the thread is deleted except
   those still open, so nothing can reach them afterwards. A "Fresh session"
@@ -244,6 +234,10 @@ Both keep:
 After either, the coordinator says nothing on its own. Its first word answers
 the person's next message.
 
+## A goal is a task's
+
+A goal is never the coordinator's own: it directs tasks, and an objective it kept working toward would hold up everything else the person asks it. A goal the person gives it, in plain words ("set a goal to…") or with `/goal <objective>` in its composer, which is sent to it as words, becomes a task's. It drafts a task for the objective, sets the goal on it with `set_goal`, and plans it as it plans any task, its preset, lead and effort included. The goal waits for the plan: while it is counting down or held nothing starts for it, and the plan's lead takes it up from its first turn, working toward it turn after turn up to the goal's limit. `set_goal` also sets a goal on a task already at work, whose lead takes it up at once. It is done only on the person's word in the turn, as goals are the person's; the task's thread says it as Althar's line ("The coordinator set the goal, as you asked: …"), and the person pauses, edits or clears it from the task.
+
 ## Permission requests
 
 The coordinator answers no permission request by default. A project can
@@ -256,3 +250,4 @@ isn't being extended to more agents ([what-agents-may-do.md](what-agents-may-do.
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: the coordinator's commands go by the project's rules, reach the network and read ordinary files anywhere.
 - 18 Nov 2026: every session of the coordinator starts from the same brief, not only a handover's: it gained what the repositories tell agents (their `AGENTS.md` and `CLAUDE.md`), the tasks finished last and the earlier conversation in short, and is written while the agent starts.
+- 24 Nov 2026: a goal given to the coordinator becomes a task's, through `set_goal` ([A goal is a task's](#a-goal-is-a-tasks)).

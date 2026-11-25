@@ -59,6 +59,7 @@ export const WINDOW_ACTIONS = {
   rename: { tool: 'rename_task' },
   attach: { tool: 'attach_pull_request' },
   moveToFront: { tool: 'move_to_front' },
+  startAnyway: { tool: 'start_anyway' },
   // The plan card.
   startPlan: { tool: 'restart_task' },
   reopenBlocker: { tool: 'restart_task' },

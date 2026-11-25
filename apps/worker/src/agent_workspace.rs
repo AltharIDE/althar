@@ -246,6 +246,7 @@ pub(crate) struct WorkspacePatch {
     pub head: String,
     pub patch: Vec<u8>,
     pub commits: Vec<u8>,
+    pub index: Option<(String, Vec<u8>)>,
 }
 
 struct TemporaryIndex(PathBuf);
@@ -262,8 +263,8 @@ pub(crate) async fn workspace_patch(
     run_id: &str,
     base: &str,
     base_head: &str,
+    capture_index: bool,
 ) -> io::Result<WorkspacePatch> {
-    use tokio::io::AsyncReadExt as _;
     let object_id = |value: &str| {
         matches!(value.len(), 40 | 64)
             && value
@@ -302,17 +303,42 @@ pub(crate) async fn workspace_patch(
     }
     // Read the workspace through fresh Git configuration. A provider can edit
     // its own .git/config; its filters must not run in the worker supervisor.
-    let checkpoint_git = || {
+    let git_in_index = |name: &str| {
         let mut git = git_command(directory);
         git.env("GIT_OBJECT_DIRECTORY", &objects)
             .env("GIT_DIR", &index.0)
             .env("GIT_WORK_TREE", directory)
-            .env("GIT_INDEX_FILE", index.0.join("checkpoint-index"))
+            .env("GIT_INDEX_FILE", index.0.join(name))
             .args(["-c", "core.bare=false"]);
         git
     };
+    let checkpoint_git = || git_in_index("checkpoint-index");
+    let saved_index = if capture_index {
+        let original = crate::agent_files::read_in_checkout(directory, ".git/index")?;
+        fs::write(index.0.join("saved-index"), &original)?;
+        let staged = git_in_index("saved-index")
+            .args(["write-tree"])
+            .output()
+            .await?;
+        if !staged.status.success() || staged.stdout.len() > 66 {
+            return Err(invalid("Could not read the worker's staged tree"));
+        }
+        let staged = String::from_utf8(staged.stdout)
+            .map_err(io::Error::other)?
+            .trim()
+            .to_owned();
+        if !object_id(&staged) || staged.len() != head.len() {
+            return Err(invalid("Invalid worker staged tree"));
+        }
+        Some((original, staged))
+    } else {
+        None
+    };
+    // When copying staged files, begin from what Git tracks in the live index.
+    // A force-added ignored file can have both staged and working contents.
+    let tracked = saved_index.as_ref().map_or(head.as_str(), |(_, tree)| tree);
     let mut git = checkpoint_git();
-    git.args(["read-tree", &head]);
+    git.args(["read-tree", tracked]);
     if !git.status().await?.success() {
         return Err(invalid("Could not start the worker's workspace checkpoint"));
     }
@@ -331,33 +357,19 @@ pub(crate) async fn workspace_patch(
         .map_err(io::Error::other)?
         .trim()
         .to_owned();
-    let mut diff = checkpoint_git()
-        .args([
-            "diff",
-            "--binary",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-color",
-            "--no-renames",
-            "--no-relative",
-            base,
-            &tree,
-            "--",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let mut patch = Vec::new();
-    diff.stdout
-        .take()
-        .ok_or_else(|| invalid("No worker diff output"))?
-        .take(MAX_PATCH_BYTES + 1)
-        .read_to_end(&mut patch)
-        .await?;
-    if patch.len() as u64 > MAX_PATCH_BYTES || !diff.wait().await?.success() {
-        return Err(invalid(
-            "The worker changes could not fit in a workspace checkpoint",
-        ));
-    }
+    let patch = workspace_diff(checkpoint_git(), base, &tree).await?;
+    let staged = match saved_index {
+        Some((original, staged)) => {
+            let patch = workspace_diff(checkpoint_git(), base, &staged).await?;
+            if crate::agent_files::read_in_checkout(directory, ".git/index")? != original {
+                return Err(invalid(
+                    "The worker changed its staged files while the snapshot was being made",
+                ));
+            }
+            Some((staged, patch))
+        }
+        None => None,
+    };
     if run_git(directory, &["rev-parse", "--verify", "HEAD^{commit}"])
         .await?
         .trim()
@@ -412,7 +424,40 @@ pub(crate) async fn workspace_patch(
         head,
         patch,
         commits,
+        index: staged,
     })
+}
+
+async fn workspace_diff(mut git: Command, base: &str, tree: &str) -> io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt as _;
+    let mut diff = git
+        .args([
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--no-renames",
+            "--no-relative",
+            base,
+            tree,
+            "--",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let mut patch = Vec::new();
+    diff.stdout
+        .take()
+        .ok_or_else(|| invalid("No worker diff output"))?
+        .take(MAX_PATCH_BYTES + 1)
+        .read_to_end(&mut patch)
+        .await?;
+    if patch.len() as u64 > MAX_PATCH_BYTES || !diff.wait().await?.success() {
+        return Err(invalid(
+            "The worker changes could not fit in a workspace checkpoint",
+        ));
+    }
+    Ok(patch)
 }
 
 #[cfg(test)]
@@ -548,7 +593,17 @@ mod tests {
         run_git(&worker, &["add", "README.md"]).await?;
         run_git(&worker, &commit).await?;
         fs::write(worker.join("draft.txt"), "Unsaved in Git\n")?;
-        let update = workspace_patch(&worker, "check", &tree, &head).await?;
+        fs::write(worker.join("stage.txt"), "Staged by the worker\n")?;
+        run_git(&worker, &["add", "stage.txt"]).await?;
+        let staged = run_git(&worker, &["write-tree"]).await?;
+        fs::write(worker.join("stage.txt"), "Working file on the worker\n")?;
+        let update = workspace_patch(&worker, "check", &tree, &head, true).await?;
+        let (index_tree, index_patch) = update.index.as_ref().expect("Requested staged tree");
+        assert_eq!(index_tree, staged.trim());
+        assert!(String::from_utf8_lossy(index_patch).contains("+Staged by the worker"));
+        assert!(!String::from_utf8_lossy(index_patch).contains("Working file on the worker"));
+        assert!(String::from_utf8_lossy(&update.patch).contains("+Working file on the worker"));
+        assert_eq!(run_git(&worker, &["write-tree"]).await?, staged);
         assert!(String::from_utf8_lossy(&update.patch).contains("+On the worker"));
         assert!(String::from_utf8_lossy(&update.patch).contains("+Unsaved in Git"));
         assert!(!update.commits.is_empty());
@@ -558,8 +613,17 @@ mod tests {
         );
         assert_eq!(
             run_git(&worker, &["status", "--porcelain"]).await?.trim(),
-            "?? draft.txt"
+            "AM stage.txt\n?? draft.txt"
         );
+
+        fs::write(worker.join(".gitignore"), "ignored.txt\n")?;
+        fs::write(worker.join("ignored.txt"), "Forced into the index\n")?;
+        run_git(&worker, &["add", "-f", "ignored.txt"]).await?;
+        fs::write(worker.join("ignored.txt"), "New working contents\n")?;
+        let copied = workspace_patch(&worker, "copy", &tree, &head, true).await?;
+        let (_, index_patch) = copied.index.expect("Requested staged tree");
+        assert!(String::from_utf8_lossy(&index_patch).contains("+Forced into the index"));
+        assert!(String::from_utf8_lossy(&copied.patch).contains("+New working contents"));
         Ok(())
     }
 }

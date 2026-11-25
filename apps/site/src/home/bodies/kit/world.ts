@@ -1,7 +1,6 @@
 import { createElement, isValidElement } from 'react'
 
 import * as board from '../../../../../../packages/ui/src/fixtures/board'
-import * as chrome from '../../../../../../packages/ui/src/fixtures/chrome'
 import * as coordinator from '../../../../../../packages/ui/src/fixtures/coordinator'
 import * as edge from '../../../../../../packages/ui/src/fixtures/edge'
 import * as home from '../../../../../../packages/ui/src/fixtures/home'
@@ -42,7 +41,6 @@ export function renamed<T>(x: T): T {
 }
 
 export const { CALLS, NEXT, READY_TWO_REPOS, SETTLED } = renamed({ ...board })
-export const { NOTES_KEPT, NOTES_SEEN } = renamed({ ...chrome })
 const planned = renamed({ ...coordinator })
 export const { DRAFT_LINEAR, FROM_231 } = planned
 /** Task 432's team as the site shows it: the lead and its reviewers, without the kit's dry run. */

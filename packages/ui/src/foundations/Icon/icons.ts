@@ -12,13 +12,17 @@ import {
   ChatPlusIn,
   Check,
   Clock,
+  Cloud,
   ClockRotateRight,
   CoffeeCup,
+  CursorPointer,
   Community,
   Compress,
+  Computer,
   Cookie,
   Copy,
   Download,
+  DragHandGesture,
   Edit,
   EditPencil,
   Expand,
@@ -26,11 +30,13 @@ import {
   Frame,
   InfoCircle,
   GitBranch,
+  GitCommit,
   GitCompare,
   GitMerge,
   GitPullRequest,
   Globe,
   HalfMoon,
+  HomeSimple,
   KanbanBoard,
   Laptop,
   LightBulb,
@@ -44,6 +50,7 @@ import {
   NavArrowLeft,
   NavArrowRight,
   NavArrowUp,
+  OneFingerSelectHandGesture,
   OpenNewWindow,
   Page,
   Palette,
@@ -59,15 +66,20 @@ import {
   Refresh,
   Search,
   Server,
+  SmartphoneDevice,
   ServerConnection,
   Settings,
   ShieldCheck,
   SidebarExpand,
+  Sort,
   SoundHigh,
+  Sparks,
   Square,
   TaskList,
   Terminal,
   Tools,
+  TriangleFlag,
+  ViewGrid,
   WarningCircle,
   WifiOff,
   Xmark,
@@ -146,8 +158,16 @@ export const ICONS = {
   plug: ServerConnection,
   /** A home: one of the person's own computers that keeps Althar's work, reached over SSH. */
   home: Server,
+  /** A phone a home opens on: pairing one, and those it has paired. */
+  phone: SmartphoneDevice,
   /** This computer, as one of the homes. */
   computer: Laptop,
+  /** The home, among the computers it runs work on: it keeps the projects. */
+  house: HomeSimple,
+  /** A worker: a computer the home runs tasks on. */
+  worker: Computer,
+  /** Althar Cloud, where a home may run tasks that would wait. */
+  cloud: Cloud,
   /** A home's connection that dropped. */
   unlinked: LinkSlash,
   agents: Community,
@@ -169,6 +189,8 @@ export const ICONS = {
   clock: Clock,
   /** An automation: work that starts by itself. */
   automation: ClockRotateRight,
+  /** A goal: what a lead keeps working toward on its own. */
+  goal: TriangleFlag,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */
@@ -190,6 +212,8 @@ export const ICONS = {
   conflict: GitCompare,
   /** A tracker's issues, moving through its statuses as their tasks go. */
   issues: KanbanBoard,
+  /** The order a list is in, and choosing another. */
+  sort: Sort,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
@@ -206,10 +230,24 @@ export const ICONS = {
   cookie: Cookie,
   /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
   canvas: Palette,
+  /** A canvas of boards: designs laid side by side, every board of a page at once. */
+  boards: ViewGrid,
+  /** One board at a time, on a canvas of boards. */
+  board: Frame,
+  /** Pointing at a part of a board, to say something about it. */
+  point: CursorPointer,
+  /** Moving around a canvas by dragging it. */
+  hand: DragHandGesture,
+  /** Using a board as the page it is: its links and buttons take the press. */
+  use: OneFingerSelectHandGesture,
+  /** A commit, as git keeps what was saved to a repository. */
+  commit: GitCommit,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
   /** Something failed: the mark before the words that say what, in the danger colour. */
   problem: WarningCircle,
+  /** Althar's own news: its tab, with what's new in an update and what's coming next. */
+  news: Sparks,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

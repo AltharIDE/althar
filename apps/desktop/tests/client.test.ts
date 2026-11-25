@@ -228,10 +228,22 @@ describe('the client', () => {
         Api.of({
           ListProjectWorkers: () => Effect.succeed([]),
           ReadLaunchPreview: () => Effect.die('unused'),
+          OpenLaunchPreviewSocket: () => Effect.die('unused'),
+          ReadLaunchPreviewSocket: () => Stream.die('unused'),
+          WriteLaunchPreviewSocket: () => Effect.die('unused'),
+          CloseLaunchPreviewSocket: () => Effect.die('unused'),
+          PrepareWorkerSnapshot: () => Effect.die('unused'),
+          ReadWorkerFile: () => Effect.die('unused'),
+          ReadWorkerSnapshotChunk: () => Effect.die('unused'),
+          ReleaseWorkerSnapshot: () => Effect.die('unused'),
           WatchAttention: () => Stream.die('unused'),
           GetConnectionInfo: () => Effect.die('unused'),
           ListClientDevices: () => Effect.die('unused'),
           IssueDevicePairing: () => Effect.die('unused'),
+          CreatePairingCode: () => Effect.die('unused'),
+          GetPairingStatus: () => Effect.die('unused'),
+          GetPhoneAccess: () => Effect.die('unused'),
+          SetPhoneAccess: () => Effect.die('unused'),
           RevokeConnectionDevice: () => Effect.die('unused'),
           RegisterClientDevice: () => Effect.die('unused'),
           RevokeClientDevice: () => Effect.die('unused'),
@@ -248,6 +260,8 @@ describe('the client', () => {
           SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
+          FindHomeFolders: () => Effect.die('unused'),
+          GetMachine: () => Effect.die('unused'),
           LookElsewhere: () => Effect.die('unused'),
           BringIn: () => Effect.die('unused'),
           PlaceRepository: () => Effect.die('unused'),
@@ -265,6 +279,12 @@ describe('the client', () => {
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
+          GetPlaces: () => Effect.die('unused'),
+          GetWorkers: () => Effect.die('unused'),
+          RemoveWorker: () => Effect.die('unused'),
+          AddWorker: () => Effect.die('unused'),
+          CreateWorkerCode: () => Effect.die('unused'),
+          SetWorkerProjects: () => Effect.die('unused'),
           GetPlanUsage: () => Effect.die('unused'),
           DismissSignInEnding: () => Effect.die('unused'),
           GetModelRooms: () => Effect.die('unused'),
@@ -289,6 +309,7 @@ describe('the client', () => {
           ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
           ListCanvases: () => Effect.die('unused'),
+          ListArtifactsDrawing: () => Effect.die('unused'),
           GetCanvas: () => Effect.die('unused'),
           ReadCanvasText: () => Effect.die('unused'),
           FindCode: () => Effect.die('unused'),
@@ -302,6 +323,7 @@ describe('the client', () => {
           SwitchAgent: () => Effect.die('unused'),
           SetModel: () => Effect.die('unused'),
           SetEffort: () => Effect.die('unused'),
+          SetAgent: () => Effect.die('unused'),
           GetModels: () => Effect.die('unused'),
           SetDefaultEffort: () => Effect.die('unused'),
           SetModelBlocked: () => Effect.die('unused'),
@@ -352,6 +374,7 @@ describe('the client', () => {
           RemoveTaskFolder: () => Effect.die('unused'),
           MoveInLine: () => Effect.die('unused'),
           LineOldestFirst: () => Effect.die('unused'),
+          StartAnyway: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
           PasteAccountSignInCode: () => Effect.die('unused'),
@@ -381,6 +404,11 @@ describe('the client', () => {
           SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
+          GetArtifactsPlace: () => Effect.die('unused'),
+          ListRepositoryFolders: () => Effect.die('unused'),
+          SetArtifactsHome: () => Effect.die('unused'),
+          SaveCanvas: () => Effect.die('unused'),
+          StopSavingCanvas: () => Effect.die('unused'),
           SetThreadGoal: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
@@ -469,6 +497,7 @@ describe('the client', () => {
           SetProjectAccounts: () => Effect.die('unused'),
           RenameAccount: () => Effect.die('unused'),
           RemoveAccount: () => Effect.die('unused'),
+          SignOutAccount: () => Effect.die('unused'),
           OrderAccounts: () => Effect.die('unused'),
           AddAccount: () => Effect.die('unused'),
           FindAccounts: () => Effect.die('unused'),
@@ -626,6 +655,7 @@ describe('the client’s calls', () => {
   it('preserves explicit query filters and leaves omitted ones to the runtime', async () => {
     const { client, sent } = await recording({
       ListCanvases: [],
+      ListArtifactsDrawing: [],
       ListPresets: [],
       GetTaskFindings: { findings: [], review: null },
       ReadCode: { path: 'src/retry.ts', text: 'const tries = 3', from: 1, total: 1, cut: false },
@@ -640,6 +670,7 @@ describe('the client’s calls', () => {
     })
     expect(await client.listCanvases('p1')).toEqual([])
     await client.listCanvases('p1', true)
+    expect(await client.listArtifactsDrawing('p1')).toEqual([])
     await client.listPresets()
     await client.listPresets('p1')
     await client.getTaskFindings('t1')
@@ -658,6 +689,7 @@ describe('the client’s calls', () => {
     expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
       ['ListCanvases', { projectId: 'p1' }],
       ['ListCanvases', { projectId: 'p1', archived: true }],
+      ['ListArtifactsDrawing', { projectId: 'p1' }],
       ['ListPresets', {}],
       ['ListPresets', { projectId: 'p1' }],
       ['GetTaskFindings', { taskId: 't1' }],

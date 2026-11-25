@@ -52,7 +52,7 @@ See [ADR-004](../decisions/coordinator.md#always-on).
   ([ADR-097](../decisions/what-agents-may-do.md#what-asks), its second phase; leads have it too);
 - keeps the project's notes: decisions the person makes in conversation that
   the code doesn't show, which every session of it starts with
-  ([ADR-031](../decisions/coordinator.md#handover-before-its-context-fills));
+  ([ADR-031](../decisions/coordinator.md#compaction-and-session-recovery));
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides)).
@@ -134,7 +134,7 @@ coordinator's disposable folder, apart.
 | `list_tasks`, `read_task` | Status, plan, steps, lead, and how its pull request stands: draft or ready, checks, unpushed commits, merged or closed, read from the same data as the task's card (never asked of the host; said as last seen where it may be stale or unknown). A task whose pull requests are all merged reads as finished; a closed one is said as last seen, since nothing watches it for reopening. Asides aren't listed: the open ones are named on a line after, with where each stands ([tasks](../decisions/tasks.md#asides)) | Read |
 | `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands (an aside said to be one), its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
-| `read_change` | A task's diff and checks | Read |
+| `read_task_diff` | A task's change as it stands in its worktree, what isn't committed included | Read |
 | `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/coordinator.md#its-copies-of-the-repositories)) | Read |
 | `read_check_log` | A check's whole log on one of the project's pull requests, a page at a time ([ADR-041](../decisions/code-hosts.md#checks-althar-sees-them-through)) | Read |
 | `rerun_check` | Runs a failed check on a pull request of the project's, or on the default branch's latest commit, once more: the one named, or each that failed. GitHub's Actions job, GitLab's pipeline job, Bitbucket Cloud's pipeline whole on the same commit; Bitbucket Data Center's builds are another service's, so it says whose and links the build ([ADR-081](../decisions/code-hosts.md#acting-on-the-host)) | Command, undone in a step |
@@ -170,12 +170,11 @@ coordinator's disposable folder, apart.
 | `page_open`, `page_move`, `page_viewport`, `page_click`, `page_hover`, `page_type`, `page_press`, `page_scroll`, `page_select`, `page_wait`, `page_evaluate`, `page_dialog` | Drives that page: opens an address beside the conversation where none is open, goes back, forward or again, sets the bar's viewport, and clicks, hovers, types, presses keys, scrolls and chooses by a reference from its snapshot, with real input the person sees as it happens; waits for words or an element; runs a script in an isolated world of the page; answers an alert or a confirm the page opened, which the other tools say holds it. The owner is the session's own task or project, never the agent's say; the page's guards hold (only http and https; sign-ins to Claude, GitHub, GitLab and Linear go to the person's browser; no permissions; downloads refused), and an answer says when one refused something. The person using the page comes first: the action in flight stops. Without a window, a page or a task still going, the answer says so. Leads have it too (ADR-100; `PageTools.ts`, `RuntimeOptions.page`) | Command |
 | `set_run_command` | Keeps how a repository runs, its own way to run, for Althar to run it; leads have it too (ADR-023) | Command |
 | `keep_run` | Keeps something more for the project to run by a name and a command, or drops it; leads have it too (ADR-044) | Command |
-| `order_tasks` | Orders a batch | Command |
+| `move_to_front` | Moves a task that waits for a place among the agents at work to the front of the line, as its card's Move to front does | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-031) | Command |
 | `read_settings` | From ADR-097's second phase: a section of the project's settings or Althar's, or all of them, each setting with its words as the screen shows them, its value, the values it takes, and whether changing it loosens what asks; leads have it too | Read |
 | `change_settings` | From ADR-097's second phase: changes a section's settings through the call its screen makes, with a line and Undo in the thread. Tightening and every plain change at once; a change that loosens what asks (Rules, Never and Ask me, a server switched back on, the team's reviews posted unasked) only where it names the person's own message in the turn, else a card; signing out, leaving a repository out and removing the project on their word; signing in, connecting and adding a repository open the walk-in or the picker for them ([ADR-097](../decisions/what-agents-may-do.md#what-asks)); leads have it too | Command |
-| `recommend_lead` | Records a lead recommendation and its reasons | Command |
 
 A lead's own tools, beside `finish_step` and its pull request's, do what its
 sandbox would refuse, outside it (ADR-057): `install_dependencies` runs its
@@ -301,40 +300,30 @@ An import on a line of its own (`@AGENTS.md`) is put in place once, and a
 file read already is named instead of said again. Each file is cut at 10,000
 characters and all of them at 20,000, with where the rest is.
 
-### Handed to a fresh session before it fills
+### Compaction and recovery
 
-An agent left to fill its context compacts it by itself, at a moment of its
-choosing, into a summary of its own, and a decision made only in
-conversation may not survive it. So Althar hands the coordinator over first
-([ADR-031](../decisions/coordinator.md#handover-before-its-context-fills)):
+Althar uses ACP usage updates to decide when the coordinator reaches 80%
+of its window. The idle sweep wakes the delivery loop once a full session
+has had an hour of inactivity. The loop sends the agent's own Compact
+command as a separate turn when the input queue is empty.
+The first ordinary turn after compaction includes the coordinator's role and
+current project records alongside the queued messages.
+See [ADR-031](../decisions/coordinator.md#compaction-and-session-recovery).
 
-- **When.** Once the agent says its context is 80% full (`HANDOVER_AT`, from
-  ACP's usage updates, as the composer's context ring shows it), between
-  turns: after the turn it crossed in, or at once where it says so between
-  turns. Never in a turn. The old session takes no more turns from then; what
-  the person says meanwhile waits for the fresh one.
-- **On what.** The same agent, account, model and effort. The fresh session
-  is started first, and the old one stopped as superseded by it; one that
-  can't start leaves the old one carrying on, its agent compacting by itself.
-  So does a brief that would take 40% or more of a fresh session's context:
-  it would be due again at once.
-- **Its brief, from Althar's records rather than the raw thread:** its role,
-  a line that it took over and should read earlier details with
-  `read_thread`, `read_task` or the code rather than guess, the project as
-  `project_overview` gives it, the notes, every open task (where it stands,
-  who leads it and what waits on the person; for the newest 25, its plan and
-  what its lead last reported too; asides apart and uncounted, with what of
-  each waits on the person and its last report), the tasks finished last,
-  what the repositories tell agents, and the conversation's last twelve
-  messages, word for word, but for what waits for its first turn, which that
-  turn says, with the earlier conversation in short before them. Each part is
-  bounded; a message longer than a part comes in parts, so `read_thread`
-  reaches all of it.
-- **What the person sees:** a quiet line in the thread, "Started a fresh
-  session; picked up 3 open tasks." The thread is Althar's record, so the
-  whole conversation stays there to scroll.
-- **What doesn't move:** plans in their countdown, held plans, drafts and
-  running tasks are Althar's, not the session's, and carry on as they were.
+```mermaid
+flowchart TD
+  A[Message or idle sweep wakes the session] --> B{Session available?}
+  B -->|Lost| C[Start a fresh session with Althar's recovery brief]
+  B -->|Available, full, idle for an hour| D[Compact if the queue is empty]
+  B -->|Message queued| E[Read the next turn]
+  D --> F[Keep the session and restore role and project records on the next turn]
+  F --> E
+  C --> E
+```
+
+The recovery brief also carries a bounded transcript, with the last twelve
+messages verbatim where they fit. Queued messages are delivered as input.
+The full transcript is kept independently of the provider session.
 
 ### Notes
 
@@ -349,10 +338,8 @@ with its record; a removed one keeps its row.
 
 ### The compaction seam
 
-Althar hands the coordinator over before its agent compacts, and a brief
-uses the records, the notes, the last messages, the earlier ones in short and
-the tools. The short part is cut from the record, not written by a model:
-Althar writes no summaries yet.
+The agent writes its own compaction summary. For recovery after session loss,
+Althar builds the brief from the records, notes and bounded transcript.
 
 Continuous compaction will write summaries as records:
 

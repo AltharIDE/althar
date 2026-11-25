@@ -52,6 +52,8 @@ export interface ReportsOptions {
   readonly address: string | undefined
   /** Where the mail goes. */
   readonly email: string
+  /** Counts successful deliveries without any part of the report. */
+  readonly sent: () => void
 }
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
@@ -237,7 +239,11 @@ export const startReports = (options: ReportsOptions) => {
       const report = assemble(await gathering, choices)
       // Kept as given, cleared as cleared: the next report starts from it.
       await writePreference(options.profile(), 'reportEmail', choices.email ?? '')
-      if (address !== null) return await post(address, report, (url, init) => net.fetch(url, init))
+      if (address !== null) {
+        const result = await post(address, report, (url, init) => net.fetch(url, init))
+        if (result.kind === 'sent') options.sent()
+        return result
+      }
       const downloads = app.getPath('downloads')
       const file = await save(downloads, report)
       shell.showItemInFolder(join(downloads, file))

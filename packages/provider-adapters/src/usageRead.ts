@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 
 import { type KeychainRead, readClaudeKeychainField, readTokenField, type TokenLocation } from './credentialStore'
-import type { AccountUsage } from './usage'
+import { type AccountUsage, usageSaid } from './usage'
 import { allowedEndpoints, type EndpointSource, endpointProblem, type TokenSource, type UsagePair, usagePairs } from './usageSources'
 
 /*
@@ -33,6 +33,8 @@ export type EndpointRead =
       readonly kind: 'fault'
       readonly fault: UsageFault
       readonly message: string
+      /** What went wrong in more words than the person is shown, for the log only. */
+      readonly detail?: string
       readonly last?: AccountUsage
       /** Where the provider has just asked Althar to wait: its Retry-After as sent, and when Althar asks again (ISO 8601). */
       readonly waiting?: { readonly retryAfter: string | null; readonly until: string }
@@ -79,10 +81,11 @@ export interface UsagePolicy {
 export const MIN_INTERVAL = 60_000
 export const MAX_BACKOFF = 24 * 60 * 60_000
 
-const fault = (kind: UsageFault, message: string, last?: AccountUsage): Extract<EndpointRead, { kind: 'fault' }> => ({
+const fault = (kind: UsageFault, message: string, last?: AccountUsage, detail?: string): Extract<EndpointRead, { kind: 'fault' }> => ({
   kind: 'fault',
   fault: kind,
   message,
+  ...(detail === undefined ? {} : { detail }),
   ...(last === undefined ? {} : { last }),
 })
 
@@ -141,24 +144,28 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
       before !== undefined &&
       at < before.notBefore &&
       !(afterLimit && before.usage !== undefined && before.strikes === 0 && before.said === undefined)
-    )
+    ) {
+      // During a provider-requested wait the last windows are shown. Other failures stay visible until a fresh read.
+      if (before.strikes === 0 && before.said !== undefined) return before.said
       return before.usage !== undefined
         ? { kind: 'usage', usage: before.usage, stale: true }
-        : (before.said ?? fault('unreachable', 'The provider asked Althar to wait before reading again.'))
+        : (before.said ?? fault('unreachable', usageSaid.rateLimited))
+    }
 
     const every = source.every ?? MIN_INTERVAL
     // The interval is taken before anything is awaited, so no second read can start inside it.
     const remember = (patch: Memory) => memory.set(key, patch)
     remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + every, strikes: before?.strikes ?? 0 })
     const failed = (kind: UsageFault, message: string, strikes = 0, wait = every) => {
+      const said = fault(kind, message, before?.usage)
       // What it said, as it said it: a read failed for another reason isn't shown as a wait the provider asked for.
       remember({
         ...(before?.usage === undefined ? {} : { usage: before.usage }),
         notBefore: at + wait,
         strikes,
-        said: fault(kind, message),
+        said,
       })
-      return fault(kind, message, before?.usage)
+      return said
     }
 
     // The token lives in this call only.
@@ -183,24 +190,24 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
         signal: AbortSignal.timeout(timeout),
       })
     } catch {
-      return failed('unreachable', 'The provider could not be reached.')
+      return failed('unreachable', usageSaid.noReply)
     } finally {
       token = null
     }
 
     const status = answer.status
-    if (status === 401 || status === 403) return failed('expired', 'Its sign-in has expired.')
+    if (status === 401 || status === 403) return failed('expired', 'Sign-in expired.')
     if (status === 429) {
       const strikes = (before?.strikes ?? 0) + 1
       const header = answer.headers?.get('retry-after') ?? null
       const wait = Math.min(MAX_BACKOFF, Math.max(every, retryAfter(header, at) ?? Math.min(15 * 60_000, MIN_INTERVAL * 2 ** strikes)))
       return {
-        ...failed('unreachable', 'The provider asked Althar to wait before reading again.', strikes, wait),
+        ...failed('unreachable', usageSaid.rateLimited, strikes, wait),
         waiting: { retryAfter: header, until: new Date(at + wait).toISOString() },
       }
     }
-    if (status >= 300 && status < 400) return failed('source_changed', 'The usage address has moved.')
-    if (status < 200 || status >= 300) return failed('unreachable', 'The provider answered with an error.')
+    if (status >= 300 && status < 400) return failed('source_changed', usageSaid.unknown)
+    if (status < 200 || status >= 300) return failed('unreachable', usageSaid.providerError)
 
     try {
       const windows = source.parse(await answer.json(), now())
@@ -209,7 +216,7 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
       remember({ usage, notBefore: at + every, strikes: 0 })
       return { kind: 'usage', usage, stale: false }
     } catch {
-      return failed('source_changed', 'The usage answer was not what Althar knows.')
+      return failed('source_changed', usageSaid.unknown)
     }
   }
 
@@ -219,9 +226,9 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
       .filter((pair) => pair.agent === account.agent && pair.provider === account.provider && pair.pays === 'plan')
       .flatMap((pair) => pair.sources)
       .find((candidate): candidate is EndpointSource => candidate.kind === 'endpoint' && candidate.id === sourceId)
-    if (source === undefined) return fault('no_source', 'This account has no such usage source.')
+    if (source === undefined) return fault('no_source', usageSaid.unknown, undefined, 'This account has no such usage source.')
     const refused = endpointProblem(source, allowed)
-    if (refused !== null) return fault('no_source', `The usage source is not allowed: ${refused}.`)
+    if (refused !== null) return fault('no_source', usageSaid.unknown, undefined, `The usage source is not allowed: ${refused}.`)
     const key = `${source.id}\n${join(account.home)}`
     const going = inflight.get(key)
     if (going !== undefined) return going

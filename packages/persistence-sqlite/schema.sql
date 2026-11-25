@@ -193,7 +193,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, shelf TEXT CHECK (shelf IN ('scratch')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, shelf TEXT CHECK (shelf IN ('scratch')), artifact_chat INTEGER NOT NULL DEFAULT 0 CHECK (artifact_chat IN (0, 1)), artifact_canvas_id TEXT REFERENCES canvases (id) ON DELETE SET NULL,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -1539,41 +1539,6 @@ CREATE INDEX helpers_by_task ON helpers (task_id);
 
 CREATE UNIQUE INDEX helpers_by_thread ON helpers (thread_id);
 
-CREATE TABLE canvases (
-    id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'cnv_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
-    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60 AND name NOT GLOB '*[^a-z0-9-]*'),
-    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
-    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html')),
-    group_name TEXT CHECK (group_name IS NULL OR (length(group_name) BETWEEN 1 AND 60 AND group_name NOT GLOB '*[^a-z0-9-]*')),
-    created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
-    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-    archived_at TEXT,
-    archived_by_actor_id TEXT REFERENCES actors (id),
-    UNIQUE (project_id, name),
-    UNIQUE (id, project_id)
-  ) STRICT;
-
-CREATE TABLE canvas_versions (
-    canvas_id TEXT NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
-    number INTEGER NOT NULL CHECK (number >= 1),
-    base INTEGER CHECK (base IS NULL OR (base >= 1 AND base < number)),
-    manifest TEXT NOT NULL CHECK (length(manifest) = 64 AND manifest NOT GLOB '*[^0-9a-f]*'),
-    entry TEXT NOT NULL,
-    entry_sha256 TEXT NOT NULL CHECK (length(entry_sha256) = 64 AND entry_sha256 NOT GLOB '*[^0-9a-f]*'),
-    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html')),
-    title TEXT NOT NULL,
-    note TEXT,
-    files INTEGER NOT NULL CHECK (files >= 1),
-    bytes INTEGER NOT NULL CHECK (bytes >= 0),
-    actor_id TEXT NOT NULL REFERENCES actors (id),
-    thread_id TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
-    task_id TEXT REFERENCES tasks (id) ON DELETE SET NULL,
-    session_id TEXT,
-    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-    PRIMARY KEY (canvas_id, number)
-  ) STRICT;
-
 CREATE TABLE canvas_copies (
     folder TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -1611,8 +1576,6 @@ CREATE TABLE canvas_resolutions (
     created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
     PRIMARY KEY (comment_id, sequence)
   ) STRICT;
-
-CREATE INDEX canvases_by_project ON canvases (project_id, archived_at);
 
 CREATE INDEX canvas_copies_by_canvas ON canvas_copies (canvas_id);
 
@@ -1910,3 +1873,74 @@ CREATE TABLE thread_goals (
   ) STRICT;
 
 CREATE INDEX active_thread_goals ON thread_goals (thread_id) WHERE status = 'active';
+
+CREATE INDEX thread_items_by_thread_date ON thread_items (thread_id, created_at DESC);
+
+CREATE INDEX thread_items_setups_by_thread ON thread_items (thread_id, sequence DESC) WHERE kind = 'setup';
+
+CREATE INDEX tasks_settled_by_project ON tasks (project_id, settled_at DESC, id DESC) WHERE state IN ('done', 'abandoned');
+
+CREATE INDEX thread_items_search_passages ON thread_items (id DESC) WHERE kind IN ('user_message', 'agent_message', 'step_result', 'arrival');
+
+CREATE TABLE "canvases" (
+    id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'cnv_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60 AND name NOT GLOB '*[^a-z0-9-]*'),
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html', 'boards')),
+    group_name TEXT CHECK (group_name IS NULL OR (length(group_name) BETWEEN 1 AND 60 AND group_name NOT GLOB '*[^a-z0-9-]*')),
+    created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    archived_at TEXT,
+    archived_by_actor_id TEXT REFERENCES actors (id),
+    UNIQUE (project_id, name),
+    UNIQUE (id, project_id)
+  ) STRICT;
+
+CREATE INDEX canvases_by_project ON canvases (project_id, archived_at);
+
+CREATE TABLE "canvas_versions" (
+    canvas_id TEXT NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
+    number INTEGER NOT NULL CHECK (number >= 1),
+    base INTEGER CHECK (base IS NULL OR (base >= 1 AND base < number)),
+    manifest TEXT NOT NULL CHECK (length(manifest) = 64 AND manifest NOT GLOB '*[^0-9a-f]*'),
+    entry TEXT NOT NULL,
+    entry_sha256 TEXT NOT NULL CHECK (length(entry_sha256) = 64 AND entry_sha256 NOT GLOB '*[^0-9a-f]*'),
+    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html', 'boards')),
+    title TEXT NOT NULL,
+    note TEXT,
+    files INTEGER NOT NULL CHECK (files >= 1),
+    bytes INTEGER NOT NULL CHECK (bytes >= 0),
+    actor_id TEXT NOT NULL REFERENCES actors (id),
+    thread_id TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES tasks (id) ON DELETE SET NULL,
+    session_id TEXT,
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY (canvas_id, number)
+  ) STRICT;
+
+CREATE TABLE artifacts_homes (
+    project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    repository_id TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    how TEXT NOT NULL CHECK (how IN ('pr', 'main')),
+    follow INTEGER NOT NULL CHECK (follow IN (0, 1)),
+    FOREIGN KEY (repository_id, project_id) REFERENCES repository_bindings (id, project_id) ON DELETE CASCADE
+  ) STRICT;
+
+CREATE TABLE canvas_saves (
+    canvas_id TEXT PRIMARY KEY NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
+    repository_id TEXT NOT NULL REFERENCES repository_bindings (id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    how TEXT NOT NULL CHECK (how IN ('pr', 'main')),
+    follow INTEGER NOT NULL CHECK (follow IN (0, 1)),
+    tracking TEXT NOT NULL,
+    request TEXT NOT NULL,
+    next_version INTEGER NOT NULL CHECK (next_version >= 1),
+    through_version INTEGER NOT NULL CHECK (through_version >= 1),
+    published TEXT CHECK (published IS NULL OR json_valid(published)),
+    state TEXT NOT NULL CHECK (state IN ('saving', 'saved', 'failed')),
+    problem TEXT
+  ) STRICT;
+
+CREATE INDEX tasks_by_artifact ON tasks (artifact_canvas_id) WHERE artifact_canvas_id IS NOT NULL;

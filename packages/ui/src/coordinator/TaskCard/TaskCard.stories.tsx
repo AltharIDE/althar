@@ -134,6 +134,25 @@ export const WaitingForTheConnection: Story = {
   args: { status: TaskStatus.Paused, now: 'Waiting for the connection', started: '12m ago' },
 }
 
+/** Stopped by another task's lead: who, and the reason it gave, under the title, as much as two lines, whole on hover. */
+export const StoppedByALead: Story = {
+  args: {
+    task: '431',
+    status: TaskStatus.Stopped,
+    title: 'Mobile: thread list loses its place after a reconnect',
+    lead: OPUS,
+    from: undefined,
+    started: 'ran 12m',
+    why: 'Stopped by Phone pairs with this Mac over Wi-Fi: its reconnect code is being rewritten there first',
+    steps: ['Implement', 'Review'],
+    at: 0,
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByTitle(/^Stopped by Phone pairs with this Mac over Wi-Fi: its reconnect/)).toBeInTheDocument()
+  },
+}
+
 /** Stopped by you: it keeps its branch and record. */
 export const Stopped: Story = {
   args: {

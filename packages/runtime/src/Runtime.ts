@@ -29,7 +29,9 @@ import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
+import { ComputerTools } from './ComputerTools'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
@@ -65,6 +67,7 @@ import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 import { WorktreeRepair } from './WorktreeRepair'
+import { WorkerSnapshots } from './WorkerSnapshots'
 import { ApiCommands } from './ApiCommands'
 import { ClientIdentities } from './ClientIdentities'
 
@@ -173,7 +176,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   const judging = startupLayer('permissionjudge', PermissionJudge.layer).pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
-  const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
+  const core = Layer.mergeAll(
+    startupLayer('projects', Projects.layer),
+    startupLayer('sessions', Sessions.layer),
+    Launches.layer,
+    WorkerSnapshots.layer,
+  ).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
       Layer.mergeAll(
@@ -217,13 +225,15 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(
         startupLayer('coordinator', Coordinator.layer),
         TaskActions.layer,
-        // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
-        SettingsTools.layer,
+        // The settings, read and changed by the coordinator and leads as the person can (ADR-097), the place for
+        // artifacts among them, through the canvases' own CanvasSaves (the one layer, built once).
+        SettingsTools.layer.pipe(Layer.provide(CanvasSaves.layer)),
         IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
+        ComputerTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
-        Canvases.layer,
+        Canvases.layer.pipe(Layer.provideMerge(CanvasSaves.layer)),
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
         Elsewhere.layer,
         MachineLoad.layer,

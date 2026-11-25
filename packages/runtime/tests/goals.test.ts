@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { controlGoal, readGoal } from '../src/threadGoals'
+import { controlGoal, goalLine, readGoal } from '../src/threadGoals'
 import { callTool, repository, runtime, turns, until } from './support'
 
 const newTask = (scratch = false) =>
@@ -46,6 +46,30 @@ const liveGoal = (threadId: string, except: string | null = null) =>
   })
 
 describe('thread goals', () => {
+  it.live('starts the next goal round on a full lead without compacting first', () => {
+    const gate = holds()
+    return Effect.gen(function* () {
+      const { threadId } = yield* newTask()
+      const sessions = yield* Sessions
+      yield* sessions.start({ threadId, ...lead })
+      const [first] = yield* until(turns(threadId), (rows) => rows[0]?.state === 'completed')
+      const body = 'What has passed so far? [context:85]'
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body })
+      yield* until(turns(threadId), (rows) => rows[1]?.state === 'completed')
+
+      const { goal } = yield* setGoal(threadId)
+      yield* sessions.kickGoal(threadId, goal?.revision ?? 0, lead)
+      const round = yield* liveGoal(threadId)
+      const log = yield* turns(threadId)
+      assert.lengthOf(log, 3)
+      assert.strictEqual(round?.sessionId, first?.providerSessionId)
+      assert.include(round?.prompt ?? '', objective)
+      assert.strictEqual((yield* readGoal(threadId))?.rounds, 1)
+      yield* controlGoal(threadId, { action: 'pause' })
+      gate.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtime(':memory:', { holds: gate })), Effect.scoped)
+  })
+
   it.live('recovers a goal accepted before its first lead could start', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'althar-cold-goal-')), 'home.sqlite')
     const gate = holds()
@@ -322,4 +346,25 @@ describe('thread goals', () => {
       Effect.scoped,
     ),
   )
+})
+
+describe('what the thread says of a goal the person changed', () => {
+  const goal = {
+    revision: 1,
+    objective: 'Ship it',
+    status: 'active' as const,
+    rounds: 0,
+    roundLimit: 12,
+    progress: null,
+    detail: null,
+    waiting: false,
+  }
+  it('says a goal set, replaced, changed, paused, resumed and cleared', () => {
+    assert.strictEqual(goalLine({ action: 'set', objective: ' Ship it ' }, null, goal), 'You set a goal: Ship it')
+    assert.strictEqual(goalLine({ action: 'set', objective: 'Ship it' }, goal, goal), 'You replaced the goal: Ship it')
+    assert.strictEqual(goalLine({ action: 'edit', objective: 'Ship it today' }, goal, null), 'You changed the goal: Ship it today')
+    assert.strictEqual(goalLine({ action: 'pause' }, goal, goal), 'You paused the goal.')
+    assert.strictEqual(goalLine({ action: 'resume' }, goal, goal), 'You resumed the goal.')
+    assert.strictEqual(goalLine({ action: 'clear' }, goal, null), 'You cleared the goal.')
+  })
 })
