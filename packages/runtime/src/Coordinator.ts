@@ -5,7 +5,7 @@ import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from
 import { type Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, GOAL_LENGTH, GOAL_ROUNDS, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
+import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -1214,7 +1214,10 @@ export class Coordinator extends Context.Service<
             const tool = call.althar
             if (tool !== 'draft_task' && tool !== 'propose_plan') return
             if ((yield* coordinatorProject(threadId)) === null) return
-            yield* redraft(threadId, (drafts) => callBegan(drafts, call.toolCallId, tool))
+            // A key of its own: the agent may give a call of a later turn the same id, and a Hold from a window behind,
+            // by this draft's key, must never reach that one's draft.
+            const key = `${call.toolCallId}@${yield* Effect.orDie((yield* Crypto.Crypto).randomUUIDv7())}`
+            yield* redraft(threadId, (drafts) => callBegan(drafts, call.toolCallId, tool, key))
           } else if (draftsBy.get(threadId)?.calls.has(call.toolCallId) !== true) return
           const projectId = yield* coordinatorProject(threadId)
           if (projectId === null) return
