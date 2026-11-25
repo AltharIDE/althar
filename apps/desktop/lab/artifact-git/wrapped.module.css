@@ -1,0 +1,309 @@
+/* What the lab adds to the kit's own, on its tokens. */
+
+/* ---- A person, as a face ------------------------------------------------- */
+.face {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font: 600 10px/1 var(--font);
+  color: var(--on-ink);
+  vertical-align: -4px;
+}
+.face[data-ink='plum'] {
+  background: var(--mark-plum);
+}
+.face[data-ink='ochre'] {
+  background: var(--mark-ochre);
+}
+.faces {
+  display: inline-flex;
+  margin-right: 2px;
+}
+.faces .face {
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.faces .face + .face {
+  margin-left: -5px;
+}
+
+/* ---- The line over the canvas ------------------------------------------ */
+.said {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--t-2);
+}
+
+/* ---- The canvas: its ground, and a board on it --------------------------- */
+.ground {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: var(--n-2);
+}
+.boardPlace {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.board {
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.board iframe {
+  display: block;
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* ---- B: side by side ------------------------------------------------------ */
+.compare {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.compareHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 4px;
+}
+.gap {
+  flex: 1;
+}
+/* yours and theirs small, one over the other; the two together large beside them, where its pins read */
+.boards {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-areas:
+    'a c'
+    'b c';
+  align-content: start;
+  gap: 16px 20px;
+  padding: 10px 16px 16px;
+  overflow: auto;
+}
+.boards > :nth-child(1) {
+  grid-area: a;
+}
+.boards > :nth-child(2) {
+  grid-area: b;
+}
+.boards > :nth-child(3) {
+  grid-area: c;
+}
+.boards[data-count='2'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas: 'a b';
+}
+.figure {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.figure .boardPlace {
+  padding: 0;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+.caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.files {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 16px 16px;
+}
+/* what to do sits beside what differs, or under it where the panel is narrow */
+.differences {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+.list {
+  flex: 1 1 440px;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.difference {
+  display: grid;
+  grid-template-columns: 20px minmax(110px, 150px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: 12.5px;
+}
+.pin {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--signal-fill);
+  color: var(--on-signal);
+  font: 600 11px/1 var(--font);
+}
+.what {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.decide {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ---- Save to repo: where it goes, and who is in its pull request -------- */
+.save {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: 100%;
+}
+.offer {
+  display: grid;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.offerHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.commits {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--line);
+}
+.commitsHead {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.commitList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.commit {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.commitTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-1);
+}
+.commitFacts {
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+/* ---- D: the artifact's draft --------------------------------------------- */
+.draft {
+  display: grid;
+  gap: 12px;
+  width: 340px;
+  padding: 14px;
+}
+.draftHead {
+  display: grid;
+  gap: 3px;
+}
+.draftTitle {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.draftWhere {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.draftWhere a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+.people {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.person {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.personName {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.personFacts {
+  justify-self: end;
+  color: var(--t-3);
+}
+.draftFiles {
+  font-size: 12px;
+}
+.draftFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}

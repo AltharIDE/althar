@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kiln · Booking page</title>
+    <!--
+      The artifact itself, as it would be in git at design/booking/: Kiln's booking page for a class, one file and its
+      styles. The lab draws its versions from one page: ?v= names whose it is (base: v3, as merged; ana: Ana's, with the
+      bookings API's dates, price and places, Gift taken out; maya: Maya's, a Book bar, Gift as a button, her heading;
+      together and together-nogift: both). ?pins= numbers the parts that differ, as Althar's ground pins them.
+    -->
+    <style>
+      :root {
+        --clay: #a4532f;
+        --clay-deep: #7d3a1f;
+        --cream: #f6efe4;
+        --sand: #eadfcd;
+        --ink: #2a211b;
+        --ink-2: #6b5b4e;
+        --line: #dccdb6;
+        --pin: #7a3ff0;
+        font-family: 'Inter Variable', 'Inter', system-ui, sans-serif;
+        color: var(--ink);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--cream);
+      }
+      body {
+        width: 1000px;
+        height: 680px;
+        overflow: hidden;
+        position: relative;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        padding: 22px 44px;
+        font-size: 14px;
+        color: var(--ink-2);
+      }
+      .mark {
+        font: 600 22px/1 Georgia, 'Times New Roman', serif;
+        letter-spacing: 0.02em;
+        color: var(--ink);
+        margin-right: auto;
+      }
+      .mark span {
+        color: var(--clay);
+      }
+      main {
+        display: grid;
+        grid-template-columns: 430px 1fr;
+        gap: 48px;
+        padding: 18px 44px 0;
+      }
+      .photo {
+        height: 520px;
+        border-radius: 18px;
+        background:
+          radial-gradient(120% 80% at 30% 20%, #d98b5f 0%, transparent 60%),
+          radial-gradient(90% 70% at 80% 90%, #6e3a22 0%, transparent 70%),
+          linear-gradient(160deg, #c26a40, #8a4426);
+        position: relative;
+        overflow: hidden;
+      }
+      .photo svg {
+        position: absolute;
+        left: 50%;
+        bottom: 54px;
+        transform: translateX(-50%);
+      }
+      .info {
+        display: flex;
+        flex-direction: column;
+        padding-top: 18px;
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--clay);
+        font-weight: 600;
+      }
+      h1 {
+        margin: 12px 0 14px;
+        font: 500 44px/1.05 Georgia, 'Times New Roman', serif;
+        letter-spacing: -0.01em;
+      }
+      .lede {
+        margin: 0 0 26px;
+        font-size: 16px;
+        line-height: 1.55;
+        color: var(--ink-2);
+        max-width: 440px;
+      }
+      .facts {
+        display: grid;
+        gap: 10px;
+        padding: 18px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        font-size: 15px;
+      }
+      .fact {
+        display: flex;
+        gap: 14px;
+      }
+      .fact b {
+        width: 74px;
+        font-weight: 500;
+        color: var(--ink-2);
+      }
+      .left {
+        color: var(--clay-deep);
+        font-weight: 600;
+      }
+      .price {
+        margin: 22px 0 18px;
+        font: 500 30px/1 Georgia, serif;
+      }
+      .price small {
+        font: 400 14px/1 'Inter Variable', system-ui, sans-serif;
+        color: var(--ink-2);
+        margin-left: 6px;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .book {
+        border: 0;
+        border-radius: 999px;
+        background: var(--ink);
+        color: var(--cream);
+        font: 600 15px/1 'Inter Variable', system-ui, sans-serif;
+        padding: 14px 26px;
+      }
+      .giftLink {
+        color: var(--clay-deep);
+        font-size: 15px;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      /* Maya's: Book in a bar of its own, with the price beside it, and Gift as a button. */
+      .bar {
+        margin-top: 26px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 16px 16px 16px 24px;
+        border-radius: 18px;
+        background: var(--sand);
+      }
+      .bar .price {
+        margin: 0;
+      }
+      .bar .book {
+        margin-left: auto;
+        padding: 18px 34px;
+        font-size: 17px;
+        background: var(--clay);
+      }
+      .giftButton {
+        margin-top: 14px;
+        align-self: flex-start;
+        border: 1px solid var(--clay);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--clay-deep);
+        font: 600 14px/1 'Inter Variable', system-ui, sans-serif;
+        padding: 11px 20px;
+      }
+      .pin {
+        position: absolute;
+        z-index: 3;
+        width: 26px;
+        height: 26px;
+        margin: -13px 0 0 -13px;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        background: var(--pin);
+        color: #fff;
+        font: 600 12px/22px 'Inter Variable', system-ui, sans-serif;
+        text-align: center;
+        box-shadow: 0 2px 6px rgba(42, 33, 27, 0.28);
+        transform: scale(var(--pin-scale, 1));
+      }
+      .outline {
+        position: absolute;
+        z-index: 2;
+        border: calc(2px * var(--pin-scale, 1)) solid var(--pin);
+        border-radius: 10px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <span class="mark">Kiln<span>.</span></span>
+      <span>Classes</span>
+      <span>Studio</span>
+      <span>Gift cards</span>
+      <span>Sign in</span>
+    </nav>
+    <main>
+      <div class="photo">
+        <svg width="260" height="210" viewBox="0 0 260 210" aria-hidden="true">
+          <ellipse cx="130" cy="196" rx="118" ry="12" fill="rgba(42,33,27,0.28)" />
+          <path d="M42 70 C 44 150, 80 190, 130 190 C 180 190, 216 150, 218 70 Z" fill="#efe2cf" />
+          <ellipse cx="130" cy="70" rx="88" ry="20" fill="#e4d2b8" />
+          <ellipse cx="130" cy="72" rx="74" ry="14" fill="#c9ad8c" />
+        </svg>
+      </div>
+      <div class="info" id="info"></div>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search)
+      const v = params.get('v') ?? 'base'
+      const pins = (params.get('pins') ?? '').split(',').filter(Boolean)
+      const ana = v === 'ana' || v.startsWith('together')
+      const maya = v === 'maya' || v.startsWith('together')
+      const gift = v !== 'ana' && v !== 'together-nogift'
+      const when = ana ? 'Sat 14 Dec · 10:00–12:30' : 'Saturday mornings'
+      const price = ana ? '£48' : '£45'
+      const left = ana ? '<span class="left">3 places left</span>' : ''
+      const heading = maya ? 'Book a wheel-throwing class' : 'Wheel throwing for beginners'
+      const info = document.getElementById('info')
+      info.innerHTML = `
+        <span class="eyebrow">Beginners · 2½ hours</span>
+        <h1 data-part="heading">${heading}</h1>
+        <p class="lede">Centre clay on the wheel, throw a bowl and a cup, and choose a glaze. We fire them; you collect in two weeks.</p>
+        <div class="facts" data-part="when">
+          <div class="fact"><b>When</b><span>${when}</span></div>
+          <div class="fact"><b>Where</b><span>Kiln, 14 Mill Lane</span></div>
+          <div class="fact"><b>Group</b><span>Up to 8${left ? ' · ' + left : ''}</span></div>
+        </div>
+        ${
+          maya
+            ? `<div class="bar" data-part="book"><div class="price">${price}<small>a place</small></div><button class="book">Book a place</button></div>
+               ${gift ? '<button class="giftButton" data-part="gift">Gift this class</button>' : '<span data-part="gift" style="height:38px;margin-top:14px"></span>'}`
+            : `<div class="price" data-part="price">${price}<small>a place</small></div>
+               <div class="actions" data-part="book"><button class="book">Book a place</button>${gift ? '<a class="giftLink" data-part="gift">Gift this class</a>' : ''}</div>`
+        }`
+      // The parts that differ, numbered as Althar pins them on a board: `when:1,book:2,gift:3`.
+      requestAnimationFrame(() => {
+        for (const pair of pins) {
+          const [name, n] = pair.split(':')
+          const part = document.querySelector(`[data-part="${name}"]`)
+          if (part === null) continue
+          const box = part.getBoundingClientRect()
+          const outline = document.createElement('div')
+          outline.className = 'outline'
+          Object.assign(outline.style, {
+            left: `${box.left - 6}px`,
+            top: `${box.top - 6}px`,
+            width: `${box.width + 12}px`,
+            height: `${Math.max(box.height, 30) + 12}px`,
+          })
+          const pin = document.createElement('div')
+          pin.className = 'pin'
+          pin.textContent = n
+          Object.assign(pin.style, { left: `${box.right + 6}px`, top: `${box.top - 6}px` })
+          document.body.append(outline, pin)
+        }
+      })
+    </script>
+  </body>
+</html>
