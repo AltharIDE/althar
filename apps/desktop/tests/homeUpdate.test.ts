@@ -16,7 +16,7 @@ const published = (version: string) =>
     readFileSync(join(__dirname, 'fixtures', `althar-host-${version}-linux-x64.json`)),
     HOST_RELEASE_KEYS,
     'x64',
-    Date.parse('2026-11-26T00:00:00Z'),
+    Date.parse('2026-11-25T22:00:00Z'),
   )
 /** What a home on a release says of itself (`release-info --json`): what its manifest says. */
 const infoOf = (release: Pick<HostRelease, 'version' | 'apiVersion' | 'storage'>) =>
