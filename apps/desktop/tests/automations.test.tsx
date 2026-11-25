@@ -431,6 +431,29 @@ describe('an automation’s page', () => {
     expect(await screen.findByRole('button', { name: /Monthly, on the last Friday at 16:00/ })).toBeTruthy()
   })
 
+  it('moves its next run with its schedule while the save is on its way: the label and the date agree', async () => {
+    const { client } = fakeClient({
+      getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView({ nextAt: local(30, 9) }) })),
+      // Never answered: the runtime hasn't said yet.
+      changeAutomation: vi.fn(() => new Promise<never>(() => {})),
+    })
+    withServices(<Room opening="auto1" />, client)
+    expect(await screen.findByText('Runs next tomorrow at 9:00')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /Every weekday at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Weekday' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Which weekday of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Weekday' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Friday' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    // The last Friday of September has gone: October's, the 30th at 9:00, and not tomorrow's.
+    const date = new Date(2026, 9, 30, 9).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    expect(await screen.findByRole('button', { name: /Monthly, on the last Friday at 9:00/ })).toBeTruthy()
+    expect(screen.getByText(`Runs next on ${date} at 9:00`)).toBeTruthy()
+    expect(screen.queryByText('Runs next tomorrow at 9:00')).toBeNull()
+  })
+
   it('says what it can’t do, keeping what the runtime kept', async () => {
     const getAutomation = vi.fn(async () => ({ cursor: 6, automation: automationView() }))
     const { client } = fakeClient({

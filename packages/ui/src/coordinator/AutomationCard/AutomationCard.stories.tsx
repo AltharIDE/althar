@@ -254,6 +254,17 @@ export const Monthly: Story = {
     await userEvent.click(await within(document.body).findByRole('option', { name: 'Friday' }))
     await userEvent.click(c.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(c.queryByRole('radiogroup', { name: 'Which day of the month' })).toBeNull())
+    // An empty time keeps it open, saying so at the time.
+    await userEvent.click(c.getByRole('button', { name: /Monthly/ }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.clear(await c.findByLabelText('Time'))
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await expect(c.getByText('Set a time first')).toBeInTheDocument()
+    await expect(c.getByLabelText('Time')).toHaveFocus()
+    await userEvent.type(c.getByLabelText('Time'), '10:00')
+    await expect(c.queryByText('Set a time first')).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(c.queryByRole('radiogroup', { name: 'Which day of the month' })).toBeNull())
     // Escape leaves it as it was.
     await userEvent.click(c.getByRole('button', { name: /Monthly/ }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Monthly…' }))
@@ -284,6 +295,32 @@ export const MonthlyShortMonths: Story = {
   },
 }
 
+/** The coordinator changed it to a monthly schedule: the old one struck through, and the date the new one first runs, for deciding whether to turn it on. */
+export const ChangedToMonthly: Story = {
+  args: { onUndo: fn(), onTurnOn: fn() },
+  render: (args) => (
+    <AutomationCard
+      {...args}
+      stage="changed"
+      next="on 30 Apr at 9:00"
+      when={[...WHEN, { value: 'month', label: 'Monthly, on the 31st at 9:00' }]}
+      whenValue="month"
+      whenWas="Every night at 2:00"
+      whenNote="A month without a 31st runs on its last day."
+      picker={() => 'Claude Opus 5'}
+      review={{ on: false }}
+      limits={LIMITS}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Monthly, on the 31st at 9:00')).toBeInTheDocument()
+    await expect(c.getByText('Every night at 2:00').closest('s')).not.toBeNull()
+    await expect(c.getByText(/· next on 30 Apr$/)).toBeInTheDocument()
+    await expect(c.getByText('A month without a 31st runs on its last day.')).toBeInTheDocument()
+  },
+}
+
 /** What the coordinator changed, while it is on: the old values struck through; it holds from its next run, or is undone. */
 export const Changed: Story = {
   args: { onUndo: fn(), onOpen: fn() },
@@ -308,6 +345,8 @@ export const Changed: Story = {
     await expect(c.getByText('Automation, changed · Meridian')).toBeInTheDocument()
     await expect(c.getByText('Every Sunday at 3:00')).toBeInTheDocument()
     await expect(c.getByText('Every night at 2:00').closest('s')).not.toBeNull()
+    // What it was, struck through, and when it runs next, side by side.
+    await expect(c.getByText(/· next Sunday$/)).toBeInTheDocument()
     await expect(c.getByText('Holds from its next run, Sunday at 3:00.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Undo' }))
     await expect(args.onUndo).toHaveBeenCalled()

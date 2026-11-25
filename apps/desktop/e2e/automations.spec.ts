@@ -54,6 +54,24 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
     await expect(page.getByText(/Runs next/)).toBeVisible()
     await page.screenshot({ path: 'test-results/automations-4-page.png', animations: 'disabled', scale: 'css', fullPage: true })
 
+    // Set to run monthly, on the second Tuesday at 16:00: it shows its words and the date of its next run at once, and keeps both
+    // once saved, on its page opened again.
+    await page.getByRole('button', { name: /Every Friday at 16:00/ }).click()
+    await page.getByRole('menuitem', { name: 'Monthly…' }).click()
+    await page.getByRole('radio', { name: 'Weekday', exact: true }).click()
+    await page.getByRole('combobox', { name: 'Which weekday of the month' }).click()
+    await page.getByRole('option', { name: 'Second' }).click()
+    await page.getByRole('combobox', { name: 'Weekday', exact: true }).click()
+    await page.getByRole('option', { name: 'Tuesday' }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
+    await expect(page.getByRole('button', { name: 'Monthly, on the second Tuesday at 16:00' })).toBeVisible()
+    await expect(page.getByText(/Runs next (on .+|tomorrow|today) at 16:\d\d/)).toBeVisible()
+    await page.getByRole('button', { name: 'Automations', exact: true }).click()
+    await page.getByRole('button', { name: 'Release notes' }).click()
+    await expect(page.getByRole('button', { name: 'Monthly, on the second Tuesday at 16:00' })).toBeVisible()
+    await expect(page.getByText(/Runs next (on .+|tomorrow|today) at 16:\d\d/)).toBeVisible()
+    await page.screenshot({ path: 'test-results/automations-4b-monthly.png', animations: 'disabled', scale: 'css', fullPage: true })
+
     // Made by hand: a blank page, its prompt ready to type.
     await page.getByRole('button', { name: 'Automations', exact: true }).click()
     await page.getByRole('button', { name: 'New automation' }).click()

@@ -549,6 +549,31 @@ describe('automations', () => {
     }).pipe(Effect.provide(clock.on(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options }))))))
   })
 
+  it.live('count a new schedule from the change: no run for a slot it has from before, then the first future one', () => {
+    // Thursday 30 April 2026, 8:00 in London: a Monday-only automation has nothing due today.
+    const clock = clockAt('2026-04-30T07:00:00Z')
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* opened
+      const mondays: AutomationDefinition = { ...NOTES, schedule: { every: 'week', days: [1], at: '09:00' } }
+      const automationId = yield* automations.make({ projectId, definition: mondays, on: true, actorId: instance.personId })
+      // At noon, its page changes it to the 31st at 9:00: April has 30 days, so its slot would be this morning's 9:00.
+      clock.set('2026-04-30T11:00:00Z')
+      yield* Effect.sleep('300 millis')
+      yield* automations.change(automationId, { ...mondays, schedule: { every: 'month', on: { day: 31 }, at: '09:00' } }, instance.personId)
+      clock.set('2026-04-30T11:05:00Z')
+      yield* Effect.sleep('400 millis')
+      assert.deepStrictEqual(yield* occurrencesOf(automationId), [])
+      assert.strictEqual((yield* automations.read(automationId)).nextAt, '2026-05-31T08:00:00.000Z')
+      // The first slot after the change runs.
+      clock.set('2026-05-31T08:00:05Z')
+      const [ran, ...rest] = yield* until(occurrencesOf(automationId), (rows) => rows.length >= 1)
+      assert.deepInclude(ran, { cause: 'schedule', slot: '2026-05-31T09:00' })
+      assert.lengthOf(rest, 0)
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
+  })
+
   it.live('run on an agent that pays per use, as on any other', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     return Effect.gen(function* () {

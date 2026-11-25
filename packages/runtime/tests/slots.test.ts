@@ -108,6 +108,12 @@ describe('slots', () => {
     assert.strictEqual(lastCome(lastSunday, utc('2026-03-29T00:59'), LONDON), '2026-02-22T01:30')
     assert.strictEqual(lastCome(lastSunday, utc('2026-03-29T01:30'), LONDON), '2026-03-29T01:30')
     assert.strictEqual(nextToCome(lastSunday, utc('2026-03-29T01:30'), LONDON), '2026-04-26T01:30')
+    // At 2:10 summer time the clock reads past 1:30, but its slot comes at 2:30: still to come, and not yet come.
+    assert.strictEqual(localOf(utc('2026-03-29T01:10'), LONDON), '2026-03-29T02:10')
+    assert.strictEqual(nextToCome(lastSunday, utc('2026-03-29T01:10'), LONDON), '2026-03-29T01:30')
+    assert.strictEqual(lastCome(lastSunday, utc('2026-03-29T01:10'), LONDON), '2026-02-22T01:30')
+    // A weekly one the same way.
+    assert.strictEqual(nextToCome({ every: 'week', days: [7], at: '01:30' }, utc('2026-03-29T01:10'), LONDON), '2026-03-29T01:30')
     // They go back at 2:00 on 25 October, the last Sunday: 1:30 happens twice, and comes once.
     assert.strictEqual(lastCome(lastSunday, utc('2026-10-25T00:45'), LONDON), '2026-10-25T01:30')
     assert.strictEqual(nextToCome(lastSunday, utc('2026-10-25T01:31'), LONDON), '2026-11-29T01:30')

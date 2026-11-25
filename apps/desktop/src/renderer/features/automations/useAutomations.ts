@@ -15,7 +15,7 @@ import { messageOf } from '../../data/client'
 import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { FIRST_SCHEDULE, needsYou, type Starter } from './words'
+import { FIRST_SCHEDULE, needsYou, nextAtAfter, type Starter } from './words'
 
 /*
  * A project's automations, as its Automations tab shows them, and one, as
@@ -170,6 +170,8 @@ export const useAutomation = (automationId: string): AutomationModel => {
         name: definition.name,
         prompt: definition.prompt,
         schedule: definition.schedule,
+        // Its next run goes with its schedule: the label and the date never disagree while the save is on its way.
+        nextAt: nextAtAfter(was.nextAt, was.definition.schedule, definition.schedule),
         work: definition.work.kind,
       }))
       void send(() => client.changeAutomation(automationId, definition))

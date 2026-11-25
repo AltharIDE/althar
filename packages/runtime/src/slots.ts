@@ -178,7 +178,11 @@ export const lastCome = (schedule: Schedule, now: number, zone: string, stagger 
 
 /** The first slot whose time, and the stagger after it, is still to come. */
 export const nextToCome = (schedule: Schedule, now: number, zone: string, stagger = 0): Slot => {
-  let slot = slotAfter(schedule, localOf(now - stagger, zone))
+  const local = localOf(now - stagger, zone)
+  // A slot a daylight-saving change moved later, 1:30 that comes at 2:30, may still be to come while the clock reads past 1:30.
+  const nominal = slotAtOrBefore(schedule, local)
+  if (instantOf(nominal, zone) + stagger > now) return nominal
+  let slot = slotAfter(schedule, local)
   // A local time the zone repeats came the first time already.
   while (instantOf(slot, zone) + stagger <= now) slot = slotAfter(schedule, slot)
   return slot

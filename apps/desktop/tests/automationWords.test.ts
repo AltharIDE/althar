@@ -15,6 +15,7 @@ import {
   minuteChoices,
   monthlyOf,
   monthOf,
+  nextAtAfter,
   needsYou,
   nextShort,
   nextSlot,
@@ -103,6 +104,17 @@ describe('when an automation runs, in words', () => {
     expect(monthlyOf({ on: { day: 32 }, at: '08:00' }, was)).toBe(was)
     expect(monthlyOf({ on: { weekday: 8, nth: 1 }, at: '08:00' }, was)).toBe(was)
     expect(monthlyOf({ on: { weekday: 1, nth: 5 }, at: '08:00' }, was)).toBe(was)
+  })
+
+  it('moves the next run with the schedule, and leaves one that has none, or the same schedule, as it is', () => {
+    const weekdays = { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' }
+    const tomorrow = local(30, 9).toISOString()
+    // The last Friday of September has gone: October's, not tomorrow's.
+    expect(nextAtAfter(tomorrow, weekdays, { every: 'month', on: { weekday: 5, nth: -1 }, at: '09:00' }, NOON)).toBe(
+      local(60, 9).toISOString(),
+    )
+    expect(nextAtAfter(tomorrow, weekdays, { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' }, NOON)).toBe(tomorrow)
+    expect(nextAtAfter(null, weekdays, { every: 'month', on: { day: 1 }, at: '09:00' }, NOON)).toBeNull()
   })
 
   it('says the short-month rule only for a day some months lack', () => {

@@ -195,6 +195,14 @@ export const nextSlot = (schedule: Schedule, now: Date = new Date()): Date => {
   return now
 }
 
+/**
+ * The next run once the schedule changes, shown before the runtime says it: the
+ * date the new schedule gives, where the old one gave a date and the schedule
+ * is another. Where nothing was due (paused), nothing is.
+ */
+export const nextAtAfter = (nextAt: string | null, before: Schedule, after: Schedule, now: Date = new Date()): string | null =>
+  nextAt === null || sameSchedule(before, after) ? nextAt : nextSlot(after, now).toISOString()
+
 /* ---- times, as a clock says them --------------------------------------------------------- */
 
 /** A time on a 24-hour clock, as the schedules say it: 9:00, 22:30. */

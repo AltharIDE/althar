@@ -106,6 +106,8 @@ export interface AutomationCardText {
   set: string
   cancel: string
   noDays: string
+  /** Under the time, where Done is pressed with none. */
+  noTime: string
   /** When's note: when it runs next. */
   next: (next: string) => string
   /** Said before an old value, struck through, to a screen reader. */
@@ -168,6 +170,7 @@ export const automationCardText: AutomationCardText = {
   set: 'Done',
   cancel: 'Cancel',
   noDays: 'Pick a day first',
+  noTime: 'Set a time first',
   next: (next) => `next ${next}`,
   was: 'was',
   none: 'None',
@@ -364,6 +367,9 @@ function AnotherTime({
   const [days, setDays] = useState<readonly number[]>(start.days)
   const [at, setAt] = useState(start.at)
   const [missing, setMissing] = useState(false)
+  const [noTime, setNoTime] = useState(false)
+  const time = useRef<HTMLInputElement>(null)
+  const timeErrorId = useId()
   const first = useRef<HTMLButtonElement>(null)
   const errorId = useId()
   useEffect(() => {
@@ -404,7 +410,20 @@ function AnotherTime({
       <span className={s.at} aria-hidden="true">
         {t.at}
       </span>
-      <Field type="time" aria-label={t.time} className={s.time} value={at} onChange={(event) => setAt(event.target.value)} required />
+      <Field
+        ref={time}
+        type="time"
+        aria-label={t.time}
+        className={s.time}
+        value={at}
+        invalid={noTime}
+        aria-describedby={noTime ? timeErrorId : undefined}
+        onChange={(event) => {
+          setAt(event.target.value)
+          if (event.target.value !== '') setNoTime(false)
+        }}
+        required
+      />
       <span className={s.anotherEnd}>
         <LinkButton onClick={onCancel}>{t.cancel}</LinkButton>
         <Button
@@ -415,7 +434,12 @@ function AnotherTime({
               first.current?.focus()
               return
             }
-            if (at !== '') onSet({ days, at })
+            if (at === '') {
+              setNoTime(true)
+              time.current?.focus()
+              return
+            }
+            onSet({ days, at })
           }}
         >
           {t.set}
@@ -424,6 +448,11 @@ function AnotherTime({
       {missing && (
         <span className={s.anotherError}>
           <FieldError id={errorId}>{t.noDays}</FieldError>
+        </span>
+      )}
+      {noTime && (
+        <span className={s.anotherError}>
+          <FieldError id={timeErrorId}>{t.noTime}</FieldError>
         </span>
       )}
     </li>
@@ -447,6 +476,10 @@ function AnotherMonth({
   const [nth, setNth] = useState('weekday' in start.on ? start.on.nth : 1)
   const [weekday, setWeekday] = useState('weekday' in start.on ? start.on.weekday : 1)
   const [at, setAt] = useState(start.at)
+  // Done on an empty time keeps the editor open, saying why.
+  const [missing, setMissing] = useState(false)
+  const time = useRef<HTMLInputElement>(null)
+  const errorId = useId()
   const first = useRef<HTMLDivElement>(null)
   useEffect(() => {
     first.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus()
@@ -510,18 +543,41 @@ function AnotherMonth({
       <span className={s.at} aria-hidden="true">
         {t.at}
       </span>
-      <Field type="time" aria-label={t.time} className={s.time} value={at} onChange={(event) => setAt(event.target.value)} required />
+      <Field
+        ref={time}
+        type="time"
+        aria-label={t.time}
+        className={s.time}
+        value={at}
+        invalid={missing}
+        aria-describedby={missing ? errorId : undefined}
+        onChange={(event) => {
+          setAt(event.target.value)
+          if (event.target.value !== '') setMissing(false)
+        }}
+        required
+      />
       <span className={s.anotherEnd}>
         <LinkButton onClick={onCancel}>{t.cancel}</LinkButton>
         <Button
           size="small"
           onClick={() => {
-            if (at !== '') onSet({ on: by === 'day' ? { day } : { weekday, nth }, at })
+            if (at === '') {
+              setMissing(true)
+              time.current?.focus()
+              return
+            }
+            onSet({ on: by === 'day' ? { day } : { weekday, nth }, at })
           }}
         >
           {t.set}
         </Button>
       </span>
+      {missing && (
+        <span className={s.anotherError}>
+          <FieldError id={errorId}>{t.noTime}</FieldError>
+        </span>
+      )}
       {by === 'day' && day >= 29 && <span className={s.anotherNote}>{t.shortMonth(day)}</span>}
     </li>
   )
@@ -718,7 +774,15 @@ export function AutomationCard({
           }
           why={
             whenWas !== undefined ? (
-              <Was value={whenWas} t={t} />
+              <>
+                <Was value={whenWas} t={t} />
+                {next !== undefined && (
+                  <>
+                    {' · '}
+                    {t.next(nextWithout(next, when.find((option) => option.value === whenValue)?.label ?? whenValue))}
+                  </>
+                )}
+              </>
             ) : next !== undefined ? (
               t.next(nextWithout(next, when.find((option) => option.value === whenValue)?.label ?? whenValue))
             ) : undefined
