@@ -628,7 +628,7 @@ export interface Client {
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
-  readonly holdDraft: (threadId: string, key: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string, taskId?: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
   readonly changePlan: (
     planId: string,
@@ -1346,7 +1346,8 @@ export const connect = async (
       command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
+    holdDraft: (threadId, key, taskId) =>
+      command((commandId) => api.HoldDraft({ commandId, threadId, key, ...(taskId === undefined ? {} : { taskId }) })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
         api.ChangePlan({

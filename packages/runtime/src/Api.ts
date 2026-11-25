@@ -2040,7 +2040,7 @@ export const handlers = apiLayer(
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
         once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
-      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
+      HoldDraft: ({ commandId, threadId, key, taskId }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId, taskId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) =>

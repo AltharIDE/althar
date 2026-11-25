@@ -88,6 +88,38 @@ describe('a task held while it was drafted', () => {
       assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
+
+  it.live('holds the plan that came already, where Hold comes after the turn that drafted it ended', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator, told, live } = yield* opened(repository())
+      // Its draft_task call begins, as the coordinator's stream says: the window knows its draft by that call.
+      yield* live.publish({
+        _tag: 'Agent',
+        threadId,
+        event: { _tag: 'ToolCall', toolCallId: 'd2', title: 'Draft task', kind: 'other', status: 'pending', althar: 'draft_task' },
+      })
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.key === 'd2'),
+      )
+      yield* callTool(coordinator, 'draft_task', { title: 'Add a retry', description: 'Retry the upload once. [lead:finish]' })
+      yield* callTool(coordinator, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'claude-code', reason: 'Small.' }, review: null })
+      const [draft] = yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.key === 'd2' && one.taskId !== null),
+      )
+      assert.isNotNull((yield* planOf('add-a-retry'))?.startsAt ?? null, 'its countdown runs')
+      // The turn ends and the runtime forgets its drafts; the window, not told yet, still shows the card being drafted.
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.length === 0,
+      )
+      // Hold pressed on that card: its plan, which came already, is held all the same.
+      yield* (yield* Coordinator).holdDraft(threadId, draft?.key ?? '', (yield* Instance).personId, draft?.taskId ?? undefined)
+      assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
 })
 
 /** The coordinator thread's cards, as the window reads them. */

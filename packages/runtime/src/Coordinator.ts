@@ -432,8 +432,11 @@ export class Coordinator extends Context.Service<
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
-    /** The person held a task while it was drafted, by its draft's key: its plan comes held, or is held where it came already. */
-    holdDraft(threadId: string, key: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * The person held a task while it was drafted, by its draft's key, and its task where the window knew it: its plan comes
+     * held, or is held where it came already.
+     */
+    holdDraft(threadId: string, key: string, actorId: ActorId, taskId?: string): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Coordinator') {
   static readonly layer: Layer.Layer<Coordinator, never, Store> = Layer.effect(
@@ -1271,11 +1274,14 @@ export class Coordinator extends Context.Service<
        * here as draft_task makes it; one whose plan came already is held there and then.
        */
       const heldTasks = new Set<string>()
-      const holdDraft = (threadId: string, key: string, actorId: ActorId) =>
+      const holdDraft = (threadId: string, key: string, actorId: ActorId, task?: string) =>
         Effect.gen(function* () {
           yield* redraft(threadId, (drafts) => heldDraft(drafts, key))
+          // Its task as the window knew it, too: the turn that drafted it can end, and its drafts go, before Hold comes.
           const taskId =
-            draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.taskId ?? (key.startsWith('task:') ? key.slice(5) : null)
+            draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.taskId ??
+            task ??
+            (key.startsWith('task:') ? key.slice(5) : null)
           if (taskId === null) return
           heldTasks.add(taskId)
           const sql = yield* SqlClient.SqlClient
@@ -3663,7 +3669,7 @@ export class Coordinator extends Context.Service<
         thread: (projectId) => provide(thread(projectId)),
         suggested: (projectId) => provide(suggested(projectId)),
         say: (input) => provide(say(input)),
-        holdDraft: (threadId, key, actorId) => provide(holdDraft(threadId, key, actorId)),
+        holdDraft: (threadId, key, actorId, taskId) => provide(holdDraft(threadId, key, actorId, taskId)),
         reading: (read) =>
           Effect.sync(() => {
             pullRequests = read

@@ -82,7 +82,7 @@ it('says a card read as being drafted, with nothing live to fill it, is being dr
   expect(drafting).toMatchObject({ key: 'task:t1', taskId: 't1', title: 'Explore', brief: true, planned: false })
   expect(drafting === undefined ? 'none' : phaseOf(drafting)).toBe('sizing')
   act(() => hook.result.current.hold(drafting ?? draft()))
-  expect(hold).toHaveBeenCalledWith('th1', 'task:t1')
+  expect(hold).toHaveBeenCalledWith('th1', 'task:t1', 't1')
   // No plan came, or discarded: the card says so itself.
   expect(hook.result.current.inPlace(card({ taskId: 't1', phase: 'drafting', unplanned: true }))).toBeUndefined()
   expect(hook.result.current.inPlace(card({ taskId: 't1', phase: 'settled', discarded: true }))).toBeUndefined()
@@ -106,6 +106,15 @@ it('shows a draft in its card’s place in the thread, above what the person sai
   hook.rerender({ drafts: [{ ...sizing, planned: true }, writing] })
   expect(hook.result.current.inPlace(card({ taskId: 't1' }))).toBeUndefined()
   expect(hook.result.current.shown).toEqual([writing])
+})
+
+it('holds a draft that is a task by its task too, so the plan is held though the turn that drafted it is over', () => {
+  // The home forgets its drafts as the coordinator's turn ends, which can be before the window hears that the plan came.
+  const sizing = draft({ key: 'draft_1', taskId: 't1', slug: 'explore-the-roles', title: 'Explore the roles', brief: true })
+  const hold = vi.fn(async () => {})
+  const hook = renderHook(() => useDraftingCards('th1', [sizing], [items.card(card({ taskId: 't1' }))], hold))
+  act(() => hook.result.current.hold(sizing))
+  expect(hold).toHaveBeenCalledExactlyOnceWith('th1', 'draft_1', 't1')
 })
 
 it('does not send a Hold without a thread and honours a hold already read from the home', () => {
@@ -212,7 +221,7 @@ it('holds a draft immediately, restores runtime state on refusal, and replaces i
   expect(hook.result.current.shown).toEqual([coverageDraft])
   act(() => hook.result.current.hold(own))
   expect(hook.result.current.held(own)).toBe(true)
-  expect(hold).toHaveBeenCalledWith('thread', 'draft')
+  expect(hold).toHaveBeenCalledWith('thread', 'draft', 'own')
   await act(async () => reject(new Error('Refused')))
   expect(hook.result.current.held(own)).toBe(false)
   expect(hook.result.current.held({ ...own, held: true })).toBe(true)

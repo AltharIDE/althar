@@ -149,7 +149,7 @@ export interface ProjectModel {
   /** Discards a task, from its card: the card shows it discarded at once, and as it was again where this fails, the line saying why. */
   readonly discardTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  readonly holdDraft: (threadId: string, key: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string, taskId?: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (
@@ -704,8 +704,8 @@ export const useProject = (projectId: string): ProjectModel => {
       }),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
-    holdDraft: (threadId, key) =>
-      client.holdDraft(threadId, key).catch((failure: unknown) => {
+    holdDraft: (threadId, key, taskId) =>
+      client.holdDraft(threadId, key, taskId).catch((failure: unknown) => {
         fail(failure)
         throw failure
       }),
