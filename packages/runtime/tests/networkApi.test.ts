@@ -139,9 +139,11 @@ describe('direct HTTPS and WSS home connections', () => {
           'sec-websocket-key': randomBytes(16).toString('base64'),
           authorization: `Althar-Device ${Buffer.from(JSON.stringify({ challenge, signature })).toString('base64url')}`,
         }
-        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, authorization: 'Althar-Device invalid' }, '/v1/api'), 0)
+        // A refused upgrade says so with a status, so a phone tells it apart from a lost network.
+        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, authorization: 'Althar-Device invalid' }, '/v1/api'), 403)
+        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, host: 'foreign.test' }, '/v1/api'), 403)
         assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 101)
-        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 0)
+        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 403)
         const statuses = yield* Effect.forEach(Array.from({ length: 60 }), () => probe(code.origin, agent))
         assert.include(statuses, 429)
       }).pipe(Effect.provide(environment)),

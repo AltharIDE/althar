@@ -5273,6 +5273,7 @@ const socketCalls = new Set<string>([
   'GetHome',
   'GetCoordinator',
   'GetModels',
+  'GetPlanUsage',
   'GetSettings',
   'GetLoad',
   'GetPlaces',

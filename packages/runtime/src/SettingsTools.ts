@@ -1589,6 +1589,13 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
   createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
   setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
+  // althar/computers: phones
+  pairedDevices: 'person: only reads the phones paired with this computer; pairing and removing one are the person’s',
+  removePairedDevice: 'person: removing a phone takes its key off this computer, the person’s',
+  phoneAccess: 'person: only reads whether phones can reach this computer',
+  setPhoneAccess: 'person: letting phones reach this computer opens it on the network, the person’s',
+  createPairingCode: 'person: pairing a phone takes the phone in the person’s hand',
+  pairingStatus: 'person: only reads how a pairing the person started goes',
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',

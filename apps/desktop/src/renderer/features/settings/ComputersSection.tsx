@@ -2,14 +2,28 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
-import { AddWorkerByHandDialog, AddWorkerDialog, AgentsAtOnce, Computers, fewerOf, Problem, SettingList } from '@althar/ui'
+import {
+  AddWorkerByHandDialog,
+  AddWorkerDialog,
+  AgentsAtOnce,
+  Button,
+  Computers,
+  fewerOf,
+  PhoneList,
+  Problem,
+  SettingGroup,
+  SettingList,
+} from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
 import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkers, useWorkerSignIn } from '../../shared/useWorkers'
 import { useAddWorker } from './useAddWorker'
 import { useWindowHome } from '../homes/windowHome'
+import { PhonesDialog } from '../phones/PhonesDialog'
+import { phoneOf, usePairedPhones } from '../phones/usePairing'
 import type { StartModel } from '../start/useStart'
 import { EVERY, glanceOf, SLOTS } from '../tabs/useLoad'
 import s from './Settings.module.css'
@@ -31,6 +45,8 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
  * connection may; its agents sign in from here over the SSH address it was
  * set up at. A home that takes workers only by its operator's certificates
  * gets the commands that add one by hand.
+ * Under them, the phones paired with the home, each with Remove, and Pair a
+ * phone…, the homes menu's own dialog.
  */
 
 export function ComputersSection({
@@ -61,6 +77,9 @@ export function ComputersSection({
   const signing = useWorkerSignIn()
   const atOnce = useAgentsAtOnce()
   const [adding, setAdding] = useState(false)
+  const [pairing, setPairing] = useState(false)
+  const phones = usePairedPhones()
+  const now = useNow(false)
   const here = useWindowHome()
   const projects = useQuery({ ...reads(client).projects(), enabled: here.canManageWorkers })
   const allProjects = (projects.data?.projects ?? []).map((project) => ({ id: project.id, name: project.name }))
@@ -147,6 +166,27 @@ export function ComputersSection({
         }
         slots={SLOTS}
       />
+      <SettingGroup
+        title="Phones"
+        headingLevel={2}
+        action={
+          <Button size="small" variant="quiet" onClick={() => setPairing(true)}>
+            Pair a phone…
+          </Button>
+        }
+      >
+        {phones.devices === null ? null : phones.devices.length === 0 ? (
+          <p className={s.quiet}>No phones paired with {here.name} yet.</p>
+        ) : (
+          <PhoneList
+            home={here.name}
+            phones={phones.devices.map((device) => phoneOf(device, now, phones.fresh))}
+            onRemove={phones.remove}
+          />
+        )}
+        {phones.problem !== null && <Problem className={s.failed}>{phones.problem}</Problem>}
+      </SettingGroup>
+      {pairing && <PhonesDialog home={here.name} onClose={() => setPairing(false)} />}
       {removing.failed !== null && <Problem className={s.failed}>{removing.failed}</Problem>}
       {picking.failed !== null && <Problem className={s.failed}>{picking.failed}</Problem>}
       {atOnce?.failed === true && <Problem className={s.failed}>{text.failed}</Problem>}
