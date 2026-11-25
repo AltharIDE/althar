@@ -21,6 +21,7 @@ import {
   type AgentHomeFrame,
   type AgentRunExit,
   type AgentWorkerCapability,
+  type AgentWorkerReadiness,
   type AgentWorkspaceSetupResult,
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId, WORKER_PROTOCOL_VERSION } from './handshake.ts'
@@ -87,9 +88,64 @@ export interface WorkerSetupCommands {
   readonly commands: ReadonlyArray<string>
 }
 
-export type WorkerSetup =
+/** A program on a worker's PATH, or one a run asks it to install first: `bun`, `node`, `pnpm` or `uv`, at a version or `latest`. */
+export interface WorkerTool {
+  readonly name: string
+  readonly version: string
+}
+
+export type WorkerSetup = (
   | WorkerSetupCommands
   | { readonly repositories: ReadonlyArray<WorkerSetupCommands & { readonly workspaceId: string }> }
+) & {
+  /** What the worker installs into its own folder, without root, before the commands run. */
+  readonly tools?: ReadonlyArray<WorkerTool>
+}
+
+/**
+ * What a worker's own check found (`althar-host worker check`): whether Claude Code's sandbox starts there, and where not
+ * why (`NoUserNamespaces`, `NoBubblewrap`, `NoSocat`, `Failed`) with the command an administrator runs to let it; the
+ * tools on its PATH; and the models each of its signed-in agents offers.
+ */
+export interface WorkerReadiness {
+  readonly sandbox: { readonly starts: true } | { readonly starts: false; readonly problem: string; readonly fix?: string }
+  readonly tools: ReadonlyArray<WorkerTool>
+  readonly models: ReadonlyArray<{
+    readonly providerId: string
+    readonly models: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  }>
+}
+
+const SANDBOX_PROBLEMS = new Set(['NoUserNamespaces', 'NoBubblewrap', 'NoSocat', 'Failed'])
+const TOOL_NAME = /^[a-z0-9][a-z0-9._+-]{0,47}$/u
+const TOOL_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u
+// eslint-disable-next-line no-control-regex -- A name a worker reports is shown: no control characters.
+const SHOWN = /^[^\x00-\x1f\x7f]{1,200}$/u
+// eslint-disable-next-line no-control-regex -- The command is shown to copy, on one line.
+const FIX = /^[^\x00-\x1f\x7f]{1,4096}$/u
+
+/** A worker's check as it reported it, kept to what can be shown and trusted. */
+export const readinessOf = (reported: AgentWorkerReadiness): WorkerReadiness => {
+  const problem = SANDBOX_PROBLEMS.has(reported.sandboxProblem) ? reported.sandboxProblem : 'Failed'
+  const fix = FIX.test(reported.sandboxFix)
+  return {
+    sandbox: reported.sandboxStarts ? { starts: true } : { starts: false, problem, ...(fix ? { fix: reported.sandboxFix } : {}) },
+    tools: reported.tools
+      .filter((tool) => TOOL_NAME.test(tool.name) && TOOL_VERSION.test(tool.version))
+      .slice(0, 64)
+      .map(({ name, version }) => ({ name, version })),
+    models: reported.models
+      .filter((entry) => PROVIDER_ID.test(entry.providerId))
+      .slice(0, MAX_CAPABILITIES)
+      .map((entry) => ({
+        providerId: entry.providerId,
+        models: entry.models
+          .filter((model) => SHOWN.test(model.id) && SHOWN.test(model.name))
+          .slice(0, 96)
+          .map(({ id, name }) => ({ id, name })),
+      })),
+  }
+}
 
 export interface WorkerRepository {
   readonly workspaceId: string
@@ -166,6 +222,8 @@ export interface AvailableAgentWorker {
   readonly signedIn?: ReadonlyArray<string>
   /** The Althar release it runs, where it says. */
   readonly release?: string
+  /** What its own check found, where it has checked. */
+  readonly readiness?: WorkerReadiness
   /** It offers its agents for any project the home grants it. */
   readonly anyProject?: boolean
   readonly capabilities: ReadonlyArray<
@@ -177,7 +235,7 @@ export interface AvailableAgentWorker {
 interface Slot {
   readonly workerId: string
   /** What it said of itself; who is signed in, again with its heartbeats. */
-  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject'>
+  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject' | 'readiness'>
   readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
@@ -459,8 +517,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               create(
                 AgentWorkspaceSetupSchema,
                 'repositories' in setup
-                  ? { repositories: setup.repositories.map((one) => ({ ...one, commands: [...one.commands] })) }
-                  : { directory: setup.directory, commands: [...setup.commands] },
+                  ? {
+                      repositories: setup.repositories.map((one) => ({ ...one, commands: [...one.commands] })),
+                      tools: [...(setup.tools ?? [])],
+                    }
+                  : { directory: setup.directory, commands: [...setup.commands], tools: [...(setup.tools ?? [])] },
               ),
             )
       if (plan !== undefined && (plan.byteLength === 0 || plan.byteLength > MAX_SETUP_BYTES))
@@ -667,6 +728,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               ...(hello.reportsSignIn ? { signedIn: [...new Set(hello.signedIn)] } : {}),
               ...(hello.release === '' ? {} : { release: hello.release }),
               ...(hello.anyProject ? { anyProject: true } : {}),
+              ...(hello.readiness === undefined ? {} : { readiness: readinessOf(hello.readiness) }),
             },
             capabilities,
             start,
@@ -702,6 +764,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
           sequence = payload.value.sequence
           if (payload.value.reportsSignIn && payload.value.signedIn.every((providerId) => PROVIDER_ID.test(providerId)))
             slot.said = { ...slot.said, signedIn: [...new Set(payload.value.signedIn)].slice(0, MAX_CAPABILITIES) }
+          if (payload.value.readiness !== undefined) slot.said = { ...slot.said, readiness: readinessOf(payload.value.readiness) }
           if (payload.value.capacity !== undefined) {
             capacity = capacityOf(payload.value.capacity)
             accountReserved = payload.value.capacity.accountReserved
@@ -928,10 +991,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     list: (projectId: string): ReadonlyArray<AvailableAgentWorker> =>
       [...slots.values()]
         .filter(({ workerId }) => ledger.permits(workerId, projectId))
-        .map(({ workerId, capabilities, busy, capacity }) => {
+        .map(({ workerId, capabilities, busy, capacity, said }) => {
           const reported = capacity()
           return {
             workerId,
+            ...(said.signedIn === undefined ? {} : { signedIn: said.signedIn }),
+            ...(said.readiness === undefined ? {} : { readiness: said.readiness }),
             // One for any project is, here, for this one.
             capabilities: capabilities.filter((item) => covers(item, projectId)).map((item) => ({ ...item, projectId })),
             busy: busy(),

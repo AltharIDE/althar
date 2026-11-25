@@ -10,6 +10,7 @@ import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { HOST_VERSION } from '../src/home'
+import type { CheckSystem } from '../src/workerCheck'
 import { releaseIdentity } from '../src/updates/release'
 import {
   enroll,
@@ -40,6 +41,13 @@ const out = (text: string) => {
 }
 let calls: Array<ReadonlyArray<string>>
 let busy = ''
+/** Its check, stood in for: bubblewrap starts, git is there, and an agent started says its models. */
+const checking: CheckSystem = {
+  run: async (command) => ({ ok: true, stdout: command.endsWith('git') ? 'git version 2.43.0' : '', stderr: '' }),
+  read: () => undefined,
+  executable: (path) => /\/(bwrap|socat|git)$/u.test(path) && !path.includes('/usr/local/'),
+  startAgent: async () => [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }],
+}
 let restore: () => void
 let data: string
 let config: string
@@ -63,6 +71,9 @@ beforeEach(() => {
       { id: 'codex', definition: agents.codex, program: '/opt/codex' },
       { id: 'claude-code', definition: agents['claude-code'], program: '/opt/claude' },
     ],
+    check: checking,
+    shipped: () => ({}),
+    sudo: async () => false,
   })
 })
 afterEach(() => {
@@ -135,7 +146,10 @@ describe('enrolling a worker with what its home gave', () => {
       `${join(folder, 'workspaces')}\n*\tcodex\t${join(folder, 'agents', 'codex')}\n*\tclaude-code\t${join(folder, 'agents', 'claude-code')}\n`,
     )
     const program = readFileSync(join(folder, 'agents', 'codex'), 'utf8')
-    expect(program).toContain(`${join(data, 'althar-worker-program', 'current', 'node', 'bin')}:/usr/local/bin`)
+    // The run's PATH, as the worker gives it; where none came, the worker's own, its sandbox's programs first.
+    expect(program).toContain('if [ -z "${PATH:-}" ]; then PATH=')
+    expect(program).toContain(`${join(folder, 'bin')}:`)
+    expect(program).toContain(`:${join(data, 'althar-worker-program', 'current', 'node', 'bin')}'`)
     expect(statSync(join(folder, 'agents', 'codex')).mode & 0o777).toBe(0o700)
     expect(readFileSync(join(folder, 'signed-in'), 'utf8')).toBe('codex\n')
     const unit = readFileSync(join(config, 'systemd', 'user', 'althar-worker.service'), 'utf8')
@@ -148,15 +162,26 @@ describe('enrolling a worker with what its home gave', () => {
       ['restart', 'althar-worker.service'],
       ['start', 'althar-worker-update.timer'],
     ])
-    expect(said.at(-1)).toMatchObject({
-      step: 'start',
-      state: 'done',
+    expect(said.find((one) => one.step === 'start' && one.state === 'done')).toMatchObject({
       workerId,
       agents: [
         { id: 'codex', name: 'Codex', signedIn: true },
         { id: 'claude-code', name: 'Claude Code', signedIn: false },
       ],
     })
+    // Then a test run: its sandbox started, and its signed-in agent started once, which said its models.
+    expect(said.at(-1)).toMatchObject({
+      step: 'check',
+      state: 'done',
+      sandbox: { starts: true },
+      agents: [
+        { id: 'codex', signedIn: true, started: true, models: 1 },
+        { id: 'claude-code', signedIn: false, models: 0 },
+      ],
+    })
+    expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
+      'sandbox\tstarts\ntool\tgit\t2.43.0\nmodel\tcodex\tgpt-6.2-sol\tGPT-6.2 Sol\n',
+    )
   })
 
   it('keeps what it did for another home apart when it joins a new one', async () => {
@@ -193,6 +218,8 @@ describe('its agents, checked again', () => {
         { id: 'codex', definition: agents.codex, program: '/opt/codex' },
         { id: 'claude-code', definition: agents['claude-code'], program: '/opt/claude' },
       ],
+      check: checking,
+      shipped: () => ({}),
     })
     await listAgents(out)
     expect(said.at(-1)).toMatchObject({ step: 'agents', state: 'done' })
@@ -216,7 +243,7 @@ describe('a code’s way', () => {
             await join_(code, 'build-box', out)
           })
           expect(home.workers()).toEqual([expect.objectContaining({ name: 'build-box' })])
-          expect(said.at(-1)).toMatchObject({ step: 'start', state: 'done' })
+          expect(said.findLast((one) => one.step === 'start')).toMatchObject({ step: 'start', state: 'done' })
           // The address that answered goes first, on the home's worker port.
           const lines = readFileSync(join(data, 'althar-worker', 'enrollment'), 'utf8').split('\n')
           expect(lines[3]).toMatch(new RegExp(`:${home.port}$`, 'u'))
@@ -273,7 +300,7 @@ describe('updating itself', () => {
     const answer = (body: string) => (async () => new Response(body)) as unknown as typeof fetch
     writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
     await update(out, answer(installed.envelope))
-    expect(said.at(-1)).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
+    expect(said.findLast((one) => one.step === 'update')).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
     // A newer one, signed by the same key, while a task runs: it waits for the next check.
     const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
     const newer = JSON.parse(Buffer.from(JSON.parse(installed.envelope).payload, 'base64url').toString('utf8')) as Record<string, unknown>
@@ -388,11 +415,11 @@ describe('finding the newest release, with no feed of its own', () => {
     // The newest that is the host's, with its asset: here, the one it runs already.
     const found = [...passed, { tag_name: 'host-v1.0.0', assets: [{ name: asset, browser_download_url: 'https://x/host' }] }]
     await update(out, listing(found, installed.envelope))
-    expect(said.at(-1)).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
+    expect(said.findLast((one) => one.step === 'update')).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
     // An empty feed is no feed.
     writeFileSync(join(data, 'althar-worker', 'update-feed'), '\n', { mode: 0o600 })
     await update(out, listing(found, installed.envelope))
-    expect(said.at(-1)).toMatchObject({ step: 'update', state: 'current' })
+    expect(said.findLast((one) => one.step === 'update')).toMatchObject({ step: 'update', state: 'current' })
   })
 
   it('fails from the command line where it isn’t installed, in its own words', async () => {
@@ -461,6 +488,9 @@ describe('its command line, at its edges', () => {
       systemctl: async () => '',
       signedIn: async () => false,
       agents: () => [{ id: 'codex', definition: plain, program: '/opt/codex' }],
+
+      check: checking,
+      shipped: () => ({}),
     })
     await install(release(), out)
     await signIn('codex', 'device', out)
@@ -469,7 +499,9 @@ describe('its command line, at its edges', () => {
         expect.objectContaining({ step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way here.' }),
       ]),
     )
-    expect(said.at(-1)).toMatchObject({ step: 'agents', state: 'done' })
+    expect(said.findLast((one) => one.step === 'agents')).toMatchObject({ step: 'agents', state: 'done' })
+    // Then its check, for the agent it may have signed in.
+    expect(said.at(-1)).toMatchObject({ step: 'check', state: 'done' })
   })
 })
 
@@ -562,11 +594,14 @@ describe('its agents and its grant, at their edges', () => {
       systemctl: async () => '',
       signedIn: async () => false,
       agents: () => [{ id: 'claude-code', definition: failing, program: '/opt/claude' }],
+
+      check: checking,
+      shipped: () => ({}),
     })
     await install(release(), out)
     await signIn('claude-code', 'browser', out)
     expect(said).toEqual(expect.arrayContaining([expect.objectContaining({ step: 'sign-in', kind: 'failed' })]))
-    expect(said.at(-1)).toMatchObject({ step: 'agents', state: 'done' })
+    expect(said.findLast((one) => one.step === 'agents')).toMatchObject({ step: 'agents', state: 'done' })
   })
 
   it('keeps an earlier enrollment’s runs apart, by its name or as before, and refuses another authority’s certificate', async () => {
@@ -625,5 +660,76 @@ describe('where its user keeps things', () => {
     } finally {
       process.env.HOME = was
     }
+  })
+})
+
+describe('its check, and letting its sandbox start', () => {
+  /** A machine whose bubblewrap starts only once AppArmor's rule is in, as newer Ubuntu's does. */
+  const ubuntu = () => {
+    let ruled = false
+    const ran: string[] = []
+    const system: CheckSystem = {
+      ...checking,
+      run: async (command, args) => {
+        ran.push([command, ...args].join(' '))
+        return { ok: !args.includes('--unshare-user') || ruled, stdout: '', stderr: '' }
+      },
+      read: (path) => (path === '/proc/sys/kernel/apparmor_restrict_unprivileged_userns' ? '1\n' : undefined),
+    }
+    return { system, ran, rule: () => (ruled = true) }
+  }
+
+  it('says why its sandbox can’t start and the one command that lets it, and lets it with sudo where it may', async () => {
+    const machine = ubuntu()
+    const sudo: string[] = []
+    restore()
+    restore = withWorkerSystem({
+      systemctl: async () => '',
+      signedIn: async () => false,
+      agents: () => [],
+      check: machine.system,
+      shipped: () => ({}),
+      sudo: async (script) => {
+        sudo.push(script)
+        machine.rule()
+        return true
+      },
+    })
+    await install(release(), out)
+    expect(await workerMain(['check'], out)).toBe(0)
+    const found = said.at(-1) as { sandbox: { starts: boolean; problem: string; fix: string } }
+    expect(found).toMatchObject({ step: 'check', state: 'done', sandbox: { starts: false, problem: 'NoUserNamespaces' } })
+    expect(found.sandbox.fix).toMatch(/^sudo sh -c '.*apparmor_parser -r \/etc\/apparmor\.d\/althar-worker-bwrap'$/u)
+    expect(found.sandbox.fix).toContain(`profile althar-worker-bwrap ${join(data, 'althar-worker-program')}/bundle-*/**/bwrap`)
+    expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toContain('sandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c')
+    said = []
+    expect(await workerMain(['sandbox'], out)).toBe(0)
+    // What went to sudo is the check's own script, without its `sudo sh -c` and quotes.
+    expect(sudo).toEqual([found.sandbox.fix.slice("sudo sh -c '".length, -1)])
+    expect(said.at(-1)).toMatchObject({ step: 'check', state: 'done', sandbox: { starts: true } })
+    expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toMatch(/^sandbox\tstarts\n/u)
+  })
+
+  it('says so where its login can’t use sudo without a password, and leaves the command for an administrator', async () => {
+    const machine = ubuntu()
+    restore()
+    restore = withWorkerSystem({
+      systemctl: async () => '',
+      signedIn: async () => false,
+      agents: () => [],
+      check: machine.system,
+      shipped: () => ({}),
+      sudo: async () => false,
+    })
+    await install(release(), out)
+    expect(await workerMain(['sandbox'], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'sandbox', state: 'failed', code: 'NeedsAdministrator' })
+    expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toContain('fix\tsudo sh -c')
+  })
+
+  it('installs only the tools a worker installs itself, saying why not in a plain line', async () => {
+    const lines: string[] = []
+    expect(await workerMain(['tools', 'cargo@1'], (text) => lines.push(text))).toBe(1)
+    expect(lines.join('')).toBe('cargo@1 isn’t a tool a worker installs.\n')
   })
 })
