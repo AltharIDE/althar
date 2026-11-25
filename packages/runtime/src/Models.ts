@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type AgentDefinition, type AgentSession, cleanUp, type ConfigOption, connect } from '@althar/provider-adapters'
-import { Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
+import { startsAgain } from './startAgain'
 import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'
 import { blockedModelsOf, clearDefaultEffort, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
@@ -277,6 +278,11 @@ export class Models extends Context.Service<
      * that said what they offer this launch, without it. One not asked yet, or that couldn't say, isn't known not to.
      */
     lacking(agentId: string, model: string): Effect.Effect<ReadonlyArray<string>>
+    /**
+     * Asks an agent again, as after a start that failed: its sign-in is checked afresh and its models asked again, in the
+     * background. What it said last stays until it answers, so its models keep their names meanwhile.
+     */
+    refresh(agentId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Models') {
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
@@ -300,6 +306,8 @@ export class Models extends Context.Service<
        */
       const probed = new Map<string, Offered | null>()
       const owners = new Map<string, string>()
+      /* What an account asked again after a start that failed said last, until it answers anew. */
+      const stale = new Map<string, Offered>()
       /*
        * The models each account's sessions offered around its asking. An agent that can't reach its maker as it is asked
        * answers with an older list of its own (Codex, where OpenAI's doesn't come in time), which mustn't hide a model its
@@ -340,6 +348,7 @@ export class Models extends Context.Service<
       }
       /** Forgets what asking an account found, and what its sessions offered since. */
       const forgetOne = (accountId: string) => {
+        stale.delete(accountId)
         probed.delete(accountId)
         since.delete(accountId)
         failedAt.delete(accountId)
@@ -447,34 +456,43 @@ export class Models extends Context.Service<
                   state: 'launching',
                   launchedAt: yield* timestamp,
                 })}`
+              // One start of the asking, in a scope of its own: closing it stops its adapter, whatever it did.
+              const attempt = Effect.scoped(
+                Effect.gen(function* () {
+                  const { session, images } = yield* Effect.gen(function* () {
+                    const connection = yield* connect({
+                      transport,
+                      // It is never prompted, so it has nothing to ask.
+                      onPermission: () => Effect.succeed({ decision: 'reject' as const }),
+                      permissions: definition.permissions,
+                    })
+                    if (processId !== undefined && connection.process !== undefined)
+                      yield* change('processes', processId, {
+                        pid: connection.process.pid,
+                        processGroupId: connection.process.pid,
+                        osStartedAt: connection.process.osStartedAt ?? null,
+                        environmentDigest: connection.process.environmentDigest,
+                        state: 'running',
+                      })
+                    const session = yield* connection.newSession({
+                      cwd: folder,
+                      mode: definition.modes.reader,
+                      modeOptionId: definition.options.mode,
+                      ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
+                    })
+                    return { session, images: connection.info.images }
+                  }).pipe(Effect.timeout(PROBE_TIMEOUT))
+                  return yield* walk(definition, session, images)
+                }),
+              )
+              // A start that may pass is made once more, afresh, as a session's is (startAgain.ts): the failed one's adapter has
+              // stopped with its scope, and the agent's sign-in is read again, before a new process of its adapter starts.
               const read = yield* Effect.exit(
-                Effect.scoped(
-                  Effect.gen(function* () {
-                    const { session, images } = yield* Effect.gen(function* () {
-                      const connection = yield* connect({
-                        transport,
-                        // It is never prompted, so it has nothing to ask.
-                        onPermission: () => Effect.succeed({ decision: 'reject' as const }),
-                        permissions: definition.permissions,
-                      })
-                      if (processId !== undefined && connection.process !== undefined)
-                        yield* change('processes', processId, {
-                          pid: connection.process.pid,
-                          processGroupId: connection.process.pid,
-                          osStartedAt: connection.process.osStartedAt ?? null,
-                          environmentDigest: connection.process.environmentDigest,
-                          state: 'running',
-                        })
-                      const session = yield* connection.newSession({
-                        cwd: folder,
-                        mode: definition.modes.reader,
-                        modeOptionId: definition.options.mode,
-                        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
-                      })
-                      return { session, images: connection.info.images }
-                    }).pipe(Effect.timeout(PROBE_TIMEOUT))
-                    return yield* walk(definition, session, images)
-                  }),
+                attempt.pipe(
+                  Effect.catchIf(
+                    (error) => startsAgain(Cause.fail(error)),
+                    () => Effect.andThen(signIns.forget(definition.id), attempt),
+                  ),
                 ),
               )
               // Its scope closed, so its agent has stopped; one that never started, or failed on the way, isn't known to have.
@@ -491,6 +509,7 @@ export class Models extends Context.Service<
             Effect.gen(function* () {
               if (!ownsProbe(account.id, reservation)) return
               probed.set(account.id, found)
+              if (found !== null) stale.delete(account.id)
               if (found === null) failedAt.set(account.id, yield* Clock.currentTimeMillis)
               else {
                 failedAt.delete(account.id)
@@ -537,9 +556,11 @@ export class Models extends Context.Service<
           if (probed.get(account.id) === null && failed !== undefined && (yield* Clock.currentTimeMillis) - failed >= askAgain)
             forgetFailure(account.id)
           const asked = probed.get(account.id)
+          // Asked again after a start that failed: what it said last, until it answers anew.
+          const last = stale.get(account.id)
           // One that couldn't say: what its latest session offered, rather than nothing, as one account's failing mustn't hide
           // a model only it offers while another's list shows as complete.
-          if (asked === null) return yield* sessionOffer(definition, account)
+          if (asked === null) return last ?? (yield* sessionOffer(definition, account))
           if (asked !== undefined) return { ...asked, models: yield* withLater(definition, account, asked) }
           if (!probing.has(account.id) && isInstalled(installs, definition)) {
             const reservation = Symbol()
@@ -560,7 +581,7 @@ export class Models extends Context.Service<
               scope,
             )
           }
-          return null
+          return last ?? null
         })
 
       const of = (entry: AgentEntry) =>
@@ -619,6 +640,18 @@ export class Models extends Context.Service<
             yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
           }).pipe(Effect.provide(context)),
         forget: (agentId) => signIns.forget(agentId).pipe(Effect.andThen(Effect.sync(() => forgetAsked(agentId)))),
+        refresh: (agentId) =>
+          signIns.forget(agentId).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                for (const accountId of accountsOf(agentId)) {
+                  const last = probed.get(accountId) ?? stale.get(accountId)
+                  forgetOne(accountId)
+                  if (last !== undefined && last !== null) stale.set(accountId, last)
+                }
+              }),
+            ),
+          ),
         forgetAccount: (accountId) => Effect.sync(() => forgetOne(accountId)),
         signingIn: (accountId) =>
           Effect.flatMap(Clock.currentTimeMillis, (now) =>

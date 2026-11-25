@@ -149,11 +149,11 @@ describe('a lead settling a review', () => {
       Effect.provide(
         withQueries(undefined, undefined, {
           each: {
-            // Its first session starts, then one won't, then they do again.
+            // Its first session starts, then one won't, nor its start again by itself, then they do again.
             'claude-code': {
               beforeNewSession: async () => {
                 made += 1
-                if (made === 2) throw new Error('No session for you')
+                if (made === 2 || made === 3) throw new Error('No session for you')
               },
             },
           },

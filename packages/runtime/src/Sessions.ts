@@ -70,6 +70,7 @@ import { MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { makeSessionBriefs } from './sessionBriefs'
+import { Models } from './Models'
 import { type SessionConnectionsDependencies, makeSessionConnections } from './sessionConnections'
 import {
   AcceptedInput,
@@ -465,6 +466,8 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
+      // What Althar holds of each agent, its sign-in as checked and its models, read again after a start that failed (connectSession).
+      const models = yield* Effect.serviceOption(Models)
       const sessionsSql = yield* SqlClient.SqlClient
       /*
        * Claude Code's adapter says the plan's windows with the usage it streams:
@@ -1535,6 +1538,7 @@ export class Sessions extends Context.Service<
         permissions,
         policies,
         questions,
+        refreshAgent: (agentId) => Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.refresh(agentId) }),
         quietFor,
         signInFault: planUsage.signInFault,
         run,

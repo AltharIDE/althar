@@ -184,6 +184,8 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /** How often a start looks again for the program Althar brings for its agent, and for how long, while it isn't there yet. */
+  readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
   /**
    * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
    * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
