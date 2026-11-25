@@ -814,6 +814,50 @@ describe('a new project on a home on another computer', () => {
     return { ...fake, host, onCreated }
   }
 
+  it('clones one of this Mac’s projects there by its address, with the code hosts it has none of offered to connect there', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const local = {
+      live: true,
+      list: [
+        {
+          id: 'p_here',
+          name: 'Site',
+          ink: 'teal',
+          working: 0,
+          yours: 0,
+          remotes: [{ url: 'https://github.com/acme/site', product: 'github' }],
+        },
+      ],
+    }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const at = onHome(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    // Clone says where from, rather than a bare From.
+    expect(way(/^Clone/).textContent).toContain('From GitHub, GitLab or Bitbucket')
+    const row = await screen.findByRole('button', { name: 'Clone acme/site' })
+    expect(within(row).getByText('On this Mac')).toBeTruthy()
+    // The hosts it isn't connected to, there to connect beside it.
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('menuitem', { name: 'GitHub' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(row)
+    await create('Site')
+    await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { url: 'https://github.com/acme/site' }))
+  })
+
+  it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {
+    onHome(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },
+      SOCKET_CALLS.filter((one) => one !== 'ConnectToken'),
+    )
+    expect(way(/^Clone/).textContent).toContain('From its address')
+    expect(await screen.findByRole('searchbox', { name: /repository/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Connect/ })).toBeNull()
+  })
+
   it('offers the repositories the home found, each read by the grant the home made, and no folder picker', async () => {
     const at = onHome()
     await userEvent.click(way(/^A folder/))

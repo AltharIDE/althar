@@ -64,12 +64,16 @@ export interface HostedRepository {
   readonly like: boolean
   /** Where it is on this computer already, when it is: added, not cloned. */
   readonly here: string | null
+  /** Where else it is, said in place of when it was pushed: one of your projects on another computer. */
+  readonly from?: string
 }
 
 export interface ProjectSetupText {
   ways: string
   clone: string
   cloneFrom: (hosts: string) => string
+  /** Where no host is offered: a clone by its address alone. */
+  cloneAnywhere: string
   folder: string
   folderNote: string
   fresh: string
@@ -110,6 +114,7 @@ export const projectSetupText: ProjectSetupText = {
   ways: 'Where its code comes from',
   clone: 'Clone',
   cloneFrom: (hosts) => `From ${hosts}`,
+  cloneAnywhere: 'From its address',
   folder: 'A folder',
   folderNote: `On ${device.this}`,
   fresh: 'Start empty',
@@ -289,7 +294,7 @@ export function SetupWays({
     {
       id: 'clone',
       title: t.clone,
-      note: t.cloneFrom(listOr(from.map((host) => host.name))),
+      note: from.length === 0 ? t.cloneAnywhere : t.cloneFrom(listOr(from.map((host) => host.name))),
       art: (
         <span className={s.wayMarks}>
           {hosts.map((host) => (
@@ -501,9 +506,11 @@ export function SetupRepositories({
     }
   }
   const failedNames = failed.flatMap((id) => hostOf(id)?.name ?? [])
+  // With no host connected, repositories listed are from elsewhere (your projects on another computer): the hosts are offered beside them.
+  const listing = connected.length > 0 || (repositories ?? []).length > 0
   const body = (() => {
     if (connecting !== undefined && connecting !== null) return <div className={s.walk}>{connecting}</div>
-    if (connected.length === 0 && (pasted === undefined || pasted === null))
+    if (!listing && (pasted === undefined || pasted === null))
       return (
         <div className={s.connectHosts} style={{ minHeight: height }}>
           {hosts.map((host, at) => (
@@ -573,6 +580,11 @@ export function SetupRepositories({
                     )}
                     {one.here !== null ? (
                       <span className={s.mono}>{t.hereNote(one.here)}</span>
+                    ) : one.from !== undefined && !(on && landing != null) ? (
+                      <span className={s.from} title={one.from}>
+                        <Icon name="computer" size={11} />
+                        {one.from}
+                      </span>
                     ) : on && landing != null ? (
                       // Keyed by the place, so a place changed lands again.
                       <span key={landing} className={cx(s.mono, s.landing)} title={landing}>
@@ -609,7 +621,7 @@ export function SetupRepositories({
               onChange={(event) => onQuery(event.target.value)}
               onKeyDown={onField}
               aria-label={t.find}
-              placeholder={connected.length === 0 ? t.findUnconnected : t.find}
+              placeholder={listing ? t.find : t.findUnconnected}
               spellCheck={false}
               autoComplete="off"
             />
@@ -622,7 +634,7 @@ export function SetupRepositories({
               options={[{ value: 'all', label: t.all }, ...connected.map((host) => ({ value: host.id, label: host.name }))]}
             />
           )}
-          {connected.length > 0 && away.length > 0 && (
+          {listing && away.length > 0 && (
             <Menu
               label={t.connectHost}
               trigger={

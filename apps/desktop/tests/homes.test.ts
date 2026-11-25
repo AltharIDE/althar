@@ -255,9 +255,15 @@ describe('managing saved homes', () => {
       [{ ...project('x'), id: '../x' }],
       [{ ...project('x'), working: -1 }],
       Array.from({ length: 201 }, (_, i) => project(`p${i}`)),
+      // Where its code is: a page on a host, never an address with a sign-in in it, or anything but https.
+      [{ ...project('x'), remotes: [{ url: 'https://token@github.com/acme/site', product: 'github' }] }],
+      [{ ...project('x'), remotes: [{ url: 'git@github.com:acme/site.git', product: 'github' }] }],
+      [{ ...project('x'), remotes: Array.from({ length: 9 }, () => ({ url: 'https://github.com/acme/site', product: null })) }],
     ])
       expect(() => at.controller.report(1, bad)).toThrow()
     expect(reportedProjects([project('a'), project('a')])).toHaveLength(1)
+    const told = [{ ...project('a'), remotes: [{ url: 'https://github.com/acme/site', product: 'github' }] }]
+    expect(reportedProjects(told)).toEqual(told)
   })
   it('keeps names and inks across launches, prunes forgotten homes, and ignores a cache it can’t read', async () => {
     const at = fixture()

@@ -8,7 +8,7 @@ import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 import { locations as locationsOf } from './locations'
-import { NO_SETUP_ARG, type WindowHome } from '../homes'
+import { APP_VERSION_ARG, NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
 import { canSetUp } from './homes/setup'
 import { homePartition, localServicesUnavailable, remoteExternalUrl } from './homes/policy'
@@ -1030,7 +1030,11 @@ const framedNow = () => {
 
 const chromeArgs = () => {
   const chrome = chromeNow()
-  return [...(chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]), ...(canSetUp() ? [] : [NO_SETUP_ARG])]
+  return [
+    ...(chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]),
+    ...(canSetUp() ? [] : [NO_SETUP_ARG]),
+    APP_VERSION_ARG + app.getVersion(),
+  ]
 }
 
 const openWindow = (home: WindowHome = { kind: 'local' }) => {

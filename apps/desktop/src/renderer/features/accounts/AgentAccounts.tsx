@@ -1,10 +1,10 @@
 import type { AccountStatus, AgentStatus } from '@althar/contracts'
 import { type AccountEntry, Accounts, AccountSignIn } from '@althar/ui'
 
-import { signInCautionOf, signInWordsOf } from '../../shared/agents'
-import { device } from '../../shared/device'
+import { signInCautionOf, signInWordsOf, waysFrom } from '../../shared/agents'
 import { shortFolder } from '../../shared/folders'
 import { clock } from '../../shared/time'
+import { useHomeName } from '../homes/useHomes'
 import type { StartModel } from '../start/useStart'
 import type { AccountSignInModel } from './useAccountSignIn'
 
@@ -82,13 +82,16 @@ export function AgentSignIn({
   account?: { readonly name: string }
 }) {
   const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
+  // The home the agent signs in on: this computer, or another's, where no folder of this one's can be chosen.
+  const home = useHomeName()
   if (flow === null) return null
   const caution = signInCautionOf(agent.id)
+  const ways = waysFrom(agent, home.remote)
   return (
     <AccountSignIn
       agent={agent.name}
       text={{
-        folder: `A folder on ${device.this}`,
+        folder: `A folder on ${home.name}`,
         ...(agent.id === 'copilot-direct' ? { checking: () => 'Connecting to GitHub…' } : {}),
       }}
       position={position}
@@ -96,13 +99,13 @@ export function AgentSignIn({
       {...(caution === undefined ? {} : { caution })}
       step={flow.step}
       ways={{
-        ...(agent.ways.includes('browser') ? { browser: signInWordsOf(agent.id).plan } : {}),
-        ...(agent.ways.includes('device') ? { code: true } : {}),
+        ...(ways.includes('browser') ? { browser: signInWordsOf(agent.id).plan } : {}),
+        ...(ways.includes('device') ? { code: true } : {}),
         // An agent that signs in only inside Althar has no command for a terminal.
         terminal: agent.login !== '',
         ...(agent.id === 'copilot-direct' || agent.id === 'copilot' ? { enterprise: true } : {}),
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
-        choose: agent.id !== 'copilot-direct',
+        choose: agent.id !== 'copilot-direct' && !home.remote,
       }}
       onWay={signIn.way}
       onEnterprise={signIn.enterprise}

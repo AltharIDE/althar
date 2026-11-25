@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
@@ -16,8 +15,8 @@ import {
   Problem,
 } from '@althar/ui'
 
-import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { useAppVersion } from '../../shared/appVersion'
 import { CHANGELOG } from '../../shared/links'
 import { usePlaces } from '../../shared/usePlaces'
 import { usePreferences } from '../../shared/usePreferences'
@@ -49,13 +48,13 @@ export interface QuickSettingsProps {
 }
 
 export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsProps) {
-  const { client, host } = useServices()
+  const { host } = useServices()
   const { reportProblem } = host
   const preferences = usePreferences()
   const sounds = useSounds()
   const atOnce = useAgentsAtOnce()
   const places = usePlaces(open)
-  const version = useQuery(reads(client).status()).data?.appVersion
+  const version = useAppVersion()
   const navigate = useNavigate()
   // Leaving for the Settings tab closes the panel.
   const settings = (section: Section | null) => {

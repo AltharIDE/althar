@@ -50,6 +50,8 @@ import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
+import { useAppVersion } from '../../shared/appVersion'
+import { useHomeName } from '../homes/useHomes'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
@@ -327,6 +329,8 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // The agents of the home the window is on: this computer's, or another's, by its name.
+  const { name: where } = useHomeName()
   // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
   const [checking, setChecking] = useState(false)
   const checkAgain = () => {
@@ -347,13 +351,13 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
     return (
       <>
         <StartError model={start} />
-        <p className={s.quiet}>{text.connecting}</p>
+        <p className={s.quiet}>{text.connecting(where)}</p>
       </>
     )
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${where}` }} />
       <StartError model={start} />
       {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
       <AgentTabPanel
@@ -368,7 +372,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
         ) : (
           <AgentInstall
             name={chosen.name}
-            text={{ missing: text.agentHere }}
+            text={{ missing: (name: string) => text.agentHere(name, where) }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
             {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
@@ -808,9 +812,11 @@ function BrowserSection() {
 function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
-  const { host } = useServices()
+  const { client, host } = useServices()
   const storage = useStorage()
-  const version = start.status?.appVersion
+  // This app's, on whichever home the window is: a home's runtime says its own release.
+  const own = useAppVersion()
+  const version = client.connection === undefined ? (own ?? start.status?.appVersion) : own
   const report = host.reportProblem
   return (
     <>

@@ -35,6 +35,24 @@ describe('what work on a home needs', () => {
     expect(needs?.find((one) => one.id === githubConnection.id)).toMatchObject({ note: 'as you' })
   })
 
+  it('offers GitHub and GitLab to connect where it has no code host and the window can connect one, after what isn’t ready', () => {
+    const none = { ...connectionList, connections: [] }
+    const needs = needsOf(status([claude, { ...codex, signIn: 'signed_out' }]), MACHINE, none, true)
+    expect(needs?.map((one) => [one.name, one.state])).toEqual([
+      ['Codex', 'signedOut'],
+      ['GitHub', 'connect'],
+      ['GitLab', 'connect'],
+      ['Claude Code', 'ready'],
+      ['git', 'ready'],
+    ])
+    // Connected to one, or on a home the window can't connect one on, or before its connections are read: none is offered.
+    expect(
+      needsOf(status([claude]), MACHINE, { ...connectionList, connections: [githubConnection] }, true)?.map((one) => one.state),
+    ).not.toContain('connect')
+    expect(needsOf(status([claude]), MACHINE, none, false)?.map((one) => one.state)).not.toContain('connect')
+    expect(needsOf(status([claude]), MACHINE, null, true)?.map((one) => one.state)).not.toContain('connect')
+  })
+
   it('says how to install agents where none is, and git where there’s none', () => {
     const away = (agent: AgentStatus, guide: string): AgentStatus => ({ ...agent, installed: false, guide })
     const needs = needsOf(

@@ -9,7 +9,9 @@ import type { HostedRepository, SetupHost } from '@althar/ui'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
 import { serviceBrand, serviceName, serviceOfProduct } from '../features/connections/ways'
+import { device } from './device'
 import { useFound } from './found'
+import { useProjectsHere } from './projectsHere'
 import { hostnameOf, remoteOf } from './remotes'
 import { ago } from './time'
 
@@ -18,7 +20,8 @@ import { ago } from './time'
  * hosts connected, all of them together, and one a URL pasted names, on a
  * host connected where it is one, else cloned with the person's own git
  * sign-in. A new project clones from them, and so does a project adding a
- * repository it doesn't have yet.
+ * repository it doesn't have yet. On another computer's home, this
+ * computer's projects too, each from where its code is, said so.
  */
 
 /** The code hosts Althar works with, in the order they're offered. */
@@ -147,6 +150,44 @@ export const useHostRepositories = (
         }),
       ),
   )
+  // On another computer's home, this computer's projects, by where their code is: one the home lists already says so; the
+  // rest are cloned by their address, with the home's own sign-in to that host where it has one.
+  const projectsHere = useProjectsHere()
+  const onHere = `On ${device.this}`
+  const homeHas = (one: { readonly host: string; readonly path: string }) =>
+    all.findIndex((listed) => {
+      const connection = codeHosts.find((connection) => listed.id.startsWith(`${connection.id}:`))
+      return (
+        connection !== undefined &&
+        sameRepository(
+          { host: hostnameOf(connection.webUrl), remote: `${listed.owner}/${listed.name}` },
+          { host: one.host, remote: one.path },
+        )
+      )
+    })
+  for (const one of projectsHere) {
+    const at = homeHas(one)
+    const listed = all[at]
+    if (listed !== undefined) all[at] = { ...listed, from: onHere }
+  }
+  const fromHere = projectsHere
+    .filter((one) => homeHas(one) === -1)
+    .map((one): HostedRepository => {
+      const name = one.path.split('/').at(-1) ?? one.path
+      return {
+        id: `here:${one.url}`,
+        host: one.product === null ? '' : serviceOfProduct(one.product),
+        owner: one.path.split('/').slice(0, -1).join('/'),
+        name,
+        description: null,
+        private: false,
+        pushed: null,
+        like: like.some((word) => name.toLowerCase().includes(word)),
+        here: null,
+        from: onHere,
+      }
+    })
+  all.unshift(...fromHere)
   const reading = listed.some((one) => one.data === undefined && !one.isError)
   const failed = codeHosts.flatMap((connection, at) => (listed[at]?.isError === true ? [serviceOfProduct(connection.product)] : []))
 
@@ -194,6 +235,17 @@ export const useHostRepositories = (
     },
     cloneOf: (id) => {
       if (pastedClone !== null && pastedClone.id === id) return pastedClone
+      const mine = projectsHere.find((one) => `here:${one.url}` === id)
+      if (mine !== undefined)
+        return {
+          id,
+          remote: mine.path,
+          from: { url: mine.url },
+          product: mine.product,
+          hostName: mine.product === null ? mine.host : serviceName(serviceOfProduct(mine.product)),
+          host: mine.host,
+          here: null,
+        }
       const connection = codeHosts.find((one) => id.startsWith(`${one.id}:`))
       const shown = all.find((one) => one.id === id)
       if (connection === undefined || shown === undefined) return null

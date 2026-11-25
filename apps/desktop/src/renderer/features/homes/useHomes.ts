@@ -3,7 +3,8 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { HomeUpdateOffer, HomeUpdateRun } from '@althar/ui/screens'
 
 import {
-  releaseMakesProjects,
+  LAST_WITHOUT_MAKING_PROJECTS,
+  releaseBrings,
   type HomeSetup,
   type HomeState,
   type HomeUpdateCheck,
@@ -109,6 +110,8 @@ type Running = 'idle' | 'running' | 'done' | { readonly problem: string } | { re
 export const useHomeUpdating = (
   older: boolean,
   onDone?: () => void,
+  /** The last release without what the home lacks: its update is offered only once a release past it is out. */
+  since: string = LAST_WITHOUT_MAKING_PROJECTS,
 ): {
   readonly offer: HomeUpdateOffer
   readonly onUpdate?: () => void
@@ -148,7 +151,7 @@ export const useHomeUpdating = (
   const moving = checked?.change === 'data' ? checked : undefined
   if (asked !== undefined && installed !== 'custom' && running === 'idle') {
     if (news.isPending || news.isFetching) return { offer: { command, installed, release: 'checking' }, onCheckAgain: reconnect }
-    if (news.data != null && !releaseMakesProjects(news.data))
+    if (news.data != null && !releaseBrings(news.data, since))
       return { offer: { command, installed, release: 'unreleased' }, onCheckAgain: () => setFresh((at) => at + 1) }
   }
   if (update === undefined || installed !== 'known') return { offer: { command, installed }, onCheckAgain: reconnect }

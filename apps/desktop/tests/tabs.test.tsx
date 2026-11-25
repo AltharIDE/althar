@@ -7,7 +7,7 @@ import {
   RouterProvider,
   useRouterState,
 } from '@tanstack/react-router'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -105,6 +105,7 @@ const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threa
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: Where })
+const altharRoute = createRoute({ getParentRoute: () => rootRoute, path: '/althar', component: Where })
 
 const windowAt = (
   path: string,
@@ -114,7 +115,7 @@ const windowAt = (
   more: Parameters<typeof fakeClient>[0] = {},
 ) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute, altharRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({
@@ -294,14 +295,28 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
   })
 
-  it('on another computer’s home with no projects, ⌘N goes from its welcome into New project, which has its tab', async () => {
+  it('on another computer’s home with no projects, the welcome is under Home, and ⌘N goes from it into New project, which has its tab', async () => {
     const { client } = windowAt('/', [], fakeHost(), homeOf, { connection: remoteConnection() })
-    // No projects there: the window is all welcome, with no tabs.
-    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull())
+    // No projects there: its welcome under the window's bar, with Home, the gear and the home. Althar's own tab is this
+    // computer's window's.
+    await waitFor(() => expect(names()).toEqual(['Home']))
+    expect(screen.getByRole('button', { name: /^Althar settings/ })).toBeTruthy()
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     await waitFor(() => expect(where()).toBe('/new'))
     expect(draftsOf(client).get()).not.toBeNull()
-    expect(names()).toEqual(['Home', 'Althar', 'New project'])
+    expect(names()).toEqual(['Home', 'New project'])
+  })
+
+  it('keeps the window’s bar on settings and Althar’s page with no project, on this computer or another’s, so Home is a press away', async () => {
+    windowAt('/althar', [], fakeHost(), homeOf, { connection: remoteConnection() })
+    await waitFor(() => expect(names()).toEqual(['Home', 'Althar']))
+    cleanup()
+    windowAt('/settings/agents', [])
+    await waitFor(() => expect(names()[0]).toBe('Home'))
+    await userEvent.click(tab('Home'))
+    await waitFor(() => expect(where()).toBe('/'))
+    // This computer's first screen is all page again.
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull())
   })
 
   it('open New project where another window’s Manage homes asks for it', async () => {

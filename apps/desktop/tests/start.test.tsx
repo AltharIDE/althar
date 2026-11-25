@@ -17,7 +17,19 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, remoteConnection, streamed, usual, withoutOpenCode } from './fixtures'
+import {
+  agents,
+  changed,
+  connectionList,
+  fakeClient,
+  fakeHost,
+  onLinuxHome,
+  project,
+  remoteConnection,
+  streamed,
+  usual,
+  withoutOpenCode,
+} from './fixtures'
 import { withServices } from './render'
 import { foldersOnHome } from '../src/renderer/data/homeConnection'
 import { draftsOf } from '../src/renderer/features/newProject/draft'
@@ -972,6 +984,57 @@ it('welcomes an empty remote home with what it found there, and goes into New pr
   await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
   expect(onNew).toHaveBeenCalledOnce()
   expect(draftsOf(client).get()?.way).toBe('new')
+})
+
+it('signs an agent in on an empty remote home and connects a code host there, each over its welcome, and clones this Mac’s projects there', async () => {
+  const linux = onLinuxHome('runner-1')
+  const local = {
+    live: true,
+    list: [
+      {
+        id: 'p_here',
+        name: 'Site',
+        ink: 'teal',
+        working: 0,
+        yours: 0,
+        remotes: [{ url: 'https://github.com/acme/site', product: 'github' }],
+      },
+    ],
+  }
+  const homes = {
+    ...linux.homes,
+    overview: vi.fn(async () => ({ ...(await linux.homes.overview()), projects: { local } })),
+  }
+  const signedOut = agents.map((agent) =>
+    agent.id === 'claude-code'
+      ? { ...agent, signIn: 'signed_out' as const, accounts: [{ ...agent.accounts[0]!, signIn: 'signed_out' as const }] }
+      : agent,
+  )
+  const { client } = fakeClient({
+    connection: linux.connection,
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.2.1', agents: signedOut })),
+    listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })),
+  })
+  const host = { ...fakeHost(), homes } as unknown as Host
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  // Signed out there: its sign-in opens over the welcome, its ways in first.
+  await userEvent.click(await screen.findByRole('button', { name: 'Sign Claude Code in on runner-1' }))
+  const signing = await screen.findByRole('dialog', { name: 'Sign Claude Code in on runner-1' })
+  expect(within(signing).getAllByRole('button').length).toBeGreaterThan(1)
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sign Claude Code in on runner-1' })).toBeNull())
+  // No code host there: GitHub is offered, its walk in over the welcome.
+  await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub on runner-1' }))
+  expect(await screen.findByRole('dialog', { name: 'GitHub' })).not.toBeNull()
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'GitHub' })).toBeNull())
+  // This Mac's projects, cloned there.
+  await userEvent.click(screen.getByRole('button', { name: 'From this Mac' }))
+  expect(onNew).toHaveBeenCalledOnce()
+  expect(draftsOf(client).get()?.way).toBe('clone')
 })
 
 it('asks a home from before windows made projects there, on a launcher of its own, to update there: its command folded away, and Check again', async () => {

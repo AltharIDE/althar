@@ -5325,6 +5325,30 @@ const socketCalls = new Set<string>([
   'PrepareFolder',
   'CloneRepository',
   'OpenProject',
+  // Setting the home up from the window: the code hosts it works with, connected there (a token made on the host's page and
+  // pasted, the home's own gh or glab sign-in, or the host's device sign-in where the home has Althar's app for it), and its
+  // agents' accounts signed in there (the agent's page opened in the window's browser and its code pasted back, or a device
+  // code). Each keeps its credential on the home, sealed out of its agents' reach, as one made on the home itself would.
+  'GetConnectGuide',
+  'FindServer',
+  'StartSignIn',
+  'GetSignIn',
+  'CancelSignIn',
+  'ConnectToken',
+  'ConnectCli',
+  'CheckConnection',
+  'Disconnect',
+  'AddAccount',
+  'RenameAccount',
+  'RemoveAccount',
+  'SignOutAccount',
+  'OrderAccounts',
+  'FindAccounts',
+  'SignInAccount',
+  'StartAccountSignIn',
+  'GetAccountSignIn',
+  'PasteAccountSignInCode',
+  'CancelAccountSignIn',
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])

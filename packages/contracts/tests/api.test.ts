@@ -938,6 +938,9 @@ describe('the calls a socket may make', () => {
   it('are those marked for it, whichever way they were marked, as a home tells its window', () => {
     for (const tag of SOCKET_CALLS) assert.isTrue(socketCanCall(tag), tag)
     for (const tag of ['ListProjects', 'WatchFrom', 'FindHomeFolders', 'CloneRepository', 'OpenProject']) assert.include(SOCKET_CALLS, tag)
+    // A home is set up from its window: its code hosts connected and its agents signed in there.
+    for (const tag of ['ConnectToken', 'StartSignIn', 'ConnectCli', 'AddAccount', 'StartAccountSignIn', 'PasteAccountSignInCode'])
+      assert.include(SOCKET_CALLS, tag)
     // Putting a repository on a host, a project's tracker, and the person's word stay with the person's own window.
     for (const tag of ['PublishRepository', 'ListRepositoryOwners', 'SetProjectTracker', 'ListContainers', 'Answer'])
       assert.notInclude(SOCKET_CALLS, tag)

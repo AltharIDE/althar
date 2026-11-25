@@ -28,7 +28,17 @@ const controls = (value: string) => Array.from(value).some((char) => char.charCo
 const projectId = Schema.String.check(Schema.isMaxLength(128), Schema.isPattern(/^[A-Za-z0-9_-]+$/))
 const projectName = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
 const count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(MAX_COUNT))
-const reported = Schema.Struct({ id: projectId, name: projectName, ink: ProjectInk, working: count, yours: count })
+/** A repository's page on its code host, as a window says it: an https address with no sign-in in it, kept short. */
+const remoteUrl = Schema.String.check(Schema.isMaxLength(400), Schema.isPattern(/^https:\/\/[^\s/@]+\/[^\s@]+$/))
+const remote = Schema.Struct({ url: remoteUrl, product: Schema.NullOr(Schema.String.check(Schema.isMaxLength(40))) })
+const reported = Schema.Struct({
+  id: projectId,
+  name: projectName,
+  ink: ProjectInk,
+  working: count,
+  yours: count,
+  remotes: Schema.optional(Schema.Array(remote).check(Schema.isMaxLength(8))),
+})
 const kept = Schema.Struct({ id: projectId, name: projectName, ink: ProjectInk })
 const file = Schema.Struct({
   version: Schema.Literal(1),
