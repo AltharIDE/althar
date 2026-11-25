@@ -245,6 +245,29 @@
   flex-basis: 100%;
 }
 
+.monthBy {
+  display: inline-flex;
+}
+
+/* The track is the card's own shade here, so it wears an edge to read as a control */
+.monthSegment {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.anotherNote {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.whenNote {
+  margin: -2px 0 4px;
+  padding-left: 40px;
+  font-size: 12px;
+  color: var(--t-3);
+  list-style: none;
+}
+
 .limits {
   margin: 0 16px 12px 48px;
   padding-top: 10px;
@@ -302,6 +325,10 @@
   }
 
   .another {
+    padding-left: 8px;
+  }
+
+  .whenNote {
     padding-left: 8px;
   }
 

@@ -394,6 +394,43 @@ describe('an automation’s page', () => {
     expect(await screen.findByRole('button', { name: /Every Friday at 7:30/ })).toBeTruthy()
   })
 
+  it('sets a day of every month, or the nth weekday of it, and says what a short month does', async () => {
+    const { client } = fakeClient()
+    withServices(<Room opening="auto1" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Every weekday at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    // The 31st: some months lack it.
+    await userEvent.click(await screen.findByRole('radio', { name: 'Day of the month' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Day of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: '31st' }))
+    expect(screen.getByText('A month without a 31st runs on its last day.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(client.changeAutomation).toHaveBeenLastCalledWith(
+      'auto1',
+      expect.objectContaining({ schedule: { every: 'month', on: { day: 31 }, at: '09:00' } }),
+    )
+    expect(await screen.findByRole('button', { name: /Monthly, on the 31st at 9:00/ })).toBeTruthy()
+    // The page says it once, where it is set, and not again under When.
+    expect(screen.queryByText('A month without a 31st runs on its last day.')).toBeNull()
+
+    // The last Friday at 16:00.
+    await userEvent.click(screen.getByRole('button', { name: /Monthly, on the 31st at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Weekday' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Which weekday of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Weekday' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Friday' }))
+    await userEvent.clear(screen.getByLabelText('Time'))
+    await userEvent.type(screen.getByLabelText('Time'), '16:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(client.changeAutomation).toHaveBeenLastCalledWith(
+      'auto1',
+      expect.objectContaining({ schedule: { every: 'month', on: { weekday: 5, nth: -1 }, at: '16:00' } }),
+    )
+    expect(await screen.findByRole('button', { name: /Monthly, on the last Friday at 16:00/ })).toBeTruthy()
+  })
+
   it('says what it can’t do, keeping what the runtime kept', async () => {
     const getAutomation = vi.fn(async () => ({ cursor: 6, automation: automationView() }))
     const { client } = fakeClient({

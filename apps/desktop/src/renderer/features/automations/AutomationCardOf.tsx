@@ -1,5 +1,5 @@
 import type { AgentStatus, AutomationDefinition, AutomationStep } from '@althar/contracts'
-import { AutomationCard, type AutomationCardProps, type AutomationPick } from '@althar/ui'
+import { AutomationCard, type AutomationCardProps, type AutomationMonth, type AutomationPick } from '@althar/ui'
 
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -8,6 +8,8 @@ import {
   endsValueOf,
   endsWords,
   limitWords,
+  monthlyOf,
+  monthOf,
   nextSlot,
   nextWords,
   sameSchedule,
@@ -16,6 +18,7 @@ import {
   timeOf,
   weeklyOf,
   whenChoices,
+  whenNoteOf,
   whenValueOf,
   whenWords,
   workOf,
@@ -112,6 +115,7 @@ export function AutomationCardOf({
       whenValue={whenValueOf(definition.schedule)}
       {...(next === null ? {} : { next: nextWords(next) })}
       {...(was === null || sameSchedule(was.schedule, definition.schedule) ? {} : { whenWas: whenWords(was.schedule) })}
+      {...(stage === 'kept' || whenNoteOf(definition.schedule) === undefined ? {} : { whenNote: whenNoteOf(definition.schedule) })}
       picker={picker}
       {...(was === null || sameStep(was.lead, definition.lead) ? {} : { leadWas: nameOf(was.lead) })}
       {...(work.kind === 'task'
@@ -137,6 +141,8 @@ export function AutomationCardOf({
         : {
             onWhenChange: (value: string) => change({ ...definition, schedule: scheduleOf(value, definition.schedule) }),
             time: timeOf(definition.schedule),
+            month: monthOf(definition.schedule),
+            onMonthChange: (month: AutomationMonth) => change({ ...definition, schedule: monthlyOf(month, definition.schedule) }),
             onTimeChange: (time: { readonly days: ReadonlyArray<number>; readonly at: string }) =>
               change({ ...definition, schedule: weeklyOf(time) }),
             onEndsChange: (value: string) => change({ ...definition, work: workOf(value, work) }),

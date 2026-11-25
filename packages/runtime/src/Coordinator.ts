@@ -304,12 +304,15 @@ const ToReview = Schema.Struct({
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
 })
 const Named = Schema.Struct({ task: Schema.String })
-/* When an automation runs, as the coordinator says it: on days of the week at a time, or every hour at a minute past. */
+/* When an automation runs, as the coordinator says it: on days of the week at a time, on a day of the month or the nth weekday of it at a time, or every hour at a minute past. */
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
+const NTH_NAMES = ['first', 'second', 'third', 'fourth', 'last'] as const
 const When = Schema.Struct({
   days: Schema.optional(Schema.Array(Schema.Literals(DAY_NAMES))),
   at: Schema.optional(Schema.String),
   every_hour_at: Schema.optional(Schema.Int),
+  day_of_month: Schema.optional(Schema.Int),
+  nth_weekday: Schema.optional(Schema.Struct({ nth: Schema.Literals(NTH_NAMES), weekday: Schema.Literals(DAY_NAMES) })),
 })
 /* What each run ends in: nothing outside this computer, a draft pull request, one ready for review, or a review of each new pull request. */
 const EndsIn = Schema.Literals(['nothing', 'draft', 'ready', 'reviews'])
@@ -2417,23 +2420,35 @@ export class Coordinator extends Context.Service<
           Effect.fail(error instanceof AutomationRefused ? new ToolRefused({ message: error.message }) : error),
         )
 
-      /** When it runs, from what the coordinator says: days at a time, or every hour at a minute past. */
+      /** When it runs, from what the coordinator says: days at a time, a day of the month or the nth weekday of it at a time, or every hour at a minute past. */
       const scheduleOf = (when: typeof When.Type) =>
         Effect.gen(function* () {
+          const at = /^\d:/.test(when.at ?? '') ? `0${when.at ?? ''}` : (when.at ?? '')
+          // One way of saying it: a monthly one with days of the week, or two monthly ones, is ambiguous.
+          const kinds = [when.every_hour_at, when.day_of_month, when.nth_weekday].filter((one) => one !== undefined).length
           const asked =
-            when.every_hour_at !== undefined
-              ? { every: 'hour', minute: when.every_hour_at }
-              : {
-                  every: 'week',
-                  days: (when.days ?? DAY_NAMES).map((day) => DAY_NAMES.indexOf(day) + 1),
-                  at: /^\d:/.test(when.at ?? '') ? `0${when.at ?? ''}` : (when.at ?? ''),
-                }
+            kinds > 1 || (kinds === 1 && when.days !== undefined)
+              ? null
+              : when.every_hour_at !== undefined
+                ? { every: 'hour', minute: when.every_hour_at }
+                : when.day_of_month !== undefined
+                  ? { every: 'month', on: { day: when.day_of_month }, at }
+                  : when.nth_weekday !== undefined
+                    ? {
+                        every: 'month',
+                        on: {
+                          weekday: DAY_NAMES.indexOf(when.nth_weekday.weekday) + 1,
+                          nth: when.nth_weekday.nth === 'last' ? -1 : NTH_NAMES.indexOf(when.nth_weekday.nth) + 1,
+                        },
+                        at,
+                      }
+                    : { every: 'week', days: (when.days ?? DAY_NAMES).map((day) => DAY_NAMES.indexOf(day) + 1), at }
           return yield* Schema.decodeUnknownEffect(Schedule)(asked).pipe(
             Effect.mapError(
               () =>
                 new ToolRefused({
                   message:
-                    'Say when as days and a time, such as days ["monday", "friday"] and at "09:00" (leave days out for every day), or as every_hour_at, the minutes past the hour.',
+                    'Say when as days and a time, such as days ["monday", "friday"] and at "09:00" (leave days out for every day); as every_hour_at, the minutes past the hour; or monthly, as day_of_month (1 to 31, or -1 for the last day) or nth_weekday ({ nth: "first", weekday: "monday" }, nth first to fourth or last) with at, and no days. Only one of them.',
                 }),
             ),
           )
@@ -3293,7 +3308,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_automation',
-          'Proposes an automation, when the person asks for work that should start by itself on a schedule ("every weekday at 9, review the new pull requests", "every Friday write release notes from what merged"). It runs on this computer while Althar is open, each run an ordinary task, starting after the person\'s own work. Give it a name of a few words; the prompt each run is asked, as the person said it, with what a lead needs; when (days and a time where the computer is, or every hour at a minute, never more often); the lead, as list_models writes it; and what each run ends in: nothing outside this computer (a report), a draft pull request, one ready for review, or reviews (one review of each pull request opened by anyone but the person and not reviewed yet, its lead only reading, its review waiting for the person until they let it post). Nothing runs until the person turns it on from its card. Its task allows everything but pushing to the default branch.',
+          'Proposes an automation, when the person asks for work that should start by itself on a schedule ("every weekday at 9, review the new pull requests", "every Friday write release notes from what merged"). It runs on this computer while Althar is open, each run an ordinary task, starting after the person\'s own work. Give it a name of a few words; the prompt each run is asked, as the person said it, with what a lead needs; when (days and a time where the computer is, a day of the month or the first to fourth or last weekday of it at a time, or every hour at a minute, never more often); the lead, as list_models writes it; and what each run ends in: nothing outside this computer (a report), a draft pull request, one ready for review, or reviews (one review of each pull request opened by anyone but the person and not reviewed yet, its lead only reading, its review waiting for the person until they let it post). Nothing runs until the person turns it on from its card. Its task allows everything but pushing to the default branch.',
           {
             type: 'object',
             properties: {
@@ -3301,7 +3316,8 @@ export class Coordinator extends Context.Service<
               prompt: { type: 'string', description: "What each run's lead is asked, as the person would say it." },
               when: {
                 type: 'object',
-                description: 'Days and a time, or every hour at a minute past.',
+                description:
+                  "Days and a time; or monthly, a day of the month or the nth weekday of it, and a time; or every hour at a minute past. One kind only. A day a month doesn't have, the 31st in April, runs on its last day.",
                 properties: {
                   days: {
                     type: 'array',
@@ -3314,6 +3330,23 @@ export class Coordinator extends Context.Service<
                     minimum: 0,
                     maximum: 59,
                     description: 'Instead of days and a time: every hour, at these minutes past.',
+                  },
+                  day_of_month: {
+                    type: 'integer',
+                    minimum: -1,
+                    maximum: 31,
+                    description:
+                      'Monthly, on this day of the month, at the time in at: 1 to 31, or -1 for the last day of the month. No days.',
+                  },
+                  nth_weekday: {
+                    type: 'object',
+                    description:
+                      'Monthly, on the first, second, third, fourth or last weekday of the month, at the time in at: "the second Tuesday". No days.',
+                    properties: {
+                      nth: { type: 'string', enum: [...NTH_NAMES] },
+                      weekday: { type: 'string', enum: [...DAY_NAMES] },
+                    },
+                    required: ['nth', 'weekday'],
                   },
                 },
               },
@@ -3350,6 +3383,12 @@ export class Coordinator extends Context.Service<
                   days: { type: 'array', items: { type: 'string', enum: [...DAY_NAMES] } },
                   at: { type: 'string' },
                   every_hour_at: { type: 'integer', minimum: 0, maximum: 59 },
+                  day_of_month: { type: 'integer', minimum: -1, maximum: 31 },
+                  nth_weekday: {
+                    type: 'object',
+                    properties: { nth: { type: 'string', enum: [...NTH_NAMES] }, weekday: { type: 'string', enum: [...DAY_NAMES] } },
+                    required: ['nth', 'weekday'],
+                  },
                 },
               },
               lead: { type: 'object', properties: { model: { type: 'string' }, effort }, required: ['model'] },

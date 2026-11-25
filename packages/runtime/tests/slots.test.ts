@@ -39,6 +39,89 @@ describe('slots', () => {
     assert.strictEqual(slotAtOrBefore(HOURLY, '2026-10-22T00:10'), '2026-10-21T23:15')
   })
 
+  it('runs monthly on a day of the month, a short month on its last day', () => {
+    const first: Schedule = { every: 'month', on: { day: 1 }, at: '09:00' }
+    const thirtyFirst: Schedule = { every: 'month', on: { day: 31 }, at: '09:00' }
+    const lastDay: Schedule = { every: 'month', on: { day: -1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(first, '2026-10-01T08:59'), '2026-10-01T09:00')
+    assert.strictEqual(slotAfter(first, '2026-10-01T09:00'), '2026-11-01T09:00')
+    // Across a year.
+    assert.strictEqual(slotAfter(first, '2026-12-15T10:00'), '2027-01-01T09:00')
+    assert.strictEqual(slotAtOrBefore(first, '2027-01-01T08:59'), '2026-12-01T09:00')
+    assert.strictEqual(slotAtOrBefore(first, '2026-10-01T09:00'), '2026-10-01T09:00')
+    // The 31st: April has 30, February 28 (29 in a leap year).
+    assert.strictEqual(slotAfter(thirtyFirst, '2026-03-31T09:00'), '2026-04-30T09:00')
+    assert.strictEqual(slotAfter(thirtyFirst, '2026-01-31T09:00'), '2026-02-28T09:00')
+    assert.strictEqual(slotAfter(thirtyFirst, '2028-01-31T09:00'), '2028-02-29T09:00')
+    assert.strictEqual(slotAtOrBefore(thirtyFirst, '2026-05-30T09:00'), '2026-04-30T09:00')
+    assert.strictEqual(slotAtOrBefore(thirtyFirst, '2026-03-01T00:00'), '2026-02-28T09:00')
+    // A 30th that February doesn't have, and a 29th that only a leap year does.
+    const thirtieth: Schedule = { every: 'month', on: { day: 30 }, at: '09:00' }
+    const twentyNinth: Schedule = { every: 'month', on: { day: 29 }, at: '09:00' }
+    assert.strictEqual(slotAfter(thirtieth, '2026-01-30T09:00'), '2026-02-28T09:00')
+    assert.strictEqual(slotAfter(twentyNinth, '2027-01-29T09:00'), '2027-02-28T09:00')
+    assert.strictEqual(slotAfter(twentyNinth, '2028-01-29T09:00'), '2028-02-29T09:00')
+    // The last day is the last of each month.
+    assert.strictEqual(slotAfter(lastDay, '2026-01-31T09:00'), '2026-02-28T09:00')
+    assert.strictEqual(slotAfter(lastDay, '2026-02-28T09:00'), '2026-03-31T09:00')
+    assert.strictEqual(slotAfter(lastDay, '2028-02-10T09:00'), '2028-02-29T09:00')
+    assert.strictEqual(slotAtOrBefore(lastDay, '2026-05-30T09:00'), '2026-04-30T09:00')
+  })
+
+  it('runs monthly on the nth weekday, the last counted from the end', () => {
+    // 1 October 2026 is a Thursday: its first Monday is the 5th.
+    const firstMonday: Schedule = { every: 'month', on: { weekday: 1, nth: 1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(firstMonday, '2026-10-01T00:00'), '2026-10-05T09:00')
+    assert.strictEqual(slotAfter(firstMonday, '2026-10-05T09:00'), '2026-11-02T09:00')
+    assert.strictEqual(slotAtOrBefore(firstMonday, '2026-10-05T08:59'), '2026-09-07T09:00')
+    // The first of the month being the weekday itself: Thursday 1 October.
+    const firstThursday: Schedule = { every: 'month', on: { weekday: 4, nth: 1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(firstThursday, '2026-09-30T00:00'), '2026-10-01T09:00')
+    const secondTuesday: Schedule = { every: 'month', on: { weekday: 2, nth: 2 }, at: '09:00' }
+    assert.strictEqual(slotAfter(secondTuesday, '2026-10-01T00:00'), '2026-10-13T09:00')
+    const fourthFriday: Schedule = { every: 'month', on: { weekday: 5, nth: 4 }, at: '09:00' }
+    assert.strictEqual(slotAfter(fourthFriday, '2026-10-01T00:00'), '2026-10-23T09:00')
+    // The last Friday: 30 October (the 31st is a Saturday), and 25 February 2028, a leap year whose 29th is a Tuesday.
+    const lastFriday: Schedule = { every: 'month', on: { weekday: 5, nth: -1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(lastFriday, '2026-10-01T00:00'), '2026-10-30T09:00')
+    assert.strictEqual(slotAfter(lastFriday, '2026-10-30T09:00'), '2026-11-27T09:00')
+    assert.strictEqual(slotAfter(lastFriday, '2028-02-01T00:00'), '2028-02-25T09:00')
+    // The last Tuesday of that leap February is its 29th.
+    const lastTuesday: Schedule = { every: 'month', on: { weekday: 2, nth: -1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(lastTuesday, '2028-02-01T00:00'), '2028-02-29T09:00')
+    assert.strictEqual(slotAfter(lastTuesday, '2027-02-01T00:00'), '2027-02-23T09:00')
+    // A month whose last day is the weekday: Sunday 31 May 2026.
+    const lastSunday: Schedule = { every: 'month', on: { weekday: 7, nth: -1 }, at: '09:00' }
+    assert.strictEqual(slotAfter(lastSunday, '2026-05-01T00:00'), '2026-05-31T09:00')
+    assert.strictEqual(slotAtOrBefore(lastSunday, '2026-06-20T00:00'), '2026-05-31T09:00')
+    assert.strictEqual(slotAtOrBefore(lastSunday, '2026-05-31T09:00'), '2026-05-31T09:00')
+    // Across a year.
+    assert.strictEqual(slotAfter(lastFriday, '2026-12-26T00:00'), '2027-01-29T09:00')
+  })
+
+  it('works a monthly slot through daylight saving, the stagger and the window', () => {
+    // London's clocks go forward at 1:00 on Sunday 29 March 2026, the last Sunday: 1:30 comes at 2:30.
+    const lastSunday: Schedule = { every: 'month', on: { weekday: 7, nth: -1 }, at: '01:30' }
+    assert.strictEqual(slotAfter(lastSunday, '2026-03-01T00:00'), '2026-03-29T01:30')
+    assert.strictEqual(localOf(instantOf('2026-03-29T01:30', LONDON), LONDON), '2026-03-29T02:30')
+    // 2:00 UTC is 3:00 summer time: the slot has come; at 0:59 UTC it hasn't.
+    assert.strictEqual(lastCome(lastSunday, utc('2026-03-29T00:59'), LONDON), '2026-02-22T01:30')
+    assert.strictEqual(lastCome(lastSunday, utc('2026-03-29T01:30'), LONDON), '2026-03-29T01:30')
+    assert.strictEqual(nextToCome(lastSunday, utc('2026-03-29T01:30'), LONDON), '2026-04-26T01:30')
+    // They go back at 2:00 on 25 October, the last Sunday: 1:30 happens twice, and comes once.
+    assert.strictEqual(lastCome(lastSunday, utc('2026-10-25T00:45'), LONDON), '2026-10-25T01:30')
+    assert.strictEqual(nextToCome(lastSunday, utc('2026-10-25T01:31'), LONDON), '2026-11-29T01:30')
+    // The stagger counts as in a week.
+    const first: Schedule = { every: 'month', on: { day: 1 }, at: '09:00' }
+    const stagger = 3 * 60_000
+    assert.strictEqual(lastCome(first, utc('2026-11-01T09:02'), LONDON, stagger), '2026-10-01T09:00')
+    assert.strictEqual(lastCome(first, utc('2026-11-01T09:03'), LONDON, stagger), '2026-11-01T09:00')
+    assert.strictEqual(nextToCome(first, utc('2026-11-01T09:02'), LONDON, stagger), '2026-11-01T09:00')
+    // A laptop opened late on the 1st still runs it: a monthly slot gets the whole twelve hours.
+    assert.strictEqual(windowOf(first, '2026-11-01T09:00', LONDON), 12 * HOUR)
+    assert.strictEqual(windowOf({ every: 'month', on: { day: 31 }, at: '09:00' }, '2026-02-28T09:00', LONDON), 12 * HOUR)
+  })
+
   it('reads a slot in a zone, and an instant back', () => {
     // London is on summer time in October until the 25th.
     assert.strictEqual(instantOf('2026-10-21T09:00', LONDON), utc('2026-10-21T08:00'))
