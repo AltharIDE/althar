@@ -225,6 +225,31 @@ export const WorkerTaken: Story = {
   },
 }
 
+/** Counting down, where the home has workers: a worker chosen now is where the countdown starts it, and the clock goes on. */
+export const CountingDownWithWorkers: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        wait={60}
+        startsAt={Date.now() + 60_000}
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: PLACES, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Linux worker 3f9a2c' }))
+    await expect(c.getByRole('button', { name: 'Runs on: Linux worker 3f9a2c' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start now' })).toBeEnabled()
+  },
+}
+
+export const CountingDownWithWorkersDark: Story = { ...CountingDownWithWorkers, globals: { theme: 'dark' } }
+
 const started = fn()
 
 /** Left alone, it starts on its own. */
