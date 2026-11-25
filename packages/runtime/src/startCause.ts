@@ -1,3 +1,4 @@
+import type { StuckStep } from '@althar/contracts'
 import type { CommandEnvelope, ProjectId } from '@althar/domain'
 import { codexHome, codexLogSaid, inRepository, type LocalCause, localCauseOf, stillThere, strayIn } from '@althar/provider-adapters'
 import { isAbsolute } from 'node:path'
@@ -190,6 +191,13 @@ export const codexHomeOf =
           Effect.map((account) => accounts.env(account)['CODEX_HOME'] ?? codexHome()),
           Effect.orElseSucceed(() => codexHome()),
         )
+
+/** A local cause's path and when the coordinator was asked, as a stuck call keeps them; its key stays in the runtime. */
+export const causeOf = (cause: unknown): NonNullable<StuckStep['cause']> => {
+  const kept = typeof cause === 'object' && cause !== null ? (cause as Record<string, unknown>) : {}
+  const { path, askedAt } = kept
+  return { ...(typeof path === 'string' ? { path } : {}), ...(typeof askedAt === 'string' ? { askedAt } : {}) }
+}
 
 /** The kind a cause's key starts with. */
 const kindOfKey = (key: string): LocalCause['kind'] | undefined => {
