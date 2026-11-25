@@ -657,6 +657,51 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
   })
 
+  it('lists the phones paired with the home under Computers, with Pair a phone…', async () => {
+    const phone = {
+      deviceId: 'dev_1a2b3c4d5e6f708192a3b4c5d6e7f809',
+      name: 'Balázs’s iPhone',
+      publicKey: 'A'.repeat(43),
+      role: 'socket' as const,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      revokedAt: null,
+    }
+    let clients = [phone]
+    const { client } = fakeClient({
+      pairedDevices: vi.fn(async () => ({ clients, next: null })),
+      removePairedDevice: vi.fn(async () => {
+        clients = []
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    const phones = await within(page).findByRole('region', { name: 'Phones' })
+    expect(await within(phones).findByText('Balázs’s iPhone')).toBeTruthy()
+    expect(within(phones).getByText('Paired Today')).toBeTruthy()
+
+    // Taken off once the person says so, and gone from the list.
+    await userEvent.click(within(phones).getByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Remove Balázs’s iPhone?' })).getByRole('button', { name: 'Remove' }))
+    expect(client.removePairedDevice).toHaveBeenCalledWith(phone.deviceId)
+    expect(await within(phones).findByText('No phones paired with This Mac yet.')).toBeTruthy()
+
+    await userEvent.click(within(phones).getByRole('button', { name: 'Pair a phone…' }))
+    expect(await screen.findByRole('dialog', { name: /Pair a phone with/ })).toBeTruthy()
+  })
+
+  it('says so where the home’s phones can’t be read, rather than showing none', async () => {
+    const { client } = fakeClient({
+      pairedDevices: vi.fn(async () => {
+        throw new ApiError({ reason: 'Forbidden', message: 'This connection can’t list devices.' })
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const phones = await within(screen.getByRole('main')).findByRole('region', { name: 'Phones' })
+    expect(await within(phones).findByText('This connection can’t list devices.')).toBeTruthy()
+    expect(within(phones).queryByText(/No phones paired/)).toBeNull()
+  })
+
   it('lists the home and its workers, opens one out, and takes one out at once once the person says so', async () => {
     const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
     const free = {

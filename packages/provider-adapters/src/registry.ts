@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, posix } from 'node:path'
+import { bundledProblem, claudeProgram, codexProgram } from './bundledPrograms'
 import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
@@ -352,6 +353,14 @@ export interface AgentDefinition<Id extends string = string> {
    * yet at work in between (Quit asking what it would stop).
    */
   readonly ready?: () => Promise<unknown> | undefined
+  /**
+   * Why the program Althar brings for it can't run beside its adapter, said
+   * before it is spawned: missing, or of another version than its adapter
+   * needs (`bundledProblem`). Undefined where it can, or where Althar
+   * brings none, or where the launch drives the person's own copy (`env`,
+   * the launch's environment, names it). Read afresh at each start.
+   */
+  readonly program?: (env: Readonly<Record<string, string | undefined>>) => string | undefined
   /**
    * Where a session's shell is now, from its agent's own record, read again
    * on each call: `home`, the account's folder (`home.variable`), `cwd`, where
@@ -1175,6 +1184,10 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     contains: claudeSandboxStarts,
     // Its sandbox probe, once a launch, which its hold and its settings both read (ADR-071).
     ready: () => (sandboxProbed() ? undefined : probeClaudeSandbox()),
+    program: (env) =>
+      env.CLAUDE_CODE_EXECUTABLE !== undefined
+        ? undefined
+        : bundledProblem(claudeProgram(process.platform, process.arch, isMusl()), import.meta.url),
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
     skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },
@@ -1217,6 +1230,11 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')],
       inheritEnv: ['CODEX_HOME', ...(process.env.FLATPAK_ID === undefined ? [] : ['CODEX_PATH', 'DBUS_SESSION_BUS_ADDRESS'])],
     }),
+    // Where `CODEX_PATH` names the person's own Codex, its adapter drives that, and Althar's own program isn't asked for.
+    program: (env) => {
+      const own = codexProgram(process.platform, process.arch)
+      return env.CODEX_PATH !== undefined || own === undefined ? undefined : bundledProblem(own, import.meta.url)
+    },
     /*
      * Not `agent`, codex-acp's default: that mode sends every request to go
      * beyond the sandbox to an automatic reviewer, so none reach Althar.

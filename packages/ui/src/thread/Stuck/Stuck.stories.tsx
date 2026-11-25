@@ -404,6 +404,46 @@ export const WhyItCouldntStart: Story = {
             />
           ),
         },
+        {
+          state: 'version mismatch, Althar’s copy',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Claude Code couldn't start. Its program and what drives it are different versions: Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'. Reinstall Althar (in a checkout of Althar, run bun install), then try again."
+            />
+          ),
+        },
+        {
+          state: 'version mismatch, the person’s own',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Kimi Code couldn't start. Its program and what drives it are different versions: Error: No such command 'acp'. Update it, then try again."
+            />
+          ),
+        },
+        {
+          state: 'a part missing',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Claude Code couldn't start. A part of it is missing: Claude Code's own program for this computer (@anthropic-ai/claude-agent-sdk-darwin-arm64 0.3.330) is missing. Reinstall Althar (in a checkout of Althar, run bun install), then try again."
+            />
+          ),
+        },
+        {
+          state: 'no reason given',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Claude Code couldn't start. It gave no reason. What it wrote is in Althar’s agents log."
+            />
+          ),
+        },
       ]}
     />
   ),

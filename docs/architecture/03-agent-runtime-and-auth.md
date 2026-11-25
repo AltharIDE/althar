@@ -1330,6 +1330,47 @@ The adapter classifies failures without collapsing them:
 The UI displays the consequence and recovery options, not raw stack traces or a
 single generic “agent failed” label.
 
+### A start that fails
+
+A start reads what the agent said, its JSON-RPC error's data included: the ACP
+SDK answers anything an adapter throws as "Internal error" with the reason in
+`data.details`, and that reason is the message that is classed and logged.
+Its class (`startFailure.ts`) says what to do, in the words the thread and the
+step's call show (`words.ts`):
+
+| Class | Read from | The person reads |
+|---|---|---|
+| Not installed | A spawn's `ENOENT`, a shell's "command not found" | Install it |
+| Signed out, sign-in ended | Each agent's words for it, or `auth_required` | Sign in again in Settings |
+| Unreachable | DNS, refused or unreachable connections | Check the connection |
+| Version mismatch | Each agent's own parser refusing an option or command (Commander, clap, yargs, Click, argparse, picocli), "too old to", Althar's own check | Update it; reinstall Althar where Althar brings it |
+| A part missing | The Agent SDK's or Codex's missing platform package, Althar's own check | Reinstall Althar |
+| Crashed | A process that exited or was signalled under its adapter | What it said |
+| None of these | Anything else | Its own first error line; never a bare "Internal error" |
+
+Before Claude Code or Codex starts, its own program is looked for as its
+adapter finds it and checked against the version its SDK names
+(`bundledPrograms.ts`): a missing platform package, or another copy of it
+that Node finds further up, is looked for again every few seconds for up to a
+minute, as while an install of Althar is still unpacking it, and the start
+goes on once it is there; past that it is said as it stands, before anything
+is spawned. The advice follows the copy the launch drives: the person's own
+Codex (`CODEX_PATH`) is theirs to update, not Althar to reinstall.
+Every package of the repository pins one exact version of each adapter
+(`adapterPins.test.ts`), so no older copy is hoisted to be found.
+
+A first start that crashed, or failed for no reason the person can act on,
+is made again once by itself: a new adapter process, after Althar forgets
+the agent's sign-in as last checked and asks it again for the models it
+offers (`Models.refresh`); an asking of its models still under way from
+before counts for nothing, and what it offered last stays, names and all,
+until it answers anew. The models probe's own start is made once more the same way. One
+signed out, not installed, refused, out of usage, at another version, offline
+or timed out is said at once, as a second start meets the same. The agent's
+whole answer, its code and all its data, goes in the log and the failed
+start's record. [The root cause that led here](../research/agent-starts-internal-error.md)
+says why.
+
 ## Verification gates
 
 - No test obtains a provider token by reading a vendor credential cache.
@@ -1352,6 +1393,9 @@ single generic “agent failed” label.
   record, and the superseded session cannot write afterwards.
 - A usage limit is recognised on every agent from its error, and before it is
   reached on agents with account status.
+- A failed start never says a bare "Internal error": each agent's ways of
+  failing to start are read from what it really said, and one that may pass
+  starts again by itself.
 - Every session's brief is recorded.
 
 ## References

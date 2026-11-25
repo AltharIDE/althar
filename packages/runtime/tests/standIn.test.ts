@@ -225,7 +225,8 @@ describe('a task’s lead out of usage outside a step', () => {
 
   it.effect('keeps the stand-in where the given lead can’t start at its reset, and gives it back once it can', () => {
     const back = later()
-    let refuse = false
+    // A start that fails for no reason is tried again once by itself: it refuses both.
+    let refuse = 0
     return Effect.gen(function* () {
       yield* knownModels
       yield* onlyClaudeHasLarge
@@ -242,7 +243,7 @@ describe('a task’s lead out of usage outside a step', () => {
       yield* atReset(back)
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       // The given lead can't start as it takes over: the stand-in carries on, and still stands in.
-      refuse = true
+      refuse = 2
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'First.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.agentId === 'codex' && row.content.includes('First.')))
       assert.include(yield* said(task.threadId), 'Fake codex carries on: the agent it was changed to couldn’t start.')
@@ -259,8 +260,8 @@ describe('a task’s lead out of usage outside a step', () => {
           'claude-code': {
             outOfUsage: { until: back },
             beforeNewSession: async () => {
-              if (!refuse) return
-              refuse = false
+              if (refuse === 0) return
+              refuse -= 1
               throw new Error('Could not start')
             },
           },
