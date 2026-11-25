@@ -14,7 +14,7 @@ import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { draftOf, nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
+import { draftHistory, draftOf, nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -134,7 +134,7 @@ export interface Attachments {
   }
   /** What goes with a message now; null where it can't go yet, with the composer saying why. */
   readonly take: (receiver: Receiver, readingCrop?: boolean) => Outgoing | null
-  /** Takes every image and file off, once its message is sent. */
+  /** Takes every image and file off, once its message is sent, and forgets what Undo would have put back. */
   readonly clear: () => void
   /** Puts back what went with a message Althar didn't take, before any added since, bytes and all, to send again. */
   readonly giveBack: (outgoing: Outgoing) => void
@@ -161,6 +161,30 @@ const readyOf = (attached: Extract<Attached, { ok: true }>): NonNullable<Waiting
     path: '',
   },
 })
+
+/**
+ * Takes one off a draft's list, as a step Undo puts back where it was, as it was (`draftHistory`). One still being read
+ * goes for good: its reading ends with nothing to land on.
+ */
+const takeOff = <T extends { readonly id: string; readonly ready: unknown }>(
+  key: string,
+  list: ReadonlyArray<T>,
+  set: (change: (now: ReadonlyArray<T>) => ReadonlyArray<T>) => void,
+  id: string,
+) => {
+  const at = list.findIndex((one) => one.id === id)
+  const one = list[at]
+  const off = () => set((now) => now.filter((x) => x.id !== id))
+  off()
+  if (one === undefined || one.ready === null) return
+  draftHistory(key).push(
+    {
+      undo: () => set((now) => (now.some((x) => x.id === id) ? now : [...now.slice(0, at), one, ...now.slice(at)])),
+      redo: off,
+    },
+    draftOf(key).text,
+  )
+}
 
 /** The images and files waiting in the draft kept under `key` (`drafts.ts`). */
 export function useAttachments(key: string, host: Attacher, shrink: Shrink = shrinkInWindow): Attachments {
@@ -270,11 +294,11 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       onAddFiles: (files: ReadonlyArray<File>, how: AddedBy = 'drop') => void add(files, receiver, how),
       onRemoveImage: (id: string) => {
         setNote(null)
-        setWaiting((now) => now.filter((one) => one.id !== id))
+        takeOff(key, draftOf<Waiting>(key).images, setWaiting, id)
       },
       onRemoveFile: (id: string) => {
         setNote(null)
-        setFiles((now) => now.filter((one) => one.id !== id))
+        takeOff(key, draftOf<unknown, WaitingFile>(key).files, setFiles, id)
       },
       ...(shown === null ? {} : { fileNote: shown }),
     }
@@ -322,6 +346,8 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       setNote(null)
       setWaiting(() => [])
       setFiles(() => [])
+      // Sent: what was taken off before can't come back into the next message.
+      draftHistory(key).clear()
     },
     giveBack: (outgoing) => {
       const given = outgoing.pictures.flatMap((picture, index): ReadonlyArray<Waiting> => {

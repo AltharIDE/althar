@@ -152,6 +152,7 @@ export {
   type WorkerState,
 } from './chrome/LoadMeter/load'
 export * from './composer/Composer/Composer'
+export * from './composer/Composer/history'
 export * from './composer/Commands/commands'
 export { CommandPanel, type CommandPanelProps, type CommandRow, commandRows } from './composer/Commands/CommandPanel'
 export * from './composer/Comments/Comments'

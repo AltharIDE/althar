@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 
 import { Composer, type ComposerProps } from '@althar/ui'
 
-import { subscribeDraft, takeDraftFocus, useDraft, wantsDraftFocus } from './drafts'
+import { draftHistory, subscribeDraft, takeDraftFocus, useDraft, wantsDraftFocus } from './drafts'
 
 /**
  * A composer whose words are its thread's draft (`drafts.ts`), read here and
@@ -10,6 +10,8 @@ import { subscribeDraft, takeDraftFocus, useDraft, wantsDraftFocus } from './dra
  * which changes the words only as it sends them or gives them back
  * (`useSetDraft`). Where words were put in it for the person to go on with
  * (`focusDraft`), it takes the focus as it next shows, its caret after them.
+ * Undo in it puts back what was taken off it, in turn with its words
+ * (`draftHistory`).
  */
 export function DraftComposer({ draft, ...props }: Omit<ComposerProps, 'value' | 'onChange'> & { readonly draft: string }) {
   const [value, setValue] = useDraft(draft)
@@ -30,5 +32,5 @@ export function DraftComposer({ draft, ...props }: Omit<ComposerProps, 'value' |
   useEffect(() => subscribeDraft(draft, take), [draft, take])
   // Drawn again as its screen shows: asked while it was out of sight, it takes it now.
   useEffect(take)
-  return <Composer {...props} inputRef={ref} value={value} onChange={setValue} />
+  return <Composer history={draftHistory(draft)} {...props} inputRef={ref} value={value} onChange={setValue} />
 }

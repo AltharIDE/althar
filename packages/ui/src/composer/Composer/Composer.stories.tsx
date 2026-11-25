@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useEffect, useRef, useState } from 'react'
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react'
 import { expect, fireEvent, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { MODEL_LIST, model, useModelPrefs } from '../../fixtures/models'
@@ -10,7 +10,9 @@ import { ContextRing } from '../ContextRing/ContextRing'
 import { DictationTray, type DictationState } from '../DictationTray/DictationTray'
 import { Behind } from '../Behind/Behind'
 import { ModelPick } from '../ModelPick/ModelPick'
+import { isMac } from '../../foundations/keys'
 import { Composer, type ComposerFile, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
+import { createComposerHistory } from './history'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -113,6 +115,17 @@ function Example(
   const [images, setImages] = useState(pictures)
   const [files, setFiles] = useState(documents)
   const [note, setNote] = useState<string | undefined>(undefined)
+  /* What was taken off, to put back with Undo: kept beside the draft, as the desktop keeps it. */
+  const [history] = useState(createComposerHistory)
+  /* Takes one off, as a step Undo puts back where it was. */
+  const takeOff = <T extends { readonly id: string }>(list: readonly T[], set: Dispatch<SetStateAction<T[]>>, id: string) => {
+    const at = list.findIndex((one) => one.id === id)
+    const one = list[at]
+    if (one === undefined) return
+    const off = () => set((now) => now.filter((x) => x.id !== id))
+    off()
+    history.push({ undo: () => set((now) => [...now.slice(0, at), one, ...now.slice(at)]), redo: off }, value)
+  }
   const [queue, setQueue] = useState(waiting.map((said, i) => ({ id: `q${i}`, ...(typeof said === 'string' ? { text: said } : said) })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
   const [tick, setTick] = useState(0)
@@ -146,6 +159,7 @@ function Example(
           setValue('')
           setImages([])
           setFiles([])
+          history.clear()
         }}
         images={images}
         files={files}
@@ -169,8 +183,9 @@ function Example(
                   }),
                 ])
               },
-              onRemoveImage: (id: string) => setImages((now) => now.filter((image) => image.id !== id)),
-              onRemoveFile: (id: string) => setFiles((now) => now.filter((file) => file.id !== id)),
+              onRemoveImage: (id: string) => takeOff(images, setImages, id),
+              onRemoveFile: (id: string) => takeOff(files, setFiles, id),
+              history,
               fileNote: note,
             }
           : {})}
@@ -802,6 +817,42 @@ export const FilesOnly: Story = {
     await expect(args.onSubmit).toHaveBeenCalledWith('')
   },
 }
+/** ⌘Z / Ctrl+Z, as the key the system has. */
+const UNDO = isMac ? '{Meta>}z{/Meta}' : '{Control>}z{/Control}'
+const REDO = isMac ? '{Meta>}{Shift>}z{/Shift}{/Meta}' : '{Control>}y{/Control}'
+/**
+ * Taken off by mistake: Undo puts it back where it was, as it was, and Redo takes it off again. The field takes the
+ * focus its × had, so Undo is a key away; what was taken off goes back in the order it went.
+ */
+export const UndoBringsBackAnImage: Story = {
+  render: () => (
+    <Example takesFiles pictures={SHOTS} documents={DOCUMENTS.slice(0, 1)} initial="The refunds page before and after the fix." />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox', { name: 'Tell the lead' })
+    const shown = () => c.getAllByRole('img').map((one) => one.getAttribute('alt'))
+    await userEvent.click(c.getByRole('button', { name: 'Remove refunds-before.png' }))
+    await userEvent.click(c.getByRole('button', { name: 'Remove refund-spec.pdf' }))
+    await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
+    await expect(field).toHaveFocus()
+    // The file went last, so it comes back first; then the image, before the other, where it was.
+    await userEvent.keyboard(UNDO)
+    await expect(c.getByText('refund-spec.pdf')).toBeInTheDocument()
+    await expect(shown()).toEqual(['refunds-after.png'])
+    await userEvent.keyboard(UNDO)
+    await expect(shown()).toEqual(['refunds-before.png', 'refunds-after.png'])
+    await expect(c.getByRole('img', { name: 'refunds-before.png' })).toHaveAttribute('src', SHOT_BEFORE.src)
+    // Redo takes it off again, and Undo puts it back once more; the words stay as they were throughout.
+    await userEvent.keyboard(REDO)
+    await expect(shown()).toEqual(['refunds-after.png'])
+    await userEvent.keyboard(UNDO)
+    await expect(shown()).toEqual(['refunds-before.png', 'refunds-after.png'])
+    await expect(c.getByRole('list', { name: '3 attachments to send' })).toBeInTheDocument()
+    await expect(field).toHaveValue('The refunds page before and after the fix.')
+  },
+}
+export const UndoBringsBackAnImageDark: Story = { ...UndoBringsBackAnImage, globals: { theme: 'dark' } }
 /** Dropped on it, pasted into it or picked with Add files: each goes to the host, which adds it, and takes it off again. */
 export const AddingFiles: Story = {
   render: () => <Example takesFiles />,

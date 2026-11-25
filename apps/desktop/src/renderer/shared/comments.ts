@@ -9,6 +9,7 @@ import { shownAddress } from '../../main/browser/addresses'
 import { elementLine, onLine, selectorLine, sized, sizeLine } from '../../main/browser/elementWords'
 import { CanvasAnchor, LINE_COMMENTS, LineComment, type Picture, type SentCanvasComment, type SentImage } from '@althar/contracts'
 import { draftCrop } from './draftCrops'
+import { draftHistory, draftOf } from './drafts'
 import { pictureOf, type ReadImage, readImage, remember, type Shrink, sentOf, shrinkInWindow } from './images'
 
 /*
@@ -235,6 +236,32 @@ export const drop = (key: string, id: string) => {
     thread.all.filter((comment) => comment !== one),
   )
   removeCrop(one.cropId)
+}
+
+/**
+ * Takes a comment off its composer, as a step Undo puts back where it was, its crop with it (`draftHistory`). One whose
+ * crop is still being read goes for good, as an image still being read does.
+ */
+export const takeOff = (key: string, id: string) => {
+  const thread = threadOf(key)
+  const one = thread.shown.find((comment) => comment.id === id)
+  if (one === undefined) return
+  const at = thread.all.indexOf(one)
+  drop(key, id)
+  if (needsCrop(one)) return
+  draftHistory(key).push(
+    {
+      undo: () => {
+        const now = threadOf(key)
+        if (now.all.some((comment) => comment.id === id)) return
+        change(key, now, [...now.all.slice(0, at), one, ...now.all.slice(at)])
+        // Its crop is kept again where it was, so the comment outlives a restart as it did before it went.
+        if (one.crop !== null && one.cropId !== undefined) void draftCrop.write(one.cropId, one.crop).catch(() => undefined)
+      },
+      redo: () => drop(key, id),
+    },
+    draftOf(key).text,
+  )
 }
 
 /** The chips go at once. Their saved copies go when the runtime accepts them. */

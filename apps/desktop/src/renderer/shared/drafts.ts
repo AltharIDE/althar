@@ -1,5 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore } from 'react'
 
+import { type ComposerHistory, createComposerHistory } from '@althar/ui'
+
 /*
  * What the person has written in a composer and not sent yet, kept by the
  * thread it is for (the coordinator's, or a task's) rather than by the
@@ -9,6 +11,10 @@ import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore }
  * restart; the images and files only as long as the window, since an
  * image's bytes can be megabytes and a file's grant lasts the launch.
  * Sending clears it; a message Althar didn't take comes back to it.
+ *
+ * Beside it, what was taken off its composer (an image, a file, a comment),
+ * for Undo to put back where it was (`draftHistory`): held in the window's
+ * memory as the draft's images are, and forgotten as it is sent.
  *
  * A draft also remembers whether any of its words were dictated, even if
  * the person edited them after: the message is sent marked, so the agent
@@ -218,6 +224,17 @@ export const useDraftAttached = <Image, File = unknown>(key: string): Pick<Draft
   return { images, files, dictated }
 }
 
+const histories = new Map<string, ComposerHistory>()
+
+/** What Undo puts back in a thread's composer: the attachments taken off it, each a step beside its words' own. */
+export const draftHistory = (key: string): ComposerHistory => {
+  const known = histories.get(key)
+  if (known !== undefined) return known
+  const made = createComposerHistory()
+  histories.set(key, made)
+  return made
+}
+
 /* Each image's id, unique in the window, so ones kept in a draft from before never share one with ones added since. */
 let images = 0
 export const nextImageId = () => {
@@ -228,6 +245,7 @@ export const nextImageId = () => {
 /** Forgets every draft this window holds, as each test starts: what wasn't written to storage yet isn't. */
 export const forgetDrafts = () => {
   drafts.clear()
+  histories.clear()
   stored = null
   images = 0
   clearTimeout(writing)

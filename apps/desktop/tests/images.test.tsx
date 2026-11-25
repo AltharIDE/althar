@@ -18,6 +18,7 @@ import {
   shrinkInWindow,
   text,
 } from '../src/renderer/shared/images'
+import { draftHistory, draftOf } from '../src/renderer/shared/drafts'
 import { sentWith, takesImages, useAttachments } from '../src/renderer/shared/useAttachments'
 import { models } from './fixtures'
 
@@ -246,6 +247,35 @@ describe('the images waiting in a composer', () => {
     act(() => result.current.props(claude).onAddFiles(many))
     expect(result.current.props(claude).images).toHaveLength(MESSAGE_IMAGES.count)
     expect(result.current.props(claude).fileNote).toBe(text.tooMany)
+  })
+
+  it('puts back an image and a file taken off where they were, as they were, with Undo, and takes them off again with Redo', async () => {
+    const attached = (name: string): Attached => ({ ok: true, grant: `grant-${name}`, name, kind: 'file', bytes: 10, entries: null })
+    const host = { attach: async (file: File) => attached(file.name), attachPasted: async () => [] }
+    const { result } = renderHook(() => useAttachments('thread:undo', host, asIs))
+    act(() =>
+      result.current
+        .props(claude)
+        .onAddFiles([fileOf(png(1, 1), 'a.png'), fileOf(png(2, 2), 'b.png'), fileOf(new Uint8Array([1]), 'notes.txt', 'text/plain')]),
+    )
+    await waitFor(() => expect(result.current.props(claude).images.every((one) => one.src !== undefined)).toBe(true))
+    await waitFor(() => expect(result.current.props(claude).files[0]?.reading).toBeUndefined())
+    const before = draftOf('thread:undo').images[0]
+    act(() => result.current.props(claude).onRemoveImage('image-1'))
+    act(() => result.current.props(claude).onRemoveFile('image-3'))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['b.png'])
+    const history = draftHistory('thread:undo')
+    act(() => void history.undo(''))
+    expect(result.current.props(claude).files.map((one) => one.name)).toEqual(['notes.txt'])
+    act(() => void history.undo(''))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['a.png', 'b.png'])
+    // The very one that went, its bytes and all.
+    expect(draftOf('thread:undo').images[0]).toBe(before)
+    act(() => void history.redo(''))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['b.png'])
+    // Sent: none of it comes back into the next message.
+    act(() => result.current.clear())
+    expect(history.undo('', true)).toBe(false)
   })
 
   it('holds the message back while an image is still being read', () => {
