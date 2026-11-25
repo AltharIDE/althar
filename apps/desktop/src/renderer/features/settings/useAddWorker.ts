@@ -345,6 +345,9 @@ export const useAddWorker = ({
     setWay: (chosen) => {
       setWay(chosen)
       setCodeFailed(null)
+      // A code asked again and not yet answered is dropped: back on the code's way, the one asked then is the only one shown.
+      codeAsked.current++
+      setCodeAsking(false)
     },
     address,
     setAddress: (value) => {

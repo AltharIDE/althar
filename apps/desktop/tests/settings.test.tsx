@@ -1013,6 +1013,48 @@ describe('the Settings tab', () => {
     expect(within(adding()).queryByText('The home is busy.')).toBeNull()
   })
 
+  it('drops a code asked again on Check again once the way changes, so only the one asked on coming back shows', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    // Busy at first; then each request waits until the test answers it, the last asked first.
+    let busy = true
+    const answers: Array<(made: { code: string; expiresAt: number }) => void> = []
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => answers.push(resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'Over SSH' }))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    await waitFor(() => expect(answers.length).toBeGreaterThanOrEqual(2))
+    const expiresAt = Date.now() + 600_000
+    act(() => answers.at(-1)!({ code: 'althar-worker1.fresh', expiresAt }))
+    expect(await within(adding()).findByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    // The retry dropped when the way changed answers late: it changes nothing.
+    act(() => answers[0]!({ code: 'althar-worker1.stale', expiresAt }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(within(adding()).getByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    expect(within(adding()).queryByText(/althar-worker1\.stale/)).toBeNull()
+  })
+
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {
     const host = fakeHost()
     const { client } = fakeClient()
