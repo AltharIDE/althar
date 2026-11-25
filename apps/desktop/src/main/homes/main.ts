@@ -14,11 +14,12 @@ import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { findRelease, HOST_RELEASE_KEYS, newestHostVersion } from './release'
+import { findRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
 import { startWorkerSetups } from './workerMain'
+import type { WorkerLog } from './workerSetup'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -47,9 +48,12 @@ export const startHomeConnections = ({
   mine,
   open,
   log,
+  logs,
   protect,
   usage,
 }: {
+  /** main.log at each level, for what adding a worker does. */
+  readonly logs: WorkerLog
   readonly protect: ProtectCredential
   readonly profile: string
   readonly entry: string
@@ -161,6 +165,8 @@ export const startHomeConnections = ({
     mine,
     // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
     reachesOwnHome: (id) => controller.state(id).current.kind !== 'https',
+    log: logs,
+    release: (signal) => workerRelease(source, signal),
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)

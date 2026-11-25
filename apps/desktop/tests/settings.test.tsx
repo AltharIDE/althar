@@ -829,6 +829,7 @@ describe('the Settings tab', () => {
       fakeHost({
         homes: paired as never,
         workers: {
+          release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid' })),
           setup: vi.fn(async () => null),
           setUp: vi.fn(async () => undefined),
           act: vi.fn(async () => undefined),
@@ -882,6 +883,7 @@ describe('the Settings tab', () => {
     }
     let listening: ((setup: WorkerSetup | null) => void) | undefined
     const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
       setup: vi.fn(async () => null),
       setUp: vi.fn(async () => undefined),
       act: vi.fn(async () => undefined),
@@ -941,6 +943,31 @@ describe('the Settings tab', () => {
     await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))
     expect(client.setWorkerProjects).toHaveBeenCalledWith(workerId, ['proj_m'])
     expect(within(page).getByText('Signed in')).toBeTruthy()
+  })
+
+  it('says plainly, before anything is pressed, that no release can add a worker yet, and checks again', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'none' as const, newest: '0.1.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('There’s no Althar release with workers yet.')).toBeTruthy()
+    expect(within(adding).getByText(/The newest host release, 0\.1\.0, came before workers/)).toBeTruthy()
+    // Neither way is offered: no address to give, no code's line that couldn't work.
+    expect(within(adding).queryByLabelText('SSH address')).toBeNull()
+    expect(bridge.setUp).not.toHaveBeenCalled()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(bridge.release).toHaveBeenLastCalledWith(true))
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

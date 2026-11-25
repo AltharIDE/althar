@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { HomeWorker } from '@althar/contracts'
 
-import { codeView, problemOf, setupView, sshTargetOf, WORKER_SCRIPT } from '../src/renderer/features/settings/useAddWorker'
+import { codeView, problemOf, setupView, sshTargetOf, unavailableOf } from '../src/renderer/features/settings/useAddWorker'
 import { computerWorkerOf, loadWorkerOf, mibOf, workerKindOf, workerStateOf } from '../src/renderer/shared/useWorkers'
 
 describe('adding a worker, in words', () => {
@@ -48,13 +48,30 @@ describe('where adding a worker stopped, in words', () => {
     expect(problemOf('UnsupportedOS', setup).retry).toBe(false)
     expect(problemOf('NoUserManager', setup).retry).toBe(false)
     expect(problemOf('AccountConflict', setup).retry).toBe(false)
-    expect(problemOf('CannotDownload', setup, 'no route').body).toBe('no route')
+    // SSH's and the worker's own words go to main.log: the window says a short line.
+    expect(problemOf('CannotDownload', setup, 'curl: (6) Could not resolve host: github.com').body).toBeUndefined()
     expect(problemOf('UploadFailed', setup).body).toBeUndefined()
     expect(problemOf('LingerOff', setup).command).toBeUndefined()
     expect(problemOf('WorkerNotAdded', setup, 'The home is busy.').title).toBe('The home is busy.')
     expect(problemOf('WorkerNotAdded', setup).title).toBe('The home couldn’t sign the worker’s key.')
-    expect(problemOf('Whatever', setup, 'it broke').body).toBe('it broke')
+    expect(problemOf('Whatever', setup, 'it broke').body).toBeUndefined()
     expect(problemOf('Whatever', setup).body).toBeUndefined()
+  })
+
+  it('says plainly where no release can add a worker, the newest it found, and to check again', () => {
+    expect(problemOf('NoWorkerRelease', setup, '0.1.0')).toEqual({
+      title: 'There’s no Althar release with workers yet.',
+      body: 'The newest host release, 0.1.0, came before workers. Check again once a newer one is out.',
+      retry: true,
+    })
+    expect(problemOf('NoWorker', setup).title).toBe('There’s no Althar release with workers yet.')
+    expect(problemOf('NoWorker', { ...setup, version: '0.1.0' }, 'This release carries no worker.').body).toBe(
+      'The newest host release, 0.1.0, came before workers. Check again once a newer one is out.',
+    )
+    expect(unavailableOf({ kind: 'none', newest: '0.1.0' })?.title).toBe('There’s no Althar release with workers yet.')
+    expect(unavailableOf({ kind: 'none', newest: null })?.body).toBe('No host release is published. Check again once one is out.')
+    expect(unavailableOf({ kind: 'ready', version: '0.2.0', base: 'https://x' })).toBeNull()
+    expect(unavailableOf(null)).toBeNull()
   })
 
   it('draws a setup as the dialog has it: its progress, its host key and where it stopped', () => {
@@ -144,13 +161,16 @@ describe('a worker, as the window lists it', () => {
 describe('a code’s way, as the dialog draws it', () => {
   it('gives its line and how long it lasts, says it is being made, or why the home made none', () => {
     const now = 1_000_000
-    expect(codeView({ code: 'althar-worker1.e30', expiresAt: now + 600_000 }, null, now)).toEqual({
-      command: `curl -fsSL ${WORKER_SCRIPT} | sh -s -- join 'althar-worker1.e30'`,
+    const base = 'https://github.com/AltharIDE/althar/releases/download/host-v0.2.0'
+    // From the host release that has workers, not the repository's latest, which is the desktop's.
+    expect(codeView({ code: 'althar-worker1.e30', expiresAt: now + 600_000 }, null, now, base)).toEqual({
+      command: `curl -fsSL ${base}/althar-worker.sh | ALTHAR_RELEASE_BASE=${base} sh -s -- join 'althar-worker1.e30'`,
       lasts: '10 minutes',
     })
-    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now).lasts).toBe('a minute')
-    expect(codeView({ code: 'c', expiresAt: now }, null, now)).toEqual({ command: null, lasts: null })
-    expect(codeView(null, null, now)).toEqual({ command: null, lasts: null })
-    expect(codeView(null, 'The home is busy.', now)).toEqual({ command: null, lasts: null, failed: 'The home is busy.' })
+    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now, base).lasts).toBe('a minute')
+    expect(codeView({ code: 'c', expiresAt: now }, null, now, base)).toEqual({ command: null, lasts: null })
+    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now, null)).toEqual({ command: null, lasts: null })
+    expect(codeView(null, null, now, base)).toEqual({ command: null, lasts: null })
+    expect(codeView(null, 'The home is busy.', now, base)).toEqual({ command: null, lasts: null, failed: 'The home is busy.' })
   })
 })

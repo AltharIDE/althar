@@ -205,6 +205,8 @@ export function ComputersSection({
           onAgain={adder.again}
           onStop={adder.stop}
           code={adder.code}
+          unavailable={adder.unavailable}
+          onCheck={adder.check}
           onClose={adder.close}
         />
       )}
