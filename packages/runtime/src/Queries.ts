@@ -3197,7 +3197,9 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
-            ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            // When the person kept it, as the store has it whatever it reads as (a pull request opening after it was kept reads
+            // ready): its kept row says when, and a saved card is checked by it.
+            ...(task.keptAt === null ? {} : { keptAt: task.keptAt }),
             ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
             // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
             // its drafting on: while the coordinator's turn that made it is open, its plan is still on its way, and its card says

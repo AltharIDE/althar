@@ -17,14 +17,12 @@ export interface BoardRow {
 }
 
 /**
- * Whether a card kept for its task still stands for its row as the store has it now: its state and settling, and whether it
- * is kept for later, which Keep for later and writing to it again move alone. A card read kept stands for its row's keeping;
- * one read otherwise for a row not kept, or kept with its pull request open, which reads as ready (worked out afresh then).
+ * Whether a card kept for its task still stands for its row as the store has it now: its state and settling, and when it was
+ * kept for later, as the store had it when the card was worked out (`keptAt`, whatever phase the card reads in), which Keep
+ * for later and writing to it again move alone. Not checked where the row was read without it.
  */
-export const standsFor = (card: Pick<BoardTask, 'state' | 'settledAt' | 'phase' | 'keptAt'>, row: BoardRow) =>
-  card.state === row.state &&
-  card.settledAt === row.settledAt &&
-  (row.keptAt === undefined || (card.phase === 'kept' ? card.keptAt === row.keptAt : row.keptAt === null))
+export const standsFor = (card: Pick<BoardTask, 'state' | 'settledAt' | 'keptAt'>, row: BoardRow) =>
+  card.state === row.state && card.settledAt === row.settledAt && (row.keptAt === undefined || (card.keptAt ?? null) === row.keptAt)
 
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(BoardTask)))
 const KEEP = 1_000

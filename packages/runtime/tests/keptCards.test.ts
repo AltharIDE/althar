@@ -167,6 +167,9 @@ describe('a board read after one task moved', () => {
       const keptView = JSON.stringify([{ ...card!, phase: 'kept', keptAt }])
       assert.strictEqual(yield* projections.read({ ...row, view: keptView, keptAt: null }, fallback), facts)
       assert.strictEqual((yield* projections.read({ ...row, view: keptView, keptAt }, fallback))[0]?.phase, 'kept')
+      // Saved as it read after a pull request of it opened, kept still: ready, and it stands, by when it was kept.
+      const openedView = JSON.stringify([{ ...card!, phase: 'ready', keptAt }])
+      assert.strictEqual((yield* projections.read({ ...row, view: openedView, keptAt }, fallback))[0]?.phase, 'ready')
       assert.deepEqual(projections.pending(10), [id])
 
       const saved = yield* projections.read(row, fallback)

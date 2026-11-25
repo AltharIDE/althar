@@ -3182,7 +3182,10 @@ export const TaskCard = Schema.Struct({
    * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
    */
   conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
-  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  /**
+   * When the person kept it for later, as the store has it, whatever phase it reads in (one kept whose pull request opened
+   * since reads ready): its kept row says when, and a saved card is checked by it. Null or absent where it isn't kept.
+   */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
