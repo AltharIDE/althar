@@ -6,15 +6,15 @@ import type { Ran, RunOptions, SetupSystem } from '../src/main/homes/setup'
 import { forTheLog, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
-const now = Date.parse('2026-11-25T00:00:00.000Z')
+const now = Date.parse('2026-01-20T00:00:00.000Z')
 const signed = (version: string) => {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const manifest = {
     format: 1,
     version,
     sequence: 1,
-    publishedAt: '2026-11-20T00:00:00.000Z',
-    expiresAt: '2027-05-01T00:00:00.000Z',
+    publishedAt: '2025-11-01T00:00:00.000Z',
+    expiresAt: '2026-05-01T00:00:00.000Z',
     platform: 'linux',
     arch: 'x64',
     archive: { url: 'https://example.test/a.tar.gz', sha256: 'b'.repeat(64), bytes: 40_000_000 },
