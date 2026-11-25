@@ -25,23 +25,43 @@ export interface ProjectHere {
   readonly path: string
 }
 
+/** Whether a page is on the server at `base`, base path and all: https://git.acme.com/bitbucket/projects/… is on https://git.acme.com/bitbucket. */
+const within = (page: string, base: string) => {
+  try {
+    const at = new URL(page)
+    const server = new URL(base)
+    const root = server.pathname.replace(/\/+$/, '')
+    return at.origin === server.origin && (root === '' || at.pathname === root || at.pathname.startsWith(`${root}/`))
+  } catch {
+    return false
+  }
+}
+
 /** The code hosts whose page for a repository is its git address too; Bitbucket Data Center's isn't. */
 const PAGE_CLONES: ReadonlySet<Product> = new Set(['github', 'gitlab', 'bitbucket_cloud'])
 
 const isProduct = Schema.is(Product)
 
 /**
- * Where the home clones one of this computer's repositories from: through its own connection to that host, by the path Althar
- * knows it at there, where it has one; else by its page, where that's its git address. Null where neither is so (a Bitbucket
+ * Where the home clones one of this computer's repositories from: through its own connection to that server for that product,
+ * by the path Althar knows it at there, where it has one; else by its page, where that's its git address. Null where neither is so (a Bitbucket
  * Data Center repository, with that server not connected there): it isn't offered.
  */
 export const cloneFromHere = (
   one: ProjectHere,
   list: ConnectionList | null,
 ): { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string } | null => {
-  const connection = (list?.connections ?? []).find(
-    (candidate) => candidate.state === 'ready' && hostnameOf(candidate.webUrl) === one.host.toLowerCase(),
-  )
+  // The home's connection to that very server, for that product: a Jira on the same host, or another base path there, isn't.
+  const connection =
+    one.product === null
+      ? undefined
+      : (list?.connections ?? []).find(
+          (candidate) =>
+            candidate.state === 'ready' &&
+            candidate.product === one.product &&
+            hostnameOf(candidate.webUrl) === one.host.toLowerCase() &&
+            within(one.url, candidate.webUrl),
+        )
   if (connection !== undefined) return { connectionId: connection.id, path: one.path.split('/') }
   return one.product !== null && PAGE_CLONES.has(one.product) ? { url: one.url } : null
 }

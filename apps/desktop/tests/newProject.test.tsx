@@ -851,7 +851,12 @@ describe('a new project on a home on another computer', () => {
   it('clones a Bitbucket Data Center project of this Mac’s through the home’s own connection to that server, and offers none it can’t reach', async () => {
     const { homes } = onLinuxHome('runner-1')
     const remotes = [
-      { url: 'https://git.acme.com/projects/PLAT/repos/site/browse', product: 'bitbucket_dc', host: 'git.acme.com', path: 'PLAT/site' },
+      {
+        url: 'https://git.acme.com/bitbucket/projects/PLAT/repos/site/browse',
+        product: 'bitbucket_dc',
+        host: 'git.acme.com',
+        path: 'PLAT/site',
+      },
       { url: 'https://code.other.com/projects/OPS/repos/infra/browse', product: 'bitbucket_dc', host: 'code.other.com', path: 'OPS/infra' },
     ]
     const local = { live: true, list: [{ id: 'p_here', name: 'Site', ink: 'teal', working: 0, yours: 0, remotes }] }
@@ -861,10 +866,15 @@ describe('a new project on a home on another computer', () => {
       id: 'conn_dc',
       product: 'bitbucket_dc' as const,
       name: 'Bitbucket',
-      webUrl: 'https://git.acme.com',
+      webUrl: 'https://git.acme.com/bitbucket',
     }
+    // Jira on the same server, at a base path of its own, listed first: it's no code host, and isn't taken for one.
+    const jira = { ...githubConnection, id: 'conn_jira', product: 'jira_dc' as const, name: 'Jira', webUrl: 'https://git.acme.com/jira' }
     const at = onHome(
-      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [server] })), listHostRepositories: vi.fn(async () => []) },
+      {
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [jira, server] })),
+        listHostRepositories: vi.fn(async () => []),
+      },
       SOCKET_CALLS,
       host as unknown as Host,
     )
@@ -876,6 +886,25 @@ describe('a new project on a home on another computer', () => {
     await waitFor(() =>
       expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'site'] }),
     )
+  })
+
+  it('offers no Bitbucket Data Center project of this Mac’s where the home has only a Jira on that server', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = [
+      {
+        url: 'https://git.acme.com/bitbucket/projects/PLAT/repos/site/browse',
+        product: 'bitbucket_dc',
+        host: 'git.acme.com',
+        path: 'PLAT/site',
+      },
+      { url: 'https://github.com/acme/web', product: 'github', host: 'github.com', path: 'acme/web' },
+    ]
+    const local = { live: true, list: [{ id: 'p_here', name: 'Site', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const jira = { ...githubConnection, id: 'conn_jira', product: 'jira_dc' as const, name: 'Jira', webUrl: 'https://git.acme.com/jira' }
+    onHome({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [jira] })) }, SOCKET_CALLS, host as unknown as Host)
+    expect(await screen.findByRole('button', { name: 'Clone acme/web' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Clone PLAT/site' })).toBeNull()
   })
 
   it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {
