@@ -858,9 +858,13 @@ export const handlers = apiLayer(
      */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
-        const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
-          concurrency: 'unbounded',
-        })
+        const statuses = yield* Effect.forEach(
+          yield* accounts.of(entry.definition.id),
+          (account) =>
+            // Checked again, one being signed in in Terminal is asked its models afresh: the sign-in may be done now.
+            recheck ? Effect.andThen(models.signInChecked(account.id), accountStatus(account, recheck)) : accountStatus(account, recheck),
+          { concurrency: 'unbounded' },
+        )
         const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
@@ -877,6 +881,7 @@ export const handlers = apiLayer(
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
+          ...(entry.definition.native === undefined && entry.definition.signIn.logout !== undefined ? { signsOut: true } : {}),
           guide: entry.definition.cli?.guide ?? null,
           problem: null,
         } satisfies AgentStatus
@@ -2458,7 +2463,25 @@ export const handlers = apiLayer(
           ),
         ),
       RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
-      RemoveAccount: ({ commandId, accountId, anyway }) => once(commandId, api(accounts.remove(accountId, { anyway: anyway === true }))),
+      RemoveAccount: ({ commandId, accountId, anyway }) =>
+        once(
+          commandId,
+          // Removed, it offers its agent's models no more.
+          api(accounts.remove(accountId, { anyway: anyway === true }).pipe(Effect.tap(() => models.forgetAccount(accountId)))),
+        ),
+      SignOutAccount: ({ commandId, accountId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* accounts.signOut(accountId)
+              // Signed out, it offers its agent's models no more, and every screen says so: checked again, its plan with it.
+              yield* models.forgetAccount(accountId)
+              yield* signIns.account(yield* accounts.get(accountId), true)
+              yield* planUsage.retell
+            }),
+          ),
+        ),
       OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
       FindAccounts: ({ agentId }) =>
         api(
@@ -2478,6 +2501,9 @@ export const handlers = apiLayer(
             Effect.gen(function* () {
               const line = yield* accounts.login(accountId, host)
               if (host !== undefined) yield* models.forget('copilot')
+              // Signed in again in Terminal, it may be someone else's sign-in, offered other models: asked afresh, and again as
+              // its sign-in is checked for a while, as Althar can't see the sign-in end there.
+              else yield* models.signingIn(accountId)
               // Opened where the app can, in Terminal; elsewhere the person runs it.
               return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
             }),

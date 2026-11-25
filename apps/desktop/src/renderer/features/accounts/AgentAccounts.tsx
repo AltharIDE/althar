@@ -10,7 +10,8 @@ import type { AccountSignInModel } from './useAccountSignIn'
 
 /*
  * An agent's accounts, drawn by the kit: one quiet line each, in the order
- * work tries them, each to sign in again, rename, move and remove. Adding one
+ * work tries them, each to sign in again, rename, move and remove, the usual
+ * folder's to sign out, as it can't be removed. Adding one
  * or signing one in happens in the list, in the line it is for, by the ways
  * the agent offers: the browser and a one-time code where Althar runs its
  * login, Terminal for any with a command of its own, or a folder another
@@ -146,6 +147,8 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
       onRename={(accountId, name) => void start.renameAccount(accountId, name)}
       onMove={(accountId, to) => void start.moveAccount(agent.id, accountId, to)}
       onRemove={(accountId) => void start.removeAccount(accountId)}
+      // The usual folder's account, signed out with the agent's own command, where it has one that does.
+      {...(agent.signsOut === true ? { onSignOut: (accountId: string) => void start.signOutAccount(accountId) } : {})}
       {...(flow === null || node === null ? {} : { signIn: { account: flow.again, at: accounts.length, node } })}
     />
   )

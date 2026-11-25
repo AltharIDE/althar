@@ -587,7 +587,12 @@ export class TaskActions extends Context.Service<
         how: Schema.Literals(['done', 'keep', 'discard']),
         why: Schema.optional(Schema.String),
       })
-      const Stopping = Schema.Struct({ task: Schema.String, turn: Schema.optional(Schema.Boolean), why: Schema.optional(Schema.String) })
+      const Stopping = Schema.Struct({
+        task: Schema.String,
+        turn: Schema.optional(Schema.Boolean),
+        why: Schema.optional(Schema.String),
+        into: Schema.optional(Schema.String),
+      })
       const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
         Schema.decodeUnknownEffect(schema)(input).pipe(
           Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
@@ -638,6 +643,13 @@ export class TaskActions extends Context.Service<
             ? taskOf(access.projectId, access.taskId)
             : Effect.fail(new ToolRefused({ message: 'Name the task, by its slug as list_tasks shows it.' }))
 
+      /** Whether a task stands stopped: open, its latest run suspended, no agent on it. */
+      const stoppedNow = (task: Task) =>
+        Effect.map(
+          standingOf(task.id),
+          (standing) => (standing.state === 'open' || standing.state === 'draft') && standing.runState === 'suspended' && !standing.working,
+        )
+
       /** What a lead may not do to its own task while it works on it: stopping or holding itself. Settling it is fine. */
       const OWN_REFUSED: ReadonlyArray<TaskMove> = ['stop', 'stop_turn', 'hold', 'restart']
 
@@ -656,6 +668,8 @@ export class TaskActions extends Context.Service<
           readonly word?: true
           /** Why the coordinator or lead did it, said in both threads where it didn't act on the person's word. */
           readonly why?: string | undefined
+          /** Stopping it, the task its work goes on in: its card then reads as folded into that one. */
+          readonly into?: Task | undefined
         } = {},
       ) =>
         Effect.gen(function* () {
@@ -693,10 +707,18 @@ export class TaskActions extends Context.Service<
             return 'It is discarded as your turn ends: it moves to Settled, its agents stop, and its work stays on this computer. End your turn with a sentence saying so.'
           }
           const outcome = yield* perform(task, move, actorOf(access), { ...args, stands: word?.stands })
-          if (!outcome.done) return `Nothing changed: ${outcome.said}`
-          const as = words === undefined ? becauseOf(asked.why) : `, as you asked: ${quoted(words)}`
-          if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
-          yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${DID_HERE[move]}${as}`)
+          const into = asked.into
+          // Stopped already, a stop that says why, or where its work went, says so on its card: nothing else changes.
+          const noted = !outcome.done && move === 'stop' && (nonEmpty(asked.why) || into !== undefined) && (yield* stoppedNow(task))
+          if (!outcome.done && !noted) return `Nothing changed: ${outcome.said}`
+          const as =
+            words === undefined
+              ? `${into === undefined ? '' : `, its work going on in “${into.title}”`}${becauseOf(asked.why)}`
+              : `, as you asked: ${quoted(words)}`
+          if (!noted) {
+            if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
+            yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${DID_HERE[move]}${as}`)
+          }
           yield* fact({
             projectId: task.projectId,
             aggregateType: 'task',
@@ -706,11 +728,18 @@ export class TaskActions extends Context.Service<
             payload: {
               move,
               ...(words === undefined ? {} : { words }),
-              ...(nonEmpty(asked.why) ? { why: asked.why } : {}),
+              ...(nonEmpty(asked.why) ? { why: asked.why.trim() } : {}),
+              ...(into === undefined ? {} : { into: into.id }),
+              // Said of a task stopped already: a reason or a fold, never who stopped it.
+              ...(noted ? { noted: true } : {}),
               by: access.role,
+              // The task whose lead did it, so its card can name that task.
+              ...(access.role === 'lead' && access.taskId !== null ? { from: access.taskId } : {}),
             },
             actorId: actorOf(access),
           })
+          if (noted)
+            return `${task.slug} was stopped already: its card now says ${into === undefined ? 'why' : `its work went on in ${into.slug}`}.`
           return `${outcome.said} ${threadsSaying(access, task)}; say it in a sentence.`
         })
 
@@ -1935,11 +1964,32 @@ export class TaskActions extends Context.Service<
         tool(
           'stop_task',
           'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message; or, where a turn Althar asked of its lead or reviewer waits for a place up next, that turn is cancelled, and what it would have said is read with the agent’s next turn. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
-          { type: 'object', properties: { task, turn: { type: 'boolean' }, why }, required: ['task'] },
+          {
+            type: 'object',
+            properties: {
+              task,
+              turn: { type: 'boolean' },
+              why: {
+                type: 'string',
+                description:
+                  'Why, in a few plain words, said after the line in both threads and on the stopped task’s card: "the person asked", or what is going wrong.',
+              },
+              into: {
+                type: 'string',
+                description:
+                  'Where its work goes on instead, as the slug of another task, when the person asked for it to be done there: its card then reads as folded into that task, settled rather than waiting on the person, and Resume still carries it on. On a task stopped already, it and why only add to what its card says: who stopped it stays, and a fold or reason said before stands until another replaces it.',
+              },
+            },
+            required: ['task'],
+          },
           (access, input) =>
-            Effect.flatMap(read(Stopping, input), (asked) =>
-              act(access, asked.task, asked.turn === true ? 'stop_turn' : 'stop', { why: asked.why }),
-            ),
+            Effect.gen(function* () {
+              const asked = yield* read(Stopping, input)
+              const into = nonEmpty(asked.into) ? yield* taskOf(access.projectId, asked.into) : undefined
+              if (into !== undefined && into.slug === asked.task.trim())
+                return yield* new ToolRefused({ message: 'A task’s work can’t go on in itself: name the task it moves to.' })
+              return yield* act(access, asked.task, asked.turn === true ? 'stop_turn' : 'stop', { why: asked.why, into })
+            }),
         ),
         tool(
           'hold_task',

@@ -1,4 +1,4 @@
-import type { PlanStep } from '@althar/contracts'
+import type { PlanStep, TaskStopped } from '@althar/contracts'
 import { type TrackItem, trackOf } from '@althar/ui'
 
 /*
@@ -40,7 +40,49 @@ export const stepText = {
     interrupted: 'Stopped when you interrupted it',
     althar: 'Stopped by Althar',
   } satisfies Record<'declined' | 'interrupted' | 'althar', string>,
+  /** Who stopped it, where that is on record: a lead by its task's title. */
+  stoppedByWho: {
+    person: 'Stopped by you',
+    coordinator: 'Stopped by the coordinator',
+    lead: (task: string) => `Stopped by ${task}`,
+    aLead: 'Stopped by another task’s lead',
+  },
+  /** Its work went on in another task: where, in place of who stopped it. */
+  folded: (task: string) => `Folded into ${task}`,
 }
+
+/** A reason as it follows who stopped a task: its first letter as written, no full stop of its own. */
+const reasonOf = (why: string | undefined) => {
+  const said = why?.trim().replace(/\.$/, '') ?? ''
+  return said === '' ? '' : `: ${said}`
+}
+
+/**
+ * What stopped a task, as its card says it: its work folded into another task, where it was; else who stopped it (the person,
+ * the coordinator, a lead by its task, Althar) and the reason they gave; else what its lead's turn ended in. Undefined where
+ * nothing says.
+ */
+export const stoppedWords = (stopped: TaskStopped | null | undefined): string | undefined => {
+  if (stopped == null) return undefined
+  if (stopped.into !== undefined) return stepText.folded(stopped.into.title)
+  const who = stepText.stoppedByWho
+  const by =
+    stopped.who === 'lead'
+      ? stopped.lead === undefined
+        ? who.aLead
+        : who.lead(stopped.lead.title)
+      : stopped.who === 'coordinator'
+        ? who.coordinator
+        : stopped.who === 'person' && stopped.by !== 'declined' && stopped.by !== 'interrupted'
+          ? who.person
+          : stopped.by === null
+            ? undefined
+            : stepText.stoppedBy[stopped.by]
+  return by === undefined ? undefined : `${by}${reasonOf(stopped.why)}`
+}
+
+/** Whether a stopped task's work went on in another: settled in all but name, its card a quiet row. */
+export const isFolded = (stopped: TaskStopped | null | undefined): boolean => stopped?.into !== undefined
 
 /** What it does while on a step, in a word; on `publish` with its Ship past its push, the stop it is at. */
 export const stepNow = (step: string | null, shipAt?: 'ready' | 'merge' | null): string | undefined =>

@@ -497,6 +497,7 @@ describe('the client', () => {
           SetProjectAccounts: () => Effect.die('unused'),
           RenameAccount: () => Effect.die('unused'),
           RemoveAccount: () => Effect.die('unused'),
+          SignOutAccount: () => Effect.die('unused'),
           OrderAccounts: () => Effect.die('unused'),
           AddAccount: () => Effect.die('unused'),
           FindAccounts: () => Effect.die('unused'),
