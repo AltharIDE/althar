@@ -35,7 +35,8 @@ export const updateFixture = async (changes: Partial<ReleaseInfo> = {}) => {
     `CREATE TABLE runtime_homes(singleton INTEGER PRIMARY KEY, id TEXT NOT NULL); INSERT INTO runtime_homes VALUES(1,'${HOME_ID}'); CREATE TABLE notes(value TEXT); INSERT INTO notes VALUES('before update')`,
   )
   db.close()
-  const oldInfo = releaseInfo()
+  // Installed older than every update the tests offer, whatever the host's own version.
+  const oldInfo: ReleaseInfo = { ...releaseInfo(), version: '0.1.0' }
   const nextInfo: ReleaseInfo = { ...oldInfo, version: '0.1.1', ...changes }
   const oldId = 'a'.repeat(64)
   fixtureFiles(join(root, 'releases', oldId), 'initial code')
