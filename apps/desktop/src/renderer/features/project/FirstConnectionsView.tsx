@@ -3,6 +3,8 @@ import { useState, useSyncExternalStore } from 'react'
 import type { ConnectionList, Service } from '@althar/contracts'
 import { FirstConnections, type FirstConnectionsService, LinkButton } from '@althar/ui'
 
+import { canCall } from '../../data/client'
+import { useServices } from '../../data/services'
 import { ConnectFlow } from '../connections/ConnectFlow'
 import s from '../connections/Connections.module.css'
 import { useConnect } from '../connections/useConnect'
@@ -62,8 +64,16 @@ const subscribe = (listener: () => void) => {
 const option = (service: Service): FirstConnectionsService => ({ id: service, name: serviceName(service), brand: serviceBrand(service) })
 const isService = (id: string): id is Service => (SERVICES as ReadonlyArray<string>).includes(id)
 
-/** What the card offers a project, from the connections: where its code is and isn't connected, the hosts where it names none, and the trackers while none is connected. */
-export const firstConnectionsOf = (list: ConnectionList, project: string) => {
+/**
+ * What the card offers a project, from the connections: where its code is and isn't connected, the hosts where it names none,
+ * and the trackers while none is connected; only what this window may connect (`may`): on another computer's home, its code
+ * hosts where the home lets it, and never its trackers.
+ */
+export const firstConnectionsOf = (
+  list: ConnectionList,
+  project: string,
+  may: { readonly hosts: boolean; readonly trackers: boolean } = { hosts: true, trackers: true },
+) => {
   const offered = SERVICES.filter((service) => list.products.some((product) => product.service === service))
   const connected = list.connections.flatMap((connection) => serviceOf(list.products, connection.product) ?? [])
   const place = list.places.find((one) => one.project === project)
@@ -71,11 +81,12 @@ export const firstConnectionsOf = (list: ConnectionList, project: string) => {
   const homeConnected = place !== undefined && list.connections.some((one) => one.product === place.product && one.webUrl === place.webUrl)
   const anyHost = connected.some(hostsCode)
   return {
-    ...(home !== undefined && !homeConnected
+    ...(may.hosts && home !== undefined && !homeConnected
       ? { host: { service: option(home), ...(place?.repositories[0] === undefined ? {} : { where: place.repositories[0] }) } }
       : {}),
-    hosts: home === undefined && !anyHost ? offered.filter(hostsCode).map(option) : [],
-    trackers: connected.some((service) => !hostsCode(service)) ? [] : offered.filter((service) => !hostsCode(service)).map(option),
+    hosts: may.hosts && home === undefined && !anyHost ? offered.filter(hostsCode).map(option) : [],
+    trackers:
+      !may.trackers || connected.some((service) => !hostsCode(service)) ? [] : offered.filter((service) => !hostsCode(service)).map(option),
   }
 }
 
@@ -91,9 +102,13 @@ export interface FirstConnectionsViewProps {
 export function FirstConnectionsView({ projectId, project, model, className }: FirstConnectionsViewProps) {
   const hidden = useSyncExternalStore(subscribe, read)
   const [walking, setWalking] = useState<Service | null>(null)
+  const { client } = useServices()
   const list = model.list
   if (list === null || hidden.includes(projectId)) return null
-  const offer = firstConnectionsOf(list, project)
+  const remote = client.connection !== undefined
+  const offer = firstConnectionsOf(list, project, { hosts: canCall(client, 'ConnectToken'), trackers: !remote })
+  // Nothing this window may connect: no card.
+  if (offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0) return null
   return (
     <FirstConnections
       {...offer}
