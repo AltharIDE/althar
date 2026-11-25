@@ -5294,6 +5294,7 @@ const socketCalls = new Set<string>([
   'StartTask',
   'StartPlan',
   'HoldPlan',
+  'PlacePlan',
   'CreateTask',
   'StopTask',
   'ResumeTask',
@@ -5761,7 +5762,15 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
+  command(
+    'StartPlan',
+    {
+      planId: Schema.String,
+      /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started (PlacePlan). */
+      workerId: Schema.optional(Schema.NullOr(WorkerSelection)),
+    },
+    Schema.Void,
+  ),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */

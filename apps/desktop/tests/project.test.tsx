@@ -531,7 +531,7 @@ describe('the Talk room', () => {
     // Held for the reset, it is paused, as on the board, not running.
     expect(screen.getByText('Paused')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln5')
+    expect(client.startPlan).toHaveBeenCalledWith('pln5', null)
   })
 
   it('files, changes and discards an issue the coordinator drafted, and shows it filed or why it wasn’t', async () => {
@@ -683,17 +683,51 @@ describe('the Talk room', () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
       listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
-      holdPlan: vi.fn(() => new Promise<boolean>(() => {})),
+      changePlan: vi.fn(() => new Promise<void>(() => {})),
     })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker 999999' }))
     expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
-    // Local can't go to a worker: held before the runtime answers, saying why, with the way back to the home.
+    // Local can't go to a worker: the runtime holds it as it changes it, in the one request; shown held before it answers,
+    // saying why, with the way back to the home.
     await userEvent.click(screen.getByRole('radio', { name: 'Local' }))
-    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    const [changed, , , where] = vi.mocked(client.changePlan).mock.calls.at(-1) ?? []
+    expect([changed, where]).toEqual(['pln1', 'checkout'])
+    expect(client.holdPlan).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     expect((await screen.findByRole('alert')).textContent).toContain('Choose Worktree to run it on a worker.')
+  })
+
+  it('keeps the latest choice of where it runs while earlier ones are still on their way, and starts on the home by name', async () => {
+    const first = 'wrk_' + 'f'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const answers: Array<(placed: boolean) => void> = []
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId: first, providers: ['claude-code'], busy: false }]),
+      placePlan: vi.fn(() => new Promise<boolean>((resolve) => answers.push(resolve))),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
+    expect(client.placePlan).toHaveBeenLastCalledWith('pln1', null)
+    // The first choice turned down after the second was made: the second stands.
+    await act(async () => answers[0]?.(false))
+    expect(screen.getByRole('button', { name: 'Runs on: This Mac' })).toBeTruthy()
+    // Started while the second is still on its way: on the home, by name, not wherever the plan was placed before.
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('offers the best available worker while keeping This home selected by default', async () => {
@@ -769,7 +803,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Use This Mac' }))
     expect(screen.queryByRole('alert')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('names the home neutrally in a remote window until the window has read which home it is', async () => {
@@ -806,7 +840,7 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Runs on: studio' })).toBeTruthy()
     // Start still sends it to the home the window is on.
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('holds, changes and starts a plan before it starts on its own', async () => {
@@ -851,7 +885,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('plans a review of someone else’s pull request with its one lead, offering every agent', async () => {
@@ -904,7 +938,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('points a plan at another branch from its last row, or at one it makes from the default branch (ADR-093)', async () => {

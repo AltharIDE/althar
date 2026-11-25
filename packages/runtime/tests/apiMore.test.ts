@@ -676,6 +676,74 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('starts a plan on the worker chosen during its countdown when its time runs out', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '1'.repeat(32)
+        const opened: Array<string> = []
+        const { client, grant } = yield* connected({
+          countdown: Duration.seconds(3),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            open: (request) => Effect.sync(() => opened.push(request.workerId)).pipe(Effect.andThen(Effect.die('Seen opening the worker'))),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        const planId = item?.kind === 'task' ? (item.content.plan?.id ?? '') : ''
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
+        // Nobody presses Start: the countdown starts it, on the worker, never on the home.
+        yield* until(thread, () => opened.length > 0)
+        assert.deepStrictEqual([...new Set(opened)], [workerId])
+      }),
+    ),
+  )
+
+  it.live('holds a countdown as a change makes the worker chosen unable to take it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '0'.repeat(32)
+        const { client, grant } = yield* connected({
+          countdown: Duration.minutes(5),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            open: () => Effect.die('A plan held must not start'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        const plan = item?.kind === 'task' ? item.content.plan : null
+        const planId = plan?.id ?? ''
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
+        // Local can't go to a worker: the change itself stops the countdown, with nothing else asked of the window.
+        yield* client.ChangePlan({ commandId: commandId(), planId, steps: plan?.steps ?? [], worksIn: 'checkout' })
+        const after = (yield* thread).items.find((one) => one.kind === 'task')
+        assert.strictEqual(after?.kind === 'task' ? after.content.phase : null, 'held')
+        assert.strictEqual(after?.kind === 'task' ? after.content.plan?.runsOn : null, workerId)
+      }),
+    ),
+  )
+
   it.live('holds a countdown at once where the worker chosen can’t take it', () =>
     Effect.scoped(
       Effect.gen(function* () {

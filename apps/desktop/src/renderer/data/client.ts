@@ -623,7 +623,8 @@ export interface Client {
      */
     readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */

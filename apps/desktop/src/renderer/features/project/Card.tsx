@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
@@ -81,7 +81,8 @@ export interface CardActions {
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly workers?: ReadonlyArray<ProjectWorker>
-  readonly onStart: (planId: string, workerId?: string) => void | Promise<boolean>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before. */
+  readonly onStart: (planId: string, workerId?: string | null) => void | Promise<boolean>
   readonly onHold: (planId: string) => void
   /**
    * Where a plan runs once it starts, chosen as it counts down or is held: a worker, any free one, or null for the home. Its
@@ -99,7 +100,7 @@ export interface CardActions {
     worksIn?: Where,
     /** The branch it works toward (ADR-093); null for the default branch. */
     toward?: string | null,
-  ) => void
+  ) => void | Promise<void>
   /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
   readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
@@ -253,8 +254,9 @@ function PlanCard({
       worksIn: nextWhere ?? worksIn,
       toward: nextToward === undefined ? toward : nextToward,
     })
-    if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
-    else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
+    return nextToward === undefined
+      ? actions.onChange(plan.id, next, nextEnd, nextWhere)
+      : actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   // Where it runs, as it counts down or is held: the home, or one of its workers (ADR-103). The runtime keeps the choice, which
   // its countdown starts it on, and checks it again as it starts.
@@ -262,14 +264,22 @@ function PlanCard({
   const here = useHomeState(homes)
   // The home by the window's name for it: This Mac, or the remote home's own; until the window has read which, neither.
   const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : here === null ? null : here.current.home.name
-  // The person's choice shows at once, and the plan's copy replaces it once the runtime has it.
-  const [place, setPlace] = useState<{ readonly from: Plan | null; readonly workerId: string }>({ from: null, workerId: HOME })
-  // A countdown the chosen place can't take is held at once, as the runtime holds it.
-  const [holding, setHolding] = useState<Plan | null>(null)
+  // The person's choice shows at once, kept by the request that sends it until a read of the plan has it, or that request is
+  // turned down; a read that lands before it went through doesn't undo it.
+  const requests = useRef(0)
+  const [place, setPlace] = useState<{
+    readonly planId: string
+    readonly workerId: string
+    readonly request: number
+    readonly through: boolean
+  } | null>(null)
+  if (place !== null && place.through && place.planId === plan.id && (plan.runsOn ?? HOME) === place.workerId) setPlace(null)
+  // A countdown the chosen place can't take shows held at once, as the runtime holds it, until the request that holds it is done.
+  const [holding, setHolding] = useState<{ readonly planId: string; readonly request: number } | null>(null)
   const counting = card.phase === 'planned' && plan.startsAt !== null
-  const held = card.phase === 'held' || (counting && holding === plan)
+  const held = card.phase === 'held' || (counting && holding?.planId === plan.id)
   const placeable = card.phase === 'held' || counting
-  const selected = !placeable ? HOME : place.from === plan ? place.workerId : (plan.runsOn ?? HOME)
+  const selected = !placeable ? HOME : place?.planId === plan.id ? place.workerId : (plan.runsOn ?? HOME)
   const placementAt = (where: string, inWhere: Where | undefined = worksIn) =>
     placementOf({
       workers: actions.workers ?? [],
@@ -282,17 +292,22 @@ function PlanCard({
     })
   const placement = placeable ? placementAt(selected) : null
   const startProblem = placement?.problem
+  /** Shows it held until `sent` is done, where the change makes the place chosen unable to take it. */
+  const holdWhile = (holds: boolean, sent: void | Promise<unknown>, request: number) => {
+    if (!holds) return
+    setHolding({ planId: plan.id, request })
+    void Promise.resolve(sent)
+      .catch(() => undefined)
+      .then(() => setHolding((was) => (was?.request === request ? null : was)))
+  }
   const placeOn = (workerId: string) => {
-    setPlace({ from: plan, workerId })
-    const holds = counting && placementAt(workerId).problem !== undefined
-    if (holds) setHolding(plan)
-    if (actions.onPlace === undefined) return
-    void actions.onPlace(plan.id, workerId === HOME ? null : workerId).then((placed) => {
-      if (placed) return
-      // Turned down: as it was again, the line saying why.
-      setPlace((was) => (was.workerId === workerId ? { from: null, workerId: HOME } : was))
-      if (holds) setHolding(null)
-    })
+    const request = ++requests.current
+    setPlace({ planId: plan.id, workerId, request, through: false })
+    const sent = actions.onPlace === undefined ? undefined : actions.onPlace(plan.id, workerId === HOME ? null : workerId)
+    holdWhile(counting && placementAt(workerId).problem !== undefined, sent, request)
+    // Turned down: as it was, the line saying why; through, until the plan's copy says so.
+    if (sent !== undefined)
+      void sent.then((placed) => setPlace((was) => (was?.request !== request ? was : placed ? { ...was, through: true } : null)))
   }
   const from = fromOf(card)
   return (
@@ -350,12 +365,9 @@ function PlanCard({
         : {
             worksIn: placeOf(worksIn),
             onWorksInChange: (next: WorksIn) => {
-              change(steps, end, whereOf(next))
-              // Somewhere the place chosen can't take it, its countdown stops until the person changes one or the other.
-              if (counting && placementAt(selected, whereOf(next)).problem !== undefined) {
-                setHolding(plan)
-                actions.onHold(plan.id)
-              }
+              // Somewhere the place chosen can't take it, the runtime stops its countdown as it changes it: shown so at once.
+              const sent = change(steps, end, whereOf(next))
+              holdWhile(counting && placementAt(selected, whereOf(next)).problem !== undefined, sent, ++requests.current)
             },
             ...(plan.worksInWhy == null || worksIn !== plan.worksIn ? {} : { worksInWhy: plan.worksInWhy }),
             ...(plan.localTaken == null ? {} : { localTaken: plan.localTaken.title }),
@@ -390,7 +402,8 @@ function PlanCard({
             },
           })}
       {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
-      onStart={() => actions.onStart(plan.id, selected === HOME ? undefined : selected)}
+      // The home by name, so a place chosen before and still being changed can't take its place.
+      onStart={() => actions.onStart(plan.id, selected === HOME ? null : selected)}
       startDisabled={startProblem !== undefined}
     />
   )

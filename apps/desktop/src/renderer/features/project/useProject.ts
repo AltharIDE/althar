@@ -141,7 +141,8 @@ export interface ProjectModel {
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly workers: ReadonlyArray<ProjectWorker>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<boolean>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers). */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
