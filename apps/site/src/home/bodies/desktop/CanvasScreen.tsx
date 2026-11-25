@@ -96,8 +96,6 @@ export function CanvasScreen({ label }: { label: string }) {
                     version={2}
                     latest={2}
                     newer={null}
-                    by="The lead of Sign-in page · just now"
-                    note={VERSIONS[1]}
                     onVersion={none}
                     onComment={none}
                     onReload={none}

@@ -305,12 +305,9 @@ export function CanvasAtWork({ active = true }: { active?: boolean } = {}) {
             <CanvasPanel
               name={NAME}
               title={TITLE}
-              kind="html"
               version={shown}
               latest={shown}
               newer={null}
-              by="The lead of Sign-in page · just now"
-              note={VERSIONS[shown - 1]!}
               onVersion={none}
               onComment={none}
               onReload={none}
