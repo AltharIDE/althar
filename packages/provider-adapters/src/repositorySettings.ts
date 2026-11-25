@@ -12,7 +12,7 @@ import { jsonc } from './ownTools'
  * settings" in docs/decisions/what-agents-may-do.md): Claude Code's hooks, helpers, status line, plugins and the
  * `.mcp.json` servers its settings start, in `.claude/settings.json` and `.claude/settings.local.json`; Codex's hooks,
  * `notify` and MCP servers in `.codex/`; and OpenCode's plugins, formatters, language servers and MCP servers in
- * `opencode.json`, and the plugins and tools it loads as code from `.opencode/`. Each file is read as the agent reads
+ * `opencode.json`, and the plugins and tools it loads as code in `.opencode/`. Each file is read as the agent reads
  * it, at the repository's root and each folder down to where its agent starts, and kept by a hash of the whole of what
  * in it runs, and of the scripts in the repository its commands name, so a branch that changes one is seen; a change
  * elsewhere in the file (a permission, a model) changes nothing. A file there that can't be read is never trusted.
@@ -450,7 +450,7 @@ const levelSettings = async (root: string, prefix: string, level: string): Promi
       const value = parse(content.text)
       if (value === undefined) return unreadEntry(agent, at, `It couldn’t be read as ${file.endsWith('.toml') ? 'TOML' : 'JSON'}`)
       const found = read(value.value, beside)
-      // What the settings start from `.mcp.json` counts with them: a change there asks again.
+      // What the settings start of `.mcp.json` counts with them: a change there asks again.
       return entryOf(root, level, agent, at, found)
     }),
   )

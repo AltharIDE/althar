@@ -103,7 +103,7 @@ export const Long: Story = {
             key: 'plugin',
             when: 'As it starts',
             command:
-              "node -e \"require('./tools/bootstrap').run({ env: process.env.BILLING_ENV, region: 'eu-central-1', verbose: true })\"",
+              'node --require ./tools/register.cjs ./tools/bootstrap.mjs --env "$BILLING_ENV" --region eu-central-1 --verbose --retries 3',
           },
         ],
       },

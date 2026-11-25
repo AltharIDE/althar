@@ -103,11 +103,15 @@ describe('a repository’s agent settings', () => {
     expect(untrustedOf(files, files)).toEqual(files)
   })
 
-  it('lists a folder of OpenCode’s code it couldn’t list', async () => {
+  it('takes a file where a folder of OpenCode’s code would be for none', async () => {
     const root = repository({ '.opencode/README.md': 'x' })
-    // A file where its plugin folder would be can't be listed as one, and isn't nothing.
+    // A file where its plugin folder would be holds no code of OpenCode's.
     write(root, { '.opencode/plugin': 'not a folder' })
     expect(await readRepositorySettings(root)).toEqual([])
+  })
+
+  // Windows can't lock a folder by its mode.
+  it.skipIf(process.platform === 'win32')('lists a folder of OpenCode’s code whose files can’t be listed, with why', async () => {
     const locked = repository({ '.opencode/tool/run.ts': 'export default {}' })
     chmodSync(join(locked, '.opencode/tool'), 0o000)
     try {

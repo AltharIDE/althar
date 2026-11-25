@@ -67,13 +67,37 @@ export const codexServers = (toml: string): ReadonlyMap<string, CodexTransport |
 }
 
 /**
- * JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; nothing where it isn't JSON after all. Each
- * pass leaves a quoted string as it is, so `"a,]"` or `"//x"` in one stays.
+ * JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; nothing where it isn't JSON after all. Read in
+ * one pass, character by character, so a quoted string stays as it is (`"a,]"` or `"//x"` in one), and no text takes
+ * longer than its length.
  */
 export const jsonc = (text: string): unknown => {
-  const stripped = text
-    .replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, quoted: string | undefined) => quoted ?? '')
-    .replace(/("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g, (_, quoted: string | undefined, after: string | undefined) => quoted ?? after ?? '')
+  let stripped = ''
+  // Where a comma was held back: dropped if a bracket closes next, kept otherwise.
+  let comma = -1
+  for (let at = 0; at < text.length; at++) {
+    const char = text[at] ?? ''
+    if (char === '"') {
+      const start = at
+      for (at++; at < text.length && text[at] !== '"'; at++) if (text[at] === '\\') at++
+      stripped += text.slice(start, at + 1)
+      comma = -1
+    } else if (char === '/' && text[at + 1] === '/') {
+      const end = text.indexOf('\n', at)
+      at = end === -1 ? text.length : end - 1
+    } else if (char === '/' && text[at + 1] === '*') {
+      const end = text.indexOf('*/', at + 2)
+      at = end === -1 ? text.length : end + 1
+    } else if (char === '}' || char === ']') {
+      if (comma !== -1) stripped = stripped.slice(0, comma) + stripped.slice(comma + 1)
+      stripped += char
+      comma = -1
+    } else {
+      if (char === ',') comma = stripped.length
+      else if (!/\s/.test(char)) comma = -1
+      stripped += char
+    }
+  }
   try {
     return JSON.parse(stripped)
   } catch {

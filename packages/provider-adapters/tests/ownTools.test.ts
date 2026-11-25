@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { codexServers, codexWithoutOwnTools, openCodeServers, openCodeWithoutOwnTools } from '../src/ownTools'
+import { codexServers, codexWithoutOwnTools, jsonc, openCodeServers, openCodeWithoutOwnTools } from '../src/ownTools'
 import { agents } from '../src/registry'
 
 /* The person's own MCP servers, switched off by name as Codex and OpenCode start (ADR-011). */
@@ -54,6 +54,18 @@ describe('the person’s own MCP servers', () => {
     ).toEqual(['github', 'sentry'])
     expect(openCodeServers('not json')).toEqual([])
     expect(openCodeServers('{"mcp": null}')).toEqual([])
+  })
+
+  it('read JSON with comments in one pass: strings stay as they are, and text that would slow a pattern down doesn’t', () => {
+    expect(jsonc('{ "a": "x // y /* z */", /* gone */ "b": [1, 2, ], // gone\n "c": "a,]", }')).toEqual({
+      a: 'x // y /* z */',
+      b: [1, 2],
+      c: 'a,]',
+    })
+    expect(jsonc('{ "a": "q\\"," }')).toEqual({ a: 'q",' })
+    expect(jsonc('{ "a": 1 /* never closed')).toBeNull()
+    expect(jsonc(`"${'\\"'.repeat(50_000)}`)).toBeNull()
+    expect(jsonc(`/*${'a/*'.repeat(50_000)}`)).toBeNull()
   })
 
   it('are switched off for Codex, from its home and the repository down to the session’s folder, each still reachable', () => {
