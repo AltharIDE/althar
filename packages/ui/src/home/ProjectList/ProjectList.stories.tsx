@@ -59,6 +59,17 @@ export const Few: Story = {}
 /** Sixteen projects: the list scrolls, and the quiet ones fold into one line. */
 export const Many: Story = { args: { projects: MANY } }
 
+/** Each row's menu, at its end on hover, over what it counts: its conversation, its settings, and taking it out of Althar. */
+export const Managed: Story = {
+  args: { onTalk: fn(), onProjectSettings: fn(), onRemoveProject: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Manage Ferrous' }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Remove from Althar…' }))
+    await expect(args.onRemoveProject).toHaveBeenCalledWith('ferrous')
+  },
+}
+
 /** A row opens its project, where its tasks are. */
 export const OpensProject: Story = {
   play: async ({ canvasElement, args }) => {
