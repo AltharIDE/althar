@@ -10,13 +10,14 @@ import { changeOf, homeUpdates, problemOf, updatedFrom } from '../src/main/homes
 const ran = (code: number | null, stdout = '', stderr = '') => ({ code, stdout, stderr })
 const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
 
-// The real, published host manifests for linux-x64, as downloaded from their GitHub releases, authenticated under the pinned key.
+// The real, published host manifests for linux-x64, as downloaded from their GitHub releases, authenticated under the pinned key,
+// on a fixed clock just after the newest was published (2026-11-25T21:51Z) and long before either expires, so they never go stale.
 const published = (version: string) =>
   authenticateRelease(
     readFileSync(join(__dirname, 'fixtures', `althar-host-${version}-linux-x64.json`)),
     HOST_RELEASE_KEYS,
     'x64',
-    Date.parse('2026-11-26T00:00:00Z'),
+    Date.parse('2026-11-25T22:00:00Z'),
   )
 /** What a home on a release says of itself (`release-info --json`): what its manifest says. */
 const infoOf = (release: Pick<HostRelease, 'version' | 'apiVersion' | 'storage'>) =>
