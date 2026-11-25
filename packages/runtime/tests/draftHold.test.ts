@@ -89,35 +89,54 @@ describe('a task held while it was drafted', () => {
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  it.live('holds the plan that came already, where Hold comes after the turn that drafted it ended', () =>
+  // The window may be behind: its card drawn after the task was made sends Hold with the task, one drawn before with its key only.
+  for (const [as, withTask] of [
+    ['from a card that knew its task', true],
+    ['from a card drawn before its task was made', false],
+  ] as const)
+    it.live(`holds the plan that came already, where Hold comes after the turn that drafted it ended, ${as}`, () =>
+      Effect.gen(function* () {
+        const { threadId, coordinator, told, live } = yield* opened(repository())
+        // Its draft_task call begins, as the coordinator's stream says: the window knows its draft by that call.
+        yield* live.publish({
+          _tag: 'Agent',
+          threadId,
+          event: { _tag: 'ToolCall', toolCallId: 'd2', title: 'Draft task', kind: 'other', status: 'pending', althar: 'draft_task' },
+        })
+        yield* until(
+          Effect.sync(() => told.drafts),
+          (drafts) => drafts.some((one) => one.key === 'd2'),
+        )
+        yield* callTool(coordinator, 'draft_task', { title: 'Add a retry', description: 'Retry the upload once. [lead:finish]' })
+        yield* callTool(coordinator, 'propose_plan', {
+          task: 'add-a-retry',
+          lead: { agent: 'claude-code', reason: 'Small.' },
+          review: null,
+        })
+        const [draft] = yield* until(
+          Effect.sync(() => told.drafts),
+          (drafts) => drafts.some((one) => one.key === 'd2' && one.taskId !== null),
+        )
+        assert.isNotNull((yield* planOf('add-a-retry'))?.startsAt ?? null, 'its countdown runs')
+        // The turn ends and the runtime forgets its drafts; the window, not told yet, still shows the card being drafted.
+        yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+        yield* until(
+          Effect.sync(() => told.drafts),
+          (drafts) => drafts.length === 0,
+        )
+        // Hold pressed on that card: its plan, which came already, is held all the same.
+        const personId = (yield* Instance).personId
+        if (withTask) yield* (yield* Coordinator).holdDraft(threadId, 'd2', personId, draft?.taskId ?? undefined)
+        else yield* (yield* Coordinator).holdDraft(threadId, 'd2', personId)
+        assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
+      }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+  it.live('turns down a Hold for a draft it never had, so the window shows the card as it was', () =>
     Effect.gen(function* () {
-      const { threadId, coordinator, told, live } = yield* opened(repository())
-      // Its draft_task call begins, as the coordinator's stream says: the window knows its draft by that call.
-      yield* live.publish({
-        _tag: 'Agent',
-        threadId,
-        event: { _tag: 'ToolCall', toolCallId: 'd2', title: 'Draft task', kind: 'other', status: 'pending', althar: 'draft_task' },
-      })
-      yield* until(
-        Effect.sync(() => told.drafts),
-        (drafts) => drafts.some((one) => one.key === 'd2'),
-      )
-      yield* callTool(coordinator, 'draft_task', { title: 'Add a retry', description: 'Retry the upload once. [lead:finish]' })
-      yield* callTool(coordinator, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'claude-code', reason: 'Small.' }, review: null })
-      const [draft] = yield* until(
-        Effect.sync(() => told.drafts),
-        (drafts) => drafts.some((one) => one.key === 'd2' && one.taskId !== null),
-      )
-      assert.isNotNull((yield* planOf('add-a-retry'))?.startsAt ?? null, 'its countdown runs')
-      // The turn ends and the runtime forgets its drafts; the window, not told yet, still shows the card being drafted.
-      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
-      yield* until(
-        Effect.sync(() => told.drafts),
-        (drafts) => drafts.length === 0,
-      )
-      // Hold pressed on that card: its plan, which came already, is held all the same.
-      yield* (yield* Coordinator).holdDraft(threadId, draft?.key ?? '', (yield* Instance).personId, draft?.taskId ?? undefined)
-      assert.deepStrictEqual(yield* planOf('add-a-retry'), { state: 'proposed', startsAt: null })
+      const { threadId } = yield* opened(repository())
+      const held = yield* Effect.flip((yield* Coordinator).holdDraft(threadId, 'never', (yield* Instance).personId))
+      assert.deepInclude(held, { _tag: 'NotFound', kind: 'draft', id: 'never' })
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })

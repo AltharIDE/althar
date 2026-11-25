@@ -305,6 +305,8 @@ const ToReview = Schema.Struct({
 })
 const Named = Schema.Struct({ task: Schema.String })
 /* When an automation runs, as the coordinator says it: on days of the week at a time, or every hour at a minute past. */
+/** How many drafts of turns that are over each coordinator thread keeps the tasks of, for a Hold from a window behind. */
+const ENDED_DRAFTS_KEPT = 50
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
 const When = Schema.Struct({
   days: Schema.optional(Schema.Array(Schema.Literals(DAY_NAMES))),
@@ -1162,6 +1164,11 @@ export class Coordinator extends Context.Service<
        * the draft_task handler and the calls' events, on fibers of their own, never undo each other's.
        */
       const draftsBy = new Map<string, Drafts>()
+      /*
+       * The tasks of drafts whose turn is over, by thread and draft key: a window behind may still show such a draft as it
+       * was before its task was made, and Hold from it holds that task. The latest few of each thread.
+       */
+      const endedDrafts = new Map<string, Map<string, string>>()
       const coordinatorProjects = new Map<string, string | null>()
       const coordinatorProject = (threadId: string) =>
         Effect.gen(function* () {
@@ -1186,6 +1193,10 @@ export class Coordinator extends Context.Service<
           if (event._tag === 'TurnEnded') {
             const drafts = draftsBy.get(event.threadId)
             if (drafts === undefined) return
+            const ended = endedDrafts.get(event.threadId) ?? new Map<string, string>()
+            for (const draft of drafts.drafts) if (draft.taskId !== null) ended.set(draft.key, draft.taskId)
+            for (const key of [...ended.keys()].slice(0, Math.max(0, ended.size - ENDED_DRAFTS_KEPT))) ended.delete(key)
+            endedDrafts.set(event.threadId, ended)
             // A draft whose plan never came keeps a card in the thread once its live one goes: it says it has no plan, or
             // that it was discarded, and offers to plan or discard it. Posted first, so the thread is never without it.
             const projectId = yield* coordinatorProject(event.threadId)
@@ -1277,12 +1288,12 @@ export class Coordinator extends Context.Service<
       const holdDraft = (threadId: string, key: string, actorId: ActorId, task?: string) =>
         Effect.gen(function* () {
           yield* redraft(threadId, (drafts) => heldDraft(drafts, key))
-          // Its task as the window knew it, too: the turn that drafted it can end, and its drafts go, before Hold comes.
-          const taskId =
-            draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.taskId ??
-            task ??
-            (key.startsWith('task:') ? key.slice(5) : null)
-          if (taskId === null) return
+          // Its task as the window knew it, or as the draft had it once its turn was over: the turn that drafted it can end,
+          // and its drafts go, before Hold comes, from a card drawn before or after its task was made.
+          const live = draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)
+          const taskId = live?.taskId ?? task ?? endedDrafts.get(threadId)?.get(key) ?? (key.startsWith('task:') ? key.slice(5) : null)
+          // Neither being drafted nor drafted: nothing to hold, which the window is told, so it shows the card as it was.
+          if (taskId === null) return live === undefined ? yield* new NotFound({ kind: 'draft', id: key }) : undefined
           heldTasks.add(taskId)
           const sql = yield* SqlClient.SqlClient
           const proposed = yield* sql<{ id: string }>`
