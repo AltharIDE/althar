@@ -66,6 +66,8 @@ export interface HostedRepository {
   readonly here: string | null
   /** Where else it is, said in place of when it was pushed: one of your projects on another computer. */
   readonly from?: string
+  /** Its host's mark, where its host isn't one of those offered. */
+  readonly brand?: Brand
 }
 
 export interface ProjectSetupText {
@@ -547,6 +549,7 @@ export function SetupRepositories({
       <ul ref={list} className={s.repoList} style={{ height }} aria-label={t.ways}>
         {shown.map((one) => {
           const host = hostOf(one.host)
+          const mark = host?.brand ?? one.brand
           const on = chosen === one.id
           const act = on ? t.chosen : one.here === null ? t.cloneRow : t.add
           return (
@@ -561,7 +564,7 @@ export function SetupRepositories({
                 onKeyDown={onRow}
               >
                 <span className={s.repoMark} aria-hidden="true">
-                  {host !== undefined && <BrandMark brand={host.brand} size={20} />}
+                  {mark !== undefined && <BrandMark brand={mark} size={20} />}
                 </span>
                 <span className={s.repoMain}>
                   <span className={s.repoName}>

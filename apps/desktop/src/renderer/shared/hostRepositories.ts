@@ -185,6 +185,7 @@ export const useHostRepositories = (
         like: like.some((word) => name.toLowerCase().includes(word)),
         here: null,
         from: onHere,
+        ...(one.product === null ? {} : { brand: serviceBrand(serviceOfProduct(one.product)) }),
       }
     })
   all.unshift(...fromHere)

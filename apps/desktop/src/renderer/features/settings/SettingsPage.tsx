@@ -46,6 +46,7 @@ import {
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
+import { canCall } from '../../data/client'
 import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
@@ -147,6 +148,7 @@ export function SettingsPage({
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
+  const catalog = canCall(useServices().client, 'GetAgentCatalog')
   // Here, and not in the agents' section, so a sign-in lasts from one section to another.
   const accounts = useAccountSignIn(start)
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
@@ -217,9 +219,12 @@ export function SettingsPage({
         computer={worker ?? null}
         onComputer={onComputer ?? (() => onSection('computers'))}
       />
-      <div hidden={section !== 'agents'}>
-        <AgentCatalogSection start={start} active={section === 'agents'} />
-      </div>
+      {/* More agents, where the home lets this window read them: another computer's home doesn't, so they aren't offered. */}
+      {catalog && (
+        <div hidden={section !== 'agents'}>
+          <AgentCatalogSection start={start} active={section === 'agents'} />
+        </div>
+      )}
     </SettingsLayout>
   )
 }
