@@ -1,9 +1,9 @@
 diff --git a/dist/index.js b/dist/index.js
-index 7aac1a4842c831b2fe926386acff60a44c82c2eb..48aeee7f577201dd44b1d23ad17e347edf08c21f 100755
+index 79a2df2a1fab0ce6ba5eee9f158542a0ea2341f7..5cbd4de0dc3bb123c175d3c00d897849aaaec1e6 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -45117,12 +45117,18 @@ var CodexAcpClient = class _CodexAcpClient {
-     return await this.codexClient.runTurn({
+@@ -45568,12 +45568,18 @@ var CodexAcpClient = class _CodexAcpClient {
+     return await this.runPromptTurn({
        threadId: request.sessionId,
        input: input2,
 -      approvalPolicy: agentMode.approvalPolicy,

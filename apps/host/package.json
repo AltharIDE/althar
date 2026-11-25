@@ -19,8 +19,8 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.110.1",
-    "@agentclientprotocol/codex-acp": "2.10.0",
+    "@agentclientprotocol/claude-agent-acp": "0.112.0",
+    "@agentclientprotocol/codex-acp": "2.12.0",
     "@althar/contracts": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
