@@ -314,14 +314,19 @@ export const startHomeConnections = ({
   const updates = homeUpdates({
     run: runProgram,
     program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
+    latest: (arch, signal) => findRelease(arch, source, signal),
     signal: quitting.signal,
     log,
   })
-  ipcMain.handle('althar:homes-update', (event) => {
+  const sshHome = (event: IpcMainInvokeEvent) => {
     const { current } = controller.state(owner(event))
     if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
-    return updates.update(current.home)
-  })
+    return current.home
+  }
+  ipcMain.handle('althar:homes-update', (event, accept: unknown) =>
+    updates.update(sshHome(event), typeof accept === 'string' ? accept : undefined),
+  )
+  ipcMain.handle('althar:homes-update-check', (event) => updates.check(sshHome(event)))
   // The newest host release, for an older home's welcome to offer its update by: asked of GitHub a few minutes apart at
   // most, from here rather than over the home's own network, and afresh on Check again.
   let news: { readonly at: number; readonly newest: Promise<string | null> } | undefined

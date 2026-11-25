@@ -1,11 +1,42 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import { LAST_WITHOUT_MAKING_PROJECTS, releaseMakesProjects } from '../src/homes'
-import { newestHostVersion } from '../src/main/homes/release'
-import { homeUpdates, problemOf, updatedFrom } from '../src/main/homes/update'
+import { authenticateRelease, HOST_RELEASE_KEYS, newestHostVersion, type HostRelease } from '../src/main/homes/release'
+import { changeOf, homeUpdates, problemOf, updatedFrom } from '../src/main/homes/update'
 
 const ran = (code: number | null, stdout = '', stderr = '') => ({ code, stdout, stderr })
 const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+
+// The real, published host manifests for linux-x64, as downloaded from their GitHub releases, authenticated under the pinned key.
+const published = (version: string) =>
+  authenticateRelease(
+    readFileSync(join(__dirname, 'fixtures', `althar-host-${version}-linux-x64.json`)),
+    HOST_RELEASE_KEYS,
+    'x64',
+    Date.parse('2026-11-26T00:00:00Z'),
+  )
+/** What a home on a release says of itself (`release-info --json`): what its manifest says. */
+const infoOf = (release: Pick<HostRelease, 'version' | 'apiVersion' | 'storage'>) =>
+  JSON.stringify({
+    version: release.version,
+    updaterProtocol: 1,
+    apiVersion: release.apiVersion,
+    storage: release.storage,
+    platform: 'linux',
+    arch: 'x64',
+  })
+const sameData = { ...published('0.1.0'), version: '0.1.1' }
+/** A home on 0.1.0: asked what it runs, it says; asked to update, `update` answers. */
+const homeOn = (update: () => Promise<ReturnType<typeof ran>>, info = infoOf(published('0.1.0'))) =>
+  vi.fn(async (_program: string, args: ReadonlyArray<string>) =>
+    (args.at(-1) ?? '').includes('release-info') ? ran(0, `${info}\n`) : update(),
+  )
+const updatesOf = (call: (args: ReadonlyArray<string>) => boolean) => (run: ReturnType<typeof homeOn>) =>
+  run.mock.calls.filter(([, args]) => call(args)).length
+const updateCalls = updatesOf((args) => (args.at(-1) ?? '').includes(' update --apply'))
 
 describe('a home updated from its window', () => {
   it('is updated once the home’s own updater says it applied the release', () => {
@@ -26,28 +57,94 @@ describe('a home updated from its window', () => {
       'Couldn’t reach runner-1 over SSH.',
     )
     expect(() => updatedFrom(ran(1, '', 'debug1: x\nThis release changes the API or stored-data format.\n'), 'runner-1')).toThrow(
-      'This release changes the API or stored-data format.',
+      'The update changes how runner-1 stores its data, and Althar couldn’t look at it first. Try again.',
     )
     expect(() => updatedFrom(ran(null), 'runner-1')).toThrow(/took too long/)
   })
 
   it('runs the home’s own update over the SSH its connection uses, once for each home however often it’s asked', async () => {
     let finish: (value: ReturnType<typeof ran>) => void = () => {}
-    const run = vi.fn(() => new Promise<ReturnType<typeof ran>>((resolve) => (finish = resolve)))
-    const updates = homeUpdates({ run, program: '/app/bin/althar-host-ssh', signal: new AbortController().signal })
+    const run = homeOn(() => new Promise<ReturnType<typeof ran>>((resolve) => (finish = resolve)))
+    const latest = vi.fn(async () => sameData)
+    const updates = homeUpdates({ run, program: '/app/bin/althar-host-ssh', latest, signal: new AbortController().signal })
     const first = updates.update(runner)
     const second = updates.update(runner)
-    expect(run).toHaveBeenCalledOnce()
-    const [program, args] = run.mock.calls[0] as unknown as [string, string[]]
-    // The ssh the window's connection runs, as given: here the Flatpak's.
-    expect(program).toBe('/app/bin/althar-host-ssh')
-    expect(args.at(-1)).toContain('update --apply --wait --json')
+    await vi.waitFor(() => expect(updateCalls(run)).toBe(1))
+    // The ssh the window's connection runs, as given: here the Flatpak's; first asked what it runs.
+    expect(run.mock.calls.map(([program]) => program)).toEqual(['/app/bin/althar-host-ssh', '/app/bin/althar-host-ssh'])
+    expect(run.mock.calls[0]?.[1].at(-1)).toContain('release-info --json')
+    expect(run.mock.calls[1]?.[1].at(-1)).toContain('update --apply --wait --json')
+    expect(latest).toHaveBeenCalledWith('x64', expect.anything())
     finish(ran(0, '{"state":"applied"}'))
     await expect(first).resolves.toEqual({ state: 'applied' })
     await expect(second).resolves.toEqual({ state: 'applied' })
-    // Done, the next ask runs again.
+    // Done, the next ask runs again, the newest release's manifest kept from the last.
     void updates.update(runner).catch(() => undefined)
-    expect(run).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(updateCalls(run)).toBe(2))
+    expect(latest).toHaveBeenCalledOnce()
+  })
+
+  it('asks before 0.1.0 → 0.2.0, which moves the data, and then lets the home’s updater apply it', async () => {
+    const [from, to] = [published('0.1.0'), published('0.2.0')]
+    // The published pair: one API, two storage formats.
+    expect([from.apiVersion, to.apiVersion]).toEqual([1, 1])
+    expect(from.storage).not.toBe(to.storage)
+    expect(changeOf(from, to, 1)).toEqual({ from: '0.1.0', to: '0.2.0', change: 'data' })
+
+    const run = homeOn(async () => ran(0, '{"state":"applied","version":"0.2.0"}'))
+    const updates = homeUpdates({
+      run,
+      program: '/usr/bin/ssh',
+      latest: async () => to,
+      signal: new AbortController().signal,
+      apiVersion: 1,
+    })
+    expect(await updates.check(runner)).toEqual({ from: '0.1.0', to: '0.2.0', change: 'data' })
+    // Not accepted: nothing runs on the home but the look.
+    expect(await updates.update(runner)).toEqual({ state: 'confirm', check: { from: '0.1.0', to: '0.2.0', change: 'data' } })
+    // Accepted for another release: asked again.
+    expect((await updates.update(runner, '0.1.9')).state).toBe('confirm')
+    expect(updateCalls(run)).toBe(0)
+    // Accepted: the home's own updater, told the change is approved.
+    expect(await updates.update(runner, '0.2.0')).toEqual({ state: 'applied', version: '0.2.0' })
+    const applied = run.mock.calls.at(-1)?.[1].at(-1)
+    expect(applied).toContain('update --apply --allow-incompatible --wait --json')
+  })
+
+  it('never approves a release of an API this app doesn’t speak, and says what to do', async () => {
+    const newer = { ...published('0.2.0'), version: '0.3.0', apiVersion: 2 }
+    const run = homeOn(async () => ran(0, '{"state":"applied"}'))
+    const updates = homeUpdates({
+      run,
+      program: '/usr/bin/ssh',
+      latest: async () => newer,
+      signal: new AbortController().signal,
+      apiVersion: 1,
+    })
+    expect((await updates.check(runner)).change).toBe('api')
+    await expect(updates.update(runner, '0.3.0')).rejects.toThrow(
+      'Althar 0.3.0 for runner-1 needs a newer Althar app. Update this app first, then runner-1.',
+    )
+    expect(updateCalls(run)).toBe(0)
+    // A release no newer than what it runs changes nothing.
+    expect(changeOf({ version: '0.3.0', apiVersion: 1, storage: 'a' }, newer, 1).change).toBe('none')
+  })
+
+  it('updates as it would where it can’t look first, and the home’s refusal says to try again', async () => {
+    const run = homeOn(async () => ran(1, '', 'This release changes the API or stored-data format. Apply it explicitly.\n'))
+    const log = vi.fn()
+    const updates = homeUpdates({
+      run,
+      program: '/usr/bin/ssh',
+      latest: async () => Promise.reject(new Error('offline')),
+      signal: new AbortController().signal,
+      log,
+    })
+    await expect(updates.update(runner)).rejects.toThrow(
+      'The update changes how runner-1 stores its data, and Althar couldn’t look at it first. Try again.',
+    )
+    expect(run.mock.calls.at(-1)?.[1].at(-1)).toContain('update --apply --wait --json')
+    expect(log).toHaveBeenCalledWith('What updating runner-1 changes couldn’t be found out: offline')
   })
 
   it('says in a short line what the home’s updater found went wrong', () => {
@@ -88,31 +185,33 @@ describe('a home updated from its window', () => {
       '',
       'The host update could not be downloaded completely. The installed release is unchanged; try again when the update source is available.\n',
     )
-    const run = vi
+    const answers = vi
       .fn()
       .mockResolvedValueOnce(failed)
       .mockResolvedValueOnce(failed)
       .mockResolvedValueOnce(ran(0, '{"state":"current","version":"0.1.0"}'))
+    const run = homeOn(answers)
+    const latest = async () => sameData
     const log = vi.fn()
-    const updates = homeUpdates({ run, program: '/usr/bin/ssh', signal: new AbortController().signal, log })
+    const updates = homeUpdates({ run, program: '/usr/bin/ssh', latest, signal: new AbortController().signal, log })
     // Through, it says what the home found: nothing newer.
     await expect(updates.update(runner)).rejects.toThrow('There’s no newer Althar for runner-1 yet.')
-    expect(run).toHaveBeenCalledTimes(3)
+    expect(answers).toHaveBeenCalledTimes(3)
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining('Updating runner-1 stopped (exit 1): The host update could not be downloaded completely.'),
     )
 
     // Three times at most, then its line.
     const always = vi.fn(async () => failed)
-    const again = homeUpdates({ run: always, program: '/usr/bin/ssh', signal: new AbortController().signal })
+    const again = homeUpdates({ run: homeOn(always), program: '/usr/bin/ssh', latest, signal: new AbortController().signal })
     await expect(again.update(runner)).rejects.toThrow('runner-1 couldn’t download the update.')
     expect(always).toHaveBeenCalledTimes(3)
 
     // What trying again won't change is said at once.
-    const other = vi.fn(async () => ran(1, '', 'This release changes the API or stored-data format.'))
-    await expect(homeUpdates({ run: other, program: '/usr/bin/ssh', signal: new AbortController().signal }).update(runner)).rejects.toThrow(
-      'This release changes the API or stored-data format.',
-    )
+    const other = vi.fn(async () => ran(1, '', 'An update or recovery transaction owns this installation.'))
+    await expect(
+      homeUpdates({ run: homeOn(other), program: '/usr/bin/ssh', latest, signal: new AbortController().signal }).update(runner),
+    ).rejects.toThrow('An update or recovery transaction owns this installation.')
     expect(other).toHaveBeenCalledOnce()
   })
 })

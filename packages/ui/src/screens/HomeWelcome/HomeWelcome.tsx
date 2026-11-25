@@ -75,8 +75,16 @@ export type WelcomeNeed = {
  * the home restarting, the window reconnecting), or stopped, with why.
  */
 export type HomeUpdateRun =
-  /** Not yet; `busy`, the tasks running on the home, which its restart stops: asked about before it goes. */
-  | { readonly state: 'idle'; readonly busy?: number }
+  /**
+   * Not yet; `busy`, the tasks running on the home, which its restart stops: asked about before it goes, unless
+   * `moves`, where the window asks about the release moving its data instead, and says it there.
+   */
+  | { readonly state: 'idle'; readonly busy?: number; readonly moves?: boolean }
+  /**
+   * Asked before it goes: the newest release (`to`) moves the home's data to a new format, kept in a snapshot first,
+   * and the home can't go back to the release it runs (`from`) after.
+   */
+  | { readonly state: 'confirm'; readonly from: string; readonly to: string; readonly busy?: number }
   | { readonly state: 'running'; readonly step: 'getting' | 'restarting' | 'reconnecting' }
   /** `offline` where the window's connection dropped on the way: the home may be back on its old release. */
   | { readonly state: 'failed'; readonly problem: string; readonly offline?: boolean }
@@ -159,6 +167,12 @@ export interface HomeWelcomeText {
     stop: (count: number) => string
     stopLine: (name: string) => string
     anyway: string
+    /** Asked before a release that moves the home's data to a new format. */
+    moves: {
+      title: (name: string, to: string) => string
+      line: (name: string, from: string, busy: number) => string
+      press: string
+    }
     cancel: string
     failed: (name: string) => string
     tryAgain: string
@@ -240,6 +254,14 @@ export const homeWelcomeText: HomeWelcomeText = {
     stop: (count) => (count === 1 ? 'Stop the running task?' : `Stop ${count} running tasks?`),
     stopLine: (name) => `${name} restarts to update, and its running tasks stop with it.`,
     anyway: 'Update anyway',
+    moves: {
+      title: (name, to) => `Update ${name} to ${to}?`,
+      line: (name, from, busy) =>
+        busy === 0
+          ? `Its data moves to a new format, with a snapshot kept. ${name} can’t go back to ${from} after.`
+          : `Its data moves to a new format, with a snapshot kept. ${busy === 1 ? 'Its running task stops' : `Its ${busy} tasks stop`}, and it can’t go back to ${from}.`,
+      press: 'Update',
+    },
     cancel: 'Cancel',
     failed: (name) => `Couldn’t update ${name}`,
     tryAgain: 'Try again',
@@ -279,8 +301,10 @@ export interface HomeWelcomeProps {
    * it isn't (`known` where it's sure, as by default).
    */
   update?: HomeUpdateOffer
-  /** Update pressed, or Try again: the window updates the home itself (`update.run`). */
+  /** Update pressed, or Try again: the window updates the home itself (`update.run`), or asks first (`confirm`). */
   onUpdate?: () => void
+  /** Not now, asked before a release that moves the home's data (`confirm`). */
+  onCancelUpdate?: () => void
   /** Check again pressed, where the home was updated by hand: the window looks at it again. */
   onCheckAgain?: () => void
   /** Sign in pressed on an agent signed out on the home, by its id: its sign-in, started. Without it, its command is copied. */
@@ -351,6 +375,7 @@ export function HomeWelcome({
   found,
   update,
   onUpdate,
+  onCancelUpdate,
   onCheckAgain,
   onSignIn,
   onDoor,
@@ -555,6 +580,7 @@ export function HomeWelcome({
       found={found}
       update={update}
       onUpdate={onUpdate}
+      onCancelUpdate={onCancelUpdate}
       onCheckAgain={onCheckAgain}
       onDoor={onDoor}
       copied={copied}
@@ -857,6 +883,7 @@ function Arrival({
   found,
   update,
   onUpdate,
+  onCancelUpdate,
   onCheckAgain,
   onDoor,
   copied,
@@ -874,6 +901,7 @@ function Arrival({
   found: HomeWelcomeProps['found']
   update: HomeWelcomeProps['update']
   onUpdate: HomeWelcomeProps['onUpdate']
+  onCancelUpdate: HomeWelcomeProps['onCancelUpdate']
   onCheckAgain: HomeWelcomeProps['onCheckAgain']
   onDoor: HomeWelcomeProps['onDoor']
   copied: string | null
@@ -914,6 +942,7 @@ function Arrival({
           name={name}
           update={update}
           onUpdate={onUpdate}
+          onCancelUpdate={onCancelUpdate}
           onCheckAgain={onCheckAgain}
           copied={copied === 'update'}
           onCopy={() => onCopy('update', update.command)}
@@ -955,6 +984,7 @@ export function UpdateHome({
   name,
   update,
   onUpdate,
+  onCancelUpdate,
   onCheckAgain,
   copied,
   onCopy,
@@ -964,6 +994,7 @@ export function UpdateHome({
   name: string
   update: HomeUpdateOffer
   onUpdate?: (() => void) | undefined
+  onCancelUpdate?: (() => void) | undefined
   onCheckAgain?: (() => void) | undefined
   /** The command was copied a moment ago. */
   copied: boolean
@@ -973,8 +1004,8 @@ export function UpdateHome({
 }) {
   const t = { ...homeWelcomeText, ...text }
   const run = update.run
-  const busy = run?.state === 'idle' ? (run.busy ?? 0) : 0
-  // Pressed on a busy home: asked first, in the same panel. Anything else under way ends the asking.
+  const busy = run?.state === 'idle' || run?.state === 'confirm' ? (run.busy ?? 0) : 0
+  // Pressed on a busy home: asked first, in the same panel, unless the window asks itself (`moves`). Anything else under way ends the asking.
   const [asking, setAsking] = useState(false)
   if (asking && (run?.state !== 'idle' || busy === 0)) setAsking(false)
   const release = update.release
@@ -988,13 +1019,15 @@ export function UpdateHome({
         ? t.update.title
         : run === undefined
           ? t.update.there(name)
-          : asking
-            ? t.update.stop(busy)
-            : run.state === 'idle'
-              ? t.update.title
-              : run.state === 'running'
-                ? t.update.running(name)
-                : t.update.failed(name)
+          : run.state === 'confirm'
+            ? t.update.moves.title(name, run.to)
+            : asking
+              ? t.update.stop(busy)
+              : run.state === 'idle'
+                ? t.update.title
+                : run.state === 'running'
+                  ? t.update.running(name)
+                  : t.update.failed(name)
   const line =
     release === 'unreleased'
       ? t.unreleased.line(name)
@@ -1002,15 +1035,17 @@ export function UpdateHome({
         ? t.looking
         : run === undefined
           ? t.update.thereLine
-          : asking
-            ? t.update.stopLine(name)
-            : run.state === 'idle'
-              ? busy > 0
-                ? t.update.busy(busy, name)
-                : t.update.line(name)
-              : run.state === 'running'
-                ? steps[at]
-                : run.problem
+          : run.state === 'confirm'
+            ? t.update.moves.line(name, run.from, busy)
+            : asking
+              ? t.update.stopLine(name)
+              : run.state === 'idle'
+                ? busy > 0
+                  ? t.update.busy(busy, name)
+                  : t.update.line(name)
+                : run.state === 'running'
+                  ? steps[at]
+                  : run.problem
   return (
     <section className={cx(s.updating, className)} aria-label={t.updateLabel(name)}>
       <div className={s.update} data-state={state}>
@@ -1042,6 +1077,13 @@ export function UpdateHome({
                 {t.update.checkAgain}
               </Button>
             )
+          ) : run.state === 'confirm' ? (
+            <span className={s.updateActions}>
+              <LinkButton onClick={onCancelUpdate}>{t.update.cancel}</LinkButton>
+              <Button variant="signal" onClick={onUpdate}>
+                {t.update.moves.press}
+              </Button>
+            </span>
           ) : asking ? (
             <span className={s.updateActions}>
               <LinkButton onClick={() => setAsking(false)}>{t.update.cancel}</LinkButton>
@@ -1063,7 +1105,7 @@ export function UpdateHome({
               </Button>
             </span>
           ) : (
-            <Button variant="signal" onClick={busy > 0 ? () => setAsking(true) : onUpdate}>
+            <Button variant="signal" onClick={busy > 0 && run.moves !== true ? () => setAsking(true) : onUpdate}>
               {t.update.press(name)}
             </Button>
           )}
