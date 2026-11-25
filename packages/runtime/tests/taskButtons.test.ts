@@ -113,6 +113,10 @@ describe('a task’s buttons, as tools', () => {
       )
       assert.include(yield* titles(task.threadId), 'Its lead set this task to resolve conflicts only when asked: the person resolves them')
       assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't in Up next/)
+      assert.strictEqual(
+        yield* callTool(lead, 'start_anyway', {}),
+        'Nothing changed: nothing of add-a-retry waits for a place among the agents at work.',
+      )
 
       const both = yield* callTool(coordinator, 'resolve_conflicts', { task: task.slug, automatically: null, now: true })
       assert.include(both, 'resolves conflicts as its project says now.')

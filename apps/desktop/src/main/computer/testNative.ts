@@ -1,8 +1,10 @@
-import type { NativeCall, NativeWindow } from '../../computer/protocol'
+import type { NativeApp, NativeCall, NativeWindow } from '../../computer/protocol'
 import type { ComputerWorker } from './worker'
 
 const FIRST: NativeWindow = { pid: 21, handle: '1', app: 'Writer', title: 'Computer Writer fixture' }
 const SECOND: NativeWindow = { pid: 22, handle: '2', app: 'Reader', title: 'Computer Reader fixture' }
+const THIRD: NativeWindow = { pid: 23, handle: '3', app: 'Planner', title: 'Today' }
+const PLANNER: NativeApp = { name: 'Planner', path: '/Applications/Planner.app', bundleId: 'com.example.planner', running: false }
 const PICTURE = {
   mimeType: 'image/png',
   data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B3ioAAAAASUVORK5CYII=',
@@ -17,9 +19,12 @@ export const testComputerWorker = (): ComputerWorker => {
     const key = target === 'desktop' ? target : target.handle
     switch (call.op) {
       case 'inventory':
-        return Promise.resolve({ kind: 'inventory', value: { apps: [], windows: [FIRST, SECOND] } })
+        return Promise.resolve({ kind: 'inventory', value: { apps: [PLANNER], windows: [FIRST, SECOND] } })
       case 'launch':
-        return Promise.resolve({ kind: 'launched', windows: [] })
+        // Planner is installed and closed; no other app is.
+        return call.app.name === PLANNER.name || call.app.path === PLANNER.path
+          ? Promise.resolve({ kind: 'launched', windows: [THIRD] })
+          : Promise.reject(new Error(`${call.app.name} didn’t open (app_not_found).`))
       case 'observe': {
         const id = '12345678-1234-1234-1234-123456789abc'
         return Promise.resolve({

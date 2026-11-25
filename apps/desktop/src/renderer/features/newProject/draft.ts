@@ -4,7 +4,6 @@ import {
   ApiError,
   inkFor,
   type FolderReading,
-  type Product,
   type ProjectInk,
   type ProjectSummary,
   type ProjectTracker,

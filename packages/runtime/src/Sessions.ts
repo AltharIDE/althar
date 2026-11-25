@@ -109,25 +109,20 @@ import { agentSaid, lostWords, startedAfreshWords } from './words'
 export { COMPACT } from './compact'
 export {
   AcceptedInput,
-  CLI_SIGN_IN_WORDS,
   DICTATED,
   type Disposition,
   INTERRUPTED,
-  ModelSwitchedOff,
   OTHER_TASKS,
   StartTimedOut,
   agentLost,
   asTold,
-  compactedSpan,
   compactedWords,
   errorClassOf,
   heldFor,
-  localBrief,
   onlyReads,
   passedOn,
   promptFor,
   sentWithWords,
-  skillsSaid,
   upFrontSaid,
 } from './sessionState'
 
@@ -1541,6 +1536,7 @@ export class Sessions extends Context.Service<
         policies,
         questions,
         quietFor,
+        signInFault: planUsage.signInFault,
         run,
         runtimeConfig,
         sessionFact,

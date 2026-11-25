@@ -12,7 +12,6 @@ import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { Select } from '../../primitives/Select/Select'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import type { ModelRoom, ModelRoomText } from '../ModelPick/room'
 import s from './ModelBrowser.module.css'
 
 /** An agent runtime on this machine. Its name is what a row shows; `how` only where something is off. */
@@ -33,7 +32,7 @@ export interface ModelBrowserText {
   pinned: string
   connected: string
   connect: string
-  columns: { model: string; runtime: string; room: string; context: string; effort: string }
+  columns: { model: string; runtime: string; context: string; effort: string }
   /** The list's name, and what a screen reader hears as the search narrows it. */
   count: (n: number) => string
   use: (model: string, inUse: boolean) => string
@@ -64,7 +63,7 @@ export const modelBrowserText: ModelBrowserText = {
   pinned: 'Pinned',
   connected: 'Connected',
   connect: 'Connect a runtime',
-  columns: { model: 'Model', runtime: 'Runtime', room: 'Usage', context: 'Context', effort: 'Default effort' },
+  columns: { model: 'Model', runtime: 'Runtime', context: 'Context', effort: 'Default effort' },
   count: (n) => `${n} models`,
   use: (model, inUse) => `Use ${model}${inUse ? ', in use' : ''}`,
   defaultEffort: (model) => `Default effort for ${model}`,
@@ -100,9 +99,6 @@ export interface ModelBrowserProps {
   /** Switches a model off, or on again. Without it, there is no such control. */
   onToggleBlocked?: (id: string) => void
   onSetDefaultEffort: (id: string, level: string) => void
-  /** @deprecated Account usage belongs in Plan usage and is never displayed by the model browser. */
-  room?: (model: ModelInfo) => ModelRoom | null | undefined
-  roomText?: Partial<ModelRoomText>
   /** Add a runtime. Without it, there is no such row. */
   onConnect?: () => void
   /** A change that didn't go through and was taken back, said in the foot until the next; `retry` makes it again. */

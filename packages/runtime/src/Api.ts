@@ -1,4 +1,4 @@
-import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
+import { controlGoal, goalLine, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { taskWorker } from './workerExecution'
 import { WorkerSnapshots } from './WorkerSnapshots'
@@ -542,6 +542,15 @@ export const handlers = apiLayer(
               }
         const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
+        // What changed is said in the thread, as Althar's line: the person sees it there, as the lead and anyone reading after do.
+        yield* Effect.provideContext(
+          addItem({ projectId: result.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: goalLine(control, result.before, result.goal),
+          }),
+          store,
+        )
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
         if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal
@@ -1624,6 +1633,7 @@ export const handlers = apiLayer(
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
+      StartAnyway: ({ commandId, taskId }) => once(commandId, api(busy.startNow(taskId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -2641,12 +2651,54 @@ export const handlers = apiLayer(
       GetLoad: () => api(machine.now),
       GetPlaces: () => api(busy.places),
       GetWorkers: () => api(homeWorkers(config.workers)),
+      // Adding, changing and removing workers is the home's operator's or the person's own client's, as pairing a device
+      // is: a device paired over the network can't, nor can an agent's socket on another device.
       RemoveWorker: ({ commandId, workerId }) =>
-        once(
-          commandId,
-          config.workers?.revoke === undefined
-            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
-            : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.revoke === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+              : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+          ),
+        ),
+      AddWorker: ({ commandId, publicKey, name, ssh }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.admin === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+              : config.workers.admin
+                  .add({ publicKey: Buffer.from(publicKey, 'base64url'), name: name.trim(), ssh: ssh?.trim() || null })
+                  .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+          ),
+        ),
+      CreateWorkerCode: ({ name }) =>
+        connectionAdmin(
+          config.workers?.admin === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+            : config.workers.admin.code(name).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+        ),
+      SetWorkerProjects: ({ commandId, workerId, projectIds }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            Effect.gen(function* () {
+              const admin = config.workers?.admin
+              if (admin === undefined)
+                return yield* new ApiError({ reason: 'WorkersOff', message: 'This home’s workers get their projects from its operator.' })
+              const wanted = [...new Set(projectIds)]
+              const known =
+                wanted.length === 0
+                  ? []
+                  : yield* sql<{ id: string }>`SELECT id FROM projects WHERE id IN ${sql.in(wanted)}`.pipe(Effect.orDie)
+              if (known.length !== wanted.length)
+                return yield* new ApiError({ reason: 'NotFound', message: 'That project isn’t on this home.' })
+              return yield* admin
+                .assign(workerId, wanted)
+                .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotChanged', message })))
+            }),
+          ),
         ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),

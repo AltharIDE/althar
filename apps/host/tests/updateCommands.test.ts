@@ -202,6 +202,11 @@ describe('operator update commands', () => {
     await Effect.runPromise(runCommand(parse(['release-info']), commands))
     const missingSigner = await Effect.runPromise(Effect.flip(runCommand(parse(['package-release']), commands)))
     expect(missingSigner).toMatchObject({ code: 'UpdateNotConfigured' })
+    // With the worker it carries, or an empty one as none: still the signer it lacks.
+    for (const workerBinary of ['', join(at.root, 'althar-worker')])
+      expect(await Effect.runPromise(Effect.flip(runCommand(parse(['package-release']), { ...commands, workerBinary })))).toMatchObject({
+        code: 'UpdateNotConfigured',
+      })
   })
 
   it('recovers startup under the lock, defers to live preparation and fails closed on incompatible recovery', async () => {

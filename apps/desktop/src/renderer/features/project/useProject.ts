@@ -267,28 +267,6 @@ export const useProject = (projectId: string): ProjectModel => {
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
-  /**
-   * Items read or heard join the thread the window shows, by its view: not one of the conversation before a clear while the
-   * view is cleared, nor one after it while the earlier conversation is open. `version` is the view's when the read began: a
-   * read that outlived a clear, a wipe or an undo is of another thread, and is dropped.
-   */
-  const arrived = useCallback(
-    (items: ReadonlyArray<ThreadItem>, version?: number) => {
-      setCoordinator((current) =>
-        version !== undefined && current.view.version !== version
-          ? current
-          : {
-              ...current,
-              items: mergeItems(
-                current.items,
-                items.filter((item) => inView(current.view, current.items, item)),
-              ),
-            },
-      )
-    },
-    [setCoordinator],
-  )
-
   /** The version of the view the window holds now, for a read that lands later. */
   const viewVersion = useCallback(
     () => cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId))?.view.version,

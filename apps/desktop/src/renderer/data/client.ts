@@ -104,6 +104,7 @@ import {
   type Load,
   type Places,
   type HomeWorkers,
+  type WorkerGrant,
   type MissedReports,
   type ModelRoom,
   type PlanUsage,
@@ -412,6 +413,8 @@ export interface Client {
   readonly moveInLine: (taskId: string, to: number) => Promise<void>
   /** Puts a project's line back in the order its tasks began waiting. */
   readonly lineOldestFirst: (projectId: string) => Promise<void>
+  /** Starts what of a task waits for a place now, whatever is free, as the person's own start; false where nothing of it waits. */
+  readonly startAnyway: (taskId: string) => Promise<boolean>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
@@ -796,6 +799,12 @@ export interface Client {
   readonly getWorkers: () => Promise<HomeWorkers>
   /** Takes a worker out of this home: its certificate is no longer accepted. */
   readonly removeWorker: (workerId: string) => Promise<void>
+  /** Has the home sign a worker's own key, as the worker set up over SSH made it: what the worker needs, to hand to it. */
+  readonly addWorker: (input: { readonly publicKey: string; readonly name: string; readonly ssh?: string }) => Promise<WorkerGrant>
+  /** A one-time code for a machine without SSH to add itself with. */
+  readonly createWorkerCode: (name: string) => Promise<{ readonly code: string; readonly expiresAt: number }>
+  /** The projects a worker works on, as the person picks them. */
+  readonly setWorkerProjects: (workerId: string, projectIds: ReadonlyArray<string>) => Promise<void>
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
@@ -1309,6 +1318,7 @@ export const connect = async (
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
     moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
     lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
+    startAnyway: (taskId) => command((commandId) => api.StartAnyway({ commandId, taskId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     tryAgain: (threadId) => command((commandId) => api.TryAgain({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
@@ -1445,6 +1455,9 @@ export const connect = async (
     getPlaces: () => settle(api.GetPlaces({})),
     getWorkers: () => settle(api.GetWorkers({})),
     removeWorker: (workerId) => command((commandId) => api.RemoveWorker({ commandId, workerId })),
+    addWorker: (input) => command((commandId) => api.AddWorker({ commandId, ...input })),
+    createWorkerCode: (name) => settle(api.CreateWorkerCode({ name })),
+    setWorkerProjects: (workerId, projectIds) => command((commandId) => api.SetWorkerProjects({ commandId, workerId, projectIds })),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     dismissSignInEnding: (accountId, endsAt, stage) =>
       command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),

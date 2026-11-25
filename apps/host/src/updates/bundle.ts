@@ -109,6 +109,8 @@ export interface BundleSource {
   readonly node: string
   readonly version: string
   readonly license?: string
+  /** The native worker, built for this release's system: a worker installs from the same release a home does. */
+  readonly worker?: string
 }
 export const copyHostAssets = async (entry: string, destination: string) => {
   const assets = join(dirname(entry), 'assets')
@@ -146,6 +148,10 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
     false,
   )
   await copyDependencies(source.entry, destination, ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp', 'sharp'])
+  if (source.worker !== undefined) {
+    await fs.copyFile(source.worker, join(destination, 'althar-worker'), constants.COPYFILE_EXCL)
+    await fs.chmod(join(destination, 'althar-worker'), 0o700)
+  }
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

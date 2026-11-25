@@ -160,19 +160,6 @@ export const EDGE_MAP: SourceEntry[] = [
   },
 ]
 
-/* Opening one folder that needs nothing decided: the project is made at once. */
-export const ONE_REPOSITORY: SourceEntry[] = [
-  {
-    id: 'halyard',
-    name: 'halyard-api',
-    where: '~/code/halyard-api',
-    origin: SourceOrigin.Existing,
-    branch: 'main',
-    remote: 'github.com/halyard/api',
-    role: 'service',
-  },
-]
-
 /** A source map you can change, in memory, for stories: roles, origins, findings, removing and adding. */
 export function useSourceMap(initial: readonly SourceEntry[]) {
   const [sources, setSources] = useState<readonly SourceEntry[]>(initial)

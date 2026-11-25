@@ -14,11 +14,11 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), NextStep and NextSteps (what a card offers to do: its last row, a strip the card's width), InkSwatches (the inks a project's mark can be drawn in), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, StepGraph (a task's steps as a graph: a lane for each agent, its steps as cards joined by lines, a marker where each round of work starts, on a canvas that pans and zooms), permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents, Evidence (what the task built, what a lead showed of its change working, and what it couldn't), Finished (the task's closing card, which holds them), and ReviewDraft (a review the lead drafted of someone else's pull request, posted only from the card). |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running, and CommentChip and CommentCard (a comment made beside the conversation, waiting to go, and what it is on). |
-| `coordinator` | What the coordinator shows about tasks: Issue, IssueDraft (an issue it drafted on a tracker, filed only from the card), TaskLaunch, TaskCard, TaskMark, TaskHeld; and about automations: AutomationCard (the plan card's frame and rows, with the automation's mark: proposed, changed with what it was struck through, or kept on its page), AutomationNote (the line it folds to once on, paused or deleted) and AutomationAsk (resume it, or run it now). |
+| `coordinator` | What the coordinator shows about tasks: Issue, IssueDraft (an issue it drafted on a tracker, filed only from the card), TaskLaunch, TaskCard, TaskMark; and about automations: AutomationCard (the plan card's frame and rows, with the automation's mark: proposed, changed with what it was struck through, or kept on its page), AutomationNote (the line it folds to once on, paused or deleted) and AutomationAsk (resume it, or run it now). |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane: BoardCard (any task's card, with nothing to press) and its chips (PullChip, BranchChip, FileChips, Thumbs, CommandChip, Fact, Findings). |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
-| `outputs` | What a task made: ChangeSet (the change, in a column), WhatItMade (what it is, its pictures, what it checked, beside it), ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
+| `outputs` | What a task made: ChangeSet (the change, in a column), WhatItMade (what it is, its pictures, what it checked, beside it), ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `browser` | A web page beside the conversation, or in a tab of its own (ADR-100): PagePanel (the browser's bar as a side panel's head: back, forward, reload, the address with its session's facts, Viewport, Comment, the person's browser, a tab, Close, and PageLine under it), PageFrame (the page's place, a device's in a well, and a picture of the page in its place), PageEmpty, and CommentBox (a comment written over that picture, beside the element it is on). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, Finder (finding a task by what it was about, ⌘K), RoomSwitch, ProjectHeader (the top of a project's screen: a task's bar, with its mark, name, where it stands, its five views as its faces, Run and what it is made of), TaskHeader, ReachLine (what a task's lead can reach, a sentence under its header whose phrases open what they mean), TaskMenu, the questions they ask first: RemoveProject, AbandonTask, UpdateReady (a newer Althar in place, and restarting into it), PlanGauge (plan usage as a third gauge after the LoadMeter's, its PlanPeek a row per agent opening to every account and window), LoadMeter (how hard the computer works, in steps held still, and Althar's work's part of it; it opens LoadPeek, each piece of work's share), and ReportProblem (the dialog that reports a problem with Althar). |
 | `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), AgentsAway (the agents not on this device, a small tile each with its one way in), RepositoryPick (the repositories found, ticked into a project, and Add a folder), OtherTools (what other tools left for a project, a tile a tool that a press takes whole and its chevron opens, to pick inside), FirstConnections (a new project's card for the code host and tracker its tasks will need), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, ConnectCard and its parts (a walk in to a code host or tracker, as a sign-in card: the ways in, a step at a time, and what the connection can do), AgentTabs (its tabs and the chosen agent's sheet, placed apart), ModelSwitches, CoAuthor, ControlCenter (modules placed in a grid of columns and rows by how much each matters, a quiet link in its foot, and as wide as what is open in it: a card for a walk in), AppVersion (which Althar this is, and its release notes, for Settings' foot), ProjectIdentity (a project's name and ink, changed in place in its settings), ProjectNotes (the decisions its coordinator keeps, each removed with its ×, in its settings), Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, BrowserPreferences, as rows of a SettingList that sit in any frame; where Althar shows in other apps, chosen or said), EdgeMini (that place, in small), Conventions (NamingRule, TemplateSources), and the Charter, a project's rules read as sentences: each a Clause with its word in the margin, a built-in setting as an underlined RuleWord or ChoiceWord, a command as a CommandToken, and a command being added as NewCommand with its NewCommandHint. |
@@ -27,9 +27,9 @@ This package holds Althar's interface components: the primitives (buttons, menus
 The rules between them:
 
 - `foundations` ← `primitives` ← the ten middle layers ← `screens`. A layer imports only from layers before it in that chain.
-- The ten middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: StepPanel's composer is a slot.
+- The ten middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: TaskFace's composer is a slot.
 - Nothing imports `screens`. It is exported on its own entry (see **Public API**).
-- `fixtures` and `storybook` serve stories, tests and the workbench. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
+- `fixtures` and `storybook` serve stories and tests. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
 - A screen is made of the real components, not pictures of them. Content a screen ships with, like the welcome's demo project, lives beside it, not in `fixtures`.
 
 ## Principles
@@ -71,7 +71,7 @@ export function WorkedFor({ text, ...props }: WorkedForProps) {
 
 The prop named `text` is always the component's copy. Content that happens to be text gets another name: `content` for streamed prose, `value` for what CopyButton copies, `question`, `label`.
 
-Translations live in the consumer. It passes `text` from its own translation files, or wraps components once to do so. The English defaults exist so that stories and the workbench read naturally. They are not the product's copy source.
+Translations live in the consumer. It passes `text` from its own translation files, or wraps components once to do so. The English defaults exist so that stories read naturally. They are not the product's copy source.
 
 The same holds for formatting: dates, durations, counts and file sizes arrive formatted.
 
@@ -126,7 +126,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Select | Select (`position="popper"`) |
 | RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters, ProjectIdentity's inks |
 | Checkbox | CheckList |
-| Tabs | StepPanel, AgentTabs |
+| Tabs | AgentTabs |
 | Collapsible | Disclosure / Fold. Content is force-mounted so it can animate, and `inert` while closed. |
 | Accordion | SubAgents |
 | Toggle | The pin in ModelBrowser |
@@ -151,7 +151,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | Part | What it is | Used by |
 | --- | --- | --- |
 | Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck |
-| SidePanel | What opens beside a thread or the board | DocPanel, StepPanel, Dock |
+| SidePanel | What opens beside a thread or the board | DocPanel, Dock |
 | TaskGlyph | Where a task stands, as a glyph | TaskCard, WorkCard, TaskHeader, WorkPeek |
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
@@ -201,10 +201,6 @@ The target is WCAG 2.2 AA, per the root document. In a component that means:
 - The accessibility addon runs on every story with `test: 'error'`.
 - Stories use the shared demo world in `src/fixtures` (one project, one task), so components are seen together as they will be used.
 
-### The workbench
-
-The workbench (`workbench/`, `bun run workbench`) is where components are seen in use rather than one at a time. It holds the specimen catalogue, where one thread shows each state named in the margin, and the example conversations. It sits outside Storybook's one-component-per-story model on purpose. It is also exposed as Storybook stories under **Workbench**. The workbench composes package components only. If it needs markup that isn't a component, that is a sign a component is missing.
-
 ## Public API
 
 - `@althar/ui` exports components, their prop and `text` types, their default `text`, and the enums, all from `src/index.ts`.
@@ -216,15 +212,14 @@ The workbench (`workbench/`, `bun run workbench`) is where components are seen i
 ## Checks
 
 - `bun run check`: type-aware lint, format and type checks (`vp check`). Lint and format settings are in the repository root's `vite.config.ts` and apply to every workspace. A pre-commit hook (`.vite-hooks/pre-commit`, installed by `prepare`) runs `vp staged`, which fixes and checks the staged files.
-- `bun run test:coverage`: Vitest in jsdom. It renders every story through `composeStories` and runs their `play` functions (`tests/stories.test.tsx`). Unit tests beside it cover what a play cannot reach: every Permission answer, the ModelBrowser keyboard, stream pacing, the pixel field and the thread's scroll. The gate is 90% lines and branches over `src/**`, excluding stories and fixtures.
+- `bun run test:coverage`: Vitest in jsdom. It renders every story through `composeStories` and runs their `play` functions (`tests/stories.*.test.tsx`, over `tests/stories.ts`). Unit tests beside it cover what a play cannot reach: every Permission answer, the ModelBrowser keyboard, stream pacing, the pixel field and the thread's scroll. The gate is 90% lines and branches over `src/**`, excluding stories and fixtures.
 - `bun run storybook` runs the catalogue with the accessibility addon. `bun run build` builds the static Storybook.
 
 ## Gaps
 
 These are known departures from the principles above, with the way back:
 
-- **The workbench** is not yet in the package, so neither is `bun run workbench`. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
-- **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
+- **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Those plays run in Storybook only; `BROWSER_ONLY` in `tests/stories.ts` lists them.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
 - **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions and StepGraph's canvas, which moves from its own arrow keys, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and the combobox of a searchable Select and of the Finder, whose options the field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
 - **Code colouring is built in only for TypeScript and JavaScript.** Other languages show plain unless the consumer passes a highlighter to CodeBlock. A real grammar-based highlighter belongs to the consumer until one is chosen for the package.

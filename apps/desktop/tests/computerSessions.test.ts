@@ -10,7 +10,11 @@ const TASK = `task_${'a'.repeat(32)}`
 const OWNER: ComputerOwner = { taskId: TASK, sessionId: 'lead', turnId: 'turn', threadId: 'thread', title: 'Verify computer access' }
 const signal = () => new AbortController().signal
 
-const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDisplay = () => true) => {
+const setup = (
+  worker: () => ComputerWorker = testComputerWorker,
+  canShareDisplay = () => true,
+  grants?: () => { readonly screen: boolean; readonly access: boolean },
+) => {
   const states: Array<ComputerState> = []
   const sessions = computerSessions({
     worker,
@@ -18,6 +22,7 @@ const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDispla
     canAsk: () => true,
     canShareDisplay,
     available: () => true,
+    ...(grants === undefined ? {} : { grants }),
   })
   const ask = async (owner = OWNER) => {
     const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader' }, signal())
@@ -60,9 +65,85 @@ describe('desktop access for a task', () => {
     sessions.allow(TASK, { requestId: request.id, allow: true })
     expect(await approval).toMatchObject({ value: { text: expect.stringContaining('"desktop":null,"foreground":true') } })
     expect(await sessions.call(OWNER, { op: 'observe', target: 'desktop' }, signal())).toMatchObject({
-      error: expect.stringContaining('approved'),
+      error: expect.stringContaining('can’t be shared on this computer'),
     })
     sessions.stop(TASK)
+  })
+
+  it('opens any installed app by its name, bundle id, path or id, as a person would, and gives back its window to use', async () => {
+    const { sessions: mine, allowed } = setup()
+    expect(await mine.call(OWNER, { op: 'launch', app: 'Planner' }, signal())).toMatchObject({
+      error: expect.stringContaining('Request access first'),
+    })
+    await allowed()
+    const opened = await mine.call(OWNER, { op: 'launch', app: 'planner' }, signal())
+    if (!('value' in opened)) throw new Error(opened.error)
+    expect(opened.value.text).toMatch(/^Opened Planner\. Its windows: /)
+    const [window] = JSON.parse(opened.value.text.match(/Its windows: (\[.*\])\./)![1]!) as Array<{ id: string; title: string }>
+    expect(window).toMatchObject({ title: 'Today' })
+    expect(await mine.call(OWNER, { op: 'observe', target: window!.id }, signal())).toHaveProperty('value')
+    // Named again any way, it is the same app, and its window keeps its id.
+    for (const app of ['com.example.planner', '/Applications/Planner.app', 'Planner.app'])
+      expect(await mine.call(OWNER, { op: 'launch', app }, signal())).toMatchObject({
+        value: { text: expect.stringContaining(window!.id) },
+      })
+    const status = await mine.call(OWNER, { op: 'status' }, signal())
+    const { apps } = JSON.parse('value' in status ? status.value.text : '{}') as { apps: Array<{ id: string; app: string }> }
+    expect(await mine.call(OWNER, { op: 'launch', app: apps[0]!.id }, signal())).toMatchObject({
+      value: { text: expect.stringContaining(window!.id) },
+    })
+    mine.stopAll('Done.')
+  })
+
+  it('says what was wrong with a launch or a target, so the task can correct it', async () => {
+    const { sessions, states, allowed } = setup()
+    const windows = await allowed()
+    const status = await sessions.call(OWNER, { op: 'status' }, signal())
+    const { apps } = JSON.parse('value' in status ? status.value.text : '{}') as { apps: Array<{ id: string; app: string }> }
+    expect(await sessions.call(OWNER, { op: 'launch', app: 'Plan' }, signal())).toEqual({
+      error: 'Plan didn’t open (app_not_found). Installed apps with a name like it: Planner.',
+    })
+    // The card doesn't keep saying it is opening an app that didn't open.
+    expect(states.at(-1)?.action).toBe('Waiting for the task’s next action.')
+    expect(await sessions.call(OWNER, { op: 'launch', app: 'Planer' }, signal())).toEqual({
+      error: 'Planer didn’t open (app_not_found). Installed apps with a name like it: Planner.',
+    })
+    expect(await sessions.call(OWNER, { op: 'launch', app: windows.Writer! }, signal())).toEqual({
+      error: `${windows.Writer} is a window’s id: observe it rather than launch it.`,
+    })
+    const unknown = 'd4444444-4444-4444-8444-444444444444'
+    expect(await sessions.call(OWNER, { op: 'launch', app: unknown }, signal())).toMatchObject({
+      error: expect.stringContaining(`No app has the id ${unknown} in this turn. Give the app’s name instead`),
+    })
+    expect(await sessions.call(OWNER, { op: 'observe', target: apps[0]!.id }, signal())).toMatchObject({
+      error: expect.stringContaining('is an app’s id, not a window’s: launch it'),
+    })
+    expect(await sessions.call(OWNER, { op: 'observe', target: unknown }, signal())).toMatchObject({
+      error: expect.stringContaining(`No window has the id ${unknown} in this turn.`),
+    })
+    sessions.stopAll('Done.')
+  })
+
+  it('says which of the system’s grants Althar lacks, rather than finding every window nameless and empty', async () => {
+    let grants = { screen: false, access: true }
+    const { sessions, states, allowed } = setup(
+      testComputerWorker,
+      () => true,
+      () => grants,
+    )
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toEqual({
+      error:
+        'macOS hasn’t let Althar see or use other apps: Screen Recording is off for Althar in System Settings › Privacy & Security. Tell the person: they switch it on once, then reopen Althar, and you can request again.',
+    })
+    grants = { screen: false, access: false }
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toMatchObject({
+      error: expect.stringContaining('Screen Recording and Accessibility are off for Althar'),
+    })
+    // Nothing was asked of the person.
+    expect(states.filter((one) => one.request !== undefined)).toHaveLength(0)
+    grants = { screen: true, access: true }
+    expect(await allowed()).toHaveProperty('Writer')
+    sessions.stopAll('Done.')
   })
 
   it('ends the session when the person declines', async () => {

@@ -1,7 +1,7 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'

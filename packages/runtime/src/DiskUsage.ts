@@ -1,5 +1,5 @@
 import type { BigIntStats } from 'node:fs'
-import { lstat, readdir, realpath, stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /*
@@ -54,8 +54,6 @@ export interface MeasureOptions {
 }
 
 export const MEASURE_TIMEOUT = 30_000
-/** What a Measure again may take: the person asked for a real number, so it is given longer. */
-export const REFRESH_TIMEOUT = 180_000
 const PARALLEL = 8
 /** Entries read at once in a directory; the clock is looked at between batches. */
 const BATCH = 64

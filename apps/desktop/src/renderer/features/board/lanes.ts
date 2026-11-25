@@ -10,7 +10,10 @@ import {
   waitingOn,
 } from '@althar/contracts'
 
+import { TaskStatus } from '@althar/ui'
+
 import { asMerging } from '../../data/merges'
+import { taskStatusOf } from '../../shared/taskStatus'
 
 /*
  * Which lane of the board each task and call goes in (ADR-065). Up next:
@@ -177,6 +180,29 @@ export const lanesOf = (
     settledTotal: board.settledTotal,
   }
 }
+
+/** The orders Running can be in, as the person picks one: the oldest first, as the board has it, or by where each stands. */
+export type RunningOrder = 'oldest' | 'status'
+
+/** Where a card in Running stands, as it says it, at work first: waiting on something outside, paused, waiting for an agent, stopped. */
+const standingRank = (task: BoardTask): number => {
+  const status = taskStatusOf(task)
+  if (status === TaskStatus.Running) return task.externalWait === undefined ? 0 : 1
+  return STATUS_RANK[status]
+}
+
+const STATUS_RANK: Record<TaskStatus, number> = {
+  [TaskStatus.Running]: 0,
+  [TaskStatus.Paused]: 2,
+  [TaskStatus.Queued]: 3,
+  [TaskStatus.Stopped]: 4,
+  [TaskStatus.Yours]: 5,
+  [TaskStatus.Done]: 6,
+}
+
+/** Running's cards in the order the person picked; by status, each keeps its place among those that stand as it does. */
+export const runningIn = (running: ReadonlyArray<BoardTask>, order: RunningOrder): ReadonlyArray<BoardTask> =>
+  order === 'oldest' ? running : running.toSorted((a, b) => standingRank(a) - standingRank(b))
 
 /** How many cards are in Needs you: what waits on the person, each once. */
 export const yoursOf = (lanes: Lanes) => waitingCount(lanes)

@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@althar/contracts'
+import { ApiError, type HomeWorker } from '@althar/contracts'
 import { EdgeSpot } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
+import type { WorkersHost, WorkerSetup } from '../src/workers'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { keys } from '../src/renderer/data/reads'
@@ -25,6 +26,7 @@ import {
   onLinuxHome,
   fakePagesHost,
   githubConnection,
+  project,
   models,
   skillCard,
   withoutOpenCode,
@@ -753,7 +755,7 @@ describe('the Settings tab', () => {
     expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('in a window on a Linux home over SSH, name that home, give its own commands, and leave Remove to a paired device', async () => {
+  it('in a window on a Linux home over SSH, name that home, take workers out as its operator, and give its own commands', async () => {
     const studio = onLinuxHome('studio')
     const worker = {
       workerId: `wrk_${'6'.repeat(32)}`,
@@ -771,14 +773,77 @@ describe('the Settings tab', () => {
     expect(await within(page).findByRole('button', { name: /^studio/ })).toBeTruthy()
     expect(within(page).queryByText('This Mac')).toBeNull()
     await userEvent.click(within(page).getByRole('button', { name: /Linux worker 666666/ }))
-    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(within(page).getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeTruthy()
+    // Over SSH it reaches the home as its operator, as the host's console does: it may take workers out.
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(false)
     await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
     await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
     const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })
     expect(within(adding).getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeTruthy()
     expect(within(adding).queryByText(/althar workers enroll/)).toBeNull()
     expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
+  })
+
+  it('on an older Linux home over SSH, leaves Remove off and says to update it', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = { workerId: `wrk_${'6'.repeat(32)}`, connected: true, busy: false, providers: ['codex'], projects: [], task: null }
+    const { client } = fakeClient({
+      connection: { ...studio.connection, calls: studio.connection.calls.filter((call) => call !== 'RemoveWorker') },
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+    })
+    withServices(<Settings at="computers" />, client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 666666/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(page).getByText('studio runs an older Althar: update it to remove its workers from here.')).toBeTruthy()
+  })
+
+  it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {
+    const studio = onLinuxHome('studio')
+    const paired = {
+      ...studio.homes,
+      state: vi.fn(async () => ({
+        ...(await studio.homes.state()),
+        current: {
+          kind: 'https' as const,
+          home: { ...(await studio.homes.list())[0]!, ssh: undefined, https: { origin: 'https://studio:6769' } },
+        },
+      })),
+    }
+    const worker: HomeWorker = {
+      workerId: `wrk_${'6'.repeat(32)}`,
+      name: 'box',
+      ssh: 'root@box',
+      anyProject: true,
+      signedIn: [],
+      connected: true,
+      busy: false,
+      providers: ['codex'],
+      projects: [],
+      task: null,
+    }
+    const signIn = vi.fn(async () => undefined)
+    const { client } = fakeClient({ connection: studio.connection, getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })) })
+    withServices(
+      <Settings at="computers" />,
+      client,
+      fakeHost({
+        homes: paired as never,
+        workers: {
+          setup: vi.fn(async () => null),
+          setUp: vi.fn(async () => undefined),
+          act: vi.fn(async () => undefined),
+          onSetup: vi.fn(() => () => undefined),
+          agents: vi.fn(async () => []),
+          signIn,
+          signInAct: vi.fn(async () => undefined),
+          onSignIn: vi.fn(() => () => undefined),
+        },
+      }),
+    )
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^box/ }))
+    expect(within(page).getByText('Not signed in')).toBeTruthy()
+    expect(within(page).queryByRole('button', { name: 'Sign in' })).toBeNull()
   })
 
   it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
@@ -802,6 +867,80 @@ describe('the Settings tab', () => {
     const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
     expect(within(adding).queryByText(/althar workers configure/)).toBeNull()
     expect(within(adding).getByText(/althar workers enroll/)).toBeTruthy()
+  })
+
+  it('adds a worker over SSH: its first step at once, its key signed by the home, then its sheet to pick its projects', async () => {
+    const workerId = `wrk_${'7'.repeat(32)}`
+    const grant = {
+      homeId: `home_${'1'.repeat(32)}`,
+      workerId,
+      authority: 'CA',
+      certificate: 'CERT',
+      serverName: 'home.althar.invalid',
+      port: 6770,
+      addresses: ['192.168.1.2:6770'],
+    }
+    let listening: ((setup: WorkerSetup | null) => void) | undefined
+    const bridge: WorkersHost = {
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn((listener) => {
+        listening = listener
+        return () => undefined
+      }),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    let workers: HomeWorker[] = []
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers })),
+      addWorker: vi.fn(async () => grant),
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [{ ...project, id: 'proj_m', name: 'Meridian' }] })),
+    })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^Add a worker/ }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    // A line that isn't an address is said at its field.
+    await userEvent.type(within(adding).getByLabelText('SSH address'), 'not an address')
+    await userEvent.click(within(adding).getByRole('button', { name: 'Add worker' }))
+    expect(within(adding).getByText(/That isn’t an SSH address/)).toBeTruthy()
+    await userEvent.clear(within(adding).getByLabelText('SSH address'))
+    await userEvent.type(within(adding).getByLabelText('SSH address'), 'build@box:2222')
+    await userEvent.click(within(adding).getByRole('button', { name: 'Add worker' }))
+    // Its first step shows at once; main goes on behind.
+    expect(within(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).getByText('Reach the machine')).toBeTruthy()
+    expect(bridge.setUp).toHaveBeenCalledWith({ target: 'build@box', port: 2222 }, true)
+    // Its key made: the window's own home signs it, and main hands that to the worker.
+    const base = { target: { target: 'althar@box', port: 2222 }, name: 'box', log: [] }
+    act(() => listening?.({ ...base, phase: 'enroll', at: 3, publicKey: 'KEY' }))
+    await waitFor(() => expect(client.addWorker).toHaveBeenCalledWith({ publicKey: 'KEY', name: 'box', ssh: 'althar@box:2222' }))
+    await waitFor(() => expect(bridge.act).toHaveBeenCalledWith({ kind: 'enroll', grant }))
+    // Started and connected: the dialog gives way to its sheet, where its projects are picked.
+    workers = [
+      {
+        workerId,
+        name: 'box',
+        ssh: 'althar@box:2222',
+        anyProject: true,
+        signedIn: ['codex'],
+        connected: true,
+        busy: false,
+        providers: ['codex'],
+        projects: [],
+        task: null,
+      },
+    ]
+    act(() => listening?.({ ...base, phase: 'done', at: 5, workerId }))
+    expect(await within(page).findByRole('heading', { name: 'box' })).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Add a worker to This Mac' })).toBeNull()
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'dismiss' })
+    await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))
+    expect(client.setWorkerProjects).toHaveBeenCalledWith(workerId, ['proj_m'])
+    expect(within(page).getByText('Signed in')).toBeTruthy()
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

@@ -15,7 +15,9 @@ export const workerRepositoryLimit = (worker: ProjectWorker | undefined, steps: 
 export const workerNameOf = (workerId: string, platform?: NonNullable<ProjectWorker['capacity']>['platform']) =>
   (platform === 'macos' ? 'Mac worker' : platform === 'windows' ? 'Windows worker' : 'Linux worker') + ' ' + workerId.slice(-6)
 
-export const workerName = (worker: Pick<ProjectWorker, 'workerId' | 'capacity'>) => workerNameOf(worker.workerId, worker.capacity?.platform)
+/** A worker as the window names it: as the person added it, where they did; else by its system and the end of its id. */
+export const workerName = (worker: Pick<ProjectWorker, 'workerId' | 'capacity' | 'name'>) =>
+  worker.name ?? workerNameOf(worker.workerId, worker.capacity?.platform)
 
 /** Why no worker can take a task, whichever worker: what the plan is, not what any worker has. */
 export type PlanUnfit =
