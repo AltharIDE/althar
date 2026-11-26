@@ -2141,7 +2141,10 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         if (credential.token.startsWith('ghu_'))
           return { limited: { by: 'app' as const, url: `${web}/settings/installations`, owner: null } }
         if (credential.token.startsWith('github_pat_')) {
-          const [first] = yield* http.json(Schema.Array(OwnedRepository), 'GET', `${api}/user/repos?per_page=1`)
+          // Whose it is says more, where it can be read; limited all the same where it can't.
+          const [first] = yield* http
+            .json(Schema.Array(OwnedRepository), 'GET', `${api}/user/repos?per_page=1`)
+            .pipe(Effect.orElseSucceed((): ReadonlyArray<typeof OwnedRepository.Type> => []))
           return { limited: { by: 'token' as const, url: `${web}/settings/personal-access-tokens`, owner: first?.owner.login ?? null } }
         }
         const limited = { by: 'token' as const, url: `${web}/settings/tokens`, owner: null }

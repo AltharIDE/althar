@@ -2937,6 +2937,13 @@ describe('GitHub’s repositories, for cloning one or making one', () => {
       assert.deepStrictEqual(yield* nothing.reach, {
         limited: { by: 'token', url: 'https://github.com/settings/personal-access-tokens', owner: null },
       })
+      // Whose it is, unread: limited all the same, by no owner.
+      const unread = reach('github_pat_t', [
+        ['GET', `${API}/user/repos?per_page=1`, { status: 403, json: { message: 'Resource not accessible' } }],
+      ])
+      assert.deepStrictEqual(yield* unread.reach, {
+        limited: { by: 'token', url: 'https://github.com/settings/personal-access-tokens', owner: null },
+      })
       // Althar's app reaches where it is installed, and no further.
       const app = reach('ghu_t', [])
       assert.deepStrictEqual(yield* app.reach, { limited: { by: 'app', url: 'https://github.com/settings/installations', owner: null } })

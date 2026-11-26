@@ -213,17 +213,24 @@ const IDLE: DraftSteps = { source: 'idle', home: 'idle', issues: 'idle' }
 const nameOf = (remote: string) => (remote.split('/').at(-1) ?? remote).replace(/\.git$/, '')
 
 /**
- * The folder each repository chosen is cloned into, by its id: its own name,
- * unless one chosen before it has that name too, when its owner's goes in
- * front (org-b-api beside api), so no two are cloned into one folder.
+ * The folder each repository chosen is cloned into, by its id, no two the
+ * same: one cloned already keeps the folder it has; the rest, in the order
+ * chosen, take their own name where it is free, else their owner's and
+ * their own (org-b-api beside api), else that with a number, the first free.
  */
-export const cloneFolders = (clones: ReadonlyArray<DraftClone>): ReadonlyMap<string, string> => {
-  const taken = new Set<string>()
+export const cloneFolders = (clones: ReadonlyArray<DraftClone>, kept: ReadonlyArray<DraftFolder> = []): ReadonlyMap<string, string> => {
   const folders = new Map<string, string>()
+  for (const folder of kept)
+    if (folder.came === 'clone' && folder.clone !== undefined && clones.some((clone) => clone.id === folder.clone))
+      folders.set(folder.clone, folder.path.split(/[\\/]/).at(-1) ?? folder.name)
+  const taken = new Set([...folders.values()].map((name) => name.toLowerCase()))
   for (const clone of clones) {
+    if (folders.has(clone.id)) continue
     const name = nameOf(clone.remote)
     const owner = clone.remote.split('/').slice(0, -1).join('-')
-    const folder = taken.has(name.toLowerCase()) && owner !== '' ? `${owner}-${name}` : name
+    const prefixed = owner === '' ? name : `${owner}-${name}`
+    const candidates = [name, prefixed, ...Array.from({ length: 98 }, (_, at) => `${prefixed}-${at + 2}`)]
+    const folder = candidates.find((one) => !taken.has(one.toLowerCase())) ?? `${prefixed}-${clones.length + 100}`
     taken.add(folder.toLowerCase())
     folders.set(clone.id, folder)
   }
@@ -541,7 +548,7 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
           // Each chosen in turn, those cloned already kept: into one place, asked for once, where one isn't here already.
           let place: { readonly grant: string; readonly where: string } | null | undefined
           let cloned: ReadonlyArray<DraftFolder> = []
-          const named = cloneFolders(at.clones)
+          const named = cloneFolders(at.clones, folders)
           for (const clone of at.clones) {
             const done = folders.find((folder) => folder.clone === clone.id)
             if (done !== undefined) {

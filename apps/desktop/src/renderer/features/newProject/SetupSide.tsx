@@ -194,7 +194,7 @@ export function SetupSide({
     if (setup.way === 'clone') {
       // Being cloned, or some cloned already: each, those still to clone filling as Create works through them.
       if (clones.length > 0 && (creating || clones.some((clone) => clonedOf(clone.id) !== undefined))) {
-        const folders = cloneFolders(clones)
+        const folders = cloneFolders(clones, draft.folders)
         return (
           <SetupZone>
             <div className={s.folders}>
