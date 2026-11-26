@@ -6,32 +6,22 @@ import { RpcClient, RpcSchema, RpcServer } from 'effect/rpc'
 
 import {
   apiLayer,
-  AgentsAtOnce,
   Api,
-  ApiError,
   type ApiHandlers,
-  ClientAuthority,
   API_VERSION,
   API_VERSION_HEADER,
   API_VERSION_MISMATCH,
   apiVersionRefusal,
-  AtOnceCount,
-  CommandId,
-  FOUND_MOST,
-  GraphRound,
-  Load,
-  NewProjectId,
   PAGE,
-  Product,
-  type SentImage,
-  SentFiles,
-  SentImages,
   SOCKET_CALLS,
-  socketCanCall,
-  TaskCard,
-  ThreadItem,
-  WatchEvent,
 } from '../src/Api'
+import { Load, WatchEvent } from '../src/api/home'
+import { NewProjectId } from '../src/api/projects'
+import { ClientAuthority, socketCanCall } from '../src/api/rpc'
+import { FOUND_MOST } from '../src/api/search'
+import { AgentsAtOnce, AtOnceCount } from '../src/api/settings'
+import { ApiError, CommandId, Product, type SentImage, SentFiles, SentImages, TaskCard, ThreadItem } from '../src/api/shared'
+import { GraphRound } from '../src/api/threads'
 import { MESSAGE_FILES } from '../src/files'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'

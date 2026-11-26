@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Evidence } from '../src/Api'
+import type { Evidence } from '../src/api/shared'
 import { type PictureReport, screenshotsNow, viewOf } from '../src/screenshots'
 
 /* The screenshots a task's Outputs show as it is now, which its pull request's comment shows too (ADR-077). */
