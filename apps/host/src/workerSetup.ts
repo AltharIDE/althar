@@ -26,6 +26,8 @@ import { privateDirectory, readPrivate, writePrivate } from './privateFiles'
 import { authenticateRelease, verifyRelease } from './updates/release'
 import { downloadRelease, getUpdateBytes } from './updates/network'
 import { extractRelease } from './updates/archive'
+import { checkHere, checkWorker, linkShipped, shippedSandbox, workerPath, type CheckSystem } from './workerCheck'
+import { installTools } from './workerTools'
 
 /*
  * A worker, set up from the window (ADR-103): the same signed release a home installs, run as a worker. Nobody types
@@ -41,7 +43,12 @@ import { extractRelease } from './updates/archive'
  * - `sign-in --agent <id> --way <browser|device>`: the agent's own sign-in, as Althar runs it on a home, its steps
  *   said as JSON lines; a code pasted back comes in on stdin.
  * - `update`: its timer's, hourly: a newer signed release, from where the home's come from, verified, unpacked and
- *   switched to while the worker runs no task, and the worker started again on it.
+ *   switched to while the worker runs no task, and the worker started again on it; and its check again.
+ * - `check`: whether its agents' sandbox starts, its tools, and each signed-in agent started once, which says its
+ *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it.
+ * - `sandbox`: what only root may do to let the sandbox start (newer Ubuntu's AppArmor rule for bubblewrap), with
+ *   `sudo -n` where this login may without a password; then the check again. Without, it only says the command.
+ * - `tools <name@version>…`: what a project needs that the worker installs itself (workerTools.ts), before its setup.
  */
 
 const run = promisify(execFile)
@@ -91,11 +98,14 @@ const writeAgents = async (folder: string, current: string) => {
   const lines: string[] = [join(folder, 'workspaces')]
   for (const agent of system.agents()) {
     const spec = agent.definition.launch(node)
-    const env = Object.entries({ ...spec.env, PATH: `${dirname(node)}:/usr/local/bin:/usr/bin:/bin` })
+    const { PATH: _path, ...rest } = spec.env ?? {}
+    const env = Object.entries(rest)
       .map(([name, value]) => `export ${name}=${shellQuoted(stable(value, release, current))}`)
       .join('\n')
+    // The worker gives each run its PATH (agent_setup.rs `worker_path`): the tools installed for it first, the sandbox's.
+    const keepPath = `if [ -z "\${PATH:-}" ]; then PATH=${shellQuoted(workerPath(folder, current))}; fi\nexport PATH`
     const command = [stable(spec.command, release, current), ...spec.args.map((arg) => stable(arg, release, current))]
-    const script = `#!/bin/sh\n${env}\nexec ${command.map(shellQuoted).join(' ')} "$@"\n`
+    const script = `#!/bin/sh\n${env}${env === '' ? '' : '\n'}${keepPath}\nexec ${command.map(shellQuoted).join(' ')} "$@"\n`
     const path = join(programs, agent.id)
     await writePrivate(path, script, true)
     await fs.chmod(path, 0o700)
@@ -137,11 +147,20 @@ export interface WorkerSystem {
   readonly systemctl: (args: ReadonlyArray<string>) => Promise<string>
   readonly signedIn: (agent: AgentDefinition) => Promise<boolean>
   readonly agents: typeof shipped
+  /** What its check runs on (workerCheck.ts). */
+  readonly check: CheckSystem
+  /** `sudo -n sh -c <script>`: whether it ran, without a password. */
+  readonly sudo: (script: string) => Promise<boolean>
+  /** Where its release ships each program its agents' sandbox needs. */
+  readonly shipped: (current: string) => Readonly<Partial<Record<string, string>>>
 }
 let system: WorkerSystem = {
   systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
   signedIn: async (agent) => (await Effect.runPromise(signInCheck(agent, process.execPath))).status === 'signed_in',
   agents: shipped,
+  check: checkHere,
+  sudo: async (script) => (await checkHere.run('sudo', ['-n', 'sh', '-c', script], { timeout: 30_000 })).ok,
+  shipped: (current) => shippedSandbox(current),
 }
 /** For tests: the system it runs on, in part; puts it back when called. */
 export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
@@ -274,6 +293,7 @@ export const enroll = async (raw: unknown, out: (text: string) => void, first: R
   await privateDirectory(join(folder, 'workspaces'), true)
   const current = join(program, 'current')
   await writeAgents(folder, current)
+  await linkAll(folder, current)
   const { agents: found } = await checkAgents(folder)
   const units = unitsFolder()
   await fs.mkdir(units, { recursive: true, mode: 0o700 })
@@ -283,6 +303,83 @@ export const enroll = async (raw: unknown, out: (text: string) => void, first: R
   await systemctl('restart', SERVICE)
   await systemctl('start', 'althar-worker-update.timer')
   say(out, { step: 'start', state: 'done', workerId: grant.workerId, agents: found })
+  // A test run, so what would fail a task fails here: the sandbox started, and each signed-in agent started once.
+  await check(out).catch((error: unknown) =>
+    say(out, {
+      step: 'check',
+      state: 'failed',
+      code: 'Failed',
+      message: error instanceof Error ? error.message : 'The check couldn’t run.',
+    }),
+  )
+}
+
+/**
+ * What the release ships for its agents' sandbox, linked into the worker's `bin` through `current`: the paths the running
+ * release has them at, as `current` names them.
+ */
+const linkAll = async (folder: string, current: string) => {
+  const release = await fs.realpath(running())
+  const programs = Object.fromEntries(
+    Object.entries(system.shipped(release)).map(([name, path]) => [name, path === undefined ? undefined : stable(path, release, current)]),
+  )
+  await linkShipped(folder, programs, system.check.executable)
+}
+
+/** The whole check (workerCheck.ts), said as a step: `check done` with what it found, by agent. */
+export const check = async (out: (text: string) => void) => {
+  const folder = workerFolder()
+  const current = join(programFolder(), 'current')
+  say(out, { step: 'check', state: 'started' })
+  const signedIn = new Set((await checkAgents(folder)).agents.flatMap((agent) => (agent.signedIn ? [agent.id] : [])))
+  const found = await checkWorker(
+    {
+      folder,
+      current,
+      program: programFolder(),
+      agents: system.agents().map((agent) => ({
+        id: agent.id,
+        name: agent.definition.name,
+        definition: agent.definition,
+        signedIn: signedIn.has(agent.id),
+      })),
+    },
+    system.check,
+  )
+  say(out, {
+    step: 'check',
+    state: 'done',
+    sandbox: found.sandbox.starts
+      ? { starts: true }
+      : { starts: false, problem: found.sandbox.problem, ...(found.sandbox.fix === undefined ? {} : { fix: found.sandbox.fix }) },
+    tools: found.tools,
+    agents: found.agents.map(({ id, name, signedIn: signed, started, message, models }) => ({
+      id,
+      name,
+      signedIn: signed,
+      ...(started === undefined ? {} : { started }),
+      ...(message === undefined ? {} : { message }),
+      models: models.length,
+    })),
+  })
+  return found
+}
+
+/**
+ * Lets the sandbox start where only root may (newer Ubuntu's AppArmor rule for bubblewrap, or a kernel switch), with
+ * `sudo -n` where this login may without a password; then checks again. Where it may not, the check's command stays for
+ * an administrator to run, and this fails saying so.
+ */
+export const allowSandbox = async (out: (text: string) => void) => {
+  const before = await check(out)
+  if (before.sandbox.starts) return
+  const fix = before.sandbox.fix
+  // The check's own command, as `sudo sh -c '<script>'`: the script alone goes to sudo.
+  const script = fix === undefined ? undefined : /^sudo sh -c '(.*)'$/u.exec(fix)?.[1]
+  if (script === undefined) throw failed('SandboxUnfixable', 'Nothing Althar knows lets the sandbox start on this computer.')
+  if (!(await system.sudo(script))) throw failed('NeedsAdministrator', 'This login can’t use sudo without a password here.')
+  const after = await check(out)
+  if (!after.sandbox.starts) throw failed('SandboxStillFails', 'The sandbox still can’t start after that.')
 }
 
 /** A code's way to a grant: ask the home at each address it gave, trusting only the authority it carries. */
@@ -394,6 +491,8 @@ export const signIn = async (id: string, way: SignInWay, out: (text: string) => 
     })
   })
   await listAgents(out)
+  // Signed in: started once, which also says its models there.
+  await check(out).catch(() => undefined)
 }
 
 /** The newer signed release, where there is one: verified against the key the worker was installed with. */
@@ -414,7 +513,10 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
       installedVersion: HOST_VERSION,
     })
   } catch {
-    return say(out, { step: 'update', state: 'current', version: HOST_VERSION })
+    say(out, { step: 'update', state: 'current', version: HOST_VERSION })
+    // Hourly, and not while it works: its check again, for what changed on it (a lead's fix, a sign-in run out).
+    if (!(await busy())) await check(out).catch(() => undefined)
+    return
   }
   if (await busy()) return say(out, { step: 'update', state: 'waiting', version: verified.manifest.version })
   const target = join(program, `bundle-${verified.manifest.archive.sha256}`)
@@ -434,6 +536,7 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   await pointAt(program, target)
   await writePrivate(join(workerFolder(), 'release'), `${verified.manifest.version}\n`, true)
   await writeAgents(workerFolder(), join(program, 'current'))
+  await linkAll(workerFolder(), join(program, 'current'))
   await systemctl('daemon-reload')
   await systemctl('restart', SERVICE)
   // The release before it stays, for a step back; older ones go.
@@ -499,6 +602,21 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
       case 'update':
         await update(out)
         return 0
+      case 'check':
+        await check(out)
+        return 0
+      case 'sandbox':
+        await allowSandbox(out)
+        return 0
+      case 'tools':
+        // Plain lines, which the worker keeps as its setup's output: `path\t<folder>` for each tool, or why not.
+        try {
+          await installTools(join(workerFolder(), 'tools'), rest, out)
+          return 0
+        } catch (error) {
+          out(`${error instanceof Error ? error.message : 'A tool couldn’t be installed.'}\n`)
+          return 1
+        }
       default:
         say(out, { step: 'worker', state: 'failed', code: 'InvalidRequest', message: 'Unknown worker command.' })
         return 64

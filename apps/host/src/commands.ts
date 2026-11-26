@@ -39,6 +39,8 @@ export interface HostIO extends ServiceCommands {
   readonly releaseSigningKey?: string | undefined
   /** The native worker binary a release carries, as the release workflow built it. */
   readonly workerBinary?: string | undefined
+  /** What the worker's sandbox needs beside Codex's package, built for the release (bundle.ts `workerTools`). */
+  readonly workerTools?: string | undefined
   readonly updates?: ControllerDependencies & SetupDependencies
 }
 
@@ -211,6 +213,7 @@ ${readable}`,
               node: io.node,
               version: HOST_VERSION,
               ...(io.workerBinary === undefined || io.workerBinary === '' ? {} : { worker: io.workerBinary }),
+              ...(io.workerTools === undefined || io.workerTools === '' ? {} : { workerTools: io.workerTools }),
             },
             signingKey: io.releaseSigningKey,
             ...(io.updates?.assemble === undefined ? {} : { assemble: io.updates.assemble }),

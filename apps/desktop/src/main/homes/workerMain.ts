@@ -129,7 +129,8 @@ export const startWorkerSetups = ({
       const said = (action as { said?: unknown }).said
       return setups.act({ kind, ...(typeof said === 'string' ? { said: said.slice(0, 2_000) } : {}) })
     }
-    if (kind !== 'trust' && kind !== 'stop' && kind !== 'again' && kind !== 'dismiss') throw new Error('Choose what to do with the worker.')
+    if (kind !== 'trust' && kind !== 'stop' && kind !== 'again' && kind !== 'dismiss' && kind !== 'check' && kind !== 'sandbox')
+      throw new Error('Choose what to do with the worker.')
     return setups.act({ kind } satisfies WorkerSetupAction)
   })
   ipcMain.handle('althar:workers-agents', (event, at: unknown) => {

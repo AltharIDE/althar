@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { cp, lstat, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
+import { workerName, workerNameOf } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type LaunchSpec, type Question, type QuestionAnswer, spawnOwned, withoutTrailingSlashes } from '@althar/provider-adapters'
@@ -289,6 +290,8 @@ type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeCo
 interface Again extends Unset {
   readonly bindingSlug: string
   readonly bindingId: string
+  /** The setup a lead recorded on a worker, which every worker runs in its place (ADR-103); none until one is. */
+  readonly worker?: string | null
   /** A Local task's folder: the person's own checkout, set up again only when its lead asks, with nothing kept of it. */
   readonly local?: number
 }
@@ -538,21 +541,35 @@ export class Setups extends Context.Service<
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const rows = yield* sql<{ name: string; setup: string; recorded: string | null; checkout: string | null }>`
-              SELECT b.display_name AS name, w.setup, b.recorded_setup AS recorded,
+            const rows = yield* sql<{
+              name: string
+              projectId: string
+              setup: string
+              recorded: string | null
+              worker: string | null
+              checkout: string | null
+            }>`
+              SELECT b.display_name AS name, w.project_id, w.setup, b.recorded_setup AS recorded, b.worker_setup AS worker,
                 (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
               FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
               WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL
                 AND w.setup IS NOT NULL
               ORDER BY b.created_at, b.rowid`
             if (rows.length === 0) return null
+            // On a worker, its setup ran there: what its lead fixes, it fixes there and records for every worker.
+            const workerId = yield* taskWorker(taskId)
+            const config = yield* RuntimeConfig
+            const listed =
+              workerId === null ? undefined : config.workers?.list(rows[0]?.projectId ?? '').find((one) => one.workerId === workerId)
+            const worker = workerId === null ? undefined : listed === undefined ? workerNameOf(workerId) : workerName(listed)
             return toldOf(
               rows.map((row) => ({
                 name: row.name,
                 setUp: JSON.parse(row.setup) as SetUp,
-                recorded: recordedOf(row.recorded) !== null,
-                byPerson: recordedOf(row.recorded)?.taskId === null,
+                recorded: worker === undefined ? recordedOf(row.recorded) !== null : recordedOf(row.worker ?? row.recorded) !== null,
+                byPerson: worker === undefined && recordedOf(row.recorded)?.taskId === null,
                 checkout: row.checkout,
+                ...(worker === undefined ? {} : { worker }),
               })),
               rows.length > 1,
             )
@@ -567,7 +584,7 @@ export class Setups extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const all = yield* sql<Again>`
             SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
-              b.run_setup AS kept, b.recorded_setup AS recorded, b.slug AS binding_slug, b.id AS binding_id,
+              b.run_setup AS kept, b.recorded_setup AS recorded, b.worker_setup AS worker, b.slug AS binding_slug, b.id AS binding_id,
               (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout,
               w.kind IS 'checkout' AS local
             FROM workspaces w
@@ -648,6 +665,32 @@ export class Setups extends Context.Service<
                 revision,
                 type: 'project.setup_recorded',
                 payload: { repository: name, copy: recorded.copy, commands: recorded.commands },
+                actorId,
+              })
+              return true
+            }),
+          )
+        })
+
+      /**
+       * Keeps a repository's setup for its workers, as a lead recorded it on one (ADR-103): every worker runs it in place of
+       * the repository's own. The person's own setup on the home is never touched by it.
+       */
+      const recordForWorkers = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`UPDATE repository_bindings SET worker_setup = ${JSON.stringify(recorded)} WHERE id = ${bindingId}`
+              const [project] = yield* sql<{ revision: number }>`SELECT revision FROM projects WHERE id = ${projectId}`
+              const revision = yield* bumpRevision('projects', projectId, project?.revision ?? 1)
+              yield* fact({
+                projectId,
+                aggregateType: 'project',
+                aggregateId: projectId,
+                revision,
+                type: 'project.worker_setup_recorded',
+                payload: { repository: name, commands: recorded.commands },
                 actorId,
               })
               return true
@@ -766,6 +809,14 @@ export class Setups extends Context.Service<
                 message: `Say which repository it is for, as repository: ${all.map((each) => each.name).join(', ')}.`,
               })
             const recorded: Recorded = { copy: [...copy], commands: [...commands], at: yield* provide(timestamp), taskId }
+            // On a worker: kept as the project's setup for its workers, replayed on every one, the home's left as it is.
+            const onWorker = yield* provide(taskWorker(taskId))
+            if (onWorker !== null) {
+              yield* provide(recordForWorkers(one.projectId, one.bindingId, one.name, { ...recorded, copy: [] }, instance.systemId))
+              return commands.length === 0
+                ? `Recorded that ${one.name} needs nothing more set up on a worker.`
+                : `Recorded ${one.name}'s setup for workers: every worker runs it before a later task's lead starts there. The setup on the home stays as it was.${copy.length === 0 ? '' : ' Files to copy aren’t taken to a worker: record them on the home.'}`
+            }
             // What the person edited is theirs: Althar asks them, and it is replaced only once they answer that it may be.
             const before = recordedOf(one.recorded)
             const theirs = before?.taskId === null ? before : undefined
@@ -822,7 +873,8 @@ export class Setups extends Context.Service<
               const workspaces = yield* againOf(taskId, undefined)
               const workspace = workspaces.find((one) => one.id === workspaceId)
               if (workspace === undefined) return
-              const recorded = recordedOf(workspace.recorded)
+              // On a worker, what a lead recorded on one, where one did; else the repository's own.
+              const recorded = recordedOf(workspace.worker ?? null) ?? recordedOf(workspace.recorded)
               const folder = workspace.within === null ? workspace.worktree : join(workspace.worktree, workspace.within)
               const found = workspace.kept ?? installIn(folder, workspace.worktree)
               const setupPlan = recorded ?? (found === null ? undefined : { commands: [found], copy: [] })
@@ -907,6 +959,40 @@ const howItFailed = (setUp: SetUp) => {
   return ended === null ? `it ${copied ?? 'went through'}` : copied === null ? ended : `${ended}, and ${copied}`
 }
 
+/**
+ * What a lead on a worker is told of its setup there (ADR-103): what failed, with the end of what it printed; then to get it
+ * ready there itself, installing what it lacks into its own folders, asking the person before anything as root, and to
+ * record what worked, which every worker runs from then on. Files to copy from the person's checkout don't reach a worker.
+ */
+const toldOnWorker = ({
+  where,
+  how,
+  setUp,
+  worker,
+  several,
+  name,
+}: {
+  readonly where: string
+  readonly how: string
+  readonly setUp: SetUp
+  readonly worker: string
+  readonly several: boolean
+  readonly name: string
+}): ReadonlyArray<string> => {
+  const fix = `Install what it lacks into your own folders there (~/.local/bin, ~/.bun, ~/.cargo, or where a tool's own installer puts it, with no root), and ask the person before running anything as root on ${worker}: Althar asks them for you as you run it.`
+  const keep = `Then record what worked with record_setup: it's kept as ${several ? `${name}'s` : "the repository's"} setup for workers, which every worker runs before a later task's lead starts there; the setup on the home stays as it is.`
+  if (setUp.command === null) return [`No setup ran in ${where}. Get it ready to work in before anything else. ${fix} ${keep}`]
+  if (!failedSetUp(setUp))
+    return [`When ${where} was made, it was set up with ${how}, and that went through: what it installs is there, so don't run it again.`]
+  return [
+    [
+      `When ${where} was made, it was set up with ${how}, and ${howItFailed(setUp)}.`,
+      ...(setUp.last === null ? [] : [`What it did, and the end of what it printed:\n\`\`\`\n${setUp.last}\n\`\`\``]),
+    ].join(' '),
+    `See why first, then get ${where} ready yourself. ${fix} ${keep}`,
+  ]
+}
+
 /** What a lead is told of how its task's worktrees were set up, each by name where there are several. */
 export const toldOf = (
   each: ReadonlyArray<{
@@ -917,13 +1003,16 @@ export const toldOf = (
     /** That recorded setup is the person's own edit, not a lead's. */
     readonly byPerson?: boolean
     readonly checkout: string | null
+    /** The worker it ran on, by name, where it did. */
+    readonly worker?: string
   }>,
   several: boolean,
 ) =>
   each
-    .flatMap(({ name, setUp, recorded, byPerson = false, checkout }) => {
-      const where = several ? `${name}'s worktree` : 'the worktree'
+    .flatMap(({ name, setUp, recorded, byPerson = false, checkout, worker }) => {
+      const where = `${several ? `${name}'s worktree` : 'the worktree'}${worker === undefined ? '' : ` on ${worker}`}`
       const how = recorded ? "the repository's recorded setup" : `\`${setUp.command}\``
+      if (worker !== undefined) return toldOnWorker({ where, how, setUp, worker, several, name })
       const ran =
         setUp.command === null
           ? null

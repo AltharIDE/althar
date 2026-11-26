@@ -4,7 +4,7 @@ import type { HomeWorkers } from '@althar/contracts'
 import type { WorkerCodeView, WorkerSetupView } from '@althar/ui'
 
 import type { SshHomeTarget } from '../../../homes'
-import type { WorkerReleaseState, WorkerSetup } from '../../../workers'
+import { WORKER_STEPS, type WorkerCheck, type WorkerReleaseState, type WorkerSetup } from '../../../workers'
 import { useServices } from '../../data/services'
 
 /*
@@ -129,6 +129,64 @@ export const problemOf = (
   }
 }
 
+/** An agent's name list in words: Claude Code, or Claude Code and Codex. */
+const andList = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+
+/** What a worker's check found, in a line, where nothing stops a task there. */
+export const checkedLine = (check: WorkerCheck) => {
+  const started = check.agents.filter((agent) => agent.started === true).map((agent) => agent.name)
+  return started.length === 0
+    ? 'Its sandbox starts. Sign its agents in on its sheet.'
+    : `Its sandbox starts, and ${andList(started)} started.`
+}
+
+/**
+ * What a worker's check found that stops a task there, in words: its sandbox, which a task's agent can't run without, and
+ * what lets it; or an agent that couldn't start, with its words. Undefined where nothing does.
+ */
+export const checkProblem = (check: WorkerCheck, name: string): NonNullable<WorkerSetupView['problem']> | undefined => {
+  if (!check.sandbox.starts) {
+    const fix = check.sandbox.fix
+    switch (check.sandbox.problem) {
+      case 'NoUserNamespaces':
+        return {
+          title: `Its agents’ sandbox can’t start on ${name}.`,
+          body:
+            check.allowed === 'NeedsAdministrator'
+              ? 'Its login can’t use sudo without a password. Have its administrator run this once, then check again:'
+              : check.allowed === 'SandboxStillFails'
+                ? 'It still can’t after that. Have its administrator look at this, then check again:'
+                : fix === undefined
+                  ? 'This Linux keeps user namespaces off, which the sandbox needs. Have its administrator turn them on.'
+                  : 'This Linux lets only programs it names make the namespaces the sandbox needs. Allow the worker’s once, as an administrator:',
+          ...(fix === undefined ? {} : { command: fix }),
+          retry: true,
+        }
+      case 'NoBubblewrap':
+      case 'NoSocat':
+        return {
+          title: `The worker on ${name} is missing what its sandbox needs.`,
+          body: 'Try again to install it afresh.',
+          retry: true,
+        }
+      default:
+        return { title: `Its agents’ sandbox can’t start on ${name}.`, body: 'Althar’s log says what it found.', retry: true }
+    }
+  }
+  const failed = check.agents.find((agent) => agent.started === false)
+  if (failed !== undefined)
+    return {
+      title: `${failed.name} couldn’t start on ${name}.`,
+      ...(failed.message === undefined ? {} : { body: failed.message }),
+      retry: true,
+    }
+  return undefined
+}
+
+/** Whether the worker a setup added passed its check, or comes from a release that doesn't check itself. */
+export const checkPassed = (setup: Pick<WorkerSetup, 'phase' | 'at'>) => setup.phase === 'done' && setup.at >= WORKER_STEPS.length
+
 /** A setup as the kit's dialog draws it. */
 export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
   name: setup.name,
@@ -145,7 +203,17 @@ export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
         },
   version: setup.version,
   hostKey: setup.hostKey === undefined ? undefined : { fingerprint: setup.hostKey.fingerprint, type: setup.hostKey.type },
-  problem: setup.problem === undefined ? undefined : problemOf(setup.problem.code, setup, setup.problem.said),
+  problem:
+    setup.phase === 'done' && setup.check !== undefined
+      ? checkProblem(setup.check, setup.name)
+      : setup.problem === undefined
+        ? undefined
+        : problemOf(setup.problem.code, setup, setup.problem.said),
+  checked: setup.check === undefined ? undefined : checkPassed(setup) ? checkedLine(setup.check) : undefined,
+  checking: setup.checking === true,
+  // One press over SSH: sudo, where the login may; once it couldn't, the command stays to copy.
+  canAllow:
+    setup.check !== undefined && !setup.check.sandbox.starts && setup.check.sandbox.fix !== undefined && setup.check.allowed === undefined,
 })
 
 /** The code's way as the dialog draws it: its line and how long it lasts, being made, or why the home made none. */
@@ -176,6 +244,9 @@ export interface AddWorkerModel {
   readonly trust: () => void
   readonly again: () => void
   readonly stop: () => void
+  /** Its check again, once added; and allowing its sandbox with sudo over SSH. */
+  readonly checkWorker: () => void
+  readonly allow: () => void
   readonly code: WorkerCodeView | null
   /** Where no release can add a worker: said in place of both ways. */
   readonly unavailable: { readonly title: string; readonly body: string } | null
@@ -278,8 +349,8 @@ export const useAddWorker = ({
     }
   }, [bridge, checks, open])
 
-  // Started and connected: the dialog gives way to its sheet.
-  const workerId = setup?.phase === 'done' ? setup.workerId : undefined
+  // Started, checked and connected: the dialog gives way to its sheet. One its check stopped stays, with what to do.
+  const workerId = setup !== null && checkPassed(setup) ? setup.workerId : undefined
   const connected = workerId !== undefined && workers?.workers.some((one) => one.workerId === workerId && one.connected) === true
   const shown = useRef<string | null>(null)
   useEffect(() => {
@@ -368,6 +439,15 @@ export const useAddWorker = ({
     },
     stop: () => {
       void bridge?.act({ kind: 'stop' })
+    },
+    // Each shows it checking at once; main's word follows.
+    checkWorker: () => {
+      setSetup((was) => (was === null ? was : { ...was, checking: true }))
+      void bridge?.act({ kind: 'check' })
+    },
+    allow: () => {
+      setSetup((was) => (was === null ? was : { ...was, checking: true }))
+      void bridge?.act({ kind: 'sandbox' })
     },
     code:
       way === 'code'

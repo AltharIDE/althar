@@ -2542,6 +2542,52 @@ export const WorkerCapacity = Schema.Struct({
 
 export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
 
+/** Where a running task moves to run: the home, or one of its workers. */
+export const TaskPlace = Schema.Union([Schema.Literal('home'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+export type TaskPlace = typeof TaskPlace.Type
+
+/** What became of a move between the home and a worker: done, with what the thread says; waiting for the turn; already there. */
+export const PlaceOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('placed'), said: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('same') }),
+])
+export type PlaceOutcome = typeof PlaceOutcome.Type
+
+/**
+ * What a worker's own check found (its setup's last step, after each sign-in, and hourly): whether its agents' sandbox
+ * starts there, and where not why (NoUserNamespaces, NoBubblewrap, NoSocat, Failed) with the one command an
+ * administrator runs to let it; the tools on its PATH; and the models each of its signed-in agents offers there.
+ */
+export const WorkerReadiness = Schema.Struct({
+  sandbox: Schema.Union([
+    Schema.Struct({ starts: Schema.Literal(true) }),
+    Schema.Struct({ starts: Schema.Literal(false), problem: Schema.String, fix: Schema.optionalKey(Schema.String) }),
+  ]),
+  tools: Schema.Array(Schema.Struct({ name: Schema.String, version: Schema.String })),
+  models: Schema.Array(
+    Schema.Struct({ providerId: Schema.String, models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) }),
+  ),
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why in its own words. */
+  agents: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ providerId: Schema.String, starts: Schema.Boolean, problem: Schema.optionalKey(Schema.String) })),
+  ),
+})
+export type WorkerReadiness = typeof WorkerReadiness.Type
+
+/**
+ * A tool a project's files say it needs (`bun.lock` Bun, `.nvmrc` a Node, uv in `pyproject.toml` uv), at the version they
+ * pin where they do, with the file that says so; for a worker, those it lacks. A worker installs Bun, Node, pnpm and uv
+ * itself, into its own folder, before the task's setup (`installs`); the rest its task's lead sets up there and records.
+ */
+export const ToolNeed = Schema.Struct({
+  name: Schema.String,
+  version: Schema.optionalKey(Schema.String),
+  why: Schema.String,
+  installs: Schema.Boolean,
+})
+export type ToolNeed = typeof ToolNeed.Type
+
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
@@ -2551,6 +2597,12 @@ export const ProjectWorker = Schema.Struct({
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
   capacity: Schema.optionalKey(WorkerCapacity),
+  /** Of `providers`, those signed in on it, where it says. */
+  signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** What its own check found, where it has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
+  /** What the project's files need that it lacks, where they need anything it lacks. */
+  needs: Schema.optionalKey(Schema.Array(ToolNeed)),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
 export type WorkerCapacity = typeof WorkerCapacity.Type
@@ -2581,6 +2633,8 @@ export const HomeWorker = Schema.Struct({
   signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The Althar release it runs, where it says. */
   release: Schema.optionalKey(Schema.String),
+  /** What its own check found, while it is connected and has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
   /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
   anyProject: Schema.optionalKey(Schema.Boolean),
   projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
@@ -4558,6 +4612,8 @@ export const ThreadSnapshot = Schema.Struct({
     planId: Schema.NullOr(Schema.String),
     /** The worker assigned to this task's accepted plan. */
     workerId: Schema.optional(Schema.NullOr(Schema.String)),
+    /** A move between the home and its workers that waits for its lead's turn to end: where to (`home` or a worker), and why, in words. */
+    placing: Schema.optional(Schema.Struct({ to: Schema.String, why: Schema.String })),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -6299,6 +6355,22 @@ const WorkApi = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Moves a running task between the home and its workers, or between workers (ADR-103), from its ⋯ menu: between its
+   * lead's turns, with its work; its lead starts afresh there, on `lead`'s model where its own isn't offered there. Moved,
+   * waiting for the turn under way, or already there; refused, with words, where it can't go.
+   */
+  command(
+    'MoveTaskTo',
+    {
+      taskId: Schema.String,
+      to: TaskPlace,
+      lead: Schema.optional(Schema.Struct({ model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) })),
+      /** Where the worker it runs on can't bring its work home now: move from what its last turn brought home. */
+      fromLastTurn: Schema.optional(Schema.Boolean),
+    },
+    PlaceOutcome,
+  ),
   /**
    * Keep them together: carries one change's commits onto another of the task's, before either ships, and its folder goes;
    * its branch stays (a task is a conversation plus parts). Into the task's first change unless `into` names one.

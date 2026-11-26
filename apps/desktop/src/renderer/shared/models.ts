@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import {
   type AgentModels,
   type AgentStatus,
+  type ProjectWorker,
   agentDefaultName,
   isAgentDefault,
   knownModelName,
@@ -531,4 +532,50 @@ export const moveTo = async (client: Client, threadId: string, current: Choice, 
   if (back && model === null && effort === null) await client.setAgent({ threadId, agentId })
   if (model !== null && (back || model !== current.model)) await client.setModel({ threadId, agentId, model })
   if (effort !== null && (back || effort !== current.effort)) await client.setEffort({ threadId, agentId, effort })
+}
+
+/** The worker a pick is for: the agents it has and has signed in, and the models each offers there, as its check found. */
+export type PickOn = Pick<ProjectWorker, 'providers' | 'signedIn' | 'readiness'>
+
+/**
+ * What a worker offers (ADR-103), from what its own check said: of the home's agents, those it has, signed in there where it
+ * says, each with the models it offers there, in its order, with what the home knows of the same model (its efforts, its
+ * description) where it knows it. An agent whose models the worker hasn't said offers only its own default, which is what
+ * a run there starts on: never the home's list, which the worker may not have.
+ */
+export const onWorker = (
+  known: ReadonlyArray<AgentModels>,
+  agents: ReadonlyArray<AgentStatus>,
+  worker: PickOn,
+): { readonly known: ReadonlyArray<AgentModels>; readonly agents: ReadonlyArray<AgentStatus> } => {
+  const there = new Map((worker.readiness?.models ?? []).map((entry) => [entry.providerId, entry.models]))
+  const offering = agents.filter((agent) => worker.providers.includes(agent.id) && (worker.signedIn?.includes(agent.id) ?? true))
+  return {
+    agents: offering,
+    known: offering.map((agent): AgentModels => {
+      const home = known.find((offered) => offered.agentId === agent.id)
+      const said = there.get(agent.id) ?? []
+      const models = said.map(
+        (model) =>
+          home?.models.find((one) => one.id === model.id) ?? {
+            id: model.id,
+            name: model.name,
+            description: null,
+            efforts: [],
+            effort: null,
+          },
+      )
+      const on = home?.model != null && said.some((model) => model.id === home.model) ? home.model : (said[0]?.id ?? null)
+      return {
+        agentId: agent.id,
+        models,
+        model: on,
+        effort: on !== null && on === home?.model ? home.effort : null,
+        defaults: home?.defaults ?? [],
+        blocked: home?.blocked ?? [],
+        probing: false,
+        images: home?.images ?? null,
+      }
+    }),
+  }
 }
