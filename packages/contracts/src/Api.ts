@@ -60,7 +60,14 @@ export const API_VERSION_HEADER = 'x-althar-api-version'
 export const LANE_HEADER = 'x-althar-lane'
 export const BACKGROUND = 'background'
 
-/** The reads a runtime puts behind when their request says `BACKGROUND`. Any other call is answered as it comes, header or not. */
+/**
+ * The reads a runtime puts behind when their request says `BACKGROUND`: the
+ * store's large ones, which the window's feed reads again on almost every
+ * change and which hold the runtime's thread while they run. A read that waits
+ * on a process or the network holds nothing meanwhile, so it would only keep a
+ * place in the lane from the reads that need it: it is answered as it comes,
+ * marked or not, and so is any other call.
+ */
 export const BEHIND_CALLS: ReadonlySet<string> = new Set([
   'ListProjects',
   'GetHome',

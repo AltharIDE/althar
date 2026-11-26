@@ -1,6 +1,7 @@
 import {
   apiVersionRefusal,
   BACKGROUND,
+  BEHIND_CALLS,
   LANE_HEADER,
   ClientAuthority,
   SocketAllowed,
@@ -138,23 +139,6 @@ export const handlers = apiLayer(
 
 /** How many reads nobody waits on run at once (`BACKGROUND`): a few, so a press always finds the thread all but free. */
 export const BEHIND_AT_ONCE = 2
-
-/**
- * The reads that go behind when nobody waits on them: the store's large ones,
- * which the window's feed reads again on almost every change and which hold
- * the runtime's thread while they run. A read that waits on a process or the
- * network holds nothing meanwhile, so it would only keep a place in the lane
- * from the reads that need it: it is answered as it comes, marked or not.
- */
-export const BEHIND_CALLS: ReadonlySet<string> = new Set([
-  'ListProjects',
-  'GetHome',
-  'GetBoard',
-  'GetCoordinator',
-  'GetThread',
-  'GetThreadItem',
-  'GetThreadItems',
-])
 
 /**
  * The lane every connection's background reads share: the reads the window's
