@@ -865,6 +865,11 @@ describe('merges on their way, at the thread’s foot', () => {
     ])
   })
 
+  it('has no foot for a card left with nothing on it, as once its last one was called off', () => {
+    const blocks = blocksOf(source([items.says('Queuing #1224.'), items.mergeLine({ rows: [] })]), new Map(), at)
+    expect(blocks.some((block) => block.kind === 'merging')).toBe(false)
+  })
+
   it('leaves a line of Althar’s own that isn’t a merge errand’s as it was', () => {
     const blocks = blocksOf(source([items.notice({ title: 'Switched to Codex', source: 'runtime' }, null)]), new Map(), at)
     expect(blocks.map((block) => block.kind)).toEqual(['divider'])

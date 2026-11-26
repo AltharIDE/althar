@@ -337,6 +337,35 @@ describe('the coordinator’s merge line', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  it.live('calling off the last one on the card, before anything landed, takes it off the card', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      checks.set(`head-${number}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access))[0]?.rows.map((row) => [row.number, row.state]),
+        [[number, 'checks']],
+      )
+      const [errand] = yield* sql<{ id: string }>`SELECT id FROM errands WHERE thread_id = ${access.threadId}`
+      const fresh = yield* turn(access, 'person')
+      assert.match(yield* callTool(access, 'cancel_errand', { errand: errand!.id, message: fresh }), /^Called off the errand/)
+      yield* sweep(access)
+      // The same card, with nothing on its way: the thread's merging line has nothing of it to show.
+      const after = yield* cards(access)
+      assert.strictEqual(after.length, 1)
+      assert.deepStrictEqual(after[0]?.rows, [])
+      // And it stays so.
+      yield* sweep(access)
+      assert.deepStrictEqual((yield* cards(access))[0]?.rows, [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   it.live('a pull request whose checks failed is sent back on the card, with what to do', () => {
     const { service, checks, pull } = host()
     const { working } = hosted(['meridian', 'api'])
