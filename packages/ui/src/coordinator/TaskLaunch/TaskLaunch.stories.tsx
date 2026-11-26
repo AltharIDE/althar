@@ -196,7 +196,7 @@ const CHECKED: readonly LaunchPlace[] = [
   { value: 'wrk_runner3', label: 'runner-3', kind: 'worker', hint: 'Claude Code signed out', disabled: true },
 ]
 
-/** Workers as their own checks found them: one ready, installing Bun first for this project; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
+/** Workers as their own checks found them: one ready; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
 export const WorkersChecked: Story = {
   render: function Render() {
     const [place, choose] = useState('home')
