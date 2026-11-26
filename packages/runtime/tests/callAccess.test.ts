@@ -48,7 +48,7 @@ describe('what every call needs from a member', () => {
     for (const [tag, rpc] of requests) {
       const access = callAccess[tag as ApiTag]
       if (access.kind === 'organization' || access.kind === 'project')
-        if (!isPermission(access.permission)) wrong.push(`${tag}: ${access.permission}`)
+        if (!isPermission(access.permission as string)) wrong.push(`${tag}: ${String(access.permission)}`)
       if (access.kind !== 'project') continue
       const field = locatorField[access.from]
       if (!fieldsOf(rpc.payloadSchema).includes(field)) wrong.push(`${tag}: no ${field} in its payload`)
