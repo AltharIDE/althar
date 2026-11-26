@@ -18,6 +18,8 @@ import {
   LANE_HEADER,
   ClientAuthority,
   SOCKET_CALLS,
+  SOCKET_CODE_HOSTS,
+  SOCKET_CODE_SERVICES,
   SocketAllowed,
   type MessageSender,
   type ClientIdentity,
@@ -358,6 +360,23 @@ export const handlers = apiLayer(
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
+    /**
+     * A socket sets its home's code hosts up, never its trackers, whose links to projects stay with the person's own window:
+     * a product it names, or a connection's own, must host code, and it follows and ends only the sign-ins it started.
+     */
+    const socketSetUp = identity.role === 'socket'
+    const signInsStarted = new Set<string>()
+    const notTrackers = () => new ApiError({ reason: 'PersonRequired', message: 'Connect or remove a tracker in the person’s own window.' })
+    const codeHostOnly = (product: string) => (socketSetUp && !SOCKET_CODE_HOSTS.has(product) ? Effect.fail(notTrackers()) : Effect.void)
+    const codeServiceOnly = (service: string) =>
+      socketSetUp && !SOCKET_CODE_SERVICES.has(service) ? Effect.fail(notTrackers()) : Effect.void
+    const codeHostConnection = (connectionId: string | undefined) =>
+      !socketSetUp || connectionId === undefined
+        ? Effect.void
+        : Effect.flatMap(Effect.orDie(sql<{ product: string }>`SELECT product FROM connections WHERE id = ${connectionId}`), ([row]) =>
+            row === undefined ? Effect.void : codeHostOnly(row.product),
+          )
+    const ownSignIn = (flowId: string) => (socketSetUp && !signInsStarted.has(flowId) ? Effect.fail(notTrackers()) : Effect.void)
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
     const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
@@ -2430,56 +2449,68 @@ export const handlers = apiLayer(
           }),
         ),
       StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            connections.startSignIn({
-              product,
-              actorId: actorId,
-              ...(webUrl === undefined ? {} : { webUrl }),
-              ...(connectionId === undefined ? {} : { connectionId }),
-            }),
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              connections
+                .startSignIn({
+                  product,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                })
+                .pipe(Effect.tap((started) => Effect.sync(() => signInsStarted.add(started.flowId)))),
+            ),
           ),
         ),
-      GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
-      CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
+      GetSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.signIn(flowId))),
+      CancelSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.cancelSignIn(flowId))),
       ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectToken({
-                product,
-                token,
-                actorId: actorId,
-                ...(webUrl === undefined ? {} : { webUrl }),
-                ...(user === undefined ? {} : { user }),
-                ...(key === undefined ? {} : { key }),
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectToken({
+                  product,
+                  token,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(user === undefined ? {} : { user }),
+                  ...(key === undefined ? {} : { key }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      GetConnectGuide: ({ service }) => api(connections.guide(service)),
-      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      GetConnectGuide: ({ service }) => Effect.andThen(codeServiceOnly(service), api(connections.guide(service))),
+      FindServer: ({ service, webUrl }) => Effect.andThen(codeServiceOnly(service), api(connections.findServer(service, webUrl))),
       ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectCli({
-                product,
-                webUrl,
-                actorId: actorId,
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectCli({
+                  product,
+                  webUrl,
+                  actorId: actorId,
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
-      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, actorId))),
+      CheckConnection: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId))),
+      Disconnect: ({ commandId, connectionId }) =>
+        Effect.andThen(codeHostConnection(connectionId), once(commandId, api(connections.remove(connectionId, actorId)))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
       PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),

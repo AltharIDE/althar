@@ -306,7 +306,14 @@ export function SetupSide({
   return (
     <fieldset className={s.fieldset} disabled={creating}>
       <div className={s.stack}>
-        <SetupWays way={setup.way} onWay={setup.onWay} hosts={setup.hosts} minHeight={height + 40}>
+        <SetupWays
+          way={setup.way}
+          onWay={setup.onWay}
+          hosts={setup.hosts}
+          minHeight={height + 40}
+          // A folder of the home's own, on another computer's.
+          {...(homeName === undefined ? {} : { text: { folderNote: `On ${homeName}` } })}
+        >
           {body}
         </SetupWays>
         {only === undefined && home.kind !== 'none' && !(home.kind === 'picks' && home.connected.length + home.away.length === 0) && (

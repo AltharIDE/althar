@@ -209,6 +209,8 @@ export interface Host {
   readonly welcomeUsage?: (...milestone: WelcomeMilestone) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
+  /** This app's version: on another computer's home, its runtime says the home's own, not this. */
+  readonly appVersion?: string
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
   readonly doNotTrack?: boolean
   /** The desktop the window sits on, and what it says of the window's own buttons and accent (`main/desktop`); absent where main said nothing, as on an edge page. */

@@ -1,11 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 
 import type { Release } from '@althar/site/changelog'
 import { compareVersions } from '@althar/ui/screens'
 
-import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { useAppVersion } from '../../shared/appVersion'
 import { releaseFor } from './notes'
 import { newsStoreOf } from './store'
 
@@ -37,7 +36,8 @@ export const useNews = (): NewsModel => {
   const { client } = useServices()
   const store = newsStoreOf(client)
   const state = useSyncExternalStore(store.subscribe, store.get)
-  const version = useQuery(reads(client).status()).data?.appVersion
+  // This app's, on whichever home the window is: a home's runtime says its own release.
+  const version = useAppVersion()
   const { release, own } = useMemo(() => releaseFor(version), [version])
 
   // The first launch with this, on whatever version: nothing is news yet.

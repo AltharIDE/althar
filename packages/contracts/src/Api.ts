@@ -5386,7 +5386,38 @@ const socketCalls = new Set<string>([
   'PrepareFolder',
   'CloneRepository',
   'OpenProject',
+  // Setting the home up from the window: the code hosts it works with, connected there (a token made on the host's page and
+  // pasted, the home's own gh or glab sign-in, or the host's device sign-in where the home has Althar's app for it), and its
+  // agents' accounts signed in there (the agent's page opened in the window's browser and its code pasted back, or a device
+  // code). Each keeps its credential on the home, sealed out of its agents' reach, as one made on the home itself would.
+  'GetConnectGuide',
+  'FindServer',
+  'StartSignIn',
+  'GetSignIn',
+  'CancelSignIn',
+  'ConnectToken',
+  'ConnectCli',
+  'CheckConnection',
+  'Disconnect',
+  'AddAccount',
+  'RenameAccount',
+  'RemoveAccount',
+  'SignOutAccount',
+  'OrderAccounts',
+  'FindAccounts',
+  'SignInAccount',
+  'StartAccountSignIn',
+  'GetAccountSignIn',
+  'PasteAccountSignInCode',
+  'CancelAccountSignIn',
 ])
+
+/**
+ * The code hosts a socket sets its home up with, by product and by service: connected, checked or removed there. A
+ * tracker's connection, like a project's tracker, stays with the person's own window.
+ */
+export const SOCKET_CODE_HOSTS: ReadonlySet<string> = new Set<Product>(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'])
+export const SOCKET_CODE_SERVICES: ReadonlySet<string> = new Set<Service>(['github', 'gitlab', 'bitbucket'])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 /** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */

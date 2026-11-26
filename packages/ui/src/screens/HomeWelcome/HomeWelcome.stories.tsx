@@ -96,6 +96,57 @@ export const Bare: Story = {
   },
 }
 
+/**
+ * A fresh home, as runner-1 was: its agents signed out there, no code host connected, and nothing found on its disk. Each
+ * agent signs in, and GitHub or GitLab connects, in a press; this Mac's projects, whose code is on a host, have a door.
+ */
+export const SettingUp: Story = {
+  args: {
+    toured: true,
+    repositories: [],
+    found: [],
+    here: [
+      { id: 'proj_althar', ink: ProjectInk.Teal },
+      { id: 'proj_site', ink: ProjectInk.Clay },
+      { id: 'proj_mobile', ink: ProjectInk.Ochre },
+    ],
+    needs: [
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.Anthropic, state: 'signedOut', command: 'claude auth login' },
+      { id: 'codex', name: 'Codex', brand: Brand.OpenAI, state: 'signedOut', command: 'codex login' },
+      { id: 'github', name: 'GitHub', brand: Brand.GitHub, state: 'connect' },
+      { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, state: 'connect' },
+      { id: 'git', name: 'git', icon: 'branch', state: 'ready', note: '2.47.3' },
+    ],
+    onConnect: fn(),
+  },
+}
+
+/** The same, on what work there has: each that isn't ready with its press. */
+export const SettingUpWhatItHas: Story = {
+  args: { ...SettingUp.args, toured: false },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await userEvent.click(await page.findByRole('button', { name: 'Next' }))
+    await expect(await page.findByRole('button', { name: 'Connect GitHub on runner-1' })).toBeVisible()
+  },
+}
+
+/** A home that makes projects, on a release older than setting it up from here: its update, under what it has. */
+export const Behind: Story = {
+  args: {
+    toured: true,
+    needs: [
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.Anthropic, state: 'signedOut', command: 'claude auth login' },
+      { id: 'git', name: 'git', icon: 'branch', state: 'ready', note: '2.47.3' },
+    ],
+    onSignIn: undefined,
+    behind: {
+      command: 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait',
+      run: { state: 'idle' },
+    },
+  },
+}
+
 /** Where it couldn't look on the home's disk: the folder door stays, saying so. */
 export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
 

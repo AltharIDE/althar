@@ -112,7 +112,7 @@ function TabsBar({
   quick: boolean
   onQuick: (open: boolean) => void
 }) {
-  const { host } = useServices()
+  const { host, client } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
   const online = useOnline()
@@ -125,9 +125,11 @@ function TabsBar({
   // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and its tab takes the window back to where it came from.
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  // Althar's own tab, until it's closed; an update with news brings it back, with its dot.
+  // Althar's own tab, until it's closed; an update with news brings it back, with its dot. On another computer's home, the
+  // app's news is this computer's window's to tell: its tab shows there only while the window is on it.
   const news = useNews()
   const onAlthar = pathname === '/althar'
+  const altharTab = news.tab && (client.connection === undefined || onAlthar)
   const pageTabs = usePageTabs(host.pages).map(({ owner, state }) => ({
     id: owner,
     title: state === null ? text.page : state.title.trim() || shownAddress(state.address) || text.page,
@@ -151,7 +153,7 @@ function TabsBar({
       {...(tabs.settings.open
         ? { settings: { current: tabs.settings.current, onSelect: () => tabs.openSettings(), onClose: tabs.closeSettings } }
         : {})}
-      {...(news.tab
+      {...(altharTab
         ? {
             althar: {
               current: onAlthar,

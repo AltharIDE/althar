@@ -8,11 +8,11 @@ import { repositoryFolder } from '@althar/ui/screens'
 import { canCall } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { device } from '../../shared/device'
 import { thingOf, useHostRepositories } from '../../shared/hostRepositories'
 import { productBrand } from '../../shared/products'
 import { changesOn, hostnameOf, remoteOf } from '../../shared/remotes'
 import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
+import { useHomeName } from '../homes/useHomes'
 import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type DraftPlan, type DraftStore, sameRepository } from './draft'
 
 /*
@@ -106,8 +106,11 @@ const nameOf = (connection: ConnectionSummary, all: ReadonlyArray<ConnectionSumm
 
 export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList | null): SetupModel & SetupActions => {
   const { client, host: system } = useServices()
-  // On another computer's home, a host or tracker is connected on that computer, not from this window: none is offered.
+  // On another computer's home, a code host is connected there from this window, where the home allows it (an older home
+  // doesn't): those it isn't connected to are offered then, and only then. Its trackers stay with the person's own window.
   const remoteHome = client.connection !== undefined
+  const connects = !remoteHome || canCall(client, 'ConnectToken')
+  const here = useHomeName()
   // Put on a host, or given a tracker, only where this window may: a window on another computer's home may not yet.
   const publishes = canCall(client, 'ListRepositoryOwners') && canCall(client, 'PublishRepository')
   const tracks = canCall(client, 'ListContainers') && canCall(client, 'SetProjectTracker')
@@ -232,7 +235,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
           brand: productBrand(connection.product),
           thing: thingOf(serviceOfProduct(connection.product)),
         })),
-        away: remoteHome
+        // Put on a host only where the window may publish: a home's window may not, so none is offered to connect for it.
+        away: !publishes
           ? []
           : hosts
               .filter((host) => !host.connected)
@@ -279,12 +283,12 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     }
     if (parts.length === 0) return null
     const line = parts.length === 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
-    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${device.this}.` : ''}`
+    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${here.name}.` : ''}`
   })()
 
   return {
     way,
-    hosts: remoteHome ? hosts.filter((one) => one.connected) : hosts,
+    hosts: connects ? hosts : hosts.filter((one) => one.connected),
     repositories,
     failed,
     pasted,
