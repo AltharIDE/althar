@@ -73,3 +73,18 @@ describe('a worker’s check, as its home keeps it', () => {
     })
   })
 })
+
+describe('the slot that receives a run, by its own check', () => {
+  const ready = { sandbox: { starts: true as const }, tools: [], models: [], agents: [{ providerId: 'codex', starts: true }] }
+
+  it('takes it only where its sandbox starts and the provider started there', async () => {
+    const { unreadyOf } = await import('../src/agentRuns.ts')
+    expect(unreadyOf(ready, 'codex')).toBeUndefined()
+    expect(unreadyOf(undefined, 'codex')).toBe('The worker hasn’t checked it can run a task yet.')
+    expect(unreadyOf({ ...ready, sandbox: { starts: false, problem: 'NoUserNamespaces' } }, 'codex')).toBe(
+      'The worker’s agents’ sandbox can’t start there.',
+    )
+    expect(unreadyOf(ready, 'claude-code')).toBe('The worker hasn’t started this agent there, or it couldn’t.')
+    expect(unreadyOf({ ...ready, agents: [{ providerId: 'codex', starts: false, problem: 'x' }] }, 'codex')).toBeDefined()
+  })
+})

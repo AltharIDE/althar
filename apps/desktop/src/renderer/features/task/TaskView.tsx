@@ -883,7 +883,13 @@ export function TaskView({
   const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   // The project's workers: where it may move to, and, on one, what its lead may run there.
   const workers = useProjectWorkers(snapshot?.project.id)
-  const onWorker = snapshot?.task.workerId == null ? undefined : workers.find((one) => one.workerId === snapshot.task.workerId)
+  // Assigned a worker, it runs there whether or not the worker is listed now: one not listed yet, or gone, has said nothing,
+  // so its picker offers only the lead agent's own default, which a run there starts on, never this home's models.
+  const leadAgent = snapshot?.session?.agentId ?? snapshot?.task.lead?.agentId ?? null
+  const onWorker =
+    snapshot?.task.workerId == null
+      ? undefined
+      : (workers.find((one) => one.workerId === snapshot.task.workerId) ?? { providers: leadAgent === null ? [] : [leadAgent] })
   const homes = servicesHost.homes
   const here = useHomeState(homes)
   // The home by the window's name for it: This Mac, or the remote home's own.

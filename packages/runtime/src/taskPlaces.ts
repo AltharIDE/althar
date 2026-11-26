@@ -174,6 +174,22 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
           }
           return yield* invalid(message)
         })
+      // Kept on its plan until its lead is between turns, and tried again then (runCheckouts.ts).
+      const waits = Effect.gen(function* () {
+        const why = `Moves to ${nameOf(input.to)} once its lead’s turn ends.`
+        const movingTo: MovingTo = {
+          to: input.to,
+          why,
+          ...(input.lead === undefined ? {} : { lead: input.lead }),
+          ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
+        }
+        yield* sql.withTransaction(rewrite(input.taskId, (now) => ({ ...now, movingTo }), input.actorId))
+        yield* touchCard(input.taskId)
+        return { kind: 'waits', why } as TaskPlaced
+      })
+      // A fresh session taking the thread over: the lead that opens where it goes is that one, not yet known here, and a move
+      // now would mark the session going out. It waits, and is judged by the incoming lead once that has the thread.
+      if (Option.isSome(yield* sessions.handingOver(task.threadId))) return yield* waits
       // The lead that will open where it goes: the agent its session is on, on the model picked for there, else the one picked
       // for its next turn, else the one its session is on, as its handover starts it (Sessions.ts), else its plan's.
       const lead = yield* sessions.running(task.threadId)
@@ -201,21 +217,8 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
         const offered = workerModelUnfit(worker, steps)
         if (offered !== undefined) return yield* refuse(workerModelWords(nameOf(input.to), offered.model))
       }
-      // Between its lead's turns: one under way ends first, as does a fresh session taking it over, and the move is tried again
-      // as they do. A move then would mark the session going out, and the one coming in would carry on where it was.
-      const handing = yield* sessions.handingOver(task.threadId)
-      if ((Option.isSome(lead) && lead.value.turnRunning) || Option.isSome(handing)) {
-        const why = `Moves to ${nameOf(input.to)} once its lead’s turn ends.`
-        const movingTo: MovingTo = {
-          to: input.to,
-          why,
-          ...(input.lead === undefined ? {} : { lead: input.lead }),
-          ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
-        }
-        yield* sql.withTransaction(rewrite(input.taskId, (now) => ({ ...now, movingTo }), input.actorId))
-        yield* touchCard(input.taskId)
-        return { kind: 'waits', why } as TaskPlaced
-      }
+      // Between its lead's turns: one under way ends first, and the move is tried again as it does.
+      if (Option.isSome(lead) && lead.value.turnRunning) return yield* waits
       // Its work comes along: from a worker, brought home and checked against what the home has (workerWorkspace.ts) before
       // anything moves. Where it can't be, the task stays where it runs, unless the person said to move from what its last
       // turn brought home.

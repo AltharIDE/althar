@@ -70,7 +70,7 @@ import { taskWorker, type WorkerExecution } from './workerExecution'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
 import { startsAgain } from './startAgain'
-import { needsInAll, needsOn, toolsToInstall } from './toolNeeds'
+import { needsAcross, needsOn, toolsToInstall } from './toolNeeds'
 import { folderGoneWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -645,8 +645,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               return yield* refuse('A worker needs the task in a worktree of its own, not Local.')
             // It takes work only where its own check found its agents' sandbox starts, and this agent started there once;
             // a worker that hasn't said, or found otherwise, takes none, and says why, before anything opens there.
-            const refusal = placedOn === undefined ? undefined : unreadyFor(placedOn, definition.id)
-            if (refusal !== undefined && placedOn !== undefined) return yield* refuse(workerUnfitWords(refusal, workerName(placedOn)))
+            // The worker that receives the run is checked again as it does (agentRuns.ts, `requireReady`), in case it was
+            // replaced meanwhile.
+            const refusal = workerRefusal(placedOn, selectedWorker, definition.id)
+            if (refusal !== undefined) return yield* refuse(refusal)
             const assets =
               !workerCanLoadSkills || skills === undefined || skills.given.length === 0
                 ? []
@@ -695,8 +697,17 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               const layouts = plans.flatMap(({ workspaceId, plan }) => (plan?.spec === undefined ? [] : [{ workspaceId, ...plan.spec }]))
               // What the task's files need that the worker lacks and installs itself, into its own folder, before the setup: read
               // in each repository's folder, as its setup runs there.
-              const folders = thread.repositories.map((one) => (one.within === null ? one.worktree : join(one.worktree, one.within)))
-              const tools = toolsToInstall(needsOn(yield* Effect.promise(() => needsInAll(folders)), placedOn?.readiness))
+              const across = yield* Effect.promise(() =>
+                needsAcross(
+                  thread.repositories.map((one) => ({
+                    name: one.name,
+                    folder: one.within === null ? one.worktree : join(one.worktree, one.within),
+                  })),
+                ),
+              )
+              // Two repositories pinning versions of a tool that can't be one install: it doesn't go to a worker, which has one.
+              if ('conflict' in across) return yield* refuse(across.conflict)
+              const tools = toolsToInstall(needsOn(across.needs, placedOn?.readiness))
               const commands = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
               const setup = tools.length === 0 ? commands : { ...(commands ?? { directory: '', commands: [] }), tools }
               remote = yield* platform.open({
@@ -1310,4 +1321,14 @@ export const unreadyFor = (worker: ProjectWorker, agentId: string): WorkerUnfit 
   return started?.starts === true
     ? undefined
     : { kind: 'agentStarts', agentId, ...(started?.problem === undefined ? {} : { problem: started.problem }) }
+}
+
+/**
+ * Why a run doesn't open on its worker, in words, or none: one not connected to the project now (nothing is known of it,
+ * so nothing opens there), or one its own check didn't find ready for this agent (`unreadyFor`).
+ */
+export const workerRefusal = (placedOn: ProjectWorker | undefined, workerId: string, agentId: string): string | undefined => {
+  if (placedOn === undefined) return workerUnfitWords({ kind: 'gone' }, workerNameOf(workerId))
+  const refusal = unreadyFor(placedOn, agentId)
+  return refusal === undefined ? undefined : workerUnfitWords(refusal, workerName(placedOn))
 }

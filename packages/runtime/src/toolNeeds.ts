@@ -107,8 +107,53 @@ export const needsIn = (folder: string) =>
     }
   })
 
-/** What several folders' files need, each tool once, as the first folder that names it says: a task's repositories, each in its folder. */
+/** Whether two pins of a tool can be one install: the same, one within the other (`24`, `24.11.0`), or either `lts`. */
+const agree = (a: string, b: string) => a === b || a === 'lts' || b === 'lts' || a.startsWith(`${b}.`) || b.startsWith(`${a}.`)
+
+const TOOL_WORDS: Readonly<Record<string, string>> = { bun: 'Bun', node: 'Node', python3: 'Python' }
+
+/**
+ * What a task's repositories need together, each read in its folder, as its setup runs there: each tool once, at the
+ * closest pin any of them gives. A run on a worker has one of each tool on its PATH, so two repositories pinning
+ * versions that can't be one install (Bun 1.3.5 and 1.2.0) are a conflict, said with both names and pins, and the
+ * run doesn't go there.
+ */
+export const needsAcross = async (
+  repositories: ReadonlyArray<{ readonly name: string; readonly folder: string }>,
+): Promise<{ readonly needs: ReadonlyArray<Need> } | { readonly conflict: string }> => {
+  const read = await Promise.all(repositories.map(async (one) => ({ name: one.name, needs: await needsIn(one.folder) })))
+  const all: Need[] = []
+  const pinnedBy = new Map<string, string>()
+  for (const { name, needs } of read)
+    for (const need of needs) {
+      const at = all.findIndex((one) => one.name === need.name)
+      const known = all[at]
+      if (known === undefined) {
+        all.push(need)
+        pinnedBy.set(need.name, name)
+        continue
+      }
+      if (need.version === undefined) continue
+      if (known.version !== undefined && !agree(known.version, need.version)) {
+        const tool = TOOL_WORDS[need.name] ?? need.name
+        return {
+          conflict: `${pinnedBy.get(need.name)} pins ${tool} ${known.version} (${known.why}) and ${name} pins ${tool} ${need.version} (${need.why}): a worker runs a task with one of each. Run it on the home, or pin the same version in both.`,
+        }
+      }
+      // The closer pin stands: 24.11.0 over 24, either over none.
+      if (known.version === undefined || need.version.length > known.version.length) {
+        all[at] = need
+        pinnedBy.set(need.name, name)
+      }
+    }
+  return { needs: all }
+}
+
+/** What several folders' files need together, as `needsAcross` reads them, without a conflict's words: for Runs on's preview. */
 export const needsInAll = async (folders: ReadonlyArray<string>): Promise<ReadonlyArray<Need>> => {
+  const across = await needsAcross(folders.map((folder) => ({ name: folder, folder })))
+  if ('needs' in across) return across.needs
+  // Conflicting pins: each tool once, as the first folder that names it says; the run itself refuses with both.
   const all: Need[] = []
   for (const needs of await Promise.all(folders.map(needsIn)))
     for (const need of needs) if (!all.some((one) => one.name === need.name)) all.push(need)

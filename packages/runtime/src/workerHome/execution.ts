@@ -347,6 +347,8 @@ export const workerExecution = (
                   { projectId, workspaceId, providerId },
                   {
                     signal,
+                    // Decided by the slot that receives it, as its own check found it there now.
+                    requireReady: true,
                     ...(repositories === undefined ? { checkout: primary.checkout } : { repositories: entries }),
                     toolPort,
                     ...(setup === undefined ? {} : { setup }),

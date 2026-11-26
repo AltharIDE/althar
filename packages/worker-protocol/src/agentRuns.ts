@@ -76,6 +76,11 @@ export interface AgentRunAssignment extends AgentPlacement {
 
 interface AgentRunOptions {
   readonly signal?: AbortSignal
+  /**
+   * The run goes only to a slot whose own check, as it said it last, found its agents' sandbox starts and this provider
+   * started there: the slot that receives it, not one the home looked at before.
+   */
+  readonly requireReady?: boolean
   readonly checkout?: WorkerCheckout
   readonly toolPort?: number
   readonly setup?: WorkerSetup
@@ -127,6 +132,14 @@ const SHOWN = /^[^\x00-\x1f\x7f]{1,200}$/u
 const SHOWN_LONG = /^[^\x00-\x1f\x7f]{1,400}$/u
 // eslint-disable-next-line no-control-regex -- The command is shown to copy, on one line.
 const FIX = /^[^\x00-\x1f\x7f]{1,4096}$/u
+
+/** Why a worker's own check, as it reported it, keeps a provider's run from it; none where it found both start. */
+export const unreadyOf = (readiness: WorkerReadiness | undefined, providerId: string): string | undefined => {
+  if (readiness === undefined) return 'The worker hasn’t checked it can run a task yet.'
+  if (!readiness.sandbox.starts) return 'The worker’s agents’ sandbox can’t start there.'
+  const started = readiness.agents.find((agent) => agent.providerId === providerId)
+  return started?.starts === true ? undefined : 'The worker hasn’t started this agent there, or it couldn’t.'
+}
 
 /** A worker's check as it reported it, kept to what can be shown and trusted. */
 export const readinessOf = (reported: AgentWorkerReadiness): WorkerReadiness => {
@@ -1041,6 +1054,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
       )
         return Promise.reject(new Error('This worker is unavailable for that project and provider.'))
       if (!validWorkerProtocolId(placement.workspaceId, 'ws_')) return Promise.reject(new Error('The worker needs a valid workspace ID.'))
+      if (options.requireReady === true) {
+        const unready = unreadyOf(slot.said.readiness, placement.providerId)
+        if (unready !== undefined) return Promise.reject(new Error(unready))
+      }
       if (checkout !== undefined && !validCheckout(checkout)) throw new Error('The worker needs a valid, bounded Git bundle.')
       if (repositories !== undefined) {
         if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId))

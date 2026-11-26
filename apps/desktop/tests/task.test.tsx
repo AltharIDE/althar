@@ -2238,6 +2238,22 @@ describe('a task', () => {
     await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', runner.workerId, { model: 'sonnet' }))
   })
 
+  it('offers a worker task only what its worker said, and only its agent’s default while that worker isn’t listed (ADR-103)', async () => {
+    const workerId = `wrk_${'c'.repeat(32)}`
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, workerId } })),
+      listProjectWorkers: vi.fn(async () => []),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('Carrying on.')
+    await userEvent.click(screen.getByRole('button', { name: /^Lead:/u }))
+    // Nothing of this home's is offered, Codex's model among them: the worker hasn't said what it has.
+    expect(await screen.findAllByRole('radio')).not.toHaveLength(0)
+    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/u })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /Claude Sonnet/u })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+  })
+
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
     expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Save as preset', 'Stop the task', 'Abandon'])

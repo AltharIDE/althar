@@ -13,7 +13,7 @@ import { fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
 import { createDeviceKey } from '@althar/transport-node'
 import { AgentRunOutcome, type AgentManagedExit } from '@althar/worker-protocol'
 import { assert, describe, it } from '@effect/vitest'
-import { Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
+import { Context, Deferred, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
@@ -1172,19 +1172,128 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           assert.includeMembers([...(opened[1]?.files ?? [])], ['made-at-home.txt', 'made-on-runner-1.txt'])
           // On the small model picked for runner-2, as its handover started it.
           assert.strictEqual((yield* answered('On runner-2 now.')).session?.model, 'small')
-          // runner-2 can't bring its work home: the task stays on it, unless the person says to move from its last turn's copy.
+          // runner-2 can't bring its work home just now: the task stays on it.
+          changedOn.set(runner2, 'made-on-runner-2.txt')
           checkpointFails = true
           assert.include((yield* Effect.flip(move('home'))).message, 'runner-2 couldn’t bring its work home just now, so it stays there.')
           assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.workerId, runner2)
-          const back = yield* move('home', { fromLastTurn: true })
+          assert.isFalse(existsSync(join(worktree, 'made-on-runner-2.txt')))
+          // Once it can, home it comes, with what runner-2 changed.
+          checkpointFails = false
+          assert.deepStrictEqual(yield* move('home'), { kind: 'placed', said: said('this home') })
+          yield* placedOn(null)
+          assert.strictEqual(readFileSync(join(worktree, 'made-on-runner-2.txt'), 'utf8'), `written on ${runner2}\n`)
+          assert.includeMembers(readdirSync(worktree), ['made-at-home.txt', 'made-on-runner-1.txt', 'made-on-runner-2.txt'])
+          assert.deepStrictEqual(yield* move('home'), { kind: 'same' })
+        }),
+      ),
+  )
+
+  it.live(
+    'waits out a fresh session taking it over, then judges the move by the incoming lead, and moves from its last turn’s copy when asked',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runner1 = 'wrk_' + 'a'.repeat(32)
+          const runner2 = 'wrk_' + 'b'.repeat(32)
+          const capacity = { platform: 'linux', architecture: 'x64', cpuCores: 8, freeMemoryMib: 16_000, freeDiskMib: 80_000 } as const
+          const offering = (models: ReadonlyArray<string>) => ({
+            ...READY,
+            models: [{ providerId: 'codex', models: models.map((id) => ({ id, name: id })) }],
+          })
+          const release = yield* Deferred.make<void>()
+          let opening = 0
+          let checkpointFails = false
+          const { client, grant } = yield* connected({
+            workers: {
+              list: () => [
+                {
+                  workerId: runner1,
+                  name: 'runner-1',
+                  providers: ['codex'],
+                  signedIn: ['codex'],
+                  busy: false,
+                  capacity,
+                  readiness: offering(['small', 'large']),
+                },
+                {
+                  workerId: runner2,
+                  name: 'runner-2',
+                  providers: ['codex'],
+                  signedIn: ['codex'],
+                  busy: false,
+                  capacity,
+                  readiness: offering(['small']),
+                },
+              ],
+              checkpointWorktree: () =>
+                checkpointFails
+                  ? Effect.fail(
+                      new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: 'The worker is gone.' }),
+                    )
+                  : Effect.void,
+              open: (request) =>
+                Effect.gen(function* () {
+                  opening += 1
+                  // The session taking it over on runner-1 is held starting, so its handover stays under way.
+                  yield* Deferred.await(release)
+                  const workerPath = repository()
+                  return {
+                    path: workerPath,
+                    toolPort: request.toolPort,
+                    transport: yield* openFakeWorker(workerPath),
+                    checkpoint: Effect.void,
+                  }
+                }),
+            },
+          })
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+          const task = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: 'Moves while it is taken over',
+            description: '[lead:finish]',
+            end: 'ready',
+            steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          })
+          yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
+            thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+          )
+          // The lead goes out on large, and comes into runner-1 on small.
+          yield* client.SetModel({ commandId: commandId(), threadId: task.threadId, model: 'large' })
+          yield* until(
+            client.GetThread({ threadId: task.threadId, fresh: true }),
+            (view) => view.session?.model === 'large' && view.session.turnRunning !== true,
+          )
+          yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: runner1, lead: { model: 'small' } })
+          yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => thread.task.workerId === runner1)
+          yield* client.Send({
+            commandId: commandId(),
+            threadId: task.threadId,
+            body: 'Carry on. [lead:finish]',
+            disposition: 'after_current',
+          })
+          yield* until(
+            Effect.sync(() => opening),
+            (count) => count === 1,
+          )
+          // runner-2 offers small alone: the incoming lead's, not the outgoing large one. It waits for the handover, and goes.
+          const waiting = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: runner2 })
+          assert.deepStrictEqual(waiting, { kind: 'waits', why: 'Moves to runner-2 once its lead’s turn ends.' })
+          assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.placing?.to, runner2)
+          yield* Deferred.succeed(release, undefined)
+          yield* until(
+            client.GetThread({ threadId: task.threadId, fresh: true }),
+            (thread) => thread.task.workerId === runner2 && thread.task.placing === undefined,
+          )
+          // runner-2 can't bring its work home: the person said to move from what its last turn brought home.
+          yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => thread.session?.turnRunning !== true)
+          checkpointFails = true
+          const back = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: 'home', fromLastTurn: true })
           assert.strictEqual(
             back.kind === 'placed' ? back.said : back.kind,
-            `${said('this home')} Its work came along as its last turn on runner-2 brought it home, as asked.`,
+            'Moved to this home: its lead carries on there. Its work came along as its last turn on runner-2 brought it home, as asked.',
           )
-          yield* placedOn(null)
-          // The work from both workers is in the home's worktree.
-          assert.includeMembers(readdirSync(worktree), ['made-at-home.txt', 'made-on-runner-1.txt'])
-          assert.deepStrictEqual(yield* move('home'), { kind: 'same' })
         }),
       ),
   )
