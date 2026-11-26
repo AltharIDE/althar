@@ -25,7 +25,7 @@ export const DOES = [
     body: 'It’s called the coordinator, and it knows the whole project. Say what you want changed: it reads the repositories and your rules, turns the ask into tasks, and proposes which agent and model takes each step. Change anyone, or hold it; leave it alone and it starts. It plans and hands out the work; it never writes the code itself.',
   },
   {
-    title: 'No more meat proxying.',
+    title: 'Copy and pasting. No more.',
     body: 'No more pasting one agent’s answer into another and typing “review this”. Every change is reviewed by a model from another lab, by default; the lead fixes each finding or sets it aside with its reason, and review goes round until it’s clean, before you see a line. Your rules add steps, like a security review when money is touched.',
   },
   {
