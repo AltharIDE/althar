@@ -1324,6 +1324,11 @@ export class MergeLine extends Context.Service<
                 branch: pull.change.target,
                 request,
               })
+              // The thread's merging line follows it from its task's name to its number.
+              yield* errands.retell(kept.errandId, {
+                title: `Its task’s pull request is #${pull.number}`,
+                links: [{ label: `#${pull.number}`, url: pull.change.url }],
+              })
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.gen(function* () {

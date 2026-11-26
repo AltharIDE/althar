@@ -771,7 +771,7 @@ describe('merges on their way, at the thread’s foot', () => {
       {
         title: `Kept your errand: merge ${label}`,
         source: 'runtime',
-        errand: { id, quiet, merges: [{ label, url, once: 'once its checks pass' }] },
+        errand: { id, quiet, merges: [{ label, url, task: url === null ? `task_${id}` : null, once: 'once its checks pass' }] },
       },
       null,
     )
@@ -824,7 +824,7 @@ describe('merges on their way, at the thread’s foot', () => {
       {
         title: 'Errand on hold: merge #1301 — its checks failed. Say go ahead to continue.',
         source: 'runtime',
-        errand: { id: 'e2', quiet: false, merges: [{ label: '#1301', url: `${PULL}1301`, once: '' }] },
+        errand: { id: 'e2', quiet: false, merges: [{ label: '#1301', url: `${PULL}1301`, task: null, once: '' }] },
       },
       null,
     )
@@ -833,6 +833,36 @@ describe('merges on their way, at the thread’s foot', () => {
     const foot = blocks.at(-1)
     if (foot?.kind !== 'merging') throw new Error('no foot')
     expect(foot.groups[0]?.rows.map((row) => row.label)).toEqual(['#1301'])
+  })
+
+  it('tells pull requests apart by their address, and merges kept for tasks by their task, not by the name they show', () => {
+    const elsewhere = 'https://github.com/meridian/web/pull/1224'
+    const keptFor = (id: string, label: string, url: string | null, task: string | null) =>
+      items.notice(
+        {
+          title: `Kept your errand: merge ${label}`,
+          source: 'runtime',
+          errand: { id, quiet: true, merges: [{ label, url, task, once: '' }] },
+        },
+        null,
+      )
+    const thread = [
+      // #1224 of one repository is in; #1224 of another is only kept.
+      moving('merged'),
+      keptFor('e1', '#1224', elsewhere, null),
+      // Two tasks that happen to show the same name.
+      keptFor('e2', 'Readiness', null, 'task_a'),
+      keptFor('e3', 'Readiness', null, 'task_b'),
+      // The same task's merge kept twice is one.
+      keptFor('e4', 'Readiness', null, 'task_b'),
+    ]
+    const foot = blocksOf(source(thread), new Map(), at).at(-1)
+    if (foot?.kind !== 'merging') throw new Error('no foot')
+    expect(foot.groups[0]?.rows.map((row) => [row.label, row.url])).toEqual([
+      ['#1224', elsewhere],
+      ['Readiness', null],
+      ['Readiness', null],
+    ])
   })
 
   it('leaves a line of Althar’s own that isn’t a merge errand’s as it was', () => {

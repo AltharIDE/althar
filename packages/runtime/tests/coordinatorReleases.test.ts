@@ -210,6 +210,85 @@ describe('the coordinator tagging', () => {
     }).pipe(Effect.provide(withHost(host)))
   })
 
+  it.live('a task’s merge kept for later follows it from the task’s name to its number, and lets go of it once called off', () => {
+    const raw = makeFakeService()
+    const host: FakeService = {
+      ...raw,
+      change: (...args) =>
+        Effect.map(raw.change(...args), (change) => ({ ...change, url: change.url.replace('https://github.com', HOST) })),
+    }
+    const repository = host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    return Effect.gen(function* () {
+      const { coordinator, sql } = yield* project(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: coordinator.projectId as ProjectId,
+        title: 'Workers readiness',
+        draft: true,
+      })
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+      const slug = row!.slug
+      const message = yield* turn(coordinator, 'merge the workers readiness PR once it’s open and green')
+      const errand = yield* callTool(coordinator, 'keep_errand', {
+        message,
+        steps: [
+          {
+            key: 'merge-workers',
+            tool: 'merge_pull_request',
+            taskId: slug,
+            target: `task:${slug}`,
+            request: {},
+            waits: [{ kind: 'task_pull_request', target: slug }],
+          },
+        ],
+      })
+      type Tag = {
+        id: string
+        quiet: boolean
+        merges: ReadonlyArray<{ label: string; url: string | null; task: string | null; once: string }>
+      }
+      const notes = (threadId: string) =>
+        Effect.map(
+          sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY rowid`,
+          (rows) => rows.map((one) => JSON.parse(one.content) as { title: string; errand?: Tag }),
+        )
+      const latest = Effect.map(notes(coordinator.threadId), (all) => all.filter((note) => note.errand?.id === errand).at(-1))
+      // Kept, with no pull request yet: by its task's name and id, quietly.
+      assert.deepStrictEqual((yield* latest)?.errand, {
+        id: errand,
+        quiet: true,
+        merges: [{ label: 'Workers readiness', url: null, task: task.taskId, once: 'once its pull request is ready' }],
+      })
+      // Its task's thread, which has no merge card, reads the line plainly.
+      const inTask = yield* notes(task.threadId)
+      assert.isTrue(inTask.some((note) => note.title.startsWith('Kept your errand')))
+      assert.isTrue(inTask.every((note) => note.errand === undefined))
+
+      // Its pull request opens: the coordinator's thread is told its number, quietly, and the task's isn't told again.
+      const pull = host.addPullRequest({ path: PATH, title: 'A worker says when it’s ready', author: 'you', draft: true })
+      const url = pull.url.replace('https://github.com', HOST)
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: coordinator.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: pull.id, ref: String(pull.number), key: String(pull.number), url, snapshot: JSON.stringify({ ...pull, repository: PATH }), listening: 1, createdAt: at, updatedAt: at })}`
+      yield* host.markReady(repository, pull)
+      yield* (yield* MergeLine).tick(coordinator.projectId)
+      const bound = yield* latest
+      assert.strictEqual(bound?.errand?.quiet, true)
+      assert.deepStrictEqual(
+        bound?.errand?.merges.map((merge) => [merge.label, merge.url, merge.task]),
+        [[`#${pull.number}`, url, task.taskId]],
+      )
+      assert.strictEqual((yield* notes(task.threadId)).length, inTask.length)
+
+      // Called off: its line stands for the person, with nothing left for the merging line.
+      const fresh = yield* turn(coordinator, 'actually, call that off')
+      assert.match(yield* callTool(coordinator, 'cancel_errand', { errand, message: fresh }), /^Called off the errand/)
+      const off = yield* latest
+      assert.strictEqual(off?.errand?.quiet, false)
+      assert.deepStrictEqual(off?.errand?.merges, [])
+    }).pipe(Effect.provide(withHost(host)))
+  })
+
   it.live('tags the default branch’s head on the person’s word, once, says so in its chat, and refuses news', () => {
     const { host, repository, working } = github()
     return Effect.gen(function* () {

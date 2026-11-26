@@ -324,14 +324,18 @@ describe('what a merge errand still has to merge', () => {
     assert.deepStrictEqual(
       mergesLeft([
         { step: merge(PR), done: true, task: null },
-        { step: merge('https://github.com/AltharIDE/althar/pull/699'), done: false, task: 'Plan card' },
-        { step: merge('task:keep-for-later', 'Merge Keep for later’s pull request'), done: false, task: 'Keep for later' },
+        { step: merge('https://github.com/AltharIDE/althar/pull/699'), done: false, task: { id: 'task_plan', title: 'Plan card' } },
+        {
+          step: merge('task:keep-for-later', 'Merge Keep for later’s pull request'),
+          done: false,
+          task: { id: 'task_keep', title: 'Keep for later' },
+        },
         { step: merge('task:workers', 'Merge the workers readiness pull request'), done: false, task: null },
       ]),
       [
-        { label: '#699', url: 'https://github.com/AltharIDE/althar/pull/699', once: 'once its checks pass' },
-        { label: 'Keep for later', url: null, once: 'once its checks pass' },
-        { label: 'workers readiness pull request', url: null, once: 'once its checks pass' },
+        { label: '#699', url: 'https://github.com/AltharIDE/althar/pull/699', task: 'task_plan', once: 'once its checks pass' },
+        { label: 'Keep for later', url: null, task: 'task_keep', once: 'once its checks pass' },
+        { label: 'workers readiness pull request', url: null, task: null, once: 'once its checks pass' },
       ],
     )
   })

@@ -985,7 +985,7 @@ export const blocksOf = (
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
       case 'merge_line':
-        for (const row of item.content.rows) onCards.add(`#${row.number}`)
+        for (const row of item.content.rows) onCards.add(row.url)
         // A card still moving is the foot's, kept current under whatever was said since; one all in stands where it was asked.
         if (newestCard.has(item.id) && !allIn(item.content)) moving.push(item.content)
         else blocks.push({ kind: 'merge_line', id: item.id, line: item.content })

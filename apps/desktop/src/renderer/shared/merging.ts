@@ -39,7 +39,8 @@ export const newestCards = (items: ReadonlyArray<ThreadItem>): ReadonlySet<strin
 
 /**
  * The foot: each card still moving, its rows as they stand, and what merges kept for later still wait for, by the newest
- * line each errand said, under the default branch's card (or one of their own); null where nothing is on its way.
+ * line each errand said, under the default branch's card (or one of their own); null where nothing is on its way. `seen` is
+ * every pull request on a card of the thread, by its address.
  */
 export const mergingOf = (
   cards: ReadonlyArray<MergeLine['content']>,
@@ -50,7 +51,7 @@ export const mergingOf = (
     key: card.key,
     branch: card.branch,
     rows: card.rows.map((row) => ({
-      key: `#${row.number}`,
+      key: row.url,
       label: `#${row.number}`,
       title: row.title,
       url: row.url,
@@ -58,19 +59,25 @@ export const mergingOf = (
       ...(row.reason === undefined ? {} : { reason: row.reason }),
     })),
   }))
-  // A pull request on a card is there already, moving or in; a kept merge stands for it only until it is.
+  // A pull request on a card is there already, moving or in, by its address, which tells #42 of one repository from another's;
+  // a kept merge stands for it only until it is. Kept merges are told apart the same way, or by their task while they have no
+  // pull request, never by the name they show.
   const kept: Array<MergingRow> = []
+  const keys = new Set<string>()
   for (const [id, errand] of errands)
-    for (const merge of errand.merges)
-      if (!seen.has(merge.label) && !kept.some((one) => one.label === merge.label))
-        kept.push({
-          key: `${id} ${merge.label}`,
-          label: merge.label,
-          title: '',
-          url: merge.url,
-          state: 'waiting',
-          ...(merge.once === '' ? {} : { once: merge.once }),
-        })
+    errand.merges.forEach((merge, index) => {
+      const key = merge.url ?? (merge.task === null ? `${id} ${index}` : `task ${merge.task}`)
+      if ((merge.url !== null && seen.has(merge.url)) || keys.has(key)) return
+      keys.add(key)
+      kept.push({
+        key,
+        label: merge.label,
+        title: '',
+        url: merge.url,
+        state: 'waiting',
+        ...(merge.once === '' ? {} : { once: merge.once }),
+      })
+    })
   if (kept.length > 0) {
     const home = groups.findIndex((group) => group.branch === null)
     if (home === -1) groups.push({ key: 'kept', branch: null, rows: kept })

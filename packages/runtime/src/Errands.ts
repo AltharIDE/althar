@@ -218,6 +218,11 @@ export class Errands extends Context.Service<
     pause(access: ToolAccess, id: string, reason: string): Effect.Effect<string, ToolRefused>
     resume(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
     cancel(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
+    /**
+     * Says again, quietly and in the errand's own thread only, what a merge errand still has to merge: as a step for a task
+     * finds its pull request, so the thread's merging line follows it from the task's name to its number.
+     */
+    retell(errandId: string, note: StepNote): Effect.Effect<void>
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
     /**
      * Whether the person's word for an action still stands, as execute checks
@@ -309,21 +314,32 @@ export class Errands extends Context.Service<
         ...(errand === undefined ? {} : { errand }),
       })
       /**
-       * An errand's line, in its thread and its tasks'. One of an errand that only merges says what is left to merge, so the
-       * thread can fold it into its merging line; `quiet` where it only says the errand moved on, not what needs the person.
+       * An errand's line, in its thread and its tasks'. In its own thread, one of an errand that only merges says what is left
+       * to merge, so the thread can fold it into its merging line; `quiet` where it only says the errand moved on, not what
+       * needs the person. Called off, nothing is left: the line stays, and the merging line lets go of it. Its tasks' threads,
+       * which hold no merge card of their own, get it as a plain line, so what became of the merge stays there to read.
        */
-      const say = (row: ErrandRow, line: string | StepNote, quiet = false) =>
+      const say = (row: ErrandRow, line: string | StepNote, quiet = false, tasksToo = true) =>
         Effect.gen(function* () {
           const note: StepNote = typeof line === 'string' ? { title: line, links: [] } : line
           const steps = yield* sql<StepRow & { taskTitle: string | null }>`SELECT s.*, t.title AS task_title FROM errand_steps s
             LEFT JOIN tasks t ON t.id = s.task_id WHERE s.errand_id = ${row.id} ORDER BY s.position`
-          const merges = mergesLeft(steps.map((step) => ({ step: said(step), done: step.state === 'done', task: step.taskTitle })))
+          const [now] = yield* sql<{ state: ErrandRow['state'] }>`SELECT state FROM errands WHERE id = ${row.id}`
+          const merges = mergesLeft(
+            steps.map((step) => ({
+              step: said(step),
+              done: step.state === 'done' || now?.state === 'cancelled',
+              task: step.taskId === null ? null : { id: step.taskId, title: step.taskTitle },
+            })),
+          )
           const content = noteContent(note, merges === null ? undefined : { id: row.id, quiet, merges })
           yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', content)
+          if (!tasksToo) return
           const tasks = yield* sql<{ taskId: string; threadId: string }>`SELECT DISTINCT s.task_id, t.id AS thread_id FROM errand_steps s
         JOIN threads t ON t.task_id = s.task_id AND t.kind = 'task' WHERE s.errand_id = ${row.id}`
           for (const task of tasks) {
-            if (task.threadId !== row.threadId) yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', content)
+            if (task.threadId !== row.threadId)
+              yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', noteContent(note))
             yield* touchTask(task.taskId)
           }
         })
@@ -723,6 +739,13 @@ export class Errands extends Context.Service<
           ),
         turn: (access) => provide(turn(access)),
         keep: (access, message, steps) => provide(keep(access, message, steps)),
+        retell: (errandId, note) =>
+          provide(
+            Effect.gen(function* () {
+              const [row] = yield* sql<ErrandRow>`SELECT * FROM errands WHERE id = ${errandId}`
+              if (row !== undefined) yield* say(row, note, true, false)
+            }),
+          ).pipe(Effect.orDie),
         pause: (access, id, reason) =>
           provide(
             Effect.gen(function* () {

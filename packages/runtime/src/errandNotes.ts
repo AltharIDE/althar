@@ -321,6 +321,8 @@ const linksIn = (line: string, steps: ReadonlyArray<SaidStep>): ReadonlyArray<No
 export interface MergeLeft {
   readonly label: string
   readonly url: string | null
+  /** Its task, where it has one: what tells it from another merge of the same name until its pull request is known. */
+  readonly task: string | null
   /** What it waits for, as "once its checks pass"; empty where it waits on nothing. */
   readonly once: string
 }
@@ -330,15 +332,19 @@ export interface MergeLeft {
  * stand as they are. A step with no pull request to name goes by its task's name, else its own words.
  */
 export const mergesLeft = (
-  steps: ReadonlyArray<{ readonly step: SaidStep; readonly done: boolean; readonly task: string | null }>,
+  steps: ReadonlyArray<{
+    readonly step: SaidStep
+    readonly done: boolean
+    readonly task: { readonly id: string; readonly title: string | null } | null
+  }>,
 ): ReadonlyArray<MergeLeft> | null => {
   if (steps.length === 0 || steps.some(({ step }) => step.tool !== 'merge_pull_request')) return null
   return steps
     .filter(({ done }) => !done)
     .map(({ step, task }) => {
       const link = labelOf(subject(step.target))
-      const label = link?.label ?? task ?? stepWords(step).replace(/^Merge\s+(?:the\s+)?/i, '')
-      return { label, url: link?.url ?? null, once: waitsWords(step) }
+      const label = link?.label ?? task?.title ?? stepWords(step).replace(/^Merge\s+(?:the\s+)?/i, '')
+      return { label, url: link?.url ?? null, task: task?.id ?? null, once: waitsWords(step) }
     })
 }
 
