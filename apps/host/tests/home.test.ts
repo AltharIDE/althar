@@ -10,7 +10,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
-import { initializeHome, serveHome, type HomeReady } from '../src/home'
+import { initializeHome, serveHome, type HomeReady, type HostDependencies } from '../src/home'
 import { parseOptions } from '../src/options'
 import { hostStatus } from '../src/status'
 import { temporary } from './support'
@@ -38,7 +38,7 @@ const fixture = () => {
     },
   }
 }
-const start = (options: ReturnType<typeof fixture>['options'], dependencies: ReturnType<typeof fixture>['dependencies']) =>
+const start = (options: ReturnType<typeof fixture>['options'], dependencies: HostDependencies) =>
   Effect.gen(function* () {
     const ready = yield* Deferred.make<HomeReady, unknown>()
     const fiber = yield* Effect.forkScoped(
@@ -99,6 +99,39 @@ describe('a persistent headless home', () => {
         const again = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
         const restored = yield* again.GetThread({ threadId: task.threadId })
         assert.strictEqual(restored.task.title, 'Work persists')
+      }),
+    ),
+  )
+
+  it.live('offers a window GitHub’s and GitLab’s sign-in by a code typed in any browser, and never Linear’s loopback', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { options, dependencies } = fixture()
+        const asked: Array<string> = []
+        yield* initializeHome(options, dependencies)
+        yield* start(options, {
+          ...dependencies,
+          clientIds: { github: 'Iv23.fake-github', gitlab: 'fake-gitlab', linear: 'fake-linear' },
+          githubApp: 'althar-fake',
+          fetch: async (url: string) => {
+            asked.push(url)
+            if (url === 'https://github.com/login/device/code')
+              return Response.json({
+                device_code: 'device',
+                user_code: 'WDJB-MJHT',
+                verification_uri: 'https://github.com/login/device',
+                expires_in: 900,
+                interval: 5,
+              })
+            return Response.json({ message: 'Not Found' }, { status: 404 })
+          },
+        })
+        const api = yield* client(options.profile)
+        const offered = Object.fromEntries((yield* api.ListConnections()).products.map((option) => [option.product, option.browserSignIn]))
+        assert.deepInclude(offered, { github: true, gitlab: true, linear: false })
+        const started = yield* api.StartSignIn({ commandId: `cmd_${'2'.repeat(32)}`, product: 'github' })
+        assert.deepInclude(started, { kind: 'device', userCode: 'WDJB-MJHT', verificationUri: 'https://github.com/login/device' })
+        assert.include(asked, 'https://github.com/login/device/code')
       }),
     ),
   )

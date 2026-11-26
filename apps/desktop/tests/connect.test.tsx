@@ -1097,6 +1097,34 @@ describe('connecting GitHub', () => {
     expect(client.startSignIn).toHaveBeenCalledTimes(2)
   })
 
+  it.each([
+    ['github', 'GitHub', 'gh', 'https://github.com'],
+    ['gitlab', 'GitLab', 'glab', 'https://gitlab.com'],
+  ] as const)(
+    'offers %s’s browser sign-in first, its command-line tool’s second, and a token last',
+    async (service, name, tool, webUrl) => {
+      const { panel } = await walk(service, {
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          products: PRODUCTS.map((product) => (product.product === service ? { ...product, browserSignIn: true } : product)),
+          places: [],
+        })),
+        getConnectGuide: vi.fn(async () =>
+          guideOf(service, { clis: [{ product: service, webUrl, tool, account: 'you', scopes: ['repo'] }] }),
+        ),
+      })
+      const ways = await within(panel).findByRole('group', { name: `Ways to connect ${name}` })
+      const offered = within(ways)
+        .getAllByRole('button')
+        .map((button) => button.textContent ?? '')
+      // For an organisation that refuses Althar's app, gh's or glab's sign-in, then a token made by hand.
+      expect(offered).toHaveLength(3)
+      expect(offered[0]).toMatch(new RegExp(`^Continue with ${name}`))
+      expect(offered[1]).toMatch(new RegExp(`^Use ${tool}’s sign-in`))
+      expect(offered[2]).toMatch(/^Make a token/)
+    },
+  )
+
   it('says GitHub didn’t answer a check, and connects as it is', async () => {
     const { panel, closed, press, heading } = await walk('github', {
       getConnectGuide: vi.fn(async () => githubGuide),

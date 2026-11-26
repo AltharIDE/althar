@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { API_VERSION } from '@althar/contracts'
 import { Context, Effect, Layer, Scope } from 'effect'
-import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services } from '@althar/runtime'
+import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services, signInsOf } from '@althar/runtime'
 
 import metadata from '../package.json'
 import { configuredHome } from './configuration'
@@ -17,7 +17,7 @@ import { workerExecution } from './agentExecution'
 export const HOST_VERSION = metadata.version
 export type HostDependencies = Pick<
   Runtime.RuntimeLayerOptions,
-  'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers'
+  'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers' | 'clientIds' | 'githubApp'
 > & { readonly maintenanceToken?: string }
 export interface HomeReady {
   readonly homeId: string
@@ -27,6 +27,13 @@ export interface HomeReady {
   readonly pid: number
   readonly workerPort?: number
 }
+
+/**
+ * Althar's own apps' public ids, as the build baked them unless the home's environment says otherwise: GitHub's and
+ * GitLab's for a sign-in whose code shows in the window and is typed in any browser, the GitHub App's slug for its install
+ * page, and Copilot's.
+ */
+const signIns = () => signInsOf(__ALTHAR_SIGN_IN__, process.env)
 
 const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runtime').Secrets>, dependencies: HostDependencies) => {
   const { maintenanceToken, ...runtimeDependencies } = dependencies
@@ -42,6 +49,9 @@ const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runt
     appVersion: HOST_VERSION,
     deviceName: hostname(),
     secrets,
+    ...signIns(),
+    // The person's browser is on another computer, so no sign-in comes back to the home's loopback address, as Linear's would.
+    loopbackSignIn: false,
     ...(maintenanceToken === undefined ? {} : { databaseMaintenanceToken: maintenanceToken }),
     ...runtimeDependencies,
   })
