@@ -48,6 +48,11 @@ const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): ReadonlyArray<stri
   return !github || ownerOf(places) === undefined ? paths : paths.map((path) => path.split('/').slice(1).join('/'))
 }
 
+/** A repository's owner, from its owner/name. */
+const ownerName = (path: string) => path.split('/', 1).join('')
+/** The owners of some repositories, each once. */
+const ownersOf = (paths: ReadonlyArray<string>) => and([...new Set(paths.map(ownerName))])
+
 /** Repositories by name, two at most; more, as a count. */
 const named = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `${paths.length} repositories`)
 
@@ -264,6 +269,9 @@ export const text = {
   didntAnswer: (service: string) => `${service} didn’t answer`,
   cantPush: 'This token can’t push',
   roleCantPush: 'Your account can’t push there',
+  /** Where the service says which repositories the account may only read. */
+  cantPushTo: (names: ReadonlyArray<string>) =>
+    names.length === 1 ? `You can’t push to ${and(names)}` : `You can’t push to ${names.length} of these repositories`,
   cantOpen: (noun: string) => `This token can’t open ${noun}`,
   cantReadRuns: 'This token can’t read check runs',
   cantReadChecks: 'This token can’t read checks',
@@ -324,7 +332,13 @@ export const text = {
     scope: (scope: string) => `The token wasn’t given the ${scope} scope.`,
     permission: (permission: string) => `${permission} isn’t allowed on this token.`,
     role: (role: string | null) => (role === null ? 'Your account can’t do this there.' : `As ${role}, your account can’t do this there.`),
+    /** Repositories the account may only read: someone else's, as a project cloned from another's repository is. */
+    readOnly: (names: ReadonlyArray<string>) =>
+      names.length === 1
+        ? `It’s ${ownersOf(names)}’s repository, and your account can only read it.`
+        : `Your account can only read ${ownersOf(names)}’s repositories.`,
     unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${named(names)}.`,
+    noPush: (names: ReadonlyArray<string>) => `It can read ${named(names)} but not push there.`,
     notInstalled: (owner: string) => `Althar isn’t installed on ${owner} yet.`,
     restricted: (owner: string) => `${owner} keeps out apps that sign in with OAuth, gh among them, until its owners approve one.`,
     sso: (owner: string) => `${owner} signs in with SAML: the token needs authorizing for it.`,
@@ -334,12 +348,20 @@ export const text = {
   fix: {
     githubSet: (what: string) => `Set ${what}, then Update.`,
     githubAdd: (names: ReadonlyArray<string>) => `Add ${these(names)} under Repository access, then Update.`,
+    githubPush: (names: ReadonlyArray<string>, owner: string) =>
+      `Give it Contents: Read and write on ${these(names)}, with ${owner} as its resource owner, then Update.`,
+    push: (service: string) => `Give the token write access there on ${service}, or connect with one that has it.`,
+    appPush: (owner: string) => `Let Althar’s app write to these on ${owner}: its owners approve that in its settings there.`,
     githubScope: (scope: string) => `Tick ${scope}, then Update token.`,
     remake: (service: string, scope: string) => `A ${service} token keeps the scopes it was made with: make one with ${scope}.`,
     restricted: (owner: string) => `Its owners can approve GitHub CLI for ${owner}, or you can make a token instead.`,
     sso: (owner: string) => `Authorize the token for ${owner} on GitHub, then check again.`,
     classic: 'A classic token reads them.',
-    role: 'Your account’s role there: its owners can change it.',
+    role: 'Its owners can give your account write access there.',
+    /** For repositories the account may only read: work on a fork of your own, or ask for access; or only read. */
+    readOnly: (names: ReadonlyArray<string>) =>
+      `Fork ${names.length === 1 ? 'it' : 'them'} to work on your own copy, or ask ${ownersOf(names)} for write access. Connected as it is, Althar only reads ${names.length === 1 ? 'it' : 'them'}.`,
+    fork: 'Fork it on GitHub',
     changeOn: (service: string) => `Change it on ${service}`,
     checkAgain: 'Check again',
     asItIs: 'Connect as it is',
@@ -533,9 +555,11 @@ const whyOf = (reason: AccessReason, line: AccessLine, product: Product, service
     case 'permission':
       return text.why.permission(reason.permission)
     case 'role':
-      return text.why.role(reason.role)
+      return reason.names !== undefined && reason.names.length > 0 ? text.why.readOnly(reason.names) : text.why.role(reason.role)
     case 'unseen':
       return text.why.unseen(reason.names)
+    case 'no_push':
+      return text.why.noPush(reason.names)
     case 'not_installed':
       return text.why.notInstalled(reason.owner)
     case 'restricted':
@@ -562,6 +586,9 @@ const stateOf = (state: AccessLine['state']): CanState => {
   }
 }
 
+/** The levels Bitbucket says a reach at, as its API does: a fact of their own, beside the repositories. */
+const LEVELS = ['read', 'write', 'admin']
+
 /** What was found, at a line's end, as the walk says it. */
 const factOf = (line: AccessLine, product: Product): string | undefined => {
   if (line.count !== null) return text.counted(product, line.count)
@@ -576,18 +603,30 @@ const checkLines = (model: ConnectModel, product: Product): ReadonlyArray<Connec
   const webUrl = model.instance?.webUrl ?? ''
   const places = placesAt(model.guide?.places ?? [], product, webUrl)
   const repositories = named(repositoriesIn(places))
-  const said = (need: AccessLine['need']) => lineText(need, product, model, repositories)
-  if (model.check !== null)
+  // What the check reaches, by owner and name where there are two at most, so the owner isn't a fact beside it.
+  const whole = [...new Set(places.flatMap((place) => place.repositories))]
+  const said = (need: AccessLine['need']) =>
+    lineText(need, product, model, need === 'reach' && whole.length <= 2 ? and(whole) : repositories)
+  if (model.check !== null) {
+    // A reason already said on a line above isn't said again under the next.
+    const told = new Set<string>()
     return model.check.lines.map((line) => {
-      const fact = factOf(line, product)
+      const fact =
+        line.need === 'reach' && whole.length <= 2 && line.count === null && !LEVELS.includes(line.fact ?? '')
+          ? undefined
+          : factOf(line, product)
+      const why = line.reason === null || line.state === 'ok' ? undefined : whyOf(line.reason, line, product, service)
+      const fresh = why !== undefined && !told.has(why)
+      if (why !== undefined) told.add(why)
       return {
         id: line.need,
         text: said(line.need),
         state: stateOf(line.state),
         ...(fact === undefined || line.state === 'no' ? {} : { fact }),
-        ...(line.reason === null || line.state === 'ok' ? {} : { why: whyOf(line.reason, line, product, service) }),
+        ...(fresh ? { why } : {}),
       }
     })
+  }
   const needs = needsOf(product, isHosted(webUrl), places.length > 0)
   // Known before the service is asked: the server answered, the site, the key typed.
   const known = (need: AccessLine['need']): string | undefined =>
@@ -636,7 +675,11 @@ const checkTitle = (model: ConnectModel, product: Product): string => {
           ? text.ssoTitle(reason.owner)
           : text.cantSee
     case 'push':
-      return reason?.kind === 'role' ? text.roleCantPush : text.cantPush
+      return reason?.kind === 'role'
+        ? reason.names !== undefined && reason.names.length > 0
+          ? text.cantPushTo(reason.names)
+          : text.roleCantPush
+        : text.cantPush
     case 'changes':
       return text.cantOpen(changes(product))
     case 'checks':
@@ -699,7 +742,8 @@ export function ConnectFlow({ model, compact = false, align = 'centre' }: Connec
       brand={brand}
       align={align}
       title={stepTitle(model, step, way)}
-      pager={{ steps: way.steps.length, at: model.at }}
+      // Where the walk is, while it is under way; the check's answer is where it ends, with nothing left to count.
+      {...(step === 'check' ? {} : { pager: { steps: way.steps.length, at: model.at } })}
       done={done}
       {...(line === undefined ? {} : { line })}
     >
@@ -1274,6 +1318,18 @@ function Fix({
       return product === 'github' && reason.url !== null
         ? listed(text.fix.githubAdd(reason.names), reason.names, change(reason.url), checkAgain, asItIs)
         : row(null, checkAgain, asItIs)
+    case 'no_push': {
+      const owner = reason.names[0]?.split('/')[0] ?? ''
+      // Althar's app: its owners let it write there; a token: given write access on its page, or one made that has it.
+      if (reason.url === null) return listed(text.fix.appPush(owner), reason.names, checkAgain, asItIs)
+      return listed(
+        product === 'github' ? text.fix.githubPush(reason.names, owner) : text.fix.push(service),
+        reason.names,
+        change(reason.url),
+        checkAgain,
+        asItIs,
+      )
+    }
     case 'not_installed':
       return row(null, checkAgain, asItIs)
     case 'restricted': {
@@ -1306,8 +1362,20 @@ function Fix({
         </Button>,
         asItIs,
       )
-    case 'role':
-      return row(text.fix.role, checkAgain, asItIs)
+    case 'role': {
+      const names = reason.names ?? []
+      if (names.length === 0) return row(text.fix.role, checkAgain, asItIs)
+      const [only, ...more] = names
+      const web = model.instance?.webUrl
+      // One repository on GitHub: its own fork page, a press away.
+      const fork =
+        product === 'github' && more.length === 0 && only !== undefined && web !== undefined ? (
+          <Button key="fork" trailingIcon="external" onClick={() => model.open(`${web}/${only}/fork`)}>
+            {text.fix.fork}
+          </Button>
+        ) : null
+      return listed(text.fix.readOnly(names), names, fork, checkAgain, asItIs)
+    }
     case 'unreadable':
       return row(null, asItIs)
     case 'failed':

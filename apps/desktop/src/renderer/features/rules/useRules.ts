@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from 'react'
 
 import { ApiError, type AgentStatus, type NameKind, patternProblem, type ProjectRulesView, type SandboxReachView } from '@althar/contracts'
 
-import { messageOf, type ProjectRulesChange } from '../../data/client'
+import { canCall, messageOf, type ProjectRulesChange } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
@@ -89,7 +89,8 @@ export interface RulesModel {
 export const useRules = (projectId: string): RulesModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const rulesRead = useQuery(read.rules(projectId))
+  // Not asked of a home that keeps them from this window: its section says so instead.
+  const rulesRead = useQuery({ ...read.rules(projectId), enabled: canCall(client, 'GetProjectRules') })
   const project = useQuery(read.projects()).data?.projects.find((each) => each.id === projectId)?.name ?? null
   const agents = useQuery(read.status()).data?.agents ?? []
   const [failed, setError] = useState<string | null>(null)

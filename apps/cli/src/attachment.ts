@@ -121,7 +121,7 @@ export const attachedSession = (
               yield* api.StopSession({ commandId, threadId })
               break
             case 'Answer':
-              yield* io.write('This socket client cannot answer permissions or questions. Use a trusted person client.\n')
+              yield* io.write('This terminal can’t answer permissions or questions: answer them in the Althar window.\n')
               break
             case 'Help':
               yield* io.write(`${ATTACH_USAGE}\n`)

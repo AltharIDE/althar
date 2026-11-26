@@ -123,7 +123,8 @@ export const connectionsHandlers = ({ identity, actorId, api }: ApiKit) =>
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId))),
+      CheckConnection: ({ connectionId, project }) =>
+        Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId, project))),
       Disconnect: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.remove(connectionId, actorId))),
     } satisfies Partial<ApiHandlers>
   })

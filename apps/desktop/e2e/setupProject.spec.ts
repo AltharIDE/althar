@@ -23,9 +23,9 @@ import {
  * a folder that isn't a repository yet (empty, or with files), which gets
  * git on main and a first commit as the project is made; a folder that is a
  * project already, which opens that project instead; a repository cloned
- * from GitHub; and a folder put on GitHub as it is made, under the account,
- * pushed and followed. Each state is shot at 1×, light and dark, into
- * test-results/setup-*.png.
+ * from GitHub, and several at once; and a folder put on GitHub as it is
+ * made, under the account, pushed and followed. Each state is shot at 1×,
+ * light and dark, into test-results/setup-*.png.
  */
 
 const git = (cwd: string, ...args: ReadonlyArray<string>) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
@@ -174,6 +174,54 @@ test('clones a repository from GitHub, and puts a new one on GitHub as it is mad
     await expect(page.getByRole('heading', { name: 'Harbour', level: 1 })).toBeVisible()
     expect(git(fresh, 'rev-parse', 'main')).toBe(git(harbour, 'rev-parse', 'HEAD'))
     expect(git(harbour, 'rev-parse', '--abbrev-ref', 'main@{upstream}')).toBe('origin/main')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('clones several repositories from GitHub at once into one project, and says its token reaches only some', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const meridian = repository(home, 'meridian')
+  // GitHub's meridian/api and meridian/web.
+  const api = join(home, 'remotes', 'api.git')
+  git(home, 'clone', '--quiet', '--bare', meridian, api)
+  const web = join(home, 'remotes', 'web.git')
+  git(home, 'clone', '--quiet', '--bare', meridian, web)
+  // Where the person keeps code, which each is cloned into.
+  mkdirSync(join(home, 'code'))
+  const { electronApp, page } = await launch(home, {
+    ALTHAR_FAKE_REMOTE_API: api,
+    ALTHAR_FAKE_REMOTE_WEB: web,
+    ALTHAR_FAKE_LIMITED: '1',
+  })
+  try {
+    await openFirstProject(electronApp, page, meridian)
+    await newProject(page, 'Meridian')
+    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    await page
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await page.getByRole('button', { name: 'Paste it myself' }).click()
+    await page.getByLabel('Paste it').fill('github_pat_e2e')
+    await page.getByRole('button', { name: 'Check' }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
+    await page.getByRole('button', { name: 'Clone meridian/api' }).click()
+    await page.getByRole('button', { name: 'Clone meridian/web' }).click()
+    await shoot(page, '13-clone-several-chosen')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shoot(page, '13-clone-several-chosen-dark')
+    await page.emulateMedia({ colorScheme: 'light' })
+    await expect(page.getByRole('button', { name: 'Chosen meridian/api' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Chosen meridian/web' })).toBeVisible()
+    await expect(page.getByText('Create clones meridian/api and meridian/web.')).toBeVisible()
+    await expect(page.getByText('Only the repositories your GitHub token was given are listed.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Give it more' })).toBeVisible()
+    await page.getByRole('button', { name: /^Create Meridian/ }).click()
+    await expect(page.getByRole('heading', { name: 'Meridian', level: 1 })).toBeVisible()
+    expect(git(join(home, 'code', 'api'), 'remote', 'get-url', 'origin')).toBe(api)
+    expect(git(join(home, 'code', 'web'), 'remote', 'get-url', 'origin')).toBe(web)
+    await shoot(page, '14-clone-several-made')
   } finally {
     await electronApp.close()
   }

@@ -111,3 +111,31 @@ describe('AgentsAtOnce scale', () => {
     expect(screen.getAllByText(String(count), { selector: 'span' })).toHaveLength(1)
   })
 })
+
+describe('AgentsAtOnce unchangeable', () => {
+  it('takes no focus, key or press, and offers no reset, where the machine it is about takes no change from here', () => {
+    const { slider, onChange } = track({ count: 6, own: true, disabled: true })
+    expect(slider.getAttribute('aria-disabled')).toBe('true')
+    expect(slider.hasAttribute('tabindex')).toBe(false)
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    fireEvent.pointerDown(slider, { clientX: 100 })
+    fireEvent.pointerUp(slider)
+    expect(slider.getAttribute('aria-valuenow')).toBe('6')
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /default/i })).toBeNull()
+  })
+})
+
+describe('TaskFolders where only the person removes them', () => {
+  it('lists held folders with nothing to press, and shows only when they go where they are not listed', async () => {
+    const { TaskFolders } = await import('../src/setup/TaskFolders/TaskFolders')
+    const held = [{ id: 't1', title: 'Fix the login', kind: 'done' as const, when: '2d', bytes: 10, why: 'uncommitted' as const, count: 2 }]
+    const goes = [{ id: 't2', title: 'Old change', kind: 'merged' as const, when: '5d', bytes: 20 }]
+    const { unmount } = render(<TaskFolders wait="smart" onWait={vi.fn()} disk={{ total: 100, used: 50 }} goes={goes} held={held} />)
+    expect(screen.queryByRole('button', { name: 'Clean up' })).toBeNull()
+    unmount()
+    render(<TaskFolders wait="week" onWait={vi.fn()} disk={null} goes={[]} held={[]} listed={false} />)
+    expect(screen.queryByText(/No finished tasks’ folders yet/)).toBeNull()
+    expect(screen.getByText('Remove finished tasks’ folders')).toBeTruthy()
+  })
+})

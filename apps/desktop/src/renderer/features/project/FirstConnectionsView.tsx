@@ -1,6 +1,7 @@
+import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { useState, useSyncExternalStore } from 'react'
 
-import type { ConnectionList, Service } from '@althar/contracts'
+import type { AccessReason, ConnectionCheck, ConnectionList, Service } from '@althar/contracts'
 import { FirstConnections, type FirstConnectionsService, LinkButton } from '@althar/ui'
 
 import { canCall } from '../../data/client'
@@ -17,7 +18,10 @@ import { SERVICES, hostsCode, serviceBrand, serviceName, serviceOf } from '../co
  * host its repositories' remotes name, or every host where they name none,
  * and a tracker. Connecting one opens its walk in the card. Each project's
  * Not now is kept on this computer (`althar.firstConnections`), and the card
- * goes once the conversation has begun.
+ * goes once the conversation has begun. Where its host is connected, the
+ * card asks what that sign-in can do there as the project is added, and
+ * where it may not push to the project's repositories, says so, with
+ * Connect again in place: found here, not on a task's last step.
  */
 
 const STORED = 'althar.firstConnections'
@@ -90,6 +94,82 @@ export const firstConnectionsOf = (
   }
 }
 
+/**
+ * The connections that reach a project's code, one for each host its repositories are on, with the repositories there:
+ * what each one's check is asked of.
+ */
+export const codeConnectionsOf = (list: ConnectionList, project: string) =>
+  list.places.flatMap((place) => {
+    if (place.project !== project) return []
+    const connection = list.connections.find((one) => one.product === place.product && one.webUrl === place.webUrl)
+    const service = connection === undefined ? undefined : serviceOf(list.products, connection.product)
+    return connection === undefined || service === undefined ? [] : [{ connection, place, service }]
+  })
+
+/** Why a sign-in may not push, in a line with what puts it right. */
+const cantPushWhy = (reason: AccessReason | null, service: string, login: string): string => {
+  switch (reason?.kind) {
+    case 'no_push':
+      return reason.url === null
+        ? `Althar’s ${service} app may not push there. Its owners can let it write, or connect again with a token that can push.`
+        : `${service} won’t take a push there with ${login}’s token. Give it write access on ${service}, or connect again with one that can push.`
+    case 'scope':
+      return `The token wasn’t given the ${reason.scope} scope. Connect again with one that has it.`
+    case 'role':
+      return `${login} may only read there: its owners can give the account write access, or connect again as one that can push.`
+    default:
+      return `${service} won’t take a push from this sign-in there. Connect again with one that can push.`
+  }
+}
+
+/** A refusal's reason, as one remedy: those with the same remedy are said together. */
+const remedyOf = (reason: AccessReason | null) =>
+  reason === null
+    ? 'none'
+    : reason.kind === 'scope'
+      ? `scope ${reason.scope}`
+      : reason.kind === 'no_push'
+        ? `no_push ${reason.url ?? ''}`
+        : reason.kind
+
+/**
+ * What a connection's check says of pushing to the project's repositories there: those its sign-in may not push to, by
+ * remedy, each with why and what puts it right; empty where it may, or the check doesn't say. Only repositories with the
+ * same reason share a line, so a remedy is never given for a repository it doesn't fit; another project's refusals are
+ * never this one's, and without each repository's own outcome, only a reason that names its repositories, or one about the
+ * whole token, is said.
+ */
+export const cantPushOf = (
+  check: ConnectionCheck,
+  repositories: ReadonlyArray<string>,
+  service: string,
+  login: string,
+): ReadonlyArray<{ readonly names: ReadonlyArray<string>; readonly why: string }> => {
+  const push = check.lines.find((line) => line.need === 'push')
+  if (push === undefined) return []
+  const mine = (path: string) => repositories.some((one) => one.toLowerCase() === path.toLowerCase())
+  const refused: ReadonlyArray<{ readonly path: string; readonly reason: AccessReason | null }> =
+    push.repositories !== undefined
+      ? push.repositories.filter((one) => one.state === 'no' && mine(one.path))
+      : push.state !== 'no'
+        ? []
+        : push.reason?.kind === 'no_push'
+          ? push.reason.names.filter(mine).map((path) => ({ path, reason: push.reason }))
+          : push.reason?.kind === 'scope'
+            ? repositories.map((path) => ({ path, reason: push.reason }))
+            : []
+  // Named as the project names them.
+  const named = (path: string) => repositories.find((one) => one.toLowerCase() === path.toLowerCase()) ?? path
+  const groups = new Map<string, { names: Array<string>; reason: AccessReason | null }>()
+  for (const one of refused) {
+    const key = remedyOf(one.reason)
+    const group = groups.get(key) ?? { names: [], reason: one.reason }
+    group.names.push(named(one.path))
+    groups.set(key, group)
+  }
+  return [...groups.values()].map((group) => ({ names: group.names, why: cantPushWhy(group.reason, service, login) }))
+}
+
 export interface FirstConnectionsViewProps {
   projectId: string
   /** The project's name, as the connections' places name it. */
@@ -101,30 +181,91 @@ export interface FirstConnectionsViewProps {
 /** A new project's card for its code host and a tracker, while either isn't connected and it wasn't put away. */
 export function FirstConnectionsView({ projectId, project, model, className }: FirstConnectionsViewProps) {
   const hidden = useSyncExternalStore(subscribe, read)
-  const [walking, setWalking] = useState<Service | null>(null)
+  const [walking, setWalking] = useState<{ readonly service: Service; readonly again: string | null } | null>(null)
   const { client } = useServices()
+  const cache = useQueryClient()
   const list = model.list
+  const hosts = canCall(client, 'ConnectToken')
+  // The project's hosts, connected: each asked what its sign-in can do there, for the repositories the project has there now,
+  // so another project's answer, or one from before a repository was added, is never this one's.
+  const codes = list === null || hidden.includes(projectId) || !hosts ? [] : codeConnectionsOf(list, project)
+  const keyOf = (code: (typeof codes)[number]) =>
+    [
+      'connection-check',
+      code.connection.id,
+      project,
+      [...code.place.repositories]
+        .map((path) => path.toLowerCase())
+        .sort()
+        .join(' '),
+    ] as const
+  const checks = useQueries({
+    queries: codes.map((code) => ({
+      queryKey: keyOf(code),
+      // For this project alone: where its own work is pushed, never another project's destinations on the same host.
+      queryFn: () => client.checkConnection(code.connection.id, project),
+      enabled: canCall(client, 'CheckConnection'),
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  })
   if (list === null || hidden.includes(projectId)) return null
   const remote = client.connection !== undefined
-  const offer = firstConnectionsOf(list, project, { hosts: canCall(client, 'ConnectToken'), trackers: !remote })
-  // Nothing this window may connect: no card.
-  if (offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0) return null
+  const offer = firstConnectionsOf(list, project, { hosts, trackers: !remote })
+  const cantPush = codes.flatMap((code, index) => {
+    const data = checks[index]?.data
+    const found =
+      data === undefined ? [] : cantPushOf(data, code.place.repositories, serviceName(code.service), code.connection.account.login)
+    return found.map((one) => ({ code, ...one }))
+  })
+  // Nothing this window may connect, and nothing in the way: no card; but one walking stays till its walk ends, its check shown.
+  if (walking === null && offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0 && cantPush.length === 0)
+    return null
+  // Walking in to a code host, the card stays the code's as it connects, its check shown before Done.
+  const walkingHost =
+    walking !== null && hostsCode(walking.service) && offer.host === undefined ? { host: { service: option(walking.service) } } : {}
   return (
     <FirstConnections
       {...offer}
-      onConnect={(service) => {
-        if (isService(service)) setWalking(service)
+      {...walkingHost}
+      {...(cantPush.length === 0
+        ? {}
+        : {
+            cantPush: cantPush.map((one) => ({
+              id: `${one.code.connection.id} ${one.names.join(' ')}`,
+              service: option(one.code.service),
+              names: one.names,
+              why: one.why,
+              // Its own connection signed in to again, so it takes one that can push: never another server's of the same kind.
+              onConnectAgain: () => setWalking({ service: one.code.service, again: one.code.connection.id }),
+            })),
+          })}
+      onConnect={(chosen) => {
+        if (isService(chosen)) setWalking({ service: chosen, again: null })
       }}
       onHide={() => hide(projectId)}
-      {...(walking === null ? {} : { walk: <Walk service={walking} onClose={() => setWalking(null)} /> })}
+      {...(walking === null
+        ? {}
+        : {
+            walk: (
+              <Walk
+                service={walking.service}
+                again={walking.again}
+                onClose={() => {
+                  setWalking(null)
+                  void cache.invalidateQueries({ queryKey: ['connection-check'] })
+                }}
+              />
+            ),
+          })}
       {...(className === undefined ? {} : { className })}
     />
   )
 }
 
 /** A service's walk in, in the card: the one Settings shows, from the card's left edge, with the way back to the card's rows on it too. */
-function Walk({ service, onClose }: { service: Service; onClose: () => void }) {
-  const flow = useConnect({ service, again: null, onClose })
+function Walk({ service, again, onClose }: { service: Service; again: string | null; onClose: () => void }) {
+  const flow = useConnect({ service, again, onClose })
   return (
     <div className={s.inCard}>
       <ConnectFlow model={flow} compact align="start" />

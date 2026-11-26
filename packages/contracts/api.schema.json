@@ -40,6 +40,53 @@
             }
           ]
         },
+        "repositories": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "accountPush": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/AccessReason"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "state": {
+                    "enum": ["ok", "no", "unknown"],
+                    "type": "string"
+                  }
+                },
+                "required": ["path", "state", "reason"],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "state": {
           "enum": ["ok", "no", "unknown"],
           "type": "string"
@@ -120,6 +167,19 @@
               "enum": ["role"],
               "type": "string"
             },
+            "names": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "role": {
               "anyOf": [
                 {
@@ -139,6 +199,33 @@
           "properties": {
             "kind": {
               "enum": ["unseen"],
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["kind", "names", "url"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "enum": ["no_push"],
               "type": "string"
             },
             "names": {
@@ -11312,6 +11399,51 @@
       "required": ["enabled", "workers"],
       "type": "object"
     },
+    "HostReach": {
+      "additionalProperties": true,
+      "properties": {
+        "limited": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "by": {
+                  "enum": ["token", "app"],
+                  "type": "string"
+                },
+                "owner": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "url": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["by", "url", "owner"],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["limited"],
+      "type": "object"
+    },
     "HostRepository": {
       "additionalProperties": true,
       "properties": {
@@ -13583,6 +13715,62 @@
                 }
               ]
             },
+            "errand": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "merges": {
+                      "items": {
+                        "additionalProperties": true,
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "once": {
+                            "type": "string"
+                          },
+                          "task": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["label", "url", "task", "once"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "quiet": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["id", "quiet", "merges"],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -14243,6 +14431,21 @@
         }
       },
       "required": ["digest", "mediaType", "bytes", "width", "height", "name", "unkept"],
+      "type": "object"
+    },
+    "PictureBytes": {
+      "additionalProperties": true,
+      "properties": {
+        "bodyBase64": {
+          "maxLength": 27962028,
+          "type": "string"
+        },
+        "mediaType": {
+          "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+          "type": "string"
+        }
+      },
+      "required": ["mediaType", "bodyBase64"],
       "type": "object"
     },
     "PicturesItem": {
@@ -19448,7 +19651,8 @@
             "signed_out",
             "sign_in_ended",
             "not_installed",
-            "waiting_on_person"
+            "waiting_on_person",
+            "push_refused"
           ],
           "type": "string"
         }
@@ -24663,7 +24867,7 @@
         "required": ["commandId", "server", "agents"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -25070,7 +25274,7 @@
         "required": ["commandId", "id", "repo", "ref", "sha", "subpath", "treeHash"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/InstalledSkill"
       }
@@ -25528,6 +25732,16 @@
         "properties": {
           "connectionId": {
             "type": "string"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": ["connectionId"],
@@ -25554,7 +25768,7 @@
         "required": ["commandId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -25570,7 +25784,7 @@
           "type": "null"
         }
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "items": {
           "$ref": "#/$defs/SkillUpdate"
@@ -25685,6 +25899,16 @@
         "properties": {
           "commandId": {
             "$ref": "#/$defs/CommandId"
+          },
+          "folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "from": {
             "anyOf": [
@@ -26443,7 +26667,7 @@
         "required": ["commandId", "id", "name", "parts"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -26672,7 +26896,7 @@
         "required": ["source"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/SkillsFound"
       }
@@ -26806,7 +27030,7 @@
         "required": ["projectId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/AgentTools"
       }
@@ -27566,7 +27790,7 @@
         "required": ["name", "repository"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ServerDetail"
       }
@@ -27705,7 +27929,7 @@
           "type": "null"
         }
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/TaskFolders"
       }
@@ -28798,7 +29022,7 @@
         },
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "items": {
           "$ref": "#/$defs/Preset"
@@ -28903,7 +29127,7 @@
           "type": "null"
         }
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/SkillList"
       }
@@ -29882,7 +30106,7 @@
         "required": ["commandId", "kind", "name", "way"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -30435,6 +30659,27 @@
         "$ref": "#/$defs/FolderReading"
       }
     },
+    "ReadHostReach": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "call",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "connectionId": {
+            "type": "string"
+          }
+        },
+        "required": ["connectionId"],
+        "type": "object"
+      },
+      "socket": true,
+      "success": {
+        "$ref": "#/$defs/HostReach"
+      }
+    },
     "ReadLaunchOutput": {
       "error": {
         "$ref": "#/$defs/ApiErrorEncoded"
@@ -30531,6 +30776,27 @@
       "socket": true,
       "success": {
         "$ref": "#/$defs/OutputText"
+      }
+    },
+    "ReadPicture": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "call",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": ["digest"],
+        "type": "object"
+      },
+      "socket": true,
+      "success": {
+        "$ref": "#/$defs/PictureBytes"
       }
     },
     "ReadWorkerFile": {
@@ -30812,7 +31078,7 @@
         "required": ["commandId", "name"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -31040,7 +31306,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -31227,7 +31493,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/InstalledSkill"
       }
@@ -31796,7 +32062,7 @@
         "required": ["commandId", "count"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -31897,7 +32163,7 @@
         "required": ["commandId", "paused"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -31921,7 +32187,7 @@
         "required": ["commandId", "on"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32012,7 +32278,7 @@
         "required": ["commandId", "wait"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32192,7 +32458,7 @@
         "required": ["commandId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32270,7 +32536,7 @@
         "required": ["commandId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32294,7 +32560,7 @@
         "required": ["commandId", "on"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32876,7 +33142,7 @@
         "required": ["commandId", "on"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32900,7 +33166,7 @@
         "required": ["commandId", "style"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32950,7 +33216,7 @@
         "required": ["commandId", "to"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -32981,7 +33247,7 @@
         "required": ["commandId", "route"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33184,7 +33450,7 @@
         "required": ["commandId", "kind", "name", "projectId", "on"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33218,7 +33484,7 @@
         "required": ["commandId", "kind", "agent", "name", "out"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33275,7 +33541,7 @@
         "required": ["commandId", "kind", "name", "roles", "projectId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33306,7 +33572,7 @@
         "required": ["commandId", "kind", "on", "takeBack"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33688,7 +33954,7 @@
         "required": ["repo", "ref", "subpath"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/SkillReviewCard"
       }
@@ -34488,7 +34754,7 @@
         "required": ["commandId", "id", "tuning"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -34642,7 +34908,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -34690,7 +34956,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }

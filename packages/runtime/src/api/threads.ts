@@ -1,9 +1,10 @@
-import { type ApiHandlers, ApiError, type GoalControl, goalCommand } from '@althar/contracts'
+import { ApiError, type ApiHandlers, type GoalControl, PICTURE_BYTES, goalCommand, pictureType } from '@althar/contracts'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { type Crypto, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { controlGoal, goalLine, goalThread, readGoal } from '../threadGoals'
+import { Artifacts } from '../Artifacts'
 import { addItem } from '../threads'
 import { Issues } from '../Issues'
 import { Queries } from '../Queries'
@@ -19,6 +20,7 @@ import type { ApiKit } from './kit'
  */
 export const threadsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, filesFor, filesSaid, commentsFor, commentsSaid }: ApiKit) =>
   Effect.gen(function* () {
+    const artifacts = yield* Artifacts
     const sessions = yield* Sessions
     const queries = yield* Queries
     const tasks = yield* Tasks
@@ -178,6 +180,17 @@ export const threadsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, fi
         api(
           Effect.gen(function* () {
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
+          }),
+        ),
+      // A picture a thread shows, by its digest, for a window on another computer or a phone: only what a window draws.
+      ReadPicture: ({ digest }) =>
+        api(
+          Effect.gen(function* () {
+            const bytes = yield* artifacts.read(digest)
+            const type = bytes === null ? null : pictureType(bytes)
+            if (bytes === null || type === null || bytes.byteLength > PICTURE_BYTES)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This picture isn’t kept here.' })
+            return { mediaType: type, bodyBase64: Buffer.from(bytes).toString('base64') }
           }),
         ),
     } satisfies Partial<ApiHandlers>

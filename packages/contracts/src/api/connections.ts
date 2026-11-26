@@ -144,8 +144,10 @@ export const AccessReason = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('refused') }),
   Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
-  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  /** `names`: the repositories (owner/name) the account's role there keeps it from, where the service says which. */
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String), names: Schema.optional(Schema.Array(Schema.String)) }),
   Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('no_push'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
@@ -163,6 +165,18 @@ export const AccessLine = Schema.Struct({
   /** How many, where the fact is a count: boards, teams, projects. */
   count: Schema.NullOr(Schema.Number),
   reason: Schema.NullOr(AccessReason),
+  /** Each repository it asked on its own, with its outcome and why: what a project's card says of its own repositories. */
+  repositories: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        state: Schema.Literals(['ok', 'no', 'unknown']),
+        reason: Schema.NullOr(AccessReason),
+        /** Whether the service said the account itself may push there; null where it didn't say. */
+        accountPush: Schema.optional(Schema.NullOr(Schema.Boolean)),
+      }),
+    ),
+  ),
 })
 export type AccessLine = typeof AccessLine.Type
 
@@ -243,6 +257,7 @@ export const ConnectionsApi = RpcGroup.make(
   /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
   command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
   /** Asks the service what a connection can do. */
-  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
+  /** A connection's check; for one project, by its name, only that project's repositories, and where its work is pushed. */
+  call('CheckConnection', { connectionId: Schema.String, project: Schema.optional(Schema.String) }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
 ).middleware(ClientAuthority)

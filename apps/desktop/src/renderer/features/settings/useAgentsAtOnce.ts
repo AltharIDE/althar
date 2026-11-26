@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import type { AgentsAtOnce, AppSettings, Places } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
+import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
 import { placesAfter } from '../../shared/usePlaces'
 
@@ -25,6 +26,8 @@ export interface AgentsAtOnceModel {
   readonly failed: boolean
   /** A number of the person's own; null goes back to the default. */
   readonly set: (count: number | null) => void
+  /** Whether the window's home takes a number from it: one on another computer from before it did doesn't. */
+  readonly canSet: boolean
 }
 
 /** Null until the settings are read. */
@@ -75,5 +78,5 @@ export const useAgentsAtOnce = (): AgentsAtOnceModel | null => {
     [cache, client],
   )
 
-  return settings === undefined ? null : { atOnce: settings.agentsAtOnce, failed, set }
+  return settings === undefined ? null : { atOnce: settings.agentsAtOnce, failed, set, canSet: canCall(client, 'SetAgentsAtOnce') }
 }

@@ -714,6 +714,7 @@ const FAILED: ReadonlySet<string> = new Set([
   'failed_to_start',
   'not_connected',
   'transient',
+  'push_refused',
 ])
 
 /** A stuck step that signing its agent in again puts right: whose agent, by id; null for any other. */

@@ -51,9 +51,14 @@ export type AccessReason =
   /** A permission a fine-grained token wasn't given, by the name its page uses: Pull requests. */
   | { readonly kind: 'permission'; readonly permission: string; readonly url: string | null }
   /** The account's own role there doesn't allow it: GitLab's Reporter, Bitbucket's read. Null where the service doesn't name it. */
-  | { readonly kind: 'role'; readonly role: string | null }
+  | { readonly kind: 'role'; readonly role: string | null; readonly names?: ReadonlyArray<string> }
   /** Repositories it doesn't see, by their paths. */
   | { readonly kind: 'unseen'; readonly names: ReadonlyArray<string>; readonly url: string | null }
+  /**
+   * Repositories it sees but may not push to, by their paths, as git's own first question of a push was answered: a token
+   * given read alone there, or one made for another owner. Where the token's access is changed, where there is a page for it.
+   */
+  | { readonly kind: 'no_push'; readonly names: ReadonlyArray<string>; readonly url: string | null }
   /** Althar's GitHub App isn't installed on the owner, and where it is installed. */
   | { readonly kind: 'not_installed'; readonly owner: string; readonly url: string | null }
   /** The owner restricts OAuth apps, which keeps out an OAuth token such as gh's. */
@@ -67,6 +72,18 @@ export type AccessReason =
   /** It couldn't be asked: the service's own words. */
   | { readonly kind: 'failed'; readonly message: string }
 
+/** What a line found of one repository, where it asks each on its own: pushing, say. */
+export interface RepositoryAccess {
+  readonly path: string
+  readonly state: AccessState
+  readonly reason: AccessReason | null
+  /**
+   * Whether the service said the account itself may push there; null where it didn't say. A refusal with true is the
+   * sign-in's, with false the account's role, and with null either.
+   */
+  readonly accountPush?: boolean | null
+}
+
 export interface AccessLine {
   readonly need: AccessNeed
   readonly state: AccessState
@@ -75,6 +92,11 @@ export interface AccessLine {
   /** How many, where the fact is a count: boards, teams, projects. */
   readonly count: number | null
   readonly reason: AccessReason | null
+  /**
+   * Each repository it was asked of, where the line asks them one by one, with its own outcome and reason: a project's card
+   * says what its own repositories can do, not what another project's can.
+   */
+  readonly repositories?: ReadonlyArray<RepositoryAccess>
 }
 
 export interface AccessReport {
@@ -99,6 +121,11 @@ export interface AccessInput {
   readonly auth: 'device_flow' | 'pkce' | 'token'
   /** The projects' repositories on this instance, by their paths. */
   readonly repositories: ReadonlyArray<ReadonlyArray<string>>
+  /**
+   * Those a task's work is pushed to, where it is known: a fork's own, not the repository it came from, which is only read.
+   * Every repository where it isn't given.
+   */
+  readonly pushes?: ReadonlyArray<ReadonlyArray<string>>
   /** Althar's GitHub App, by its slug, for where it is installed. */
   readonly appSlug?: string
 }
@@ -113,4 +140,5 @@ export const line = (need: AccessNeed, state: AccessState, more: Partial<Omit<Ac
   fact: more.fact ?? null,
   count: more.count ?? null,
   reason: more.reason ?? null,
+  ...(more.repositories === undefined ? {} : { repositories: more.repositories }),
 })

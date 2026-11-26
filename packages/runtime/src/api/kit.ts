@@ -85,7 +85,9 @@ export const apiKit = Effect.gen(function* () {
   const connectionAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
       ? effect
-      : Effect.fail(new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }))
+      : Effect.fail(
+          new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
+        )
   const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
   const sql = yield* SqlClient.SqlClient
   const ledger = yield* Ledger

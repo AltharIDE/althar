@@ -22,7 +22,7 @@ import { SettingsApi } from './api/settings'
 import { AccountStrategy, AlwaysScope, ApiError, CommandId, Holder, Product, Queued, RuleKind } from './api/shared'
 import { SkillsApi } from './api/skills'
 import { TasksApi } from './api/tasks'
-import { ThreadsApi } from './api/threads'
+import { PictureApi, ThreadsApi } from './api/threads'
 import { ToolsApi } from './api/tools'
 import { WorkerPreviewApi, WorkersApi, WorkerSnapshotApi } from './api/workers'
 
@@ -157,6 +157,7 @@ export const Api = HomeApi.merge(
   ProjectsApi,
   TasksApi,
   ThreadsApi,
+  PictureApi,
   SearchApi,
   CanvasesApi,
   PlansApi,
@@ -198,6 +199,7 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         ProjectsApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ProjectsApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         TasksApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof TasksApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         ThreadsApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ThreadsApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        PictureApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof PictureApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         SearchApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof SearchApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         CanvasesApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof CanvasesApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         PlansApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof PlansApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),

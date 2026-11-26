@@ -130,7 +130,7 @@ test.beforeAll(() => {
 })
 
 /** The app, with the fake OpenSSH and the signed release, its window big enough for the dialog, and the fake server's folder. */
-const start = async () => {
+const start = async (env: Readonly<Record<string, string>> = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -145,6 +145,7 @@ const start = async () => {
     ALTHAR_SSH_TOOLS: tools,
     ALTHAR_HOST_RELEASE_KEY: join(home, 'release.pub'),
     ALTHAR_HOST_RELEASE_MANIFEST: signed.manifest,
+    ...env,
   })
   await openFirstProject(electronApp, page, repository(projects))
   // Room for the whole dialog as its steps come, as a window of the person's has.
@@ -239,6 +240,63 @@ test('sets a first home up over SSH, as steps, from what a home is to its own wi
     }
   } finally {
     await closing(electronApp, home)
+  }
+})
+
+test('on the home’s window, a new project finds a repository only on GitHub, and clones several there at once', async () => {
+  // GitHub's meridian/api and meridian/web, its token said to reach only some of the account's: the home's own connection.
+  const remotes = mkdtempSync(join(tmpdir(), 'althar-e2e-remotes-'))
+  const source = repository(remotes, 'meridian')
+  const api = join(remotes, 'api.git')
+  const web = join(remotes, 'web.git')
+  execFileSync('git', ['clone', '--quiet', '--bare', source, api])
+  execFileSync('git', ['clone', '--quiet', '--bare', source, web])
+  const { home, electronApp, page } = await start({ ALTHAR_FAKE_REMOTE_API: api, ALTHAR_FAKE_REMOTE_WEB: web, ALTHAR_FAKE_LIMITED: '1' })
+  try {
+    await openSetup(page)
+    await page.getByRole('button', { name: 'Set one up', exact: true }).click()
+    await page.getByRole('radio', { name: /^Over SSH/ }).click()
+    await page.getByRole('button', { name: 'Continue', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Connect a home' })
+    await dialog.getByLabel('SSH host', { exact: true }).fill('deploy@vps.example.com')
+    await dialog.getByRole('button', { name: 'Set it up', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Trust and continue', exact: true }).click()
+    await dialog.getByLabel('Name', { exact: true }).fill('My VPS')
+    const opened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
+    await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
+    const remote = await opened
+    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true })).toBeVisible()
+
+    // A new project there: GitHub connected on the home, from the clone list, with a token.
+    await remote.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: 'New project' }).click()
+    await remote.getByRole('textbox', { name: 'Name' }).fill('Meridian')
+    await remote.getByRole('button', { name: 'Connect GitHub' }).click()
+    await remote
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await remote.getByRole('button', { name: 'Paste it myself' }).click()
+    await remote.getByLabel('Paste it').fill('github_pat_e2e')
+    await remote.getByRole('button', { name: 'Check' }).click()
+    await remote.getByRole('button', { name: 'Done' }).click()
+    // meridian/web is on GitHub alone, on no computer: found by searching for it.
+    const find = remote.getByRole('searchbox', { name: 'Find a repository, or paste its URL' })
+    await find.fill('web')
+    await remote.getByRole('button', { name: 'Clone meridian/web' }).click()
+    await find.fill('')
+    await remote.getByRole('button', { name: 'Clone meridian/api' }).click()
+    await expect(remote.getByRole('button', { name: 'Chosen meridian/web' })).toBeVisible()
+    await expect(remote.getByText('Create clones meridian/web and meridian/api.')).toBeVisible()
+    await expect(remote.getByText('Only the repositories your GitHub token was given are listed.')).toBeVisible()
+    await still(remote)
+    await remote.screenshot({ path: 'test-results/home-clone-several.png', scale: 'css' })
+    await remote.getByRole('button', { name: /^Create Meridian/ }).click()
+    await expect(remote.getByRole('heading', { name: 'Meridian', level: 1 })).toBeVisible()
+    await still(remote)
+    await remote.screenshot({ path: 'test-results/home-clone-several-made.png', scale: 'css' })
+  } finally {
+    await closing(electronApp, home)
+    rmSync(remotes, { recursive: true, force: true })
   }
 })
 

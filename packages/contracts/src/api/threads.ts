@@ -58,6 +58,16 @@ export const TaskIssue = Schema.Struct({
 })
 export type TaskIssue = typeof TaskIssue.Type
 
+/** The most a picture's bytes can be: what the runtime keeps of one (`PICTURE_KEPT`). */
+export const PICTURE_BYTES = 20 * 1024 * 1024
+
+/** A kept picture's bytes, read by its digest (`ReadPicture`): what kind it is, and the bytes in base64. */
+export const PictureBytes = Schema.Struct({
+  mediaType: Schema.Literals(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+  bodyBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(PICTURE_BYTES / 3) * 4)),
+})
+export type PictureBytes = typeof PictureBytes.Type
+
 /** Images in the task's collection, independent of how its conversation is paged. */
 export const EvidenceGallery = Schema.Struct({
   revision: Schema.Number,
@@ -495,4 +505,13 @@ export const ThreadsApi = RpcGroup.make(
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
+).middleware(ClientAuthority)
+
+/**
+ * A picture a thread shows (a lead's report, show_pictures, a check's or review's shots, a canvas's picture), by its digest in
+ * the home's artifact store: how a window on another computer and a phone draw what the home keeps, through the home's own
+ * connection. Only what a window draws is given (PNG, JPEG, GIF, WebP), whole: a smaller copy is made where it is shown.
+ */
+export const PictureApi = RpcGroup.make(
+  call('ReadPicture', { digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)) }, PictureBytes),
 ).middleware(ClientAuthority)

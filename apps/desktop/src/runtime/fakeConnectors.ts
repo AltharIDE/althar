@@ -11,6 +11,7 @@ import {
   type Product,
   type ProductInfo,
   products,
+  pushAnswer,
 } from '@althar/connectors'
 import { type FakeCheck, makeFakeService, routed } from '@althar/connectors/testing'
 import { Connectors } from '@althar/runtime'
@@ -22,7 +23,8 @@ import { Duration, Effect, Layer } from 'effect'
  * https://github.test, which no network reaches. Its repositories are
  * meridian/api, with one issue, and meridian/web where
  * ALTHAR_FAKE_REMOTE_WEB is set, with the pull requests ALTHAR_FAKE_PULLS
- * lists for a test to review; what is pushed to one goes to the bare
+ * lists for a test to review, its token said to reach only some of the
+ * account's where ALTHAR_FAKE_LIMITED is set; what is pushed to one goes to the bare
  * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE, and its commits have the checks
  * ALTHAR_FAKE_CHECKS names, where it does, passed once the file
  * ALTHAR_FAKE_CHECKS_PASS names is there, where it names one; a merge into
@@ -73,11 +75,38 @@ github.addRepository(['meridian', 'api'])
 if (process.env.ALTHAR_FAKE_QUEUE !== undefined) github.mergeQueue()
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.
 if (process.env.ALTHAR_FAKE_REMOTE_WEB !== undefined) github.addRepository(['meridian', 'web'])
+// A token made for some of the account's repositories, for a test that sees it said (ALTHAR_FAKE_LIMITED).
+if (process.env.ALTHAR_FAKE_LIMITED !== undefined)
+  github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens`, owner: null })
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
 // Pull requests someone else opened on meridian/api, for a test that reviews them: each its title, author and head commit, which
 // the test pushed to the remote as refs/pull/<n>/head, numbered from 1 in the order given.
 for (const pull of JSON.parse(process.env.ALTHAR_FAKE_PULLS ?? '[]') as ReadonlyArray<{ title: string; author: string; headSha: string }>)
   github.addPullRequest({ path: ['meridian', 'api'], ...pull })
+
+/**
+ * Where a test pushes over HTTP to a server of its own on loopback (ALTHAR_FAKE_REMOTE), GitHub's check asks it git's first
+ * question of a push, as the real check does, and says the repository it refuses: the only address these tests reach.
+ */
+const checkedPush: Access = (input) =>
+  Effect.flatMap(github.access(input), (report): Effect.Effect<AccessReport> => {
+    const remote = process.env.ALTHAR_FAKE_REMOTE ?? ''
+    if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(remote)) return Effect.succeed(report)
+    return Effect.map(pushAnswer(globalThis.fetch, remote, 'Basic e2e'), (answer) =>
+      answer !== 'no'
+        ? report
+        : {
+            ...report,
+            lines: report.lines.map((said) =>
+              said.need === 'push'
+                ? line('push', 'no', {
+                    reason: { kind: 'no_push', names: ['meridian/api'], url: 'https://github.com/settings/personal-access-tokens' },
+                  })
+                : said,
+            ),
+          },
+    )
+  })
 
 export const fakeConnectors = Layer.succeed(
   Connectors,
@@ -87,7 +116,7 @@ export const fakeConnectors = Layer.succeed(
         ...products.github,
         hosted: { webUrl: HOST, apiUrl: `${HOST}/api/v3` },
         make: () => ({ host: github, tracker: github }),
-        access: github.access,
+        access: checkedPush,
       },
     ],
     fetch: () => Promise.reject(new Error('The end-to-end tests reach no network')),

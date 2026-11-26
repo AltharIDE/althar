@@ -283,9 +283,12 @@ const entriesOf = (projectId: string) =>
  */
 const placeAt = (projectId: string, repository: string, number: number) =>
   Effect.gen(function* () {
-    const { hosted } = yield* hostedOf(projectId)
+    const { hosted, forks } = yield* hostedOf(projectId)
     const [product, path] = [repository.slice(0, repository.indexOf(':')), repository.slice(repository.indexOf(':') + 1)]
-    const found = hosted.find((one) => one.host.product === product && one.path.join('/').toLowerCase() === path.toLowerCase())
+    // Where its work goes first (a fork's upstream, DEV-169), then the fork itself, where a step kept from before names it.
+    const found = [...hosted, ...forks].find(
+      (one) => one.host.product === product && one.path.join('/').toLowerCase() === path.toLowerCase(),
+    )
     if (found === undefined)
       return yield* refused(
         `${path} isn’t one of the project’s repositories on a host Althar is connected to now. The person connects it in Settings.`,
@@ -1241,7 +1244,9 @@ export class MergeLine extends Context.Service<
                 ? null
                 : (first?.branch ?? null)
           const content = { key, branch, rows: [...history, ...active] }
-          if (content.rows.length === 0) return
+          // Nothing left on a card that showed some, as when the last one waiting was called off: it shows nothing now, so the
+          // thread's merging line lets go of it too.
+          if (content.rows.length === 0 && (fresh || latest === undefined || latest.rows.length === 0)) return
           if (!fresh && latest !== undefined) {
             if (JSON.stringify({ key, branch: latest.branch, rows: latest.rows }) === JSON.stringify(content)) return
             return yield* updateItem(projectId as ProjectId, latest.id, content)
@@ -1324,6 +1329,11 @@ export class MergeLine extends Context.Service<
                 branch: pull.change.target,
                 request,
               })
+              // The thread's merging line follows it from its task's name to its number.
+              yield* errands.retell(kept.errandId, {
+                title: `Its task’s pull request is #${pull.number}`,
+                links: [{ label: `#${pull.number}`, url: pull.change.url }],
+              })
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.gen(function* () {
@@ -1384,7 +1394,26 @@ export class MergeLine extends Context.Service<
                 ),
                 (rows) => rows.map((row) => row.subject),
               )
-              for (const key of new Set([...lines, ...watched])) {
+              // Each branch whose newest card still shows something on its way, which the line reads again even with nothing
+              // waiting any more: what was called off comes off it.
+              const moving = yield* Effect.map(
+                Effect.flatMap(
+                  SqlClient.SqlClient,
+                  (sql) =>
+                    sql<{
+                      content: string
+                    }>`SELECT content FROM thread_items WHERE project_id = ${projectId} AND kind = 'merge_line' ORDER BY rowid`,
+                ),
+                (rows) => {
+                  const newest = new Map<string, ReadonlyArray<CardRow>>()
+                  for (const row of rows) {
+                    const content = JSON.parse(row.content) as { key?: string; rows?: ReadonlyArray<CardRow> }
+                    if (content.key !== undefined) newest.set(content.key, content.rows ?? [])
+                  }
+                  return [...newest].flatMap(([key, cardRows]) => (cardRows.some((one) => one.state !== 'merged') ? [key] : []))
+                },
+              )
+              for (const key of new Set([...lines, ...watched, ...moving])) {
                 const coordinatorAt = yield* coordinatorThread(projectId)
                 yield* redWatch(projectId, key, coordinatorAt === undefined ? [] : wakeOf(coordinatorAt)).pipe(
                   Effect.catchCause((cause) => Effect.logWarning('Could not read a merged branch’s checks', cause)),
