@@ -1151,6 +1151,23 @@ export const HostRepository = Schema.Struct({
 })
 export type HostRepository = typeof HostRepository.Type
 
+/**
+ * Whether a code host's connection lists every repository its account has,
+ * or fewer, as it was let reach them: a token made for some, an app
+ * installed on some. `url` is where it is let reach more, where known.
+ */
+export const HostReach = Schema.Struct({
+  limited: Schema.NullOr(
+    Schema.Struct({
+      by: Schema.Literals(['token', 'app']),
+      url: Schema.NullOr(Schema.String),
+      /** The one owner a token is for, whose repositories it was given some or all of; null where it isn't one owner's, or unknown. */
+      owner: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type HostReach = typeof HostReach.Type
+
 /** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
 export const RepositoryOwner = Schema.Struct({
   id: Schema.String,
@@ -5405,6 +5422,7 @@ const socketCalls = new Set<string>([
   'GetMachine',
   'ListConnections',
   'ListHostRepositories',
+  'ReadHostReach',
   'GetRepositories',
   'ReadFolder',
   'PlaceRepository',
@@ -5551,6 +5569,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  call('ReadHostReach', { connectionId: Schema.String }, HostReach),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
   call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
   /**
@@ -5558,7 +5578,9 @@ const ProjectApi = RpcGroup.make(
    * chose (`grant`): one on a connection's host, by its path there; or one by
    * its URL, signed in through the connection whose host it is on, else with
    * the person's own git sign-in. Refused where that folder has something in
-   * it already; what a failed clone made is taken away.
+   * it already; what a failed clone made is taken away. `folder` names it in
+   * place of the repository's own name, as for two of one name cloned into
+   * one place; a single name, never a path.
    */
   command(
     'CloneRepository',
@@ -5568,6 +5590,7 @@ const ProjectApi = RpcGroup.make(
         Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
         Schema.Struct({ url: Schema.String }),
       ]),
+      folder: Schema.optional(Schema.String),
     },
     ClonedRepository,
   ),

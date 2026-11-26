@@ -162,6 +162,21 @@
   display: grid;
   gap: 8px;
 }
+/* A host whose list is short of what its account has: said under the list, quietly, with where it reaches more. */
+.limited {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12px;
+  line-height: 18px;
+}
+.limited > svg {
+  flex: none;
+  margin-top: 2.5px;
+  color: var(--t-3);
+}
 .reposBar {
   display: flex;
   align-items: center;
