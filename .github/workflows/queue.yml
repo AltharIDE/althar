@@ -165,6 +165,12 @@ jobs:
         with:
           # On a pull request HEAD is its merge with main, and HEAD^1 is main.
           fetch-depth: 2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # And what the workflows must say for quarantine to keep its word: every job that measures coverage runs its
+      # lapsed tests (packages/testing/src/workflows.ts), with no install.
+      - run: bun packages/testing/src/workflows.ts check
       - env:
           BASE: ${{ github.event.merge_group.base_sha }}
         run: |
