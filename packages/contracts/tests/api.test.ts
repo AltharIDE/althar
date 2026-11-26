@@ -948,5 +948,9 @@ describe('the calls a socket may make', () => {
       assert.notInclude(SOCKET_CALLS, tag)
     // Where a plan runs is chosen and started from any window, a remote home's too.
     for (const tag of ['StartPlan', 'PlacePlan']) assert.include(SOCKET_CALLS, tag)
+    // The home's own settings change from its window; a project's rules stay with the project's own settings.
+    for (const tag of ['SetAgentsAtOnce', 'SetPlansAndReviews', 'SetPostTeamReviews', 'ListPresets', 'SetFolderWait', 'GetTaskFolders'])
+      assert.include(SOCKET_CALLS, tag)
+    assert.notInclude(SOCKET_CALLS, 'SetProjectRules')
   })
 })

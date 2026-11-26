@@ -5413,6 +5413,27 @@ const socketCalls = new Set<string>([
   'GetAccountSignIn',
   'PasteAccountSignInCode',
   'CancelAccountSignIn',
+  // The home's own settings, changed from its window as Settings shows them under the home's name: how its tasks go, its
+  // pull requests, its presets, how many agents work there at once, its automations and its finished tasks' folders.
+  // What a project's rules give stays with the project's own settings.
+  'SetPlansAndReviews',
+  'SetSendMidTurn',
+  'SetNewProjectDefaults',
+  'SetAutomationsPaused',
+  'ListPresets',
+  'EditPreset',
+  'TunePreset',
+  'SetPostTeamReviews',
+  'SetRunOutside',
+  'SetCoAuthor',
+  'SetReviewSeal',
+  'SetReviewSealStyle',
+  'SetShipRoute',
+  'SetAgentsAtOnce',
+  'GetTaskFolders',
+  'SetFolderWait',
+  'CleanUpFolders',
+  'RemoveTaskFolder',
 ])
 
 /**

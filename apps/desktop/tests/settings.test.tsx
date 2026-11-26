@@ -637,7 +637,7 @@ describe('the Settings tab', () => {
     // How many agents at once, and why: this Mac's memory and cores.
     const count = await within(page).findByRole('slider', { name: 'Agents at once' })
     expect(count.getAttribute('aria-valuenow')).toBe('4')
-    expect(within(page).getByText('Default for 16 GB and 10 cores')).toBeTruthy()
+    expect(within(page).getByText('Default for this Mac’s 16 GB and 10 cores')).toBeTruthy()
     expect(within(page).queryByText(/busy/)).toBeNull()
     expect(within(page).queryByRole('button', { name: 'Use the default' })).toBeNull()
     count.focus()
@@ -808,7 +808,7 @@ describe('the Settings tab', () => {
     const older = studio.connection.calls.filter((call) => call !== 'ConnectToken' && call !== 'StartAccountSignIn')
     const old = fakeClient({ connection: { ...studio.connection, calls: older }, listConnections: vi.fn(async () => connectionList) })
     withServices(<Settings at="code-hosts" />, old.client, fakeHost({ homes: studio.homes }))
-    expect(await screen.findByText('Update studio to connect GitHub or GitLab there from here.')).toBeTruthy()
+    expect(await screen.findByText('Update studio to connect GitHub or GitLab there from here')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Connect/ })).toBeNull()
     // Where the window doesn't run the update itself, its command, copied.
     const copied = vi.fn(async () => {})
@@ -822,7 +822,7 @@ describe('the Settings tab', () => {
       fakeClient({ connection: { ...studio.connection, calls: older } }).client,
       fakeHost({ homes: studio.homes }),
     )
-    expect(await screen.findByText('Update studio to sign its agents in from here.')).toBeTruthy()
+    expect(await screen.findByText('Update studio to sign its agents in from here')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Sign in|Add an account/ })).toBeNull()
     cleanup()
     // A task's link to an agent's sign-in opens its tab with the update, and starts no sign-in the home would refuse.
@@ -831,12 +831,52 @@ describe('the Settings tab', () => {
     }
     const linked = fakeClient({ connection: { ...studio.connection, calls: older } })
     withServices(<SignInLink />, linked.client, fakeHost({ homes: studio.homes }))
-    expect(await screen.findByText('Update studio to sign its agents in from here.')).toBeTruthy()
+    expect(await screen.findByText('Update studio to sign its agents in from here')).toBeTruthy()
     await waitFor(() => expect(linked.client.status).toHaveBeenCalledTimes(2))
     await act(async () => {})
     expect(screen.queryByRole('group', { name: /^Signing/ })).toBeNull()
     expect(linked.client.addAccount).not.toHaveBeenCalled()
     expect(linked.client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('on another computer’s home, puts its sections under its name and what it runs, and this computer’s under This Mac', async () => {
+    const studio = onLinuxHome('studio')
+    const { client } = fakeClient({
+      connection: studio.connection,
+      getMachine: vi.fn(async () => ({ system: 'Ubuntu 24.04.1 LTS', cores: 4, memory: 8 * 1024 ** 3, disk: null, git: '2.43.0' })),
+    })
+    withServices(<Settings at="mcp-servers" />, client, fakeHost({ homes: studio.homes }))
+    const nav = screen.getByRole('navigation', { name: 'Settings' })
+    const home = await within(nav).findByRole('list', { name: /^studio/ })
+    expect(await within(nav).findByText('Ubuntu 24.04.1 LTS')).toBeTruthy()
+    for (const name of ['Agents', 'MCP servers', 'Skills', 'Code hosts and trackers', 'Tasks', 'Pull requests', 'Computers'])
+      expect(within(home).getByRole('button', { name: new RegExp(`^${name}`) })).toBeTruthy()
+    const here = within(nav).getByRole('list', { name: 'This Mac' })
+    for (const name of ['Work on this Mac', 'Notifications', 'Appearance', 'Editor and browser'])
+      expect(within(here).getByRole('button', { name })).toBeTruthy()
+    // What the home can't show a window yet is said calmly, not as an error.
+    const page = screen.getByRole('main')
+    expect(within(page).getByText('studio’s MCP servers don’t show in a window yet')).toBeTruthy()
+    expect(within(page).queryByText(/couldn’t be read/)).toBeNull()
+    cleanup()
+    // Work on this Mac holds only this Mac's: the home's agents at once and automations are the home's.
+    withServices(<Settings at="this-mac" />, fakeClient({ connection: studio.connection }).client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByRole('switch', { name: 'Show how hard studio works' })).toBeTruthy()
+    expect(screen.queryByText('Agents at once')).toBeNull()
+    expect(screen.queryByRole('switch', { name: /Pause all automations/ })).toBeNull()
+  })
+
+  it('on an older home, shows its own settings as they stand under one strip with its update', async () => {
+    const studio = onLinuxHome('studio')
+    const older = studio.connection.calls.filter((call) => call !== 'SetPlansAndReviews' && call !== 'SetPostTeamReviews')
+    withServices(
+      <Settings at="pull-requests" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findAllByText('Update studio to change these from here')).toHaveLength(1)
+    const held = screen.getByRole('main').querySelector('fieldset')
+    expect(held?.disabled).toBe(true)
   })
 
   it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {

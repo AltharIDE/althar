@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
 import {
@@ -29,6 +29,8 @@ import { EVERY, glanceOf, SLOTS } from '../tabs/useLoad'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
+import { HomeSettings } from './HomeSettings'
+import { device } from '../../shared/device'
 
 /*
  * Settings › Computers: where the home's agents run (ADR-103). The home, with
@@ -54,12 +56,15 @@ export function ComputersSection({
   opened,
   onOpen,
   onTask,
+  folders,
 }: {
   start: StartModel
   /** The computer opened out: the home (`HOME`) or a worker, by its id; null for all of them. */
   opened: string | null
   onOpen: (id: string | null) => void
   onTask?: ((threadId: string) => void) | undefined
+  /** A home's finished tasks' folders, on its disk: under it, opened out, after its agents at once. */
+  folders?: ReactNode
 }) {
   const { client, host } = useServices()
   const reading = useQuery({
@@ -150,18 +155,24 @@ export function ComputersSection({
               onOpenLink: (url: string) => window.open(url, '_blank', 'noopener'),
             })}
         homeSettings={
-          atOnce === null ? null : (
-            <SettingList>
-              <AgentsAtOnce
-                count={atOnce.atOnce.count}
-                own={atOnce.atOnce.own !== null}
-                machine={atOnce.atOnce.machine}
-                most={MOST_AT_ONCE}
-                onChange={atOnce.set}
-                fewer={places === null ? null : fewerOf(places)}
-                text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
-              />
-            </SettingList>
+          atOnce === null && folders === undefined ? null : (
+            <HomeSettings>
+              {atOnce !== null && (
+                <SettingList>
+                  <AgentsAtOnce
+                    count={atOnce.atOnce.count}
+                    own={atOnce.atOnce.own !== null}
+                    machine={atOnce.atOnce.machine}
+                    most={MOST_AT_ONCE}
+                    onChange={atOnce.set}
+                    fewer={places === null ? null : fewerOf(places)}
+                    // Named by the home it's about: This Mac's, or runner-1's.
+                    text={text.atOnce(here.standalone ? here.name : device.this)}
+                  />
+                </SettingList>
+              )}
+              {folders}
+            </HomeSettings>
           )
         }
         slots={SLOTS}
