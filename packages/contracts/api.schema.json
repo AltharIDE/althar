@@ -2164,66 +2164,6 @@
       "required": ["kind", "name", "source", "started", "kept", "own"],
       "type": "object"
     },
-    "AttentionEvent": {
-      "anyOf": [
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Nudge"],
-              "type": "string"
-            },
-            "body": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            },
-            "kind": {
-              "$ref": "#/$defs/NudgeKind"
-            },
-            "threadId": {
-              "type": "string"
-            },
-            "title": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "kind", "key", "title", "body", "threadId"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Waiting"],
-              "type": "string"
-            },
-            "count": {
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": ["_tag", "count"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Working"],
-              "type": "string"
-            },
-            "working": {
-              "type": "boolean"
-            }
-          },
-          "required": ["_tag", "working"],
-          "type": "object"
-        }
-      ]
-    },
     "AttentionRequest": {
       "additionalProperties": true,
       "properties": {
@@ -3350,7 +3290,28 @@
       "properties": {
         "calls": {
           "items": {
-            "$ref": "#/$defs/BoardCall"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BoardCall"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": ["permission", "stuck", "question", "checkout"]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -6487,7 +6448,38 @@
       "properties": {
         "connections": {
           "items": {
-            "$ref": "#/$defs/ConnectionSummary"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ConnectionSummary"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "product": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "github",
+                            "gitlab",
+                            "bitbucket_cloud",
+                            "bitbucket_dc",
+                            "linear",
+                            "jira_cloud",
+                            "jira_dc",
+                            "trello",
+                            "clickup"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["product"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -6496,7 +6488,38 @@
         },
         "places": {
           "items": {
-            "$ref": "#/$defs/ConnectPlace"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ConnectPlace"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "product": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "github",
+                            "gitlab",
+                            "bitbucket_cloud",
+                            "bitbucket_dc",
+                            "linear",
+                            "jira_cloud",
+                            "jira_dc",
+                            "trello",
+                            "clickup"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["product"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -6512,7 +6535,38 @@
         },
         "products": {
           "items": {
-            "$ref": "#/$defs/ProductOption"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProductOption"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "product": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "github",
+                            "gitlab",
+                            "bitbucket_cloud",
+                            "bitbucket_dc",
+                            "linear",
+                            "jira_cloud",
+                            "jira_dc",
+                            "trello",
+                            "clickup"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["product"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         }
@@ -6707,7 +6761,119 @@
         },
         "items": {
           "items": {
-            "$ref": "#/$defs/ThreadItem"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SettingItem"
+              },
+              {
+                "$ref": "#/$defs/SmallChangeItem"
+              },
+              {
+                "$ref": "#/$defs/ModelMoveItem"
+              },
+              {
+                "$ref": "#/$defs/MergeLineItem"
+              },
+              {
+                "$ref": "#/$defs/UserMessageItem"
+              },
+              {
+                "$ref": "#/$defs/AgentTextItem"
+              },
+              {
+                "$ref": "#/$defs/ToolCallItem"
+              },
+              {
+                "$ref": "#/$defs/PlanItem"
+              },
+              {
+                "$ref": "#/$defs/NoticeItem"
+              },
+              {
+                "$ref": "#/$defs/StepResultItem"
+              },
+              {
+                "$ref": "#/$defs/TaskItem"
+              },
+              {
+                "$ref": "#/$defs/ArrivalItem"
+              },
+              {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              {
+                "$ref": "#/$defs/RunItem"
+              },
+              {
+                "$ref": "#/$defs/IssueDraftItem"
+              },
+              {
+                "$ref": "#/$defs/SetupItem"
+              },
+              {
+                "$ref": "#/$defs/PushRequestItem"
+              },
+              {
+                "$ref": "#/$defs/ReviewDraftItem"
+              },
+              {
+                "$ref": "#/$defs/IssueChangesItem"
+              },
+              {
+                "$ref": "#/$defs/AutomationItem"
+              },
+              {
+                "$ref": "#/$defs/PicturesItem"
+              },
+              {
+                "$ref": "#/$defs/TaskAskItem"
+              },
+              {
+                "$ref": "#/$defs/CanvasItem"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "setting",
+                            "small_change",
+                            "model_move",
+                            "merge_line",
+                            "user_message",
+                            "agent_message",
+                            "agent_thought",
+                            "tool_call",
+                            "plan",
+                            "notice",
+                            "step_result",
+                            "task",
+                            "arrival",
+                            "question",
+                            "run",
+                            "issue_draft",
+                            "setup",
+                            "push_request",
+                            "review_draft",
+                            "issue_changes",
+                            "automation",
+                            "pictures",
+                            "task_ask",
+                            "canvas"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -8573,6 +8739,379 @@
       "required": ["pictures", "files"],
       "type": "object"
     },
+    "HeardAttention": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Nudge"],
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/NudgeKind"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "kind", "key", "title", "body", "threadId"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Waiting"],
+              "type": "string"
+            },
+            "count": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": ["_tag", "count"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Working"],
+              "type": "string"
+            },
+            "working": {
+              "type": "boolean"
+            }
+          },
+          "required": ["_tag", "working"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "allOf": [
+                {
+                  "not": {
+                    "enum": ["Nudge", "Waiting", "Working"]
+                  }
+                }
+              ],
+              "type": "string"
+            }
+          },
+          "required": ["_tag"],
+          "type": "object"
+        }
+      ]
+    },
+    "HeardEvent": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Changed"],
+              "type": "string"
+            },
+            "aggregateId": {
+              "type": "string"
+            },
+            "aggregateType": {
+              "type": "string"
+            },
+            "checkpoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cursor": {
+              "$ref": "#/$defs/Cursor"
+            },
+            "projectId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "renamedByAgent": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "renamedTo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "threadId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["_tag", "cursor", "aggregateType", "aggregateId", "projectId", "threadId"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Streaming"],
+              "type": "string"
+            },
+            "agentId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": ["agent_message", "agent_thought"],
+              "type": "string"
+            },
+            "offset": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sequence": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "threadId", "itemId", "sequence", "kind", "agentId", "text"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Context"],
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "enum": ["Infinity", "-Infinity", "NaN"],
+                  "type": "string"
+                }
+              ]
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "used": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "enum": ["Infinity", "-Infinity", "NaN"],
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": ["_tag", "threadId", "used", "size"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Background"],
+              "type": "string"
+            },
+            "background": {
+              "items": {
+                "$ref": "#/$defs/BackgroundCommand"
+              },
+              "type": "array"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "threadId", "background"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Launches"],
+              "type": "string"
+            },
+            "launches": {
+              "items": {
+                "$ref": "#/$defs/Launch"
+              },
+              "type": "array"
+            },
+            "projectId": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "projectId", "launches"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Terminals"],
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "terminals": {
+              "items": {
+                "$ref": "#/$defs/ShownTerminal"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["_tag", "projectId", "terminals"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["PlanUsage"],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/$defs/PlanUsage"
+            }
+          },
+          "required": ["_tag", "usage"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Drafting"],
+              "type": "string"
+            },
+            "drafts": {
+              "items": {
+                "$ref": "#/$defs/Draft"
+              },
+              "type": "array"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "threadId", "drafts"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "enum": ["Output"],
+              "type": "string"
+            },
+            "dropped": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "enum": ["Infinity", "-Infinity", "NaN"],
+                  "type": "string"
+                }
+              ]
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": ["_tag", "threadId", "itemId", "text", "dropped"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "_tag": {
+              "allOf": [
+                {
+                  "not": {
+                    "enum": ["Changed", "Streaming", "Context", "Background", "Launches", "Terminals", "PlanUsage", "Drafting", "Output"]
+                  }
+                }
+              ],
+              "type": "string"
+            }
+          },
+          "required": ["_tag"],
+          "type": "object"
+        }
+      ]
+    },
     "HeldForConnection": {
       "additionalProperties": true,
       "properties": {
@@ -9457,7 +9996,28 @@
       "properties": {
         "calls": {
           "items": {
-            "$ref": "#/$defs/HomeCall"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HomeCall"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": ["permission", "stuck", "question", "checkout"]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -13106,6 +13666,16 @@
               "anyOf": [
                 {
                   "enum": ["aside", "relayed", "folder", "compacted", "interrupted", "brought"],
+                  "type": "string"
+                },
+                {
+                  "allOf": [
+                    {
+                      "not": {
+                        "enum": ["aside", "relayed", "folder", "compacted", "interrupted", "brought"]
+                      }
+                    }
+                  ],
                   "type": "string"
                 },
                 {
@@ -20833,79 +21403,6 @@
       "required": ["revision", "objective", "status", "rounds", "roundLimit", "progress", "detail", "waiting"],
       "type": "object"
     },
-    "ThreadItem": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/SettingItem"
-        },
-        {
-          "$ref": "#/$defs/SmallChangeItem"
-        },
-        {
-          "$ref": "#/$defs/ModelMoveItem"
-        },
-        {
-          "$ref": "#/$defs/MergeLineItem"
-        },
-        {
-          "$ref": "#/$defs/UserMessageItem"
-        },
-        {
-          "$ref": "#/$defs/AgentTextItem"
-        },
-        {
-          "$ref": "#/$defs/ToolCallItem"
-        },
-        {
-          "$ref": "#/$defs/PlanItem"
-        },
-        {
-          "$ref": "#/$defs/NoticeItem"
-        },
-        {
-          "$ref": "#/$defs/StepResultItem"
-        },
-        {
-          "$ref": "#/$defs/TaskItem"
-        },
-        {
-          "$ref": "#/$defs/ArrivalItem"
-        },
-        {
-          "$ref": "#/$defs/QuestionItem"
-        },
-        {
-          "$ref": "#/$defs/RunItem"
-        },
-        {
-          "$ref": "#/$defs/IssueDraftItem"
-        },
-        {
-          "$ref": "#/$defs/SetupItem"
-        },
-        {
-          "$ref": "#/$defs/PushRequestItem"
-        },
-        {
-          "$ref": "#/$defs/ReviewDraftItem"
-        },
-        {
-          "$ref": "#/$defs/IssueChangesItem"
-        },
-        {
-          "$ref": "#/$defs/AutomationItem"
-        },
-        {
-          "$ref": "#/$defs/PicturesItem"
-        },
-        {
-          "$ref": "#/$defs/TaskAskItem"
-        },
-        {
-          "$ref": "#/$defs/CanvasItem"
-        }
-      ]
-    },
     "ThreadSnapshot": {
       "additionalProperties": true,
       "properties": {
@@ -20922,7 +21419,28 @@
         },
         "attention": {
           "items": {
-            "$ref": "#/$defs/AttentionRequest"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AttentionRequest"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": ["permission", "stuck", "question", "checkout"]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -20982,7 +21500,119 @@
         },
         "items": {
           "items": {
-            "$ref": "#/$defs/ThreadItem"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SettingItem"
+              },
+              {
+                "$ref": "#/$defs/SmallChangeItem"
+              },
+              {
+                "$ref": "#/$defs/ModelMoveItem"
+              },
+              {
+                "$ref": "#/$defs/MergeLineItem"
+              },
+              {
+                "$ref": "#/$defs/UserMessageItem"
+              },
+              {
+                "$ref": "#/$defs/AgentTextItem"
+              },
+              {
+                "$ref": "#/$defs/ToolCallItem"
+              },
+              {
+                "$ref": "#/$defs/PlanItem"
+              },
+              {
+                "$ref": "#/$defs/NoticeItem"
+              },
+              {
+                "$ref": "#/$defs/StepResultItem"
+              },
+              {
+                "$ref": "#/$defs/TaskItem"
+              },
+              {
+                "$ref": "#/$defs/ArrivalItem"
+              },
+              {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              {
+                "$ref": "#/$defs/RunItem"
+              },
+              {
+                "$ref": "#/$defs/IssueDraftItem"
+              },
+              {
+                "$ref": "#/$defs/SetupItem"
+              },
+              {
+                "$ref": "#/$defs/PushRequestItem"
+              },
+              {
+                "$ref": "#/$defs/ReviewDraftItem"
+              },
+              {
+                "$ref": "#/$defs/IssueChangesItem"
+              },
+              {
+                "$ref": "#/$defs/AutomationItem"
+              },
+              {
+                "$ref": "#/$defs/PicturesItem"
+              },
+              {
+                "$ref": "#/$defs/TaskAskItem"
+              },
+              {
+                "$ref": "#/$defs/CanvasItem"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "setting",
+                            "small_change",
+                            "model_move",
+                            "merge_line",
+                            "user_message",
+                            "agent_message",
+                            "agent_thought",
+                            "tool_call",
+                            "plan",
+                            "notice",
+                            "step_result",
+                            "task",
+                            "arrival",
+                            "question",
+                            "run",
+                            "issue_draft",
+                            "setup",
+                            "push_request",
+                            "review_draft",
+                            "issue_changes",
+                            "automation",
+                            "pictures",
+                            "task_ask",
+                            "canvas"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -21011,7 +21641,119 @@
         },
         "reports": {
           "items": {
-            "$ref": "#/$defs/ThreadItem"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SettingItem"
+              },
+              {
+                "$ref": "#/$defs/SmallChangeItem"
+              },
+              {
+                "$ref": "#/$defs/ModelMoveItem"
+              },
+              {
+                "$ref": "#/$defs/MergeLineItem"
+              },
+              {
+                "$ref": "#/$defs/UserMessageItem"
+              },
+              {
+                "$ref": "#/$defs/AgentTextItem"
+              },
+              {
+                "$ref": "#/$defs/ToolCallItem"
+              },
+              {
+                "$ref": "#/$defs/PlanItem"
+              },
+              {
+                "$ref": "#/$defs/NoticeItem"
+              },
+              {
+                "$ref": "#/$defs/StepResultItem"
+              },
+              {
+                "$ref": "#/$defs/TaskItem"
+              },
+              {
+                "$ref": "#/$defs/ArrivalItem"
+              },
+              {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              {
+                "$ref": "#/$defs/RunItem"
+              },
+              {
+                "$ref": "#/$defs/IssueDraftItem"
+              },
+              {
+                "$ref": "#/$defs/SetupItem"
+              },
+              {
+                "$ref": "#/$defs/PushRequestItem"
+              },
+              {
+                "$ref": "#/$defs/ReviewDraftItem"
+              },
+              {
+                "$ref": "#/$defs/IssueChangesItem"
+              },
+              {
+                "$ref": "#/$defs/AutomationItem"
+              },
+              {
+                "$ref": "#/$defs/PicturesItem"
+              },
+              {
+                "$ref": "#/$defs/TaskAskItem"
+              },
+              {
+                "$ref": "#/$defs/CanvasItem"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": [
+                            "setting",
+                            "small_change",
+                            "model_move",
+                            "merge_line",
+                            "user_message",
+                            "agent_message",
+                            "agent_thought",
+                            "tool_call",
+                            "plan",
+                            "notice",
+                            "step_result",
+                            "task",
+                            "arrival",
+                            "question",
+                            "run",
+                            "issue_draft",
+                            "setup",
+                            "push_request",
+                            "review_draft",
+                            "issue_changes",
+                            "automation",
+                            "pictures",
+                            "task_ask",
+                            "canvas"
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },
@@ -23213,285 +23955,6 @@
       },
       "required": ["id", "sequence", "agentId", "createdAt", "kind", "content", "input"],
       "type": "object"
-    },
-    "WatchEvent": {
-      "anyOf": [
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Changed"],
-              "type": "string"
-            },
-            "aggregateId": {
-              "type": "string"
-            },
-            "aggregateType": {
-              "type": "string"
-            },
-            "checkpoint": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "cursor": {
-              "$ref": "#/$defs/Cursor"
-            },
-            "projectId": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "renamedByAgent": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "renamedTo": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "threadId": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": ["_tag", "cursor", "aggregateType", "aggregateId", "projectId", "threadId"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Streaming"],
-              "type": "string"
-            },
-            "agentId": {
-              "type": "string"
-            },
-            "itemId": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": ["agent_message", "agent_thought"],
-              "type": "string"
-            },
-            "offset": {
-              "anyOf": [
-                {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "sequence": {
-              "maximum": 9007199254740991,
-              "minimum": -9007199254740991,
-              "type": "integer"
-            },
-            "text": {
-              "type": "string"
-            },
-            "threadId": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "threadId", "itemId", "sequence", "kind", "agentId", "text"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Context"],
-              "type": "string"
-            },
-            "size": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "enum": ["Infinity", "-Infinity", "NaN"],
-                  "type": "string"
-                }
-              ]
-            },
-            "threadId": {
-              "type": "string"
-            },
-            "used": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "enum": ["Infinity", "-Infinity", "NaN"],
-                  "type": "string"
-                }
-              ]
-            }
-          },
-          "required": ["_tag", "threadId", "used", "size"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Background"],
-              "type": "string"
-            },
-            "background": {
-              "items": {
-                "$ref": "#/$defs/BackgroundCommand"
-              },
-              "type": "array"
-            },
-            "threadId": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "threadId", "background"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Launches"],
-              "type": "string"
-            },
-            "launches": {
-              "items": {
-                "$ref": "#/$defs/Launch"
-              },
-              "type": "array"
-            },
-            "projectId": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "projectId", "launches"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Terminals"],
-              "type": "string"
-            },
-            "projectId": {
-              "type": "string"
-            },
-            "terminals": {
-              "items": {
-                "$ref": "#/$defs/ShownTerminal"
-              },
-              "type": "array"
-            }
-          },
-          "required": ["_tag", "projectId", "terminals"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["PlanUsage"],
-              "type": "string"
-            },
-            "usage": {
-              "$ref": "#/$defs/PlanUsage"
-            }
-          },
-          "required": ["_tag", "usage"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Drafting"],
-              "type": "string"
-            },
-            "drafts": {
-              "items": {
-                "$ref": "#/$defs/Draft"
-              },
-              "type": "array"
-            },
-            "threadId": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "threadId", "drafts"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "_tag": {
-              "enum": ["Output"],
-              "type": "string"
-            },
-            "dropped": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "enum": ["Infinity", "-Infinity", "NaN"],
-                  "type": "string"
-                }
-              ]
-            },
-            "itemId": {
-              "type": "string"
-            },
-            "text": {
-              "type": "string"
-            },
-            "threadId": {
-              "type": "string"
-            }
-          },
-          "required": ["_tag", "threadId", "itemId", "text", "dropped"],
-          "type": "object"
-        }
-      ]
     },
     "Weekday": {
       "enum": [1, 2, 3, 4, 5, 6, 7],
@@ -27010,7 +27473,115 @@
       "success": {
         "anyOf": [
           {
-            "$ref": "#/$defs/ThreadItem"
+            "$ref": "#/$defs/SettingItem"
+          },
+          {
+            "$ref": "#/$defs/SmallChangeItem"
+          },
+          {
+            "$ref": "#/$defs/ModelMoveItem"
+          },
+          {
+            "$ref": "#/$defs/MergeLineItem"
+          },
+          {
+            "$ref": "#/$defs/UserMessageItem"
+          },
+          {
+            "$ref": "#/$defs/AgentTextItem"
+          },
+          {
+            "$ref": "#/$defs/ToolCallItem"
+          },
+          {
+            "$ref": "#/$defs/PlanItem"
+          },
+          {
+            "$ref": "#/$defs/NoticeItem"
+          },
+          {
+            "$ref": "#/$defs/StepResultItem"
+          },
+          {
+            "$ref": "#/$defs/TaskItem"
+          },
+          {
+            "$ref": "#/$defs/ArrivalItem"
+          },
+          {
+            "$ref": "#/$defs/QuestionItem"
+          },
+          {
+            "$ref": "#/$defs/RunItem"
+          },
+          {
+            "$ref": "#/$defs/IssueDraftItem"
+          },
+          {
+            "$ref": "#/$defs/SetupItem"
+          },
+          {
+            "$ref": "#/$defs/PushRequestItem"
+          },
+          {
+            "$ref": "#/$defs/ReviewDraftItem"
+          },
+          {
+            "$ref": "#/$defs/IssueChangesItem"
+          },
+          {
+            "$ref": "#/$defs/AutomationItem"
+          },
+          {
+            "$ref": "#/$defs/PicturesItem"
+          },
+          {
+            "$ref": "#/$defs/TaskAskItem"
+          },
+          {
+            "$ref": "#/$defs/CanvasItem"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "kind": {
+                "allOf": [
+                  {
+                    "not": {
+                      "enum": [
+                        "setting",
+                        "small_change",
+                        "model_move",
+                        "merge_line",
+                        "user_message",
+                        "agent_message",
+                        "agent_thought",
+                        "tool_call",
+                        "plan",
+                        "notice",
+                        "step_result",
+                        "task",
+                        "arrival",
+                        "question",
+                        "run",
+                        "issue_draft",
+                        "setup",
+                        "push_request",
+                        "review_draft",
+                        "issue_changes",
+                        "automation",
+                        "pictures",
+                        "task_ask",
+                        "canvas"
+                      ]
+                    }
+                  }
+                ],
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
           },
           {
             "type": "null"
@@ -27044,7 +27615,119 @@
       "socket": true,
       "success": {
         "items": {
-          "$ref": "#/$defs/ThreadItem"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SettingItem"
+            },
+            {
+              "$ref": "#/$defs/SmallChangeItem"
+            },
+            {
+              "$ref": "#/$defs/ModelMoveItem"
+            },
+            {
+              "$ref": "#/$defs/MergeLineItem"
+            },
+            {
+              "$ref": "#/$defs/UserMessageItem"
+            },
+            {
+              "$ref": "#/$defs/AgentTextItem"
+            },
+            {
+              "$ref": "#/$defs/ToolCallItem"
+            },
+            {
+              "$ref": "#/$defs/PlanItem"
+            },
+            {
+              "$ref": "#/$defs/NoticeItem"
+            },
+            {
+              "$ref": "#/$defs/StepResultItem"
+            },
+            {
+              "$ref": "#/$defs/TaskItem"
+            },
+            {
+              "$ref": "#/$defs/ArrivalItem"
+            },
+            {
+              "$ref": "#/$defs/QuestionItem"
+            },
+            {
+              "$ref": "#/$defs/RunItem"
+            },
+            {
+              "$ref": "#/$defs/IssueDraftItem"
+            },
+            {
+              "$ref": "#/$defs/SetupItem"
+            },
+            {
+              "$ref": "#/$defs/PushRequestItem"
+            },
+            {
+              "$ref": "#/$defs/ReviewDraftItem"
+            },
+            {
+              "$ref": "#/$defs/IssueChangesItem"
+            },
+            {
+              "$ref": "#/$defs/AutomationItem"
+            },
+            {
+              "$ref": "#/$defs/PicturesItem"
+            },
+            {
+              "$ref": "#/$defs/TaskAskItem"
+            },
+            {
+              "$ref": "#/$defs/CanvasItem"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "kind": {
+                  "allOf": [
+                    {
+                      "not": {
+                        "enum": [
+                          "setting",
+                          "small_change",
+                          "model_move",
+                          "merge_line",
+                          "user_message",
+                          "agent_message",
+                          "agent_thought",
+                          "tool_call",
+                          "plan",
+                          "notice",
+                          "step_result",
+                          "task",
+                          "arrival",
+                          "question",
+                          "run",
+                          "issue_draft",
+                          "setup",
+                          "push_request",
+                          "review_draft",
+                          "issue_changes",
+                          "automation",
+                          "pictures",
+                          "task_ask",
+                          "canvas"
+                        ]
+                      }
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": ["kind"],
+              "type": "object"
+            }
+          ]
         },
         "type": "array"
       }
@@ -33610,7 +34293,7 @@
       },
       "socket": true,
       "success": {
-        "$ref": "#/$defs/WatchEvent"
+        "$ref": "#/$defs/HeardEvent"
       }
     },
     "WatchAttention": {
@@ -33626,7 +34309,7 @@
       },
       "socket": true,
       "success": {
-        "$ref": "#/$defs/AttentionEvent"
+        "$ref": "#/$defs/HeardAttention"
       }
     },
     "WatchFrom": {
@@ -33647,7 +34330,7 @@
       },
       "socket": true,
       "success": {
-        "$ref": "#/$defs/WatchEvent"
+        "$ref": "#/$defs/HeardEvent"
       }
     },
     "WorkToward": {

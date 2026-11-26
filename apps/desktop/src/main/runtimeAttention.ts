@@ -1,4 +1,4 @@
-import { AttentionApi, clientProtocol, type AttentionEvent, type PortLike, untraced } from '@althar/contracts'
+import { AttentionApi, clientProtocol, type AttentionEvent, isKnownAttention, type PortLike, untraced } from '@althar/contracts'
 import { Cause, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -14,7 +14,10 @@ export const watchRuntimeAttention = (
         yield* Effect.addFinalizer(() => Effect.sync(() => port.close?.()))
         const protocol = yield* Layer.build(clientProtocol(port))
         const client = yield* RpcClient.make(AttentionApi, untraced).pipe(Effect.provideContext(protocol))
-        yield* Stream.runForEach(client.WatchAttention({}), (attention) => Effect.sync(() => event(attention)))
+        // An event of a type this app doesn't know, as a newer runtime could send, is passed over.
+        yield* Stream.runForEach(Stream.filter(client.WatchAttention({}), isKnownAttention), (attention) =>
+          Effect.sync(() => event(attention)),
+        )
       }),
     ).pipe(Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.sync(() => failed(Cause.pretty(cause)))))),
   )

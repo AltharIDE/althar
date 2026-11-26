@@ -2,7 +2,7 @@ import { PairingCodeMade, PairingInvitation, PairingStatus, PairingTokenHash, Ph
 import { GoalControl, ThreadGoal } from './goals'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
-import { AttentionEvent } from './attention'
+import { HeardAttention } from './attention'
 import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 import {
   ConnectionInfo,
@@ -28,6 +28,7 @@ import {
 } from './canvases'
 import { BroughtIn, Elsewhere } from './elsewhere'
 import { MESSAGE_FILES } from './files'
+import { KnownArray, KnownOrNull, OpenLiterals, OpenUnion } from './open'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
@@ -1552,10 +1553,11 @@ export type ConnectPlace = typeof ConnectPlace.Type
 export const ConnectionList = Schema.Struct({
   cursor: Cursor,
   position: Schema.optional(FeedPosition),
-  connections: Schema.Array(ConnectionSummary),
-  products: Schema.Array(ProductOption),
+  /** Each of a product a newer home connects to and this client doesn't know is left out, here and below. */
+  connections: KnownArray('product', [ConnectionSummary]),
+  products: KnownArray('product', [ProductOption]),
   /** Where the projects' code is, on the hosted services and on servers already connected. */
-  places: Schema.Array(ConnectPlace),
+  places: KnownArray('product', [ConnectPlace]),
 })
 export type ConnectionList = typeof ConnectionList.Type
 
@@ -2283,8 +2285,10 @@ export const NoticeItem = Schema.Struct({
      * a line with its summary behind it; or its turn interrupted by the person.
      * What was brought in from another tool, and where from, is Althar's own
      * line (`brought`, workspaces-and-runs, "Bringing in other tools' work").
+     * One a newer home draws that this client doesn't know is `unknown`, drawn
+     * as Althar's own line.
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'compacted', 'interrupted', 'brought'])),
+    role: Schema.optional(OpenLiterals(['aside', 'relayed', 'folder', 'compacted', 'interrupted', 'brought'], 'unknown')),
     /**
      * For the agent compacting its context (`compacted`): how it stands, the
      * summary it kept where it said one, and why it failed. Its description
@@ -3823,6 +3827,9 @@ export const ThreadItem = Schema.Union([
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
+/** A thread's items as a client reads them: one of a kind a newer home has and this client doesn't know is left out. */
+export const ThreadItems = KnownArray('kind', ThreadItem.members)
+
 /** How full an agent's context is: the tokens in it, and how many it holds. */
 export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
 export type ContextUse = typeof ContextUse.Type
@@ -4591,13 +4598,14 @@ export const ThreadSnapshot = Schema.Struct({
   session: Schema.NullOr(SessionSummary),
   /** Whether Try again can act now, from the runtime's retry rule. */
   retryable: Schema.optional(Schema.Boolean),
-  attention: Schema.Array(AttentionRequest),
+  /** A call of a kind a newer home has and this client doesn't know is left out: it couldn't be answered here. */
+  attention: KnownArray('kind', [AttentionRequest]),
   /** The newest items before the page's start, oldest first. */
-  items: Schema.Array(ThreadItem),
+  items: ThreadItems,
   /** There are items before these. */
   earlier: Schema.Boolean,
   /** Its steps' reports, on this page or not, newest two hundred: its finished view is read from the lead's, its graph from all. */
-  reports: Schema.Array(ThreadItem),
+  reports: ThreadItems,
   /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
   turns: Schema.optional(Schema.Array(TurnTime)),
   /** Every task its lead started, oldest first, whatever page of its thread says so and however long ago they settled. */
@@ -4693,7 +4701,7 @@ export const HomeSnapshot = Schema.Struct({
   /** What the loop did is read from: when they last left the home, unless the window says. */
   since: Schema.String,
   tasks: Schema.Array(HomeTask),
-  calls: Schema.Array(HomeCall),
+  calls: KnownArray('kind', [HomeCall]),
   events: Schema.Array(HomeEvent),
   projects: Schema.Array(ProjectSummary),
 })
@@ -4708,7 +4716,7 @@ export const BoardSnapshot = Schema.Struct({
   cursor: Cursor,
   position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
-  calls: Schema.Array(BoardCall),
+  calls: KnownArray('kind', [BoardCall]),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
 })
@@ -4762,7 +4770,7 @@ export const CoordinatorSnapshot = Schema.Struct({
       available: Schema.Boolean,
     }),
   ),
-  items: Schema.Array(ThreadItem),
+  items: ThreadItems,
   earlier: Schema.Boolean,
   /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
   turns: Schema.optional(Schema.Array(TurnTime)),
@@ -4912,6 +4920,17 @@ export const WatchEvent = Schema.Union([
   }),
 ])
 export type WatchEvent = typeof WatchEvent.Type
+
+/**
+ * An event of a watch as a client hears it: one of a type a newer home sends
+ * and this client doesn't know is `Unknown`, which it passes over. A runtime
+ * sends a `WatchEvent`, never `Unknown`.
+ */
+export const HeardEvent = OpenUnion('_tag', WatchEvent.members, 'Unknown')
+export type HeardEvent = typeof HeardEvent.Type
+
+/** Whether a client knows the event it heard. */
+export const isKnownEvent = (event: HeardEvent): event is WatchEvent => event._tag !== 'Unknown'
 
 /** What a command printed, as kept: its end, and how many lines before it weren't kept. */
 export const OutputText = Schema.Struct({ text: Schema.String, dropped: Schema.Number })
@@ -5248,7 +5267,7 @@ export class ClientAuthority extends RpcMiddleware.Service<ClientAuthority>()('@
 
 /** A native host can subscribe without constructing the desktop's complete client. Uses the same authenticated API. */
 export const AttentionApi = RpcGroup.make(
-  Rpc.make('WatchAttention', { payload: {}, success: AttentionEvent, error: ApiError, stream: true }).annotate(SocketAllowed, true),
+  Rpc.make('WatchAttention', { payload: {}, success: HeardAttention, error: ApiError, stream: true }).annotate(SocketAllowed, true),
 ).middleware(ClientAuthority)
 
 const socketCalls = new Set<string>([
@@ -5373,7 +5392,7 @@ const ConnectionApi = RpcGroup.make(
     RegisteredClient,
   ),
   command('RevokeClientDevice', { deviceId: ClientDeviceId }, Schema.Void),
-  Rpc.make('WatchFrom', { payload: { position: FeedPosition }, success: WatchEvent, error: ApiError, stream: true }).annotate(
+  Rpc.make('WatchFrom', { payload: { position: FeedPosition }, success: HeardEvent, error: ApiError, stream: true }).annotate(
     SocketAllowed,
     true,
   ),
@@ -5661,8 +5680,12 @@ const ProjectApi = RpcGroup.make(
     { taskId: Schema.optional(Schema.String), attentionId: Schema.optional(Schema.String), action: OnePressAction },
     Schema.Void,
   ),
-  /** One item of a thread, as its page has it: null for one the thread keeps for Althar and never shows, such as what a lead could see. */
-  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, Schema.NullOr(ThreadItem)),
+  /**
+   * One item of a thread, as its page has it: null for one the thread keeps
+   * for Althar and never shows, such as what a lead could see, and, to a
+   * client, for one of a kind it doesn't know.
+   */
+  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, KnownOrNull('kind', ThreadItem.members)),
   /**
    * Several items of a thread at once, as `GetThreadItem` reads each: what a
    * burst of changes touched, in one call. Those of them the thread shows; an
@@ -5671,7 +5694,7 @@ const ProjectApi = RpcGroup.make(
   call(
     'GetThreadItems',
     { threadId: Schema.String, itemIds: Schema.Array(Schema.String).check(Schema.isMaxLength(THREAD_ITEMS_AT_ONCE)) },
-    Schema.Array(ThreadItem),
+    ThreadItems,
   ),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
@@ -6845,7 +6868,7 @@ const WorkApi = RpcGroup.make(
    */
   Rpc.make('Watch', {
     payload: { since: Schema.optional(Cursor), deltas: Schema.optional(Schema.Boolean) },
-    success: WatchEvent,
+    success: HeardEvent,
     error: ApiError,
     stream: true,
   }).annotate(SocketAllowed, true),
