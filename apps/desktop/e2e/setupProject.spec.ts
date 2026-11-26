@@ -187,6 +187,8 @@ test('clones several repositories from GitHub at once into one project, and says
   git(home, 'clone', '--quiet', '--bare', meridian, api)
   const web = join(home, 'remotes', 'web.git')
   git(home, 'clone', '--quiet', '--bare', meridian, web)
+  // Where the person keeps code, which each is cloned into.
+  mkdirSync(join(home, 'code'))
   const { electronApp, page } = await launch(home, {
     ALTHAR_FAKE_REMOTE_API: api,
     ALTHAR_FAKE_REMOTE_WEB: web,
