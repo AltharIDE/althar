@@ -217,6 +217,66 @@ describe('the authenticated private API', () => {
     )
   })
 
+  it.live('lets a socket change its home’s own settings, never a project’s rules', () =>
+    Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const calls = (yield* api.GetConnectionInfo({})).calls ?? []
+      for (const tag of ['SetAgentsAtOnce', 'SetPostTeamReviews', 'GetTaskFolders']) assert.include(calls, tag)
+      yield* api.SetAgentsAtOnce({ commandId: commandId(), count: 3 })
+      yield* api.SetPostTeamReviews({ commandId: commandId(), on: true })
+      const settings = yield* api.GetSettings({})
+      assert.strictEqual(settings.agentsAtOnce.count, 3)
+      assert.isTrue(settings.postTeamReviews)
+      yield* api.GetTaskFolders({})
+      const refused = (effect: Effect.Effect<unknown, unknown>) =>
+        Effect.map(Effect.flip(effect), (error) => (error as { readonly reason?: string }).reason)
+      assert.strictEqual(
+        yield* refused(api.SetProjectRules({ commandId: commandId(), projectId: 'proj_x', allowEverything: true })),
+        'PersonRequired',
+      )
+      // What only the person decides stays theirs: trusting outside code fully, removing folders and what they hold, a preset.
+      assert.strictEqual(yield* refused(api.SetRunOutside({ commandId: commandId(), to: 'full' })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.CleanUpFolders({ commandId: commandId() })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemoveTaskFolder({ commandId: commandId(), taskId: 'task_x', seen: null })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemovePreset({ commandId: commandId(), id: 'preset_x' })), 'PersonRequired')
+      assert.notInclude(calls, 'SetRunOutside')
+      assert.notInclude(calls, 'RemoveTaskFolder')
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
+  it.live('shows a socket its home’s own MCP servers and skills, as a home set up with althar-host has them', () => {
+    // As apps/host sets a home up: its skills' store in its profile, and its agents' settings in its user's own folder.
+    const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+    const home = mkdtempSync(join(tmpdir(), 'althar-socket-user-'))
+    return Effect.gen(function* () {
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const tools = yield* api.GetAgentTools({ projectId: null })
+      assert.isTrue(tools.enabled)
+      assert.isTrue((yield* api.ListSkills({})).enabled)
+      // A server's sign-in opens a browser where its agent runs: not from another computer's window.
+      assert.strictEqual(
+        (yield* Effect.flip(api.SignInToolServer({ commandId: commandId(), agent: 'claude', name: 'linear' }))).reason,
+        'PersonRequired',
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        services({
+          ...options,
+          skills: { root: join(profile, 'skills') },
+          agentConfigs: { homeDir: home, folder: join(profile, 'agent-sync') },
+        }),
+      ),
+    )
+  })
+
   it.live('authenticates a device key, records the client device, and revokes its live connection', () =>
     Effect.gen(function* () {
       const identities = yield* ClientIdentities

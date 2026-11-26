@@ -2443,7 +2443,8 @@ export const accessGitHub: Access = (input: AccessInput) =>
         const path = found.path.join('/')
         // What GitHub said of the account there, kept apart from what it didn't say.
         const accountPush = found.push ?? null
-        if (found.push === false) return Effect.succeed({ path, state: 'no', reason: { kind: 'role', role: null }, accountPush })
+        if (found.push === false)
+          return Effect.succeed({ path, state: 'no', reason: { kind: 'role', role: null, names: [path] }, accountPush })
         if (scopeless) return Effect.succeed({ path, state: 'no', reason: { kind: 'scope', scope: 'repo', url: settings }, accountPush })
         return Effect.map(pushAnswer(input.fetch, `${web}/${path}.git`, authorization), (answer): RepositoryAccess => {
           if (answer === 'no')
@@ -2458,8 +2459,9 @@ export const accessGitHub: Access = (input: AccessInput) =>
       outcomes.filter((one) => one.state === 'no' && one.reason !== null && kinds.includes(one.reason.kind))
     const byRole = refusedBy(['role'])
     const byToken = refusedBy(['no_push'])
-    // Where GitHub says the account itself may not push, no token of it may.
-    if (byRole.length > 0) lines.push(line('push', 'no', { reason: { kind: 'role', role: null }, ...repositories }))
+    // Where GitHub says the account itself may not push, no token of it may: which repositories, by their owner and name.
+    if (byRole.length > 0)
+      lines.push(line('push', 'no', { reason: { kind: 'role', role: null, names: byRole.map((one) => one.path) }, ...repositories }))
     // A classic token without repo says so by its scope, which is what puts it right.
     else if (scopeless) lines.push({ ...byScope('push'), ...repositories })
     else if (byToken.length > 0)

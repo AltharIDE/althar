@@ -293,7 +293,7 @@ describe('checking a GitHub connection', () => {
         { repositories: [['northwind', 'api']] },
       )
       const report = yield* check
-      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null })
+      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null, names: ['northwind/api'] })
       assert.deepStrictEqual(states(report), ['account ok', 'reach ok', 'push no', 'changes ok', 'checks ok', 'issues ok'])
     }),
   )

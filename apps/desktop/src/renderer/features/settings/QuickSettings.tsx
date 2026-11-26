@@ -26,6 +26,7 @@ import type { Section } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
+import { useSettingsHome } from './home'
 
 /*
  * Althar's quick settings, from the gear at the end of the window's bar, on
@@ -53,6 +54,7 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
   const preferences = usePreferences()
   const sounds = useSounds()
   const atOnce = useAgentsAtOnce()
+  const home = useSettingsHome()
   const places = usePlaces(open)
   const version = useAppVersion()
   const navigate = useNavigate()
@@ -84,8 +86,9 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
               machine={atOnce.atOnce.machine}
               most={MOST_AT_ONCE}
               onChange={atOnce.set}
+              disabled={!atOnce.canSet}
               fewer={places === null ? null : fewerOf(places)}
-              text={{ value: text.atOnceValue }}
+              text={{ value: text.atOnce(home.name).value }}
             />
             {atOnce.failed && (
               <Problem size="small" className={s.failed}>

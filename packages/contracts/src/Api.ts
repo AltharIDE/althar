@@ -1626,7 +1626,8 @@ export const AccessReason = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('refused') }),
   Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
-  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  /** `names`: the repositories (owner/name) the account's role there keeps it from, where the service says which. */
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String), names: Schema.optional(Schema.Array(Schema.String)) }),
   Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('no_push'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
@@ -5482,6 +5483,48 @@ const socketCalls = new Set<string>([
   'GetAccountSignIn',
   'PasteAccountSignInCode',
   'CancelAccountSignIn',
+  // The home's own settings, changed from its window as Settings shows them under the home's name: how its tasks go, its
+  // pull requests, its presets, how many agents work there at once, its automations and its finished tasks' folders.
+  // What a project's rules give stays with the project's own settings, and what only the person decides with the person:
+  // trusting outside code fully (SetRunOutside), removing finished tasks' folders and what they hold (CleanUpFolders,
+  // RemoveTaskFolder), and removing a preset of their own (RemovePreset).
+  'SetPlansAndReviews',
+  'SetSendMidTurn',
+  'SetNewProjectDefaults',
+  'SetAutomationsPaused',
+  'ListPresets',
+  'EditPreset',
+  'TunePreset',
+  'ResetPreset',
+  'SetPostTeamReviews',
+  'SetCoAuthor',
+  'SetReviewSeal',
+  'SetReviewSealStyle',
+  'SetShipRoute',
+  'SetAgentsAtOnce',
+  'GetTaskFolders',
+  'SetFolderWait',
+  // The home's MCP servers and skills, its agents' own (ADR-097): read, given to roles and projects, synced, added and
+  // removed from its window. A server's sign-in runs the agent's own command where it is, opening a browser on the home,
+  // so it stays with a window on that computer.
+  'GetAgentTools',
+  'GetServerDetail',
+  'CheckServers',
+  'SetToolRoles',
+  'SetToolInProject',
+  'SetToolSync',
+  'SetToolKeptOut',
+  'PickToolWay',
+  'UndoToolSync',
+  'AddServer',
+  'RemoveServer',
+  'ListSkills',
+  'FindSkills',
+  'StageSkill',
+  'ApproveSkill',
+  'CheckSkillUpdates',
+  'RollBackSkill',
+  'UninstallSkill',
 ])
 
 /**

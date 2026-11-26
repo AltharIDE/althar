@@ -999,3 +999,48 @@
     animation-name: fade;
   }
 }
+
+/*
+ * The update as a strip, in a section of Settings: the width of the sheet it sits on, flat on it as a row of settings
+ * is, with no card of its own and nothing arriving; the command folds open under it, from its left.
+ */
+.updating[data-layout='strip'] {
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+.updating[data-layout='strip'] .update {
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  background: var(--sunk);
+  box-shadow: none;
+  animation: none;
+}
+.updating[data-layout='strip'] .updateTile {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--paper);
+}
+.updating[data-layout='strip'] .updateTitle {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.updating[data-layout='strip'] .updateLine {
+  font-size: 12.5px;
+}
+.updating[data-layout='strip'] .updateEnd {
+  min-width: 0;
+}
+.updating[data-layout='strip'] .byHand {
+  align-items: flex-start;
+  padding-left: 14px;
+  animation: none;
+}
+.updating[data-layout='strip'] .updateUnsure {
+  text-align: left;
+}

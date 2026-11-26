@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Brand } from '../src/foundations/brands/brands'
 import { ProjectInk } from '../src/foundations/ProjectMark/drawing'
-import { HomeWelcome, type HomeWelcomeProps, type WelcomeNeed } from '../src/screens/HomeWelcome/HomeWelcome'
+import { HomeWelcome, type HomeWelcomeProps, UpdateHome, type WelcomeNeed } from '../src/screens/HomeWelcome/HomeWelcome'
 
 /* runner-1's welcome, as a window on it shows it while it has no projects. */
 
@@ -287,5 +287,41 @@ describe('a home’s welcome, every time after', () => {
     expect(pasted(field, 'https://github.com/acme/api').defaultPrevented).toBe(false)
     expect(at.onPaste).toHaveBeenCalledOnce()
     field.remove()
+  })
+})
+
+describe('an older home’s update, as a strip in Settings', () => {
+  it('lies flat as a strip, says what the update brings, and checks again quietly where no release has it yet', () => {
+    const onCheckAgain = vi.fn()
+    render(
+      <UpdateHome
+        layout="strip"
+        name="runner-1"
+        update={{ command: 'launcher update', release: 'unreleased' }}
+        onCheckAgain={onCheckAgain}
+        copied={false}
+        onCopy={vi.fn()}
+        text={{ unreleased: { arrival: () => '', title: 'Signing in from here comes with its next update', line: () => 'Not yet.' } }}
+      />,
+    )
+    const strip = screen.getByRole('region', { name: 'Updating runner-1' })
+    expect(strip.dataset.layout).toBe('strip')
+    expect(within(strip).getByText('Signing in from here comes with its next update')).toBeTruthy()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Check again' }))
+    expect(onCheckAgain).toHaveBeenCalled()
+    cleanup()
+    const onUpdate = vi.fn()
+    render(
+      <UpdateHome
+        layout="strip"
+        name="runner-1"
+        update={{ command: 'launcher update', run: { state: 'idle' } }}
+        onUpdate={onUpdate}
+        copied={false}
+        onCopy={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(onUpdate).toHaveBeenCalled()
   })
 })

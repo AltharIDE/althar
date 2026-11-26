@@ -161,8 +161,10 @@ export interface TaskFoldersProps {
   goes: ReadonlyArray<FinishedFolder>
   /** Folders whose wait is up, which Althar holds back; each removed by hand, but while it runs. */
   held: ReadonlyArray<HeldFolder>
-  onCleanUp: () => void
-  onRemove: (id: string) => void
+  /** Removes every folder Clean up takes; without it, as where only the person may, they're listed with nothing to press. */
+  onCleanUp?: () => void
+  /** Removes one held folder; without it, the held ones are listed with nothing to press. */
+  onRemove?: (id: string) => void
   /** Opens a folder's task from its row; without it, the rows only say. */
   onOpen?: (id: string) => void
   /** Their sizes are still being worked out. */
@@ -175,6 +177,8 @@ export interface TaskFoldersProps {
   error?: string
   /** The person was sent here to free space: the row comes into view and lights for a moment, so they see where they landed. */
   lit?: boolean
+  /** Whether the folders themselves are known: without them, as on a home that doesn't list them to this window, only the choice of when. */
+  listed?: boolean
   text?: Partial<TaskFoldersText>
 }
 
@@ -213,11 +217,12 @@ function HeldRow({
   one: HeldFolder
   asking: boolean
   onAsk: (asking: boolean) => void
-  onRemove: () => void
+  /** Removes it; without it, the row only says why it is held. */
+  onRemove: (() => void) | undefined
   busy: boolean
   t: TaskFoldersText
 }) {
-  const removable = one.why !== 'running'
+  const removable = one.why !== 'running' && onRemove !== undefined
   return (
     <li className={cx(s.item, asking && s.asking, removable && !asking && s.removable)}>
       <Icon name={WHY_GLYPH[one.why]} size={11} className={cx(s.mark, s.warm)} />
@@ -233,7 +238,7 @@ function HeldRow({
           </Button>
         </span>
       )}
-      {asking && one.why !== 'running' && (
+      {asking && removable && (
         <fieldset className={s.ask} aria-label={`${t.remove}: ${one.title}`}>
           <span className={s.askWords}>{t.ask[one.why](one.count ?? 0)}</span>
           <LinkButton onClick={() => onAsk(false)}>{t.cancel}</LinkButton>
@@ -289,7 +294,7 @@ function FolderList({
                 one={one}
                 asking={asking === one.id}
                 onAsk={(on) => setAsking(on ? one.id : null)}
-                onRemove={() => onRemove(one.id)}
+                onRemove={onRemove === undefined ? undefined : () => onRemove(one.id)}
                 busy={busy === one.id}
                 t={t}
               />
@@ -319,6 +324,7 @@ export function TaskFolders({
   busy = null,
   error,
   lit = false,
+  listed = true,
   text,
 }: TaskFoldersProps) {
   const t = { ...taskFoldersText, ...text, waits: { ...taskFoldersText.waits, ...text?.waits } }
@@ -353,6 +359,7 @@ export function TaskFolders({
       glyph={<Icon name="folder" size={15} />}
       under={
         // With none, the legend still says what the bar will show: the row never ends on a blank.
+        listed &&
         (disk !== null || any || measuring || freed !== null || error !== undefined || none) && (
           <div className={s.space}>
             {disk !== null && (
@@ -397,7 +404,7 @@ export function TaskFolders({
                   <FolderList
                     goes={goes}
                     held={held}
-                    onRemove={onRemove}
+                    {...(onRemove === undefined ? {} : { onRemove })}
                     {...(onOpen === undefined ? {} : { onOpen })}
                     busy={busy}
                     measuring={measuring}
@@ -414,7 +421,7 @@ export function TaskFolders({
               {measuring && going !== null && holding !== null && <span>{t.measuring}</span>}
               <span className={s.grow} />
               {freed !== null && <span>{t.freed(freed)}</span>}
-              {goes.length > 0 && (
+              {goes.length > 0 && onCleanUp !== undefined && (
                 <Button size="small" busy={busy === 'clean'} onClick={onCleanUp} data-lands="">
                   {t.cleanUp}
                 </Button>

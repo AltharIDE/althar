@@ -11,6 +11,37 @@
   list-style: none;
 }
 
+/* a group under a heading: what its sections are of, a home by its name, and quieter, what it runs */
+.headed {
+  display: grid;
+  gap: 4px;
+}
+.heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 10px;
+  font-size: 11.5px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.headingTitle {
+  flex: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.headingNote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+
 /* a section: its icon and name; the one open lifted off the page, as the tab with the window is off the bar */
 .section {
   display: flex;

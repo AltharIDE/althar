@@ -10,6 +10,7 @@ import { ArtifactsGroup } from './ArtifactsGroup'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
+import { farText, HomeHolds, type Unshown } from '../homes/HomeHolds'
 import { HEADING } from './sections'
 import { type Standing, standingOf } from './standing'
 import { useProjectTracker } from './useProjectTracker'
@@ -111,6 +112,16 @@ function TrackerRow({
   )
 }
 
+/** Where a window on another computer's home can't show a part of this section: what isn't shown, and what still holds. */
+const unshownText = {
+  repositories: { icon: 'branch', title: (home: string) => `This project’s repositories stay on ${home} for now`, line: farText('them') },
+  trackers: {
+    icon: 'plug',
+    title: (home: string) => `This project’s tracker and artifacts stay on ${home} for now`,
+    line: `${farText('them')} Its tasks there still use them.`,
+  },
+} satisfies Record<string, Unshown>
+
 export function CodeSection({
   projectId,
   trackers,
@@ -136,57 +147,61 @@ export function CodeSection({
   return (
     <>
       <ForkOffer offer={offer} />
-      <Repositories model={repositories} connections={list} onConnect={onConnect} />
-      <SettingGroup
-        title={text.trackers}
-        headingLevel={HEADING.part}
-        action={
-          !binding ? (
-            <Button size="small" icon="plug" onClick={() => onConnect('all')}>
-              {text.connectTracker}
-            </Button>
-          ) : (
-            <LinkButton onClick={() => onConnect('all')}>{text.connectAnother}</LinkButton>
-          )
-        }
-      >
-        <SettingList>
-          {bound.trackers.length > 0 && (
-            <TrackerBinding
-              trackers={bound.trackers}
-              value={bound.value}
-              container={bound.container}
-              containers={bound.containers}
-              gone={bound.gone}
-              onChange={bound.choose}
-              onContainer={bound.chooseContainer}
-            />
-          )}
-          {bound.failed !== null && (
-            <p role="alert" className={s.quiet}>
-              <ControlLine tone="yours">{bound.failed}</ControlLine>
-            </p>
-          )}
-          {trackers.length === 0 ? (
-            <EmptyState icon="plug" variant="flush" title={text.none} line={text.noneLine} headingLevel={4} />
-          ) : (
-            trackers.map((tracker) => (
-              <TrackerRow
-                key={trackerIdOf(tracker)}
-                tracker={tracker}
-                list={list}
-                onConnect={onConnect}
-                elsewhere={binding && tracker.bound !== true}
-                byTeam={bound.container !== null}
+      <HomeHolds changes={['SetRepository', 'AddRepositories', 'LeaveOutRepository']} unshown={unshownText.repositories}>
+        <Repositories model={repositories} connections={list} onConnect={onConnect} />
+      </HomeHolds>
+      <HomeHolds reads={['GetProjectTracker']} unshown={unshownText.trackers}>
+        <SettingGroup
+          title={text.trackers}
+          headingLevel={HEADING.part}
+          action={
+            !binding ? (
+              <Button size="small" icon="plug" onClick={() => onConnect('all')}>
+                {text.connectTracker}
+              </Button>
+            ) : (
+              <LinkButton onClick={() => onConnect('all')}>{text.connectAnother}</LinkButton>
+            )
+          }
+        >
+          <SettingList>
+            {bound.trackers.length > 0 && (
+              <TrackerBinding
+                trackers={bound.trackers}
+                value={bound.value}
+                container={bound.container}
+                containers={bound.containers}
+                gone={bound.gone}
+                onChange={bound.choose}
+                onContainer={bound.chooseContainer}
               />
-            ))
-          )}
-        </SettingList>
-      </SettingGroup>
-      <p className={s.quiet}>
-        <LinkButton onClick={onManage}>{text.manage}</LinkButton>
-      </p>
-      <ArtifactsGroup projectId={projectId} />
+            )}
+            {bound.failed !== null && (
+              <p role="alert" className={s.quiet}>
+                <ControlLine tone="yours">{bound.failed}</ControlLine>
+              </p>
+            )}
+            {trackers.length === 0 ? (
+              <EmptyState icon="plug" variant="flush" title={text.none} line={text.noneLine} headingLevel={4} />
+            ) : (
+              trackers.map((tracker) => (
+                <TrackerRow
+                  key={trackerIdOf(tracker)}
+                  tracker={tracker}
+                  list={list}
+                  onConnect={onConnect}
+                  elsewhere={binding && tracker.bound !== true}
+                  byTeam={bound.container !== null}
+                />
+              ))
+            )}
+          </SettingList>
+        </SettingGroup>
+        <p className={s.quiet}>
+          <LinkButton onClick={onManage}>{text.manage}</LinkButton>
+        </p>
+        <ArtifactsGroup projectId={projectId} />
+      </HomeHolds>
     </>
   )
 }

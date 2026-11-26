@@ -51,7 +51,7 @@ export type AccessReason =
   /** A permission a fine-grained token wasn't given, by the name its page uses: Pull requests. */
   | { readonly kind: 'permission'; readonly permission: string; readonly url: string | null }
   /** The account's own role there doesn't allow it: GitLab's Reporter, Bitbucket's read. Null where the service doesn't name it. */
-  | { readonly kind: 'role'; readonly role: string | null }
+  | { readonly kind: 'role'; readonly role: string | null; readonly names?: ReadonlyArray<string> }
   /** Repositories it doesn't see, by their paths. */
   | { readonly kind: 'unseen'; readonly names: ReadonlyArray<string>; readonly url: string | null }
   /**

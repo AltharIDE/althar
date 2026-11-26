@@ -1078,6 +1078,7 @@ export function UpdateHome({
   onCheckAgain,
   copied,
   onCopy,
+  layout = 'card',
   className,
   text,
 }: {
@@ -1089,6 +1090,11 @@ export function UpdateHome({
   /** The command was copied a moment ago. */
   copied: boolean
   onCopy: () => void
+  /**
+   * A card of its own, as a home's welcome centres it; or a strip the width of what it sits in, flat on its sheet, as a
+   * section of Settings has it, where a card would sit in a card.
+   */
+  layout?: 'card' | 'strip'
   className?: string
   text?: Partial<HomeWelcomeText>
 }) {
@@ -1100,6 +1106,9 @@ export function UpdateHome({
   if (asking && (run?.state !== 'idle' || busy === 0)) setAsking(false)
   const release = update.release
   const state = release ?? (run === undefined ? 'there' : asking ? 'asking' : run.state)
+  // In a strip, its presses as small as the rows of settings around it, and Check again quiet.
+  const small = layout === 'strip' ? ({ size: 'small' } as const) : {}
+  const quiet = layout === 'strip' ? ({ size: 'small', variant: 'quiet' } as const) : {}
   const steps = [t.update.steps.getting, t.update.steps.restarting(name), t.update.steps.reconnecting]
   const at = run?.state === 'running' ? (['getting', 'restarting', 'reconnecting'] as const).indexOf(run.step) : 0
   const title =
@@ -1137,13 +1146,16 @@ export function UpdateHome({
                   ? steps[at]
                   : run.problem
   return (
-    <section className={cx(s.updating, className)} aria-label={t.updateLabel(name)}>
+    <section className={cx(s.updating, className)} data-layout={layout} aria-label={t.updateLabel(name)}>
       <div className={s.update} data-state={state}>
         <span className={s.updateTile} aria-hidden="true">
           {state === 'running' || state === 'checking' ? (
-            <Spinner size="large" />
+            <Spinner size={layout === 'strip' ? 'small' : 'large'} />
           ) : (
-            <Icon name={state === 'failed' || state === 'asking' ? 'problem' : state === 'unreleased' ? 'clock' : 'download'} size={20} />
+            <Icon
+              name={state === 'failed' || state === 'asking' ? 'problem' : state === 'unreleased' ? 'clock' : 'download'}
+              size={layout === 'strip' ? 16 : 20}
+            />
           )}
         </span>
         <span className={s.updateText} aria-live="polite">
@@ -1155,7 +1167,7 @@ export function UpdateHome({
         <span className={s.updateEnd}>
           {release === 'checking' ? null : release === 'unreleased' ? (
             onCheckAgain !== undefined && (
-              <Button icon="reload" onClick={onCheckAgain}>
+              <Button icon="reload" {...quiet} onClick={onCheckAgain}>
                 {t.update.checkAgain}
               </Button>
             )
@@ -1163,7 +1175,7 @@ export function UpdateHome({
             <StepTrack steps={trackOf(steps, at)} className={s.updateTrack} text={{ label: t.updateLabel(name) }} />
           ) : run === undefined ? (
             onCheckAgain !== undefined && (
-              <Button icon="reload" onClick={onCheckAgain}>
+              <Button icon="reload" {...quiet} onClick={onCheckAgain}>
                 {t.update.checkAgain}
               </Button>
             )
@@ -1195,7 +1207,7 @@ export function UpdateHome({
               </Button>
             </span>
           ) : (
-            <Button variant="signal" onClick={busy > 0 && run.moves !== true ? () => setAsking(true) : onUpdate}>
+            <Button variant="signal" {...small} onClick={busy > 0 && run.moves !== true ? () => setAsking(true) : onUpdate}>
               {t.update.press(name)}
             </Button>
           )}
