@@ -33,7 +33,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Running: Story = {}
-export const WaitingOnYou: Story = { args: { status: TaskStatus.Yours, steps: HELD } }
+export const NeedsYou: Story = { args: { status: TaskStatus.Yours, steps: HELD } }
 export const Paused: Story = { args: { status: TaskStatus.Paused } }
 /** Sent back from Repair to Implement: what it had reached stays, ringed. */
 export const SentBack: Story = { args: { steps: SENT_BACK } }
@@ -68,10 +68,10 @@ export const AllStates: Story = {
           ),
         },
         {
-          state: 'waiting on you',
+          state: 'needs you',
           node: (
             <Peek>
-              <WorkPeek {...args} {...WaitingOnYou.args} />
+              <WorkPeek {...args} {...NeedsYou.args} />
             </Peek>
           ),
         },

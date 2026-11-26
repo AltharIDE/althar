@@ -56,7 +56,7 @@ export const WithEffort: Story = {
 }
 
 /** Something in it waits on you: violet, and the button answers. */
-export const WaitingOnYou: Story = {
+export const NeedsYou: Story = {
   args: {
     task: '431',
     status: TaskStatus.Yours,
@@ -228,7 +228,7 @@ export const Widths: Story = {
   render: (args) => {
     const cards = [
       { ...args, ...Done.args, from: T432.from },
-      { ...args, ...WaitingOnYou.args, from: T432.from, pr: 'Draft PR 1187, after Draft PR 1102 and PR 1090' },
+      { ...args, ...NeedsYou.args, from: T432.from, pr: 'Draft PR 1187, after Draft PR 1102 and PR 1090' },
       { ...args, ...Paused.args },
       { ...args, status: TaskStatus.Queued, now: 'Waiting for a free agent · 2 are busy', started: '1m ago' },
       { ...args, ...Stopped.args },
@@ -274,7 +274,7 @@ export const LongFacts: Story = {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: 320 }}>
         <TaskCard {...args} lead={SONNET} effort="High" from={from} />
         <TaskCard {...args} lead={SONNET} effort="High" from={from} pr="Draft PR 1187" />
-        <TaskCard {...args} {...WaitingOnYou.args} lead={SONNET} from={from} pr="Draft PR 1187" />
+        <TaskCard {...args} {...NeedsYou.args} lead={SONNET} from={from} pr="Draft PR 1187" />
       </div>
     )
   },
@@ -289,7 +289,7 @@ export const AllStates: Story = {
       size="thread"
       cells={[
         { state: 'running', node: <TaskCard {...args} /> },
-        { state: 'waiting on you', node: <TaskCard {...args} {...WaitingOnYou.args} /> },
+        { state: 'needs you', node: <TaskCard {...args} {...NeedsYou.args} /> },
         { state: 'done', node: <TaskCard {...args} {...Done.args} /> },
         { state: 'paused', node: <TaskCard {...args} {...Paused.args} /> },
         { state: 'stopped', node: <TaskCard {...args} {...Stopped.args} /> },

@@ -53,7 +53,7 @@ export const AllStates: Story = {
         { state: 'running', node: fill(<StepTrack steps={trackOf(STEPS, 2)} />) },
         { state: 'labelled', node: fill(<StepTrack steps={trackOf(STEPS, 2)} labels />) },
         { state: 'sent back', node: fill(<StepTrack steps={trackOf(STEPS, 1, 3)} labels />) },
-        { state: 'waiting on you', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Yours} labels />) },
+        { state: 'needs you', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Yours} labels />) },
         { state: 'paused', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Paused} labels />) },
         { state: 'stopped', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Stopped} labels />) },
         { state: 'done', node: fill(<StepTrack steps={trackOf(STEPS, 4, 4, true)} status={TaskStatus.Done} labels />) },
