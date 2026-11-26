@@ -27,7 +27,7 @@ import {
   lagLogged,
   watchLag,
 } from '@althar/runtime'
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
 import { keepCompiledNow } from '../compileCache'
@@ -236,6 +236,24 @@ const machineIn = (named: string | undefined) => {
     : { cores: 64, memory: 256 * 1024 ** 3 }
 }
 
+/**
+ * The pressure the end-to-end tests name in `ALTHAR_FAKE_PRESSURE`, read as this computer's own would be: `memory`,
+ * critical, so one agent works at a time at once; `cpu`, every core busy with work waiting for them, so the number comes
+ * down a place every little while. Without one, none is read: the machine running the tests is never theirs.
+ */
+const pressureIn = (named: string | undefined) => {
+  if (named !== 'memory' && named !== 'cpu') return false as const
+  const read = Effect.map(Clock.currentTimeMillis, (at) => ({
+    at,
+    // Readings that move on, as a computer's do: CPU time spent, and of it, busy.
+    cores: { busy: named === 'cpu' ? at * 4 : at, total: at * 4, count: 4 },
+    memory: { used: 50, total: 100 },
+    pressure: named === 'memory' ? ('critical' as const) : ('normal' as const),
+    contention: named === 'cpu' ? 2 : 0.5,
+  }))
+  return { read, every: Duration.seconds(1) }
+}
+
 /* Ports and folders that arrive before the runtime is ready wait here. */
 interface ClientPort {
   readonly port: Port
@@ -301,7 +319,8 @@ const program = Effect.gen(function* () {
           },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
-          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
+          // Its pressure is none, unless a test names some (`ALTHAR_FAKE_PRESSURE`): memory that is critical, or the CPU busy.
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: pressureIn(process.env.ALTHAR_FAKE_PRESSURE) },
           ...(fakeCompactionIdle > 0 ? { idle: { compaction: Duration.millis(fakeCompactionIdle) } } : {}),
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
@@ -312,10 +331,15 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot }, (outcome) => {
-    parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
-  })
-  const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
+  const workerHome = yield* workersForProfile(
+    { profile, worktrees: options.worktreeRoot },
+    (outcome) => {
+      parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+    },
+    // Opened once the person adds a worker: one more of the runtime's own ports, which no canvas may reach (ADR-104).
+    (port) => parent.postMessage({ type: 'listening', ports: [port] }),
+  )
+  const workerOptions = { workers: workerHome.execution }
   const context = yield* startup(
     'services',
     Layer.build(
@@ -352,12 +376,9 @@ const program = Effect.gen(function* () {
     threads: number
   }>`SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM threads) AS threads`
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
-  const workerPort =
-    workerHome === undefined
-      ? undefined
-      : yield* workerHome
-          .listen(Context.get(context, Instance).homeId)
-          .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
+  const workerPort = yield* workerHome
+    .listen(Context.get(context, Instance).homeId)
+    .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
   // Phones reach This Mac's home once the person lets them in (Settings › Computers), and again after a restart.
   yield* phonesIn(profile, context as never).pipe(Effect.catch((error) => Effect.logWarning('Phones could not be let in', String(error))))
   isReady(context)

@@ -1,0 +1,47 @@
+/* The app's screens at work, as the home page's carousel shows them: each in its frame, fading at the end of its round; a button pressed a moment before its answer lands. */
+
+.wrap { position: relative; }
+.frame {
+  overflow: hidden;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.08), 0 34px 90px -34px rgba(20, 20, 23, 0.32);
+  transition: opacity 320ms var(--ease);
+}
+
+.press { transition: transform 160ms var(--ease), box-shadow 160ms var(--ease); }
+.pressed { transform: scale(0.94); box-shadow: 0 0 0 4px var(--signal-dim); }
+
+/* The conversation, kept narrow (560px of the window's 1440, as the app opens it beside the board), and beside it the canvas or the board, given the rest. */
+.beside { position: relative; display: grid; flex: 1; min-height: 0; grid-template-columns: 560px minmax(0, 1fr); }
+/* Beside the board, the conversation a tenth narrower again (504px), the board's four lanes given the room. */
+.besideBoard { grid-template-columns: 504px minmax(0, 1fr); }
+/* The conversation, its newest at the foot over the composer; what it gains glides it up (useGlide in talk.tsx). */
+.talk { display: flex; flex-direction: column; min-height: 0; padding: 28px 40px 24px; overflow: hidden; }
+/* Over the conversation, the bar that says who it is with, as the app's project view heads it. */
+.asides { flex: none; margin: -12px -20px 12px; }
+.thread { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+.list { display: flex; flex-direction: column; gap: 14px; will-change: transform; }
+.composer { flex: none; margin-top: 16px; }
+/* Sent: the message rises into the conversation from the composer, as a bubble does on a phone, overshooting a touch and settling. */
+.sent { transform-origin: 100% 100%; animation: sent 460ms cubic-bezier(0.34, 1.4, 0.64, 1) both; }
+@keyframes sent { from { opacity: 0; transform: translateY(18px) scale(0.86); } 40% { opacity: 1; } }
+/* The answer comes in under it, then streams. */
+.reply { animation: arrive 360ms var(--ease) both; }
+.turn { display: grid; gap: 10px; max-width: 560px; }
+.said { font-size: 14px; line-height: 1.5; color: var(--t-1); }
+.ask { align-self: flex-end; min-height: 1.45em; max-width: 420px; padding: 10px 14px; border-radius: 14px; background: var(--n-4); font-size: 14px; line-height: 1.45; }
+.arrive { animation: arrive 420ms var(--ease) both; }
+.caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: var(--t-1); animation: blink 900ms steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
+.page { width: 100%; height: 100%; border: 0; }
+
+/* On a tablet the canvas's conversation is narrower beside it; on a phone the home is its list alone, as the app lays itself out that narrow, and the canvas is the canvas alone, its page with the brand's side narrower (signin.module.css). */
+@media (min-width: 700px) and (max-width: 900px) {
+  .canvasFit .beside { grid-template-columns: 420px minmax(0, 1fr); }
+}
+@media (max-width: 699px) {
+  .homeFit aside { display: none; }
+  .canvasFit .beside { grid-template-columns: minmax(0, 1fr); }
+  .canvasFit .talk { display: none; }
+}

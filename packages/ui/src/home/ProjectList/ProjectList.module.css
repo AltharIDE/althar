@@ -112,6 +112,50 @@ button.row:hover {
   flex: none;
 }
 
+/*
+ * A row's menu, at its end over what it counts: hidden at rest, shown as the
+ * row is hovered or has the focus, and while it is open. What it covers
+ * fades as it shows, so nothing moves beside it; always there where nothing
+ * hovers.
+ */
+.item {
+  position: relative;
+}
+.more {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  opacity: 0;
+  translate: 0 -50%;
+  transition: opacity var(--fast) var(--ease);
+}
+.withMenu .yours,
+.withMenu .ticks {
+  transition: opacity var(--fast) var(--ease);
+}
+.withMenu:is(:hover, :focus-within, [data-open]) .more {
+  opacity: 1;
+}
+.withMenu:is(:hover, :focus-within, [data-open]) :is(.yours, .ticks) {
+  opacity: 0;
+}
+.withMenu[data-open] button.row {
+  --project-mark-ground: var(--n-1);
+  background: var(--n-1);
+}
+/* with nothing counted at its end, the words stop short of it, so a long name never runs under it */
+.withMenu .words:last-child {
+  margin-right: 30px;
+}
+@media (hover: none) {
+  .more {
+    opacity: 1;
+  }
+  .withMenu :is(.yours, .ticks) {
+    opacity: 0;
+  }
+}
+
 .quiet {
   margin-top: 6px;
 }
@@ -132,7 +176,9 @@ button.row:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .row {
+  .row,
+  .more,
+  .withMenu :is(.yours, .ticks) {
     transition: none;
   }
 }

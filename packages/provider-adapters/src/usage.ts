@@ -80,8 +80,42 @@ export type UsageRead =
   | { readonly kind: 'usage'; readonly usage: AccountUsage }
   /** The agent answered, with no plan window: an API key, or a plan it gives none for. */
   | { readonly kind: 'none' }
-  /** The agent couldn't be asked, or its answer wasn't one Althar knows: a fault to show, in words. */
+  /** The agent couldn't be asked, or its answer wasn't one Althar knows: in its own words, for the log; `usageFailureOf` words it for the person. */
   | { readonly kind: 'failed'; readonly message: string }
+
+/**
+ * What a reading that failed says in Plan usage: one short line, in fixed words. Never the provider's answer, an address, a
+ * status or an error's own words: those go to the log only.
+ */
+export const usageSaid = {
+  /** The agent's own sign-in is gone or refused: the person signs in again (the peek's button beside the agent). */
+  signedOut: 'Signed out. Sign in again to read usage.',
+  /** The provider refused a sign-in the agent renews itself, the next time it runs. */
+  expired: (agent: string) => `Sign-in expired. ${agent} renews it on its next run.`,
+  rateLimited: 'Rate limited. Tries again later.',
+  noReply: 'No reply. Tries again soon.',
+  providerError: 'Provider error. Tries again soon.',
+  /** Any other failure: an answer Althar doesn't know, a moved address, an error it can't name. */
+  unknown: 'Couldn’t read usage.',
+  notYet: 'Not read yet.',
+  /** Claude Code's sign-in wasn't where Althar reads it: a session says its windows instead. */
+  afterTurn: 'Not read yet. Shows after its next turn.',
+  noSignIn: 'Couldn’t find its sign-in to read usage.',
+} as const
+
+/**
+ * A failure in an agent's or a command's own words (Codex's app-server, OpenCode's CLI), as Plan usage says it: whether its
+ * sign-in is what failed, and the short line for it.
+ */
+export const usageFailureOf = (raw: string): { readonly signedOut: boolean; readonly said: string } => {
+  if (/not (logged|signed) in|sign in|log in|unauthori[sz]ed|\b40[13]\b|token_expired|auth/i.test(raw))
+    return { signedOut: true, said: usageSaid.signedOut }
+  if (/\b429\b|rate.?limit|too many requests/i.test(raw)) return { signedOut: false, said: usageSaid.rateLimited }
+  if (/didn’t answer|timed? ?out|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|network|stopped (before|listening)/i.test(raw))
+    return { signedOut: false, said: usageSaid.noReply }
+  if (/\b5\d\d\b/.test(raw)) return { signedOut: false, said: usageSaid.providerError }
+  return { signedOut: false, said: usageSaid.unknown }
+}
 
 export const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null

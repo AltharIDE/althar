@@ -592,18 +592,6 @@ export const fetchedRefs = (
     signedIn(target),
   ).pipe(Effect.asVoid)
 
-/** As fetchedRefs: whether git could, the reason only in the log. */
-export const fetchRefs = (
-  cwd: string,
-  target: { readonly url: string; readonly header: string | null },
-  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
-) =>
-  fetchedRefs(cwd, target, refs).pipe(
-    Effect.as(true),
-    Effect.tapError(loggedFetch('refs')),
-    Effect.orElseSucceed(() => false),
-  )
-
 /**
  * Where git fetches from: a URL with the header that signs Althar in, or a
  * remote by name, with no header, as the person's own git reaches it.

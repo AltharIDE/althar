@@ -16,7 +16,7 @@ import { States, statesOn } from '../../storybook/States'
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
 
 /** The lower row as a consumer fills it: the model picker and the context meter. */
-function Picker({ left }: { left?: number }) {
+function Picker() {
   const [id, setId] = useState('claude-opus-5')
   const [effort, setEffort] = useState<string | null>(null)
   const prefs = useModelPrefs()
@@ -30,7 +30,6 @@ function Picker({ left }: { left?: number }) {
       defaultEffort={def}
       owner="Lead"
       count={MODEL_LIST.length}
-      room={left === undefined ? undefined : () => ({ left, until: 'Mon 11:00', account: null })}
       onChange={(next) => {
         setId(next)
         setEffort(null)
@@ -76,8 +75,6 @@ let addedSoFar = 0
 
 function Example(
   props: Partial<ComposerProps> & {
-    /** The share left of the model's tightest window. */
-    left?: number
     initial?: string
     recording?: boolean
     streaming?: boolean
@@ -97,7 +94,6 @@ function Example(
   },
 ) {
   const {
-    left,
     initial = '',
     recording = false,
     streaming = false,
@@ -180,7 +176,7 @@ function Example(
           : {})}
         placeholder="Tell the lead"
         hint="/"
-        picker={<Picker left={left} />}
+        picker={<Picker />}
         meter={<ContextRing used={122} total={1000} model={model('claude-opus-5')} />}
         dictation={{
           elapsed: seconds === null ? null : clock(seconds),
@@ -313,28 +309,6 @@ export const Suggesting: Story = {
     await userEvent.keyboard('{Tab}')
     await expect(field).toHaveValue('Mark this as done')
   },
-}
-/** Legacy quota props leave the composer quiet, at every remaining share. */
-export const NearlyOut: Story = {
-  render: () => (
-    <div style={{ display: 'grid', gap: 16, width: 520 }}>
-      <Example left={10} />
-      <Example left={3} />
-      <Example left={0} />
-    </div>
-  ),
-}
-/** The same at the narrowest feet: models and effort only, and send stays put. */
-export const NearlyOutNarrow: Story = {
-  render: () => (
-    <div style={{ display: 'grid', gap: 16 }}>
-      {[300, 380, 460].map((w) => (
-        <div key={w} style={{ width: w }}>
-          <Example left={3} takesFiles />
-        </div>
-      ))}
-    </div>
-  ),
 }
 /** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
 export const NarrowFoot: Story = {

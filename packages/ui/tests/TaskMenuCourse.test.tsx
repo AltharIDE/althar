@@ -117,3 +117,34 @@ describe('the task’s menu', () => {
     expect(foot()).toBeNull()
   })
 })
+
+describe('where it runs, from its menu (ADR-103)', () => {
+  it('lists the home and its workers, one greyed with why, and moves it where another is picked', () => {
+    const onMove = vi.fn()
+    render(
+      <TaskMenu
+        defaultOpen
+        onRename={vi.fn()}
+        runsOn={{
+          value: 'home',
+          places: [
+            { value: 'home', label: 'This Mac' },
+            { value: 'wrk_a', label: 'runner-1', hint: '12 GB free' },
+            { value: 'wrk_b', label: 'runner-2', hint: 'Sandbox can’t start', disabled: true },
+          ],
+          onMove,
+        }}
+      />,
+    )
+    const here = menu().getByRole('menuitemradio', { name: /This Mac/ })
+    expect(here.getAttribute('aria-checked')).toBe('true')
+    expect(
+      menu()
+        .getByRole('menuitemradio', { name: /runner-2/ })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+    expect(menu().getByText('Sandbox can’t start')).toBeTruthy()
+    fireEvent.click(menu().getByRole('menuitemradio', { name: /runner-1/ }))
+    expect(onMove).toHaveBeenCalledWith('wrk_a')
+  })
+})

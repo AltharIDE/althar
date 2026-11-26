@@ -15,6 +15,8 @@ import {
   infoOf,
   keyOf,
   offersEffort,
+  onWorker,
+  type PickOn,
   togglePin,
   useModelPrefs,
   withoutModel,
@@ -57,6 +59,8 @@ export interface ModelChoiceProps {
   text?: Partial<ModelPickText>
   /** Its menu opened or closed: a plan's row, whose whole is the picker, keeps it under the pointer while it's open. */
   onOpenChange?: (open: boolean) => void
+  /** The worker it runs on: only the agents and models it offers there. */
+  worker?: PickOn | undefined
 }
 
 export function ModelChoice({
@@ -73,17 +77,24 @@ export function ModelChoice({
   placement,
   text,
   onOpenChange,
+  worker,
 }: ModelChoiceProps) {
-  const known = useModels()
+  const home = useModels()
+  const { known, agents: offering } = useMemo(
+    () => (worker === undefined ? { known: home ?? [], agents } : onWorker(home ?? [], agents, worker)),
+    [home, agents, worker],
+  )
   const setDefault = useSetDefaultEffort()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [asking, setAsking] = useState<ModelInfo | null>(null)
-  const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
+  const catalog = useMemo(() => withoutModel(catalogOf(known, offering), without), [known, offering, without])
   const current = infoOf(catalog, value)
   const pins = prefs.pins ?? defaultPins(catalog)
-  const pinned = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
+  const pinnedHere = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
+  // On a worker none of whose models the person pinned, what it offers there is the list: a worker has few.
+  const pinned = worker !== undefined && pinnedHere.length === 0 ? catalog.models : pinnedHere
   const defaultOf = (info: ModelInfo) => defaultEffortOf(catalog, info)
   const agentName = (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId
   const another = (info: ModelInfo) => info.runtime !== value.agentId
@@ -134,6 +145,7 @@ export function ModelChoice({
       {browsing && (
         <ModelsBrowser
           agents={agents}
+          {...(worker === undefined ? {} : { worker })}
           without={without}
           value={current.id}
           {...(projectId === undefined ? {} : { projectId })}
@@ -168,6 +180,8 @@ export interface ModelsBrowserProps {
   projectId?: string
   onPick: (model: ModelInfo) => void
   onClose: () => void
+  /** The worker it runs on: only the agents and models it offers there. */
+  worker?: PickOn
 }
 
 /**
@@ -175,16 +189,21 @@ export interface ModelsBrowserProps {
  * model's default effort, its room, and the ones switched off, to switch
  * them on again. What picking one does is the consumer's.
  */
-export function ModelsBrowser({ agents, without = null, value, onPick, onClose }: ModelsBrowserProps) {
-  const known = useModels()
+export function ModelsBrowser({ agents: all, without = null, value, onPick, onClose, worker }: ModelsBrowserProps) {
+  const home = useModels()
+  const { known: shown, agents } = useMemo(
+    () => (worker === undefined ? { known: home ?? [], agents: all } : onWorker(home ?? [], all, worker)),
+    [home, all, worker],
+  )
+  const known = shown
   const setDefault = useSetDefaultEffort()
   const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
   // The latest change that didn't go through, said in the foot until the next one.
   const [failed, setFailed] = useState<{ readonly text: string; readonly retry: () => void } | null>(null)
-  const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
-  const every = useMemo(() => withoutModel(catalogOf(known ?? [], agents, { withBlocked: true }), without), [known, agents, without])
-  const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
+  const catalog = useMemo(() => withoutModel(catalogOf(known, agents), without), [known, agents, without])
+  const every = useMemo(() => withoutModel(catalogOf(known, agents, { withBlocked: true }), without), [known, agents, without])
+  const blocked = known.flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
   const pins = prefs.pins ?? defaultPins(catalog)
   const nameOf = (key: string) => every.models.find((info) => info.id === key)?.name ?? choiceOf(key).model ?? key
   /** Makes an effort a model's default; an agent's own default, whose model isn't known, has none to keep. */
@@ -224,7 +243,7 @@ export function ModelsBrowser({ agents, without = null, value, onPick, onClose }
       onTogglePin={(key) => togglePin(key, pins)}
       onSetDefaultEffort={makeDefault}
       text={{
-        columns: { model: 'Model', runtime: 'Agent', room: 'Usage', context: 'Context', effort: 'Default effort' },
+        columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' },
         // The pin's shortcut as this system writes it.
         keys: { ...modelBrowserText.keys, pin: modKey('P') },
       }}

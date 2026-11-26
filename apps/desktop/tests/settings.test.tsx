@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@althar/contracts'
+import { ApiError, type HomeWorker } from '@althar/contracts'
 import { EdgeSpot } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
+import type { WorkersHost, WorkerSetup } from '../src/workers'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { keys } from '../src/renderer/data/reads'
@@ -25,6 +26,7 @@ import {
   onLinuxHome,
   fakePagesHost,
   githubConnection,
+  project,
   models,
   skillCard,
   withoutOpenCode,
@@ -105,11 +107,9 @@ describe('the quick settings', () => {
     // Nothing else: not the agents, the code hosts, reviews, co-author, the icon. Nor what is running: settings are calm.
     expect(within(panel).queryByText(/Agents\b(?! at once)|Code hosts|Post reviews|Co-author|App icon|In other apps|busy/)).toBeNull()
     expect(within(panel).getByText('Althar 0.0.0')).toBeTruthy()
-    expect(
-      within(panel)
-        .getByRole('link', { name: /What’s new/ })
-        .getAttribute('href'),
-    ).toBe('https://althar.ai/changelog')
+    // What's new is Althar's own page, in the window, not the notes in the browser.
+    expect(within(panel).getByRole('button', { name: 'What’s new' })).toBeTruthy()
+    expect(within(panel).queryByRole('link', { name: /What’s new/ })).toBeNull()
 
     // All settings goes to the Settings tab, where it was last, and leaves the panel.
     await userEvent.click(within(panel).getByRole('button', { name: /^All settings/ }))
@@ -657,6 +657,51 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
   })
 
+  it('lists the phones paired with the home under Computers, with Pair a phone…', async () => {
+    const phone = {
+      deviceId: 'dev_1a2b3c4d5e6f708192a3b4c5d6e7f809',
+      name: 'Balázs’s iPhone',
+      publicKey: 'A'.repeat(43),
+      role: 'socket' as const,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      revokedAt: null,
+    }
+    let clients = [phone]
+    const { client } = fakeClient({
+      pairedDevices: vi.fn(async () => ({ clients, next: null })),
+      removePairedDevice: vi.fn(async () => {
+        clients = []
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const page = screen.getByRole('main')
+    const phones = await within(page).findByRole('region', { name: 'Phones' })
+    expect(await within(phones).findByText('Balázs’s iPhone')).toBeTruthy()
+    expect(within(phones).getByText('Paired Today')).toBeTruthy()
+
+    // Taken off once the person says so, and gone from the list.
+    await userEvent.click(within(phones).getByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Remove Balázs’s iPhone?' })).getByRole('button', { name: 'Remove' }))
+    expect(client.removePairedDevice).toHaveBeenCalledWith(phone.deviceId)
+    expect(await within(phones).findByText('No phones paired with This Mac yet.')).toBeTruthy()
+
+    await userEvent.click(within(phones).getByRole('button', { name: 'Pair a phone…' }))
+    expect(await screen.findByRole('dialog', { name: /Pair a phone with/ })).toBeTruthy()
+  })
+
+  it('says so where the home’s phones can’t be read, rather than showing none', async () => {
+    const { client } = fakeClient({
+      pairedDevices: vi.fn(async () => {
+        throw new ApiError({ reason: 'Forbidden', message: 'This connection can’t list devices.' })
+      }),
+    })
+    withServices(<Settings at="computers" />, client)
+    const phones = await within(screen.getByRole('main')).findByRole('region', { name: 'Phones' })
+    expect(await within(phones).findByText('This connection can’t list devices.')).toBeTruthy()
+    expect(within(phones).queryByText(/No phones paired/)).toBeNull()
+  })
+
   it('lists the home and its workers, opens one out, and takes one out at once once the person says so', async () => {
     const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_697, freeDiskMib: 90_000 } as const
     const free = {
@@ -710,7 +755,7 @@ describe('the Settings tab', () => {
     expect((within(page).getByRole('button', { name: 'Remove Linux worker 222222' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('in a window on a Linux home over SSH, name that home, give its own commands, and leave Remove to a paired device', async () => {
+  it('in a window on a Linux home over SSH, name that home, take workers out as its operator, and give its own commands', async () => {
     const studio = onLinuxHome('studio')
     const worker = {
       workerId: `wrk_${'6'.repeat(32)}`,
@@ -728,14 +773,78 @@ describe('the Settings tab', () => {
     expect(await within(page).findByRole('button', { name: /^studio/ })).toBeTruthy()
     expect(within(page).queryByText('This Mac')).toBeNull()
     await userEvent.click(within(page).getByRole('button', { name: /Linux worker 666666/ }))
-    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(within(page).getByText('Over SSH, this window can’t remove workers. A device paired with studio can.')).toBeTruthy()
+    // Over SSH it reaches the home as its operator, as the host's console does: it may take workers out.
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(false)
     await userEvent.click(within(page).getByRole('button', { name: 'Computers' }))
     await userEvent.click(within(page).getByRole('button', { name: 'Add a worker' }))
     const adding = screen.getByRole('dialog', { name: 'Add a worker to studio' })
     expect(within(adding).getByText(/althar-host enroll-worker .* && althar-host status --wait --json$/)).toBeTruthy()
     expect(within(adding).queryByText(/althar workers enroll/)).toBeNull()
     expect(within(adding).getByText(/--agent-config ~\/althar-worker\/agents\.conf --watch$/)).toBeTruthy()
+  })
+
+  it('on an older Linux home over SSH, leaves Remove off and says to update it', async () => {
+    const studio = onLinuxHome('studio')
+    const worker = { workerId: `wrk_${'6'.repeat(32)}`, connected: true, busy: false, providers: ['codex'], projects: [], task: null }
+    const { client } = fakeClient({
+      connection: { ...studio.connection, calls: studio.connection.calls.filter((call) => call !== 'RemoveWorker') },
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })),
+    })
+    withServices(<Settings at="computers" />, client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Linux worker 666666/ }))
+    expect((within(page).getByRole('button', { name: 'Remove Linux worker 666666' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(page).getByText('studio runs an older Althar: update it to remove its workers from here.')).toBeTruthy()
+  })
+
+  it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {
+    const studio = onLinuxHome('studio')
+    const paired = {
+      ...studio.homes,
+      state: vi.fn(async () => ({
+        ...(await studio.homes.state()),
+        current: {
+          kind: 'https' as const,
+          home: { ...(await studio.homes.list())[0]!, ssh: undefined, https: { origin: 'https://studio:6769' } },
+        },
+      })),
+    }
+    const worker: HomeWorker = {
+      workerId: `wrk_${'6'.repeat(32)}`,
+      name: 'box',
+      ssh: 'root@box',
+      anyProject: true,
+      signedIn: [],
+      connected: true,
+      busy: false,
+      providers: ['codex'],
+      projects: [],
+      task: null,
+    }
+    const signIn = vi.fn(async () => undefined)
+    const { client } = fakeClient({ connection: studio.connection, getWorkers: vi.fn(async () => ({ enabled: true, workers: [worker] })) })
+    withServices(
+      <Settings at="computers" />,
+      client,
+      fakeHost({
+        homes: paired as never,
+        workers: {
+          release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid' })),
+          setup: vi.fn(async () => null),
+          setUp: vi.fn(async () => undefined),
+          act: vi.fn(async () => undefined),
+          onSetup: vi.fn(() => () => undefined),
+          agents: vi.fn(async () => []),
+          signIn,
+          signInAct: vi.fn(async () => undefined),
+          onSignIn: vi.fn(() => () => undefined),
+        },
+      }),
+    )
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^box/ }))
+    expect(within(page).getByText('Not signed in')).toBeTruthy()
+    expect(within(page).queryByRole('button', { name: 'Sign in' })).toBeNull()
   })
 
   it('put a worker back with why when it can’t be taken out, and say what adding one takes', async () => {
@@ -759,6 +868,261 @@ describe('the Settings tab', () => {
     const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
     expect(within(adding).queryByText(/althar workers configure/)).toBeNull()
     expect(within(adding).getByText(/althar workers enroll/)).toBeTruthy()
+  })
+
+  it('adds a worker over SSH: its first step at once, its key signed by the home, then its sheet to pick its projects', async () => {
+    const workerId = `wrk_${'7'.repeat(32)}`
+    const grant = {
+      homeId: `home_${'1'.repeat(32)}`,
+      workerId,
+      authority: 'CA',
+      certificate: 'CERT',
+      serverName: 'home.althar.invalid',
+      port: 6770,
+      addresses: ['192.168.1.2:6770'],
+    }
+    let listening: ((setup: WorkerSetup | null) => void) | undefined
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn((listener) => {
+        listening = listener
+        return () => undefined
+      }),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    let workers: HomeWorker[] = []
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers })),
+      addWorker: vi.fn(async () => grant),
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [{ ...project, id: 'proj_m', name: 'Meridian' }] })),
+    })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^Add a worker/ }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    // A line that isn't an address is said at its field.
+    await userEvent.type(within(adding).getByLabelText('SSH address'), 'not an address')
+    await userEvent.click(within(adding).getByRole('button', { name: 'Add worker' }))
+    expect(within(adding).getByText(/That isn’t an SSH address/)).toBeTruthy()
+    await userEvent.clear(within(adding).getByLabelText('SSH address'))
+    await userEvent.type(within(adding).getByLabelText('SSH address'), 'build@box:2222')
+    await userEvent.click(within(adding).getByRole('button', { name: 'Add worker' }))
+    // Its first step shows at once; main goes on behind.
+    expect(within(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).getByText('Reach the machine')).toBeTruthy()
+    expect(bridge.setUp).toHaveBeenCalledWith({ target: 'build@box', port: 2222 }, true)
+    // Its key made: the window's own home signs it, and main hands that to the worker.
+    const base = { target: { target: 'althar@box', port: 2222 }, name: 'box', log: [] }
+    act(() => listening?.({ ...base, phase: 'enroll', at: 3, publicKey: 'KEY' }))
+    await waitFor(() => expect(client.addWorker).toHaveBeenCalledWith({ publicKey: 'KEY', name: 'box', ssh: 'althar@box:2222' }))
+    await waitFor(() => expect(bridge.act).toHaveBeenCalledWith({ kind: 'enroll', grant }))
+    // Started and connected: the dialog gives way to its sheet, where its projects are picked.
+    workers = [
+      {
+        workerId,
+        name: 'box',
+        ssh: 'althar@box:2222',
+        anyProject: true,
+        signedIn: ['codex'],
+        connected: true,
+        busy: false,
+        providers: ['codex'],
+        projects: [],
+        task: null,
+      },
+    ]
+    // Connected while its check still runs: the dialog stays until the check is in.
+    act(() => listening?.({ ...base, phase: 'running', at: 5, workerId }))
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
+    act(() =>
+      listening?.({
+        ...base,
+        phase: 'done',
+        at: 6,
+        workerId,
+        check: { sandbox: { starts: true }, agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: true }] },
+      }),
+    )
+    expect(await within(page).findByRole('heading', { name: 'box' })).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Add a worker to This Mac' })).toBeNull()
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'dismiss' })
+    await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))
+    expect(client.setWorkerProjects).toHaveBeenCalledWith(workerId, ['proj_m'])
+    expect(within(page).getByText('Signed in')).toBeTruthy()
+  })
+
+  it('keeps a worker whose check found its sandbox can’t start, with the command that lets it, and allows it with sudo in one press', async () => {
+    let listening: ((setup: WorkerSetup | null) => void) | undefined
+    const fix = "sudo sh -c 'printf x > /etc/apparmor.d/althar-worker-bwrap && apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+    const added: WorkerSetup = {
+      target: { target: 'althar@box' },
+      name: 'box',
+      log: [],
+      phase: 'done',
+      at: 5,
+      workerId: `wrk_${'5'.repeat(32)}`,
+      check: { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] },
+    }
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://example.com' })),
+      setup: vi.fn(async () => added),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn((listener: (setup: WorkerSetup | null) => void) => {
+        listening = listener
+        return () => undefined
+      }),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const workers: HomeWorker[] = [
+      {
+        workerId: added.workerId!,
+        name: 'box',
+        anyProject: true,
+        signedIn: [],
+        connected: true,
+        busy: false,
+        providers: ['codex'],
+        projects: [],
+        task: null,
+      },
+    ]
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^Add a worker/ }))
+    const adding = await screen.findByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('Its agents’ sandbox can’t start on box.')).toBeTruthy()
+    expect(within(adding).getByText(fix)).toBeTruthy()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Allow with sudo' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'sandbox' })
+    // It shows it checking at once.
+    expect(within(adding).getByRole('button', { name: 'Checking…' })).toBeTruthy()
+    // The login can't use sudo without a password: the command stays, for its administrator.
+    act(() => listening?.({ ...added, check: { ...added.check!, allowed: 'NeedsAdministrator' } }))
+    expect(await within(adding).findByText(/Its login can’t use sudo without a password/u)).toBeTruthy()
+    expect(within(adding).queryByRole('button', { name: 'Allow with sudo' })).toBeNull()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'check' })
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
+  })
+
+  it('says plainly, before anything is pressed, that no release can add a worker yet, and checks again', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'none' as const, newest: '0.1.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('There’s no Althar release with workers yet.')).toBeTruthy()
+    expect(within(adding).getByText(/The newest host release, 0\.1\.0, came before workers/)).toBeTruthy()
+    // Neither way is offered: no address to give, no code's line that couldn't work.
+    expect(within(adding).queryByLabelText('SSH address')).toBeNull()
+    expect(bridge.setUp).not.toHaveBeenCalled()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(bridge.release).toHaveBeenLastCalledWith(true))
+  })
+
+  it('asks the home for a code again on Check again, its error and Checking… shown until it answers', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    let answer: (made: { code: string; expiresAt: number }) => void = () => undefined
+    // Busy until Check again is pressed; then it answers once the test says.
+    let busy = true
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => (answer = resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    // The dialog as it is each time: it's drawn again as its way changes.
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    const before = createWorkerCode.mock.calls.length
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    // Asked again: what it said stays, and the button says it's checking, until the home answers.
+    expect(within(adding()).getByText('The home is busy.')).toBeTruthy()
+    expect((within(adding()).getByRole('button', { name: 'Checking…' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(createWorkerCode.mock.calls.length).toBe(before + 1))
+    act(() => answer({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 }))
+    expect(
+      await within(adding()).findByText(
+        /ALTHAR_RELEASE_BASE=https:\/\/example\.invalid\/host-v0\.2\.0 sh -s -- join 'althar-worker1\.e30'/,
+      ),
+    ).toBeTruthy()
+    expect(within(adding()).queryByText('The home is busy.')).toBeNull()
+  })
+
+  it('drops a code asked again on Check again once the way changes, so only the one asked on coming back shows', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    // Busy at first; then each request waits until the test answers it, the last asked first.
+    let busy = true
+    const answers: Array<(made: { code: string; expiresAt: number }) => void> = []
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => answers.push(resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'Over SSH' }))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    await waitFor(() => expect(answers.length).toBeGreaterThanOrEqual(2))
+    const expiresAt = Date.now() + 600_000
+    act(() => answers.at(-1)!({ code: 'althar-worker1.fresh', expiresAt }))
+    expect(await within(adding()).findByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    // The retry dropped when the way changed answers late: it changes nothing.
+    act(() => answers[0]!({ code: 'althar-worker1.stale', expiresAt }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(within(adding()).getByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    expect(within(adding()).queryByText(/althar-worker1\.stale/)).toBeNull()
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

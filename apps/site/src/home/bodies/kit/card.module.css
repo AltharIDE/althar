@@ -1,0 +1,85 @@
+/* The business card on the canvas (CanvasAtWork.tsx): a card on a dotted ground, its pieces coming in as the story reaches them. */
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #efece4;
+  background-image: radial-gradient(rgba(20, 20, 23, 0.1) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+
+/* The cards, held in the middle of the canvas; as the canvas grows or shrinks they glide to its new middle (CanvasAtWork's useCentre). */
+.cards { position: absolute; inset: 0; }
+
+/* The front: the card, there from the start; with a back, it steps up and to the left, turned a little. */
+.front,
+.back {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 420px;
+  height: 240px;
+  margin: -120px 0 0 -210px;
+  border-radius: 12px;
+  transition:
+    transform 640ms var(--ease-out),
+    opacity 420ms var(--ease-out);
+}
+.front {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: 26px 28px 30px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 23, 0.08), 0 22px 44px -22px rgba(20, 20, 23, 0.35);
+}
+.cards[data-back] .front { transform: translate(-70px, -74px) rotate(-3deg); }
+
+/* Each piece of the front comes in on its own. */
+.piece { margin: 0; opacity: 0; transform: translateY(7px); transition: opacity 320ms var(--ease-out), transform 420ms var(--ease-out); }
+.piece[data-on] { opacity: 1; transform: none; }
+
+.head { display: flex; align-items: center; gap: 8px; }
+.mark { display: block; color: var(--cobalt); }
+.app { font: 650 18px var(--head); letter-spacing: -0.02em; color: #141417; }
+
+.who { align-self: end; margin-bottom: 12px; }
+/* Her name in the heading's face, then in the serif italic: both laid in one place, one fading for the other. */
+.name { display: inline-grid; color: #141417; }
+.sans, .serif { grid-area: 1 / 1; transition: opacity 360ms var(--ease-out), transform 460ms var(--ease-out); }
+.sans { font: 600 32px/1.1 var(--head); letter-spacing: -0.035em; }
+.serif { font: italic 400 38px/1.1 var(--beat); letter-spacing: -0.01em; color: var(--cobalt); opacity: 0; transform: translateY(5px); }
+.name[data-serif] .sans { opacity: 0; transform: translateY(-5px); }
+.name[data-serif] .serif { opacity: 1; transform: none; }
+.role { margin-top: 5px; font: 15px var(--head); color: #63636b; }
+
+.install { justify-self: start; padding: 4px 8px; border-radius: 6px; background: #f4f2ec; font: 13px var(--mono); color: #141417; }
+
+/* The cobalt rule along its foot, drawn from the left. */
+.rule {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: var(--cobalt);
+  transform: scaleX(0); transform-origin: left center;
+  transition: transform 520ms var(--ease-out);
+}
+.rule[data-on] { transform: none; }
+
+/* The back: cobalt, behind the front, turned the other way; the mark's dots open out from its middle. */
+.back {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  background: var(--cobalt);
+  color: #fff;
+  box-shadow: 0 22px 44px -22px rgba(10, 14, 90, 0.55);
+  opacity: 0;
+  transform: translate(80px, 106px) rotate(9deg) scale(0.96);
+}
+.back[data-on] { opacity: 1; transform: translate(80px, 74px) rotate(4deg); }
+.dots { display: block; line-height: 0; clip-path: circle(0% at 50% 58%); transition: clip-path 800ms var(--ease-out); }
+.dots[data-on] { clip-path: circle(75% at 50% 58%); }
+.tag { margin: 0; font: italic 400 20px var(--beat); opacity: 0; transform: translateY(5px); transition: opacity 360ms var(--ease-out), transform 460ms var(--ease-out); }
+.tag[data-on] { opacity: 0.92; transform: none; }

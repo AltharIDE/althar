@@ -76,7 +76,7 @@ export const PAGE_META = {
     name: 'Office hours',
     title: 'Office hours · Althar',
     description:
-      'Twenty minutes on video with Balazs, who makes Althar: get it set up together, or talk through working with coding agents. Free.',
+      'Twenty minutes on video with Balazs and Niko, who build Althar: get it set up together, or talk through working with coding agents. Free.',
     image: '/og/home.jpg',
     index: true,
   },

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 
 import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import { type Commands, Ledger } from '@althar/persistence-sqlite'
-import { AUTOMATION_DEFAULTS, type AutomationDefinition, Schedule, scheduleInLine } from '@althar/contracts'
+import { AUTOMATION_DEFAULTS, type AutomationDefinition, GOAL_LENGTH, GOAL_ROUNDS, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -82,6 +82,7 @@ import { TITLE_LENGTH } from './taskTitle'
 import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
+import { controlGoal } from './threadGoals'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
@@ -234,6 +235,8 @@ const Attaching = Schema.Struct({
   pull_request: Schema.Union([Schema.String, Schema.Number]),
   start_from_head: Schema.optional(Schema.Boolean),
 })
+/* A goal set on a task on the person's word: the objective its lead keeps working toward. */
+const GoalAsked = Schema.Struct({ task: Schema.String, objective: Schema.String })
 const DraftedIssue = Schema.Struct({
   ...AskedFields.fields,
   title: Schema.String,
@@ -1413,6 +1416,39 @@ export class Coordinator extends Context.Service<
             return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
           }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
+        })
+
+      /**
+       * A goal set on a task, on the person's word in this turn (goals are the person's: no agent sets one on its own). On a
+       * task already at work its lead takes it up now; on one whose plan hasn't started, it waits for the plan, so the
+       * countdown and a hold still stand, and the lead takes it up from its first turn. Said in the task's thread, as Althar's
+       * line, as one the person sets there is.
+       */
+      const setGoalTool = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(GoalAsked, input)
+          if ((yield* personsWords(access)) === undefined)
+            return yield* new ToolRefused({
+              message: 'A goal is set on the person’s word: call set_goal in a turn their message started, where they asked for it.',
+            })
+          const task = yield* taskOf(access, asked.task)
+          const control = { action: 'set' as const, objective: asked.objective }
+          const result = yield* controlGoal(task.threadId, control).pipe(
+            Effect.catchTag('ApiError', (error) => Effect.fail(new ToolRefused({ message: error.message }))),
+          )
+          if (!result.changed) return `${task.slug} already works toward that goal.`
+          const by = access.role === 'coordinator' ? 'The coordinator' : 'A lead'
+          yield* addItem({ projectId: result.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `${by} ${result.before === null ? 'set' : 'replaced'} the goal, as you asked: ${result.goal?.objective ?? asked.objective.trim()}`,
+          })
+          if (result.stopping !== undefined) yield* sessions.cancelGoalRound(task.threadId, result.stopping)
+          // One waiting for its plan is the plan's lead's to take up, from its first turn: nothing starts a lead for it here.
+          if (result.goal?.status === 'active' && !result.goal.waiting) yield* sessions.kickGoal(task.threadId, result.goal.revision)
+          return result.goal?.waiting === true
+            ? `Set the goal on ${task.slug}: it waits for its plan to start, and its lead works toward it from then, up to ${result.goal.roundLimit} turns. Say so in a sentence.`
+            : `Set the goal on ${task.slug}: its lead works toward it now, up to ${result.goal?.roundLimit ?? GOAL_ROUNDS} turns. Say so in a sentence.`
         })
 
       /**
@@ -3201,6 +3237,23 @@ export class Coordinator extends Context.Service<
             required: ['title', 'lead'],
           },
           startNow,
+        ),
+        tool(
+          'set_goal',
+          `Sets a goal on a task, where the person gives one ("set a goal to…", or /goal and an objective): the objective its lead keeps working toward on its own, turn after turn, up to ${GOAL_ROUNDS} turns, until it is done or stuck; the person pauses, edits or clears it from the task. Only on the person's word in this turn. A goal is a task's, never the coordinator's own: for a new objective, draft_task for it, set_goal on the task it drafted, then propose_plan, as you plan any task (its preset, lead and effort); it waits for its plan, so the countdown and a hold still stand. On a task already at work, its lead takes it up now. Setting it again replaces the goal.`,
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: 'The task’s slug, as draft_task or list_tasks gives it.' },
+              objective: {
+                type: 'string',
+                maxLength: GOAL_LENGTH,
+                description: 'What its lead should keep working toward, in the person’s words.',
+              },
+            },
+            required: ['task', 'objective'],
+          },
+          setGoalTool,
         ),
         tool(
           'start_artifact',

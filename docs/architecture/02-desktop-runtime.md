@@ -638,23 +638,30 @@ together:
 apps/
   desktop/
     src/
-      features/<feature>/ # routes, views, view models, tests
-      shared/             # what several features use
-      data/               # the Effect data layer: RPC client, change feed
-  cli/                    # optional diagnostic/control client
+      main/               # Electron's main process: windows, the runtime's process
+      runtime/            # the runtime as the app starts it, in a utility process
+      renderer/
+        features/<feature>/ # routes, views, view models
+        shared/             # what several features use
+        data/               # the RPC client, the change feed, the cache
+  cli/                    # a command-line client of the runtime
+  host/                   # a persistent home on a Linux host
+  worker/                 # an execution worker (Rust)
+  report/                 # the Worker that files a problem report
+  site/
 packages/
   contracts/              # versioned client/runtime schemas
   domain/                 # entities, commands, policies, projections
-  runtime/                # composition root and process supervision
+  runtime/                # composition root, the workflow, Althar's tools
   persistence-sqlite/
-  workflow/
   provider-adapters/      # the ACP adapter, agent registry, native side channels
-  althar-tools/        # the MCP server agents use to reach Althar
-  integration-connectors/
-  mcp-broker/
+  connectors/             # code hosts and trackers, with their fakes
   skills/
+  transport-node/         # local socket and SSH transports
+  worker-protocol/        # the home's contract with its workers
+  testing/                # how the tests run
   ui/
-  testkit/
+brand/
 ```
 
 Runtime-side packages are written with Effect; `ui` never uses it
@@ -666,7 +673,7 @@ These are package boundaries, not network services:
 - adapters depend inward on domain ports and contracts;
 - `runtime` composes implementations and owns side effects;
 - `desktop` speaks through the control-plane contract;
-- contract suites for adapters/connectors live in `testkit`;
+- adapters and connectors keep their fakes and contract suites beside them;
 - production UI primitives stay with the product until they need an independent
   release.
 

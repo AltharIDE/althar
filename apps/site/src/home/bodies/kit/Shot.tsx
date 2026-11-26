@@ -13,6 +13,12 @@ import s from './Shot.module.css'
  * px), scaled up until that part reads. It is a picture: nothing in it can
  * be pressed or focused, and it reads as its label. Out of sight, what
  * loops in it rests.
+ *
+ * Or, on a phone or a tablet, it can fill a box of the screen's own shape
+ * (`fill`: the nearest `[data-fit-box]` round it, as the carousel's views
+ * are), showing the part of itself it is given, `w` px of it across from
+ * `x`, as large as that reads, and as much of the rest round it as the box
+ * has room for: from `y` down, or up from its foot.
  */
 
 export interface Region {
@@ -22,16 +28,29 @@ export interface Region {
   h: number
 }
 
+/** A part to show, filling the box it is in: across from `x`, `w` px of it at least, and from `y` down, or (`from: 'foot'`) up to `y + h`. */
+export interface Fit {
+  x: number
+  y: number
+  w: number
+  h?: number
+  from?: 'top' | 'foot'
+}
+
 export interface ShotProps {
   w: number
   /** Its height; without it, as tall as what it shows. */
   h?: number
   /** On a narrow screen, laid out this wide instead. */
   phoneW?: number
+  /** On a tablet, filling its box (`fill`), laid out this wide instead. */
+  tabletW?: number
   /** On a narrow screen, the part to show, in the design's px. */
   phone?: Region
   /** Elsewhere, the part to show; by default all of it. */
   crop?: Region
+  /** Filling the box it is in, on a phone and on a tablet: the part to show on each. */
+  fill?: { phone?: Fit; tablet?: Fit }
   /** Where it sits when it is narrower than its place. */
   align?: 'center' | 'start'
   /** Never shown larger than this. */
@@ -45,6 +64,8 @@ export interface ShotProps {
 }
 
 const NARROW = 700
+const TABLET = 900
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi))
 
 /*
  * The app's components keep what is current in view (a tab scrolls itself
@@ -63,7 +84,21 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2, label, className, frame, children }: ShotProps) {
+export function Shot({
+  w,
+  h,
+  phoneW,
+  tabletW,
+  phone,
+  crop,
+  fill,
+  align = 'center',
+  maxScale = 2,
+  label,
+  className,
+  frame,
+  children,
+}: ShotProps) {
   const box = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [fit, setFit] = useState<{ scale: number; width: number; region: Region } | null>(null)
@@ -72,15 +107,36 @@ export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2
   // Regions are written inline: follow what they say, not which object they are.
   const phoneKey = phone ? `${phone.x},${phone.y},${phone.w},${phone.h}` : ''
   const cropKey = crop ? `${crop.x},${crop.y},${crop.w},${crop.h}` : ''
+  const fillKey = fill ? JSON.stringify(fill) : ''
   useLayoutEffect(() => {
     const el = box.current
     const inner = stage.current
     if (!el || !inner) return
+    const room = el.closest<HTMLElement>('[data-fit-box]')
     const measure = () => {
       const narrow = window.innerWidth < NARROW
-      const width = narrow && phoneW ? phoneW : w
+      const mid = !narrow && window.innerWidth < TABLET && fill?.tablet !== undefined && room !== null
+      const width = narrow && phoneW ? phoneW : mid && tabletW ? tabletW : w
       inner.style.width = `${width}px`
       const height = h ?? inner.scrollHeight
+      // Filling its box: as large as its part reads across, and larger if the box is taller than all of it; its part as near the middle across as the box leaves room for.
+      const part = window.innerWidth < NARROW ? fill?.phone : window.innerWidth < TABLET ? fill?.tablet : undefined
+      if (part && room && room.clientWidth && room.clientHeight) {
+        const bw = room.clientWidth
+        const bh = room.clientHeight
+        const scale = Math.max(bw / part.w, bh / height)
+        const rw = bw / scale
+        const rh = bh / scale
+        const x = clamp(part.x + (part.w - rw) / 2, 0, width - rw)
+        const y = clamp(part.from === 'foot' ? part.y + (part.h ?? rh) - rh : part.y, 0, height - rh)
+        const region = { x, y, w: rw, h: rh }
+        setFit((was) =>
+          was && was.scale === scale && was.width === width && was.region.x === x && was.region.y === y && was.region.h === rh
+            ? was
+            : { scale, width, region },
+        )
+        return
+      }
       const region = narrow && phone ? phone : (crop ?? { x: 0, y: 0, w: width, h: height })
       const scale = Math.min(maxScale, el.clientWidth / region.w)
       setFit((was) =>
@@ -98,9 +154,10 @@ export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     ro.observe(inner)
+    if (room) ro.observe(room)
     return () => ro.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [w, h, phoneW, phoneKey, cropKey, maxScale])
+  }, [w, h, phoneW, tabletW, phoneKey, cropKey, fillKey, maxScale])
 
   const region = fit?.region ?? { x: 0, y: 0, w, h: h ?? 1 }
   const scale = fit?.scale ?? 0

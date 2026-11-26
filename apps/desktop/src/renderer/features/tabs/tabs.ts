@@ -25,6 +25,8 @@ export type Where =
   | { readonly kind: 'thread'; readonly threadId: string }
   /** A page in a tab of its own, by its owner (ADR-100). */
   | { readonly kind: 'page'; readonly owner: string }
+  /** Althar's own page: what's new, and what's coming next. */
+  | { readonly kind: 'althar' }
 
 /** What a window keeps between launches: its projects' tabs in order, where in each it was, the view each was last on, and the settings' tab. */
 export interface Kept {
@@ -46,6 +48,7 @@ export const whereOf = (pathname: string): Where => {
   if (/^\/new\/?$/.test(pathname)) return { kind: 'new' }
   const page = /^\/pages\/([^/]+)\/?$/.exec(pathname)
   if (page?.[1] !== undefined) return { kind: 'page', owner: decodeURIComponent(page[1]) }
+  if (/^\/althar\/?$/.test(pathname)) return { kind: 'althar' }
   // A section the settings don't have is their first.
   const settings = /^\/settings\/([^/]+)\/?$/.exec(pathname)
   if (settings?.[1] !== undefined) {

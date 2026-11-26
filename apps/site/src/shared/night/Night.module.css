@@ -19,6 +19,8 @@
   color: var(--ink);
 }
 .night > .under { top: 0; bottom: 0; }
+/* Wider than a tablet, the site's bar floats over the page's top (shared/Bar): the window opens under it. */
+@media (min-width: 901px) { .night { padding-top: 90px; } }
 
 /* ---- the window: its instruments along the top, the page's head in it ---- */
 

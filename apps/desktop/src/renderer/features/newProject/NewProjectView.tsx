@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
-import { Button, keys, LinkButton, modKey, OtherTools, Problem, RepositoryPick } from '@althar/ui'
-import { CommandText, homeWelcomeText, NewProject } from '@althar/ui/screens'
+import { keys, LinkButton, modKey, OtherTools, RepositoryPick } from '@althar/ui'
+import { homeWelcomeText, NewProject, olderLine, UpdateHome } from '@althar/ui/screens'
 
 import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -11,7 +11,7 @@ import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectD
 import type { ConnectionsModel } from '../connections/useConnections'
 import { words as elsewhereWords } from '../elsewhere/tiles'
 import { useElsewhere } from '../elsewhere/useElsewhere'
-import { useHomeName, useHomeUpdate } from '../homes/useHomes'
+import { useHomeName, useHomeUpdating } from '../homes/useHomes'
 import { factsOf, useFound } from '../../shared/found'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
@@ -102,7 +102,7 @@ export function NewProjectView({
   const home = useHomeName()
   // A home from before windows made projects there is asked to update: nothing on this page would work on it.
   const older = home.remote && !canCall(client, 'FindHomeFolders')
-  const update = useHomeUpdate()
+  const updating = useHomeUpdating(older)
   const found = useFound(!older)
   const [copied, setCopied] = useState(false)
   // When each found was last worked on is said from when the page opened.
@@ -118,25 +118,19 @@ export function NewProjectView({
     return (
       <div className={s.window}>
         <main className={s.older}>
-          <Problem
-            banner
-            action={
-              <Button
-                size="small"
-                icon={copied ? 'check' : 'copy'}
-                onClick={() => {
-                  setCopied(true)
-                  void navigator.clipboard.writeText(update.command).catch(() => setCopied(false))
-                }}
-              >
-                {copied ? homeWelcomeText.copied : homeWelcomeText.copyUpdate}
-              </Button>
-            }
-          >
-            {homeWelcomeText.older(home.name)}
-          </Problem>
-          <CommandText command={update.command} className={s.olderCommand} />
-          {update.installed !== 'known' && <p className={s.olderUnsure}>{homeWelcomeText.updateUnsure(home.name, update.installed)}</p>}
+          <p className={s.olderLine}>{olderLine(homeWelcomeText, home.name, updating.offer)}</p>
+          <UpdateHome
+            name={home.name}
+            update={updating.offer}
+            onUpdate={updating.onUpdate}
+            onCancelUpdate={updating.onCancelUpdate}
+            onCheckAgain={updating.onCheckAgain}
+            copied={copied}
+            onCopy={() => {
+              setCopied(true)
+              void navigator.clipboard.writeText(updating.offer.command).catch(() => setCopied(false))
+            }}
+          />
         </main>
       </div>
     )

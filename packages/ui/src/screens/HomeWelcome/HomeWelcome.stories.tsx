@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -34,6 +34,9 @@ const ARGS: HomeWelcomeProps = {
   onToured: fn(),
   onCopy: fn(),
   onGuide: fn(),
+  onSignIn: fn(),
+  onUpdate: fn(),
+  onCheckAgain: fn(),
 }
 
 const meta = {
@@ -96,21 +99,117 @@ export const Bare: Story = {
 /** Where it couldn't look on the home's disk: the folder door stays, saying so. */
 export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
 
-/** A home from before windows made projects there, over SSH: the update command its connection's launcher takes, in place of the ways in, and no tour. */
+const UPDATE = 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait'
+const OLDER: Partial<HomeWelcomeProps> = { toured: false, machine: null, git: undefined, repositories: [], found: null }
+
+/** A home from before windows made projects there, over SSH: one press updates it, in place of the ways in, and no tour. */
 export const Older: Story = {
-  args: {
-    toured: false,
-    machine: null,
-    git: undefined,
-    repositories: [],
-    found: null,
-    update: { command: 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait', installed: 'known' },
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'idle' } } },
+}
+
+/** Tasks running on the home: pressed, it asks first, since the restart stops them. */
+export const OlderBusy: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'idle', busy: 2 } } },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await fireEvent.click(await page.findByRole('button', { name: 'Update runner-1' }))
+    await expect(await page.findByText('Stop 2 running tasks?')).toBeVisible()
   },
 }
 
-/** An older home paired over HTTPS: the window can't see how it was installed, so the usual command, and a line saying so. */
+/** It couldn't, after the home dropped the window's connection: Reconnect beside Try again. */
+export const OlderFailedOffline: Story = {
+  args: {
+    ...OLDER,
+    update: { command: UPDATE, installed: 'known', run: { state: 'failed', problem: 'The new host did not become ready.', offline: true } },
+  },
+}
+
+/** Under way: the release coming down, where the press was. */
+export const OlderUpdating: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'running', step: 'getting' } } },
+}
+
+/** The home restarting into it: the window's connection drops meanwhile, and the panel says so. */
+export const OlderRestarting: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'running', step: 'restarting' } } },
+}
+
+/** It couldn't: why, Try again, and the command to run there by hand, folded away. */
+export const OlderFailed: Story = {
+  args: {
+    ...OLDER,
+    update: {
+      command: UPDATE,
+      installed: 'known',
+      run: { state: 'failed', problem: 'No verified host release is staged. Check the home’s network and try again.' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    // Opened as a pointer would, not a key: no focus ring left on it.
+    await fireEvent.click(await page.findByRole('button', { name: 'Update it on runner-1 yourself' }))
+    await expect(await page.findByRole('button', { name: 'Copy the update command' })).toBeVisible()
+  },
+}
+
+/** The newest release moves the home's data to a new format: asked once, in place, before anything runs. */
+export const OlderMovesData: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0' } } },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement)
+    await expect(await page.findByText('Update runner-1 to 0.2.0?')).toBeVisible()
+    await fireEvent.click(page.getByRole('button', { name: 'Update' }))
+    await expect(args.onUpdate).toHaveBeenCalledOnce()
+  },
+}
+
+/** The same, with tasks running there: one question says both. */
+export const OlderMovesDataBusy: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0', busy: 2 } } },
+}
+
+/** The newest release speaks an API this app doesn't: not run, and what to do instead. */
+export const OlderNewerApi: Story = {
+  args: {
+    ...OLDER,
+    update: {
+      command: UPDATE,
+      installed: 'known',
+      run: { state: 'failed', problem: 'Althar 0.3.0 for runner-1 needs a newer Althar app. Update this app first, then runner-1.' },
+    },
+  },
+}
+
+/** No published release makes projects from a window yet: said in place of the update, with Check again. */
+export const OlderNoRelease: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', release: 'unreleased' } },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement)
+    await expect(await page.findByText('No newer release yet')).toBeVisible()
+    await expect(page.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+    await expect(page.queryByRole('button', { name: 'How to update it' })).toBeNull()
+    await fireEvent.click(page.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheckAgain).toHaveBeenCalledOnce()
+  },
+}
+
+/** While the newest release is looked for, before anything is offered. */
+export const OlderChecking: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', release: 'checking' } },
+}
+
+/** A download that failed, said in a line: what failed, where the home's updater says. */
+export const OlderDownloadFailed: Story = {
+  args: {
+    ...OLDER,
+    update: { command: UPDATE, installed: 'known', run: { state: 'failed', problem: 'runner-1’s DNS didn’t answer for api.github.com.' } },
+  },
+}
+
+/** An older home paired over HTTPS: the window can't run it, so Check again once it's updated there, and the command folded away. */
 export const OlderPaired: Story = {
-  args: { ...Older.args, update: { command: Older.args!.update!.command, installed: 'unknown' } },
+  args: { ...OLDER, update: { command: UPDATE, installed: 'unknown' } },
 }
 
 /** A long name, in the app's narrowest window. */

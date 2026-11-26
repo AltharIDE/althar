@@ -1,5 +1,6 @@
 import type { StartupStage } from '../../startup'
 import type { HomesHost } from '../../homes'
+import type { WorkersHost } from '../../workers'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
@@ -200,6 +201,8 @@ export interface Host {
     readonly subscribe: (listener: (state: ComputerState) => void) => () => void
   }
   readonly homes?: HomesHost
+  /** Adding workers over SSH, and signing their agents in; none where this build can't, as a browser's can't. */
+  readonly workers?: WorkersHost
   readonly saveWorkerSnapshot?: (request: { readonly projectId: string; readonly taskId: string }) => Promise<void>
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
@@ -270,8 +273,11 @@ export interface Host {
   readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
-  /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
-  readonly onOpen: (listener: (threadId: string) => void) => () => void
+  /**
+   * Calls `listener` with the thread a notification the person clicked is about, until the returned function is called; `asked`
+   * where the thread raised a prompt itself, rather than the person clicking.
+   */
+  readonly onOpen: (listener: (threadId: string, asked: boolean) => void) => () => void
   /**
    * Where Althar shows while the person is in another app (`shared/edge`): the place chosen, whether a screen has a notch to
    * choose the island by, the system, and whether it has a tray to put the mark in; null before the main process knows.

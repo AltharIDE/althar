@@ -21,7 +21,7 @@ interface Item {
 
 const brand = (b: Brand) => <BrandMark brand={b} size={20} />
 
-const GROUPS: ReadonlyArray<{ name: string; items: readonly Item[]; wide?: boolean }> = [
+export const GROUPS: ReadonlyArray<{ name: string; items: readonly Item[]; wide?: boolean }> = [
   { name: 'Agents', wide: true, items: AGENTS.map((a) => ({ id: a.id, name: a.name, mark: <AgentMark agent={a.id} size={20} /> })) },
   {
     name: 'Code',

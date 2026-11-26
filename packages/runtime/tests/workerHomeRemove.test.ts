@@ -28,6 +28,10 @@ const journalId = `wjn_${'3'.repeat(32)}`
 
 const hello = (workerId: string): AgentWorkerHello => ({
   $typeName: 'althar.worker.v1.AgentWorkerHello',
+  anyProject: false,
+  reportsSignIn: false,
+  signedIn: [],
+  release: '',
   reserveBeforeTransfer: false,
   version: 1,
   workerId,

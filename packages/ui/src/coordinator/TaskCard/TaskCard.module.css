@@ -301,3 +301,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* why it stands where it does, under its title: as much as two lines, the whole on hover */
+.why {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}

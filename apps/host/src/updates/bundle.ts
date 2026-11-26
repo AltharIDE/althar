@@ -109,6 +109,13 @@ export interface BundleSource {
   readonly node: string
   readonly version: string
   readonly license?: string
+  /** The native worker, built for this release's system: a worker installs from the same release a home does. */
+  readonly worker?: string
+  /**
+   * What the worker's agents' sandbox needs beside what Codex's package carries (scripts/worker-sandbox-tools.sh): its
+   * `bin` (socat) goes to the release's `tools/bin`, its `licenses` to `tools/licenses`.
+   */
+  readonly workerTools?: string
 }
 export const copyHostAssets = async (entry: string, destination: string) => {
   const assets = join(dirname(entry), 'assets')
@@ -146,6 +153,23 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
     false,
   )
   await copyDependencies(source.entry, destination, ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp', 'sharp'])
+  if (source.worker !== undefined) {
+    await fs.copyFile(source.worker, join(destination, 'althar-worker'), constants.COPYFILE_EXCL)
+    await fs.chmod(join(destination, 'althar-worker'), 0o700)
+  }
+  if (source.workerTools !== undefined)
+    for (const [part, mode] of [
+      ['bin', 0o700],
+      ['licenses', 0o600],
+    ] as const) {
+      const from = join(source.workerTools, part)
+      await fs.mkdir(join(destination, 'tools', part), { recursive: true, mode: 0o700 })
+      for (const name of await fs.readdir(from)) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(name) || !(await fs.lstat(join(from, name))).isFile()) throw failed()
+        await fs.copyFile(join(from, name), join(destination, 'tools', part, name), constants.COPYFILE_EXCL)
+        await fs.chmod(join(destination, 'tools', part, name), mode)
+      }
+    }
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

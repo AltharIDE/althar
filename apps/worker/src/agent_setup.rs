@@ -1,8 +1,10 @@
 use std::{
+    env,
     ffi::{OsStr, OsString},
     io,
     path::{Component, Path, PathBuf},
     process::Stdio,
+    sync::OnceLock,
     time::Duration,
 };
 
@@ -24,6 +26,11 @@ pub(crate) const DESCRIPTOR_BYTES: usize = 128 * 1024;
 const COMMANDS: usize = 20;
 const COMMAND_BYTES: usize = 8_000;
 const GROUP_OUTPUT_BYTES: usize = 192;
+const TOOLS: usize = 8;
+/// The tools a worker installs for a project itself, into its own folder, without root.
+const KNOWN_TOOLS: [&str; 4] = ["bun", "node", "pnpm", "uv"];
+/// How the home names the tools a run needs to its agent unit, which installs them before its setup.
+pub(crate) const TOOLS_VARIABLE: &str = "ALTHAR_WORKER_TOOLS";
 
 pub(crate) struct WorkspaceSetup {
     pub(crate) folder: PathBuf,
@@ -40,6 +47,7 @@ impl SetupPlan {
         workspaces: &AgentWorkspace,
         given: &AgentWorkspaceSetup,
     ) -> io::Result<Self> {
+        tools_of(given)?;
         if given.repositories.is_empty() {
             return Ok(Self::Single(WorkspaceSetup::from_wire(
                 &workspaces.root,
@@ -134,10 +142,29 @@ impl SetupPlan {
     }
 
     pub(crate) async fn run(&self) -> AgentWorkspaceSetupResult {
+        let until = Instant::now() + LIMIT;
+        let tools = env::var(TOOLS_VARIABLE).unwrap_or_default();
+        let tools: Vec<&str> = tools.split_whitespace().collect();
+        if !tools.is_empty() {
+            let installed = install_tools(&tools, LIMIT).await;
+            if installed.exit_code != 0 {
+                return installed;
+            }
+            if let Self::Single(setup) = self
+                && setup.commands.is_empty()
+            {
+                return installed;
+            }
+        }
+        self.run_commands(until).await
+    }
+
+    async fn run_commands(&self, until: Instant) -> AgentWorkspaceSetupResult {
         match self {
-            Self::Single(setup) => run_workspace_setup(setup, LIMIT).await,
+            Self::Single(setup) => {
+                run_workspace_setup(setup, until.saturating_duration_since(Instant::now())).await
+            }
             Self::Set(repositories) => {
-                let until = Instant::now() + LIMIT;
                 let mut result = AgentWorkspaceSetupResult::default();
                 for (id, setup) in repositories {
                     let outcome =
@@ -163,13 +190,43 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
+/// The tools a setup asks for, as `name@version` (a version, or `latest`): only those a worker installs itself.
+pub(crate) fn tools_of(given: &AgentWorkspaceSetup) -> io::Result<Vec<String>> {
+    let version = |text: &str| {
+        !text.is_empty()
+            && text.len() <= 32
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+    };
+    if given.tools.len() > TOOLS
+        || given
+            .tools
+            .iter()
+            .any(|tool| !KNOWN_TOOLS.contains(&tool.name.as_str()) || !version(&tool.version))
+    {
+        return Err(invalid(
+            "The worker setup asks for a tool it doesn't install",
+        ));
+    }
+    Ok(given
+        .tools
+        .iter()
+        .map(|tool| format!("{}@{}", tool.name, tool.version))
+        .collect())
+}
+
 impl WorkspaceSetup {
     pub(crate) fn from_wire(root: &Path, given: &AgentWorkspaceSetup) -> io::Result<Self> {
-        Self::new(
-            root,
-            Path::new(&given.directory),
-            given.commands.iter().map(OsString::from).collect(),
-        )
+        let commands: Vec<OsString> = given.commands.iter().map(OsString::from).collect();
+        // A setup of tools alone runs no command of its own.
+        if commands.is_empty() && !given.tools.is_empty() && given.directory.is_empty() {
+            return Ok(Self {
+                folder: workspace_folder(root, Path::new(""))?,
+                commands,
+            });
+        }
+        Self::new(root, Path::new(&given.directory), commands)
     }
 
     pub(crate) fn new(root: &Path, directory: &Path, commands: Vec<OsString>) -> io::Result<Self> {
@@ -208,10 +265,42 @@ pub(crate) fn workspace_folder(root: &Path, directory: &Path) -> io::Result<Path
     Ok(folder)
 }
 
+/// The folders of the tools installed for this run, once its unit has installed them.
+static TOOL_FOLDERS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+fn data_home() -> Option<PathBuf> {
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| env::var_os("HOME").map(|home| Path::new(&home).join(".local/share")))
+}
+
+/// Where a run's commands and its agent find programs, as the release's own check finds them (apps/host's
+/// `workerPath`): the tools installed for the run first, then what the worker ships for its agents' sandbox (its `bin`
+/// holds only bubblewrap, socat and ripgrep, under the one AppArmor rule that lets them), the person's own folders
+/// (`~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, where a lead's fix installs), the system's, and last its own Node.
+pub(crate) fn worker_path() -> OsString {
+    let mut folders: Vec<PathBuf> = TOOL_FOLDERS.get().cloned().unwrap_or_default();
+    if let Some(data) = data_home() {
+        folders.push(data.join("althar-worker/bin"));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let home = Path::new(&home);
+        folders.extend([".local/bin", ".bun/bin", ".cargo/bin"].map(|folder| home.join(folder)));
+    }
+    folders.extend(["/usr/local/bin", "/usr/bin", "/bin"].map(PathBuf::from));
+    if let Some(program) = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        folders.push(program.join("node/bin"));
+    }
+    env::join_paths(folders.iter().filter(|folder| folder.is_absolute()))
+        .unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".into())
+}
+
 pub(crate) fn worker_environment(command: &mut Command) -> &mut Command {
-    command
-        .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin");
+    command.env_clear().env("PATH", worker_path());
     for name in [
         "HOME",
         "LANG",
@@ -236,6 +325,93 @@ fn append_tail(tail: &mut Vec<u8>, data: &[u8]) {
         tail.drain(..remove);
     }
     tail.extend_from_slice(data);
+}
+
+/// Installs the tools a run needs with the release's own installer (`althar-host worker tools`), into the worker's
+/// folder, without root: each folder it says (`path\t<folder>`) goes first on the run's PATH; what else it says is kept
+/// as the setup's output, so a failure reaches the home with its words.
+async fn install_tools(tools: &[&str], duration: Duration) -> AgentWorkspaceSetupResult {
+    let mut output_tail = Vec::with_capacity(OUTPUT_BYTES);
+    let Some(program) = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        append_tail(
+            &mut output_tail,
+            b"Althar could not find its own release.\n",
+        );
+        return AgentWorkspaceSetupResult {
+            exit_code: 1,
+            output_tail,
+            ..Default::default()
+        };
+    };
+    let node = program.join("node/bin/node");
+    let host = program.join("dist/althar-host.js");
+    if !node.is_file() || !host.is_file() {
+        append_tail(
+            &mut output_tail,
+            b"This worker wasn't installed from a release, so it can't install tools.\n",
+        );
+        return AgentWorkspaceSetupResult {
+            exit_code: 1,
+            output_tail,
+            ..Default::default()
+        };
+    }
+    let mut folders = Vec::new();
+    let finished = timeout(duration, async {
+        let mut installer = Command::new(&node);
+        let output = worker_environment(&mut installer)
+            .arg(&host)
+            .args(["worker", "tools"])
+            .args(tools)
+            .current_dir(env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from))
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            match line.split_once('\t') {
+                Some(("path", folder)) if Path::new(folder).is_absolute() => {
+                    folders.push(PathBuf::from(folder));
+                }
+                _ => {
+                    append_tail(&mut output_tail, line.as_bytes());
+                    append_tail(&mut output_tail, b"\n");
+                }
+            }
+        }
+        append_tail(&mut output_tail, &output.stderr);
+        Ok::<_, io::Error>(
+            output
+                .status
+                .code()
+                .and_then(|code| u32::try_from(code).ok())
+                .unwrap_or(1),
+        )
+    })
+    .await;
+    let (exit_code, timed_out) = match finished {
+        Ok(Ok(code)) => (code, false),
+        Ok(Err(_)) => {
+            append_tail(
+                &mut output_tail,
+                b"Althar could not start the tool installer.\n",
+            );
+            (1, false)
+        }
+        Err(_) => (1, true),
+    };
+    if exit_code == 0 {
+        let _ = TOOL_FOLDERS.set(folders);
+    }
+    AgentWorkspaceSetupResult {
+        exit_code,
+        timed_out,
+        output_tail,
+        ..Default::default()
+    }
 }
 
 async fn run_workspace_setup(
@@ -339,6 +515,62 @@ mod tests {
         assert!(!root.join("marker").exists());
         assert!(!project.join("unexpected").exists());
         Ok(())
+    }
+
+    #[test]
+    fn a_setup_asks_only_for_tools_a_worker_installs_itself() -> io::Result<()> {
+        use crate::wire::AgentWorkerTool;
+        let tool = |name: &str, version: &str| AgentWorkerTool {
+            name: name.into(),
+            version: version.into(),
+        };
+        let given = AgentWorkspaceSetup {
+            tools: vec![
+                tool("bun", "1.3.5"),
+                tool("node", "24"),
+                tool("uv", "latest"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(tools_of(&given)?, vec!["bun@1.3.5", "node@24", "uv@latest"]);
+        for (name, version) in [
+            ("cargo", "1"),
+            ("bun", ""),
+            ("bun", "1;touch x"),
+            ("node", "../x"),
+        ] {
+            let asked = AgentWorkspaceSetup {
+                tools: vec![tool(name, version)],
+                ..Default::default()
+            };
+            assert!(tools_of(&asked).is_err(), "{name}@{version}");
+        }
+        let fixture = tempfile::tempdir()?;
+        let alone = AgentWorkspaceSetup {
+            tools: vec![tool("bun", "latest")],
+            ..Default::default()
+        };
+        assert!(
+            WorkspaceSetup::from_wire(fixture.path(), &alone)?
+                .commands
+                .is_empty()
+        );
+        assert!(
+            WorkspaceSetup::from_wire(fixture.path(), &AgentWorkspaceSetup::default()).is_err(),
+            "no tools and no commands is no setup"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_run_finds_the_sandbox_the_worker_ships_then_the_persons_programs_then_the_systems() {
+        let path = worker_path();
+        let folders: Vec<_> = env::split_paths(&path).collect();
+        let at = |end: &str| folders.iter().position(|folder| folder.ends_with(end));
+        let system = at("usr/bin").expect("the system's");
+        assert!(at(".local/bin").is_none_or(|own| own < system));
+        assert!(at("althar-worker/bin").is_none_or(|shipped| shipped < system));
+        assert!(at("node/bin").is_none_or(|node| node > system));
     }
 
     #[test]

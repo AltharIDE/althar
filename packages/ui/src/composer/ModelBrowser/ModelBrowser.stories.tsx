@@ -59,27 +59,6 @@ export const Default: Story = {
   render: () => <Example onConnect={() => {}} />,
 }
 
-/**
- * Account usage stays in Plan usage, even when supplied by an older caller.
- */
-export const Room: Story = {
-  args: {
-    room: (m) =>
-      m.id === 'claude-opus-5'
-        ? { left: 19, until: 'Mon 09:00', account: null }
-        : m.runtime === 'claude-code'
-          ? { left: 56, until: '17:00', account: null }
-          : m.runtime === 'codex'
-            ? { left: 3, until: '14:00', account: 'Side' }
-            : undefined,
-  },
-  play: async () => {
-    const page = within(document.body)
-    await expect(page.queryByText('Usage')).toBeNull()
-    await expect(page.queryByText(/19%|56%|Side · 3%/)).toBeNull()
-  },
-}
-
 /** Searching, moving into the list and pinning with a shortcut. */
 export const SearchingAndPinning: Story = {
   render: () => <Example onConnect={() => {}} />,
@@ -282,7 +261,7 @@ const OPENCODE_MODELS: typeof MODEL_LIST = OPENCODE_NAMES.map((name, i) => ({
   efforts: ['low', 'high'],
 }))
 
-function OpenCodeList({ signedOut = false, room = false }: { signedOut?: boolean; room?: boolean }) {
+function OpenCodeList({ signedOut = false }: { signedOut?: boolean }) {
   return (
     <ModelBrowser
       models={[...MODEL_LIST.slice(0, 3), ...OPENCODE_MODELS]}
@@ -296,7 +275,6 @@ function OpenCodeList({ signedOut = false, room = false }: { signedOut?: boolean
       onPick={fn()}
       blocked={['oc-4', 'oc-9']}
       onToggleBlocked={fn()}
-      {...(room ? { room: (m) => (m.id === 'oc-0' ? { left: 18, until: 'Mon 09:00', account: null } : null) } : {})}
     />
   )
 }
@@ -318,14 +296,12 @@ export const OpenCodeModels: Story = {
   },
 }
 
-/** Where the agent isn't in its normal state, its row says so; and a model with a reading shows it in a column of its own. */
+/** Where the agent isn't in its normal state, its row says so. */
 export const OpenCodeSignedOut: Story = {
-  render: () => <OpenCodeList signedOut room />,
+  render: () => <OpenCodeList signedOut />,
   play: async () => {
     const body = within(document.body)
     await expect(body.getAllByText('signed out').length).toBeGreaterThan(0)
-    await expect(body.queryByText('Usage')).toBeNull()
-    await expect(body.queryByText('18%')).toBeNull()
   },
 }
 

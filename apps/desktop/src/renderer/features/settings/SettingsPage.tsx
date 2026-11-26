@@ -112,6 +112,8 @@ export interface SettingsPageProps {
   focus?: SettingsFocus
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
+  /** About Althar's What's new: Althar's own page, in the window. Without it, the notes in the browser. */
+  onWhatsNew?: () => void
   /**
    * An agent to sign in again, by its id, as a signed-out agent's error asks:
    * its tab opens, with its sign-in started, once while the page shows.
@@ -133,6 +135,7 @@ export function SettingsPage({
   onSection,
   focus,
   onTask,
+  onWhatsNew,
   signIn,
   account: meant,
   agent: shown,
@@ -206,6 +209,7 @@ export function SettingsPage({
         looks={looks}
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
+        {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
         lit={focus === 'task-folders'}
         onFreeUp={() => onSection('this-mac', 'task-folders')}
         computer={worker ?? null}
@@ -232,6 +236,7 @@ function SectionBody({
   looks,
   asked,
   onTask,
+  onWhatsNew,
   lit,
   onFreeUp,
   computer,
@@ -245,6 +250,7 @@ function SectionBody({
   /** The agent the person was sent here to sign in again. */
   asked?: string
   onTask?: (threadId: string) => void
+  onWhatsNew?: () => void
   /** The task folders' row comes into view and lights for a moment: the person was sent there to free space. */
   lit: boolean
   /** Sends the person to the task folders' row, from About's storage. */
@@ -291,7 +297,7 @@ function SectionBody({
         </>
       )
     case 'about':
-      return <AboutSection start={start} onFreeUp={onFreeUp} />
+      return <AboutSection start={start} onFreeUp={onFreeUp} {...(onWhatsNew === undefined ? {} : { onWhatsNew })} />
   }
 }
 
@@ -799,7 +805,7 @@ function BrowserSection() {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => void }) {
+function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
@@ -815,6 +821,7 @@ function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => 
         checking={update.checking}
         website={WEBSITE}
         notes={CHANGELOG}
+        {...(onWhatsNew === undefined ? {} : { onNotes: onWhatsNew })}
         community={COMMUNITY}
         {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
       />

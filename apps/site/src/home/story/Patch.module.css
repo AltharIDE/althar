@@ -1,0 +1,224 @@
+/*
+ * The review as a patch (Patch.tsx), on the section's dark: the file's name and its change across the top, line numbers
+ * down a gutter, the lines taken out in red, the line put in and the review's hunks in green and cobalt, and the preview
+ * (one side of the drawing at a time, today's then Althar's) beside them, as large as the window lets it be.
+ */
+
+.patch {
+  /* The preview: as tall as the window leaves under the nav, the room over the patch (Story.module.css) and the file's bar, and as wide as that makes it, 520px at most. */
+  --pv: min(520px, calc((100svh - 76px - clamp(16px, (100svh - 720px) * 0.4, 48px) - 44px - 22px - 18px) * 0.765));
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
+  color: #f4efe7;
+}
+
+/* The file, and what the change to it comes to so far. */
+.file {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding-left: 92px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font: 500 12px var(--mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: rgba(244, 239, 231, 0.38);
+}
+.file b { font-weight: 500; color: rgba(244, 239, 231, 0.75); }
+.del { color: #ff7a6e; }
+.add { color: #62c47e; }
+
+/* The line numbers, as many as the room shows: its size its row's, never its own. */
+.gutter {
+  grid-row: 2;
+  contain: size;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  overflow: hidden;
+  padding: 22px 16px 0 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  font: 400 12px/30px var(--mono);
+  color: rgba(244, 239, 231, 0.17);
+  user-select: none;
+}
+
+.body { grid-row: 2; display: grid; grid-template-columns: minmax(0, 1fr) var(--pv); gap: 40px; min-width: 0; padding: 22px 0 0 28px; }
+.text { --size: clamp(34px, 4vw, 58px); position: relative; min-width: 0; }
+
+/* The heading: the line taken out, and the line put in, typed; the size of every scene's heading (Story.module.css), its beat 1.14 times as large. */
+.title { display: grid; margin: 0; font-weight: 600; }
+.minus,
+.plus { display: flex; align-items: baseline; margin-left: -28px; padding-left: 28px; }
+.minus { padding-top: 6px; padding-bottom: 8px; background: linear-gradient(90deg, rgba(255, 107, 94, 0.13), rgba(255, 107, 94, 0) 78%); }
+.plus { padding-top: 4px; padding-bottom: 12px; background: linear-gradient(90deg, rgba(43, 59, 255, 0.26), rgba(43, 59, 255, 0) 78%); }
+.minus > i,
+.plus > i { flex: none; width: calc(var(--size) * 0.62); font: 300 calc(var(--size) * 0.56) / 1 var(--mono); font-style: normal; }
+.minus > i { color: #ff7a6e; }
+.plus > i { color: #b4bcff; }
+/* The old line: full white while the preview shows today, dimming as it pans to Althar (--pan, 0 to 1, follows the scroll). */
+.old { position: relative; font: 600 var(--size) / 1.02 var(--head); letter-spacing: -0.04em; color: rgb(244 239 231 / calc(1 - 0.58 * var(--pan, 1))); }
+.plus b {
+  font: 400 calc(var(--size) * 1.14) / 0.9 var(--beat);
+  font-style: italic;
+  letter-spacing: -0.015em;
+  color: #f4efe7;
+  -webkit-text-stroke: 0.018em currentColor;
+}
+
+/* What is still to be typed: there, unseen; and the caret where the typing is. */
+.rest { color: transparent; -webkit-text-stroke: 0; }
+.caret { display: inline-block; width: min(0.12em, 9px); height: 1em; margin-left: 0.04em; vertical-align: -0.12em; background: #b4bcff; }
+
+/* The change's comment: the lead. */
+.note { max-width: 62ch; margin: 16px 0 0; font: 400 14.5px/1.6 var(--mono); color: rgba(244, 239, 231, 0.5); }
+
+/* The review's hunks: each a header that opens it, its first + line, and the rest of it folding open. */
+.hunks { display: grid; gap: 10px; margin: 22px 0 0; padding: 0; list-style: none; }
+.hunk {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 420ms var(--ease-out), transform 520ms var(--ease-out), visibility 0s linear 520ms;
+}
+.hunk[data-in] { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+.hh { margin: 0; font: inherit; }
+.hh button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font: 500 12.5px var(--mono);
+  letter-spacing: 0.05em;
+  text-align: left;
+  color: rgba(180, 188, 255, 0.78);
+  cursor: pointer;
+}
+.hh button:focus-visible { outline: 2px solid #b4bcff; outline-offset: 3px; border-radius: 4px; }
+.at { flex: 1; }
+.check { flex: none; width: 18px; height: 18px; overflow: visible; }
+.check circle, .check path { fill: none; stroke-dasharray: 1; stroke-dashoffset: 1; stroke-linecap: round; stroke-linejoin: round; }
+.check circle { stroke: rgba(180, 188, 255, 0.5); stroke-width: 1.3; transition: stroke-dashoffset 520ms var(--ease-out) 120ms; }
+.check path { stroke: #b4bcff; stroke-width: 1.9; transition: stroke-dashoffset 360ms var(--ease-out) 560ms; }
+.hunk[data-in] .check circle, .hunk[data-in] .check path { stroke-dashoffset: 0; }
+.chevron { flex: none; width: 11px; height: 11px; transition: transform 320ms var(--ease); }
+.chevron path { fill: none; stroke: rgba(244, 239, 231, 0.55); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.hunk[data-open] .chevron { transform: rotate(180deg); }
+
+/* The download, under the hunks, once the pull request has reached you: the page's cobalt button, its room held from the start. */
+.get {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  margin-top: 22px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--cobalt);
+  color: #fff;
+  font: 600 15px var(--font);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-decoration: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 420ms var(--ease-out), transform 520ms var(--ease-out), visibility 0s linear 520ms, background var(--fast) var(--ease);
+}
+.get[data-in] { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+.get svg { stroke: #b4bcff; }
+.get:hover { background: #1f35c8; }
+.get:focus-visible { outline: 2px solid #b4bcff; outline-offset: 3px; }
+
+.row { border-left: 2px solid rgba(98, 196, 126, 0.65); background: rgba(98, 196, 126, 0.06); }
+.row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 9px 16px 9px 14px; }
+.row > i { font: 500 16px/1.5 var(--mono); font-style: normal; color: #62c47e; }
+.row p { margin: 0; font-size: 16.5px; line-height: 1.5; letter-spacing: -0.005em; color: rgba(244, 239, 231, 0.74); }
+.row p b { font-weight: 600; color: #f4efe7; }
+.more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 380ms var(--ease); }
+.hunk[data-open] .more { grid-template-rows: 1fr; }
+.more > div { min-height: 0; overflow: hidden; }
+.hunk[data-open] .more > div { margin-top: 6px; }
+
+/* Today, by hand: a line taken out as each paste lands, under the old line, where the line put in and its comment will
+ * be; they fold away as the preview pans to Althar, and the line put in comes in where they were. */
+.byHand {
+  position: absolute;
+  top: calc(var(--size) * 1.02 + 14px);
+  left: 0;
+  right: 0;
+  transition: opacity 320ms var(--ease-out), transform 420ms var(--ease-out), visibility 0s linear 420ms;
+}
+.byHand ol { display: grid; gap: 6px; margin: 22px 0 0; padding: 0; list-style: none; }
+.byHand .row { border-left-color: rgba(255, 122, 110, 0.6); background: rgba(255, 107, 94, 0.07); opacity: 0; transform: translateY(6px); transition: opacity 320ms var(--ease-out), transform 420ms var(--ease-out); }
+.byHand .row[data-in] { opacity: 1; transform: none; }
+.byHand .row > i { color: #ff7a6e; }
+.byHand .row p { color: rgba(244, 239, 231, 0.62); }
+.patch:not([data-today]) .byHand { visibility: hidden; opacity: 0; transform: translateY(-10px); }
+.patch[data-today] .byHand { transition-delay: 0s; }
+.plus,
+.note { transition: opacity 420ms var(--ease-out) 140ms; }
+.patch[data-today] .plus,
+.patch[data-today] .text > .note { opacity: 0; transition-delay: 0s; }
+
+/* The preview: one side of the drawing at a time, as tall as the window has room for: today's (--pan 0, set on the
+ * patch), the frame panning across, and Althar's (--pan 1), today's out of the frame to the left. */
+.preview { width: var(--pv); }
+.crop { position: relative; width: 100%; aspect-ratio: 0.765; overflow: hidden; border-radius: 16px; }
+.crop > * { position: absolute; top: 0; left: calc(-100% * 0.522 / 0.478 * var(--pan, 1)); width: calc(100% / 0.478); }
+
+/* Coming into place: the file's bar, its line numbers, the heading, today's comment and the preview fade and rise in,
+ * in turn, as the section scrolls up (--in, 0 to 1, follows the scroll). */
+.file { --k: clamp(0, (var(--in, 1) - 0.05) / 0.3, 1); --rise: 0px; }
+.gutter { --k: clamp(0, (var(--in, 1) - 0.12) / 0.35, 1); --rise: 0px; }
+.title { --k: clamp(0, (var(--in, 1) - 0.15) / 0.35, 1); --rise: 22px; }
+.byHand > .note { --k: clamp(0, (var(--in, 1) - 0.35) / 0.3, 1); --rise: 14px; }
+.preview { --k: clamp(0, (var(--in, 1) - 0.25) / 0.5, 1); --rise: 56px; }
+.file,
+.gutter,
+.title,
+.byHand > .note,
+.preview { opacity: var(--k); translate: 0 calc((1 - var(--k)) * var(--rise)); }
+.byHand > .note { transition: none; }
+
+/* A tablet or a phone: one column, the heading, then the whole drawing, then the hunks; the gutter narrower. */
+@media (max-width: 900px) {
+  .patch { grid-template-columns: 36px minmax(0, 1fr); grid-template-rows: 40px minmax(0, 1fr); }
+  .file { gap: 10px; padding-left: 50px; font-size: 11px; overflow: hidden; }
+  .gutter { padding-right: 10px; font-size: 11px; }
+  .body { grid-template-columns: minmax(0, 1fr); gap: 0; padding-left: 14px; }
+  .text { display: contents; }
+  .minus, .plus { margin-left: -14px; padding-left: 14px; }
+  .text { --size: clamp(30px, 8.4vw, 40px); }
+  .old { white-space: nowrap; }
+  .title { order: 1; }
+  .note { order: 2; font-size: 13px; }
+  .text > .note { --k: clamp(0, (var(--in, 1) - 0.3) / 0.3, 1); opacity: var(--k); translate: 0 calc((1 - var(--k)) * 14px); transition: none; }
+  .preview { order: 3; width: auto; margin-top: 28px; }
+  .hunks { order: 4; }
+  .get { order: 5; justify-self: start; margin-top: 28px; }
+  .crop { aspect-ratio: auto; overflow: visible; border-radius: 0; }
+  .crop > * { position: static; width: auto; }
+  .row p { font-size: 15.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hunk, .check circle, .check path, .chevron, .more, .byHand, .byHand .row, .plus, .note, .get { transition: none; }
+}
+
+/* A short window: the patch a little closer set, so its foot stays in sight. */
+@media (min-width: 901px) and (max-height: 760px) {
+  .note { margin-top: 10px; }
+  .byHand ol { margin-top: 14px; }
+  .hunks { gap: 6px; margin-top: 14px; }
+  .get { height: 42px; margin-top: 14px; }
+  .row { padding-top: 7px; padding-bottom: 7px; }
+}

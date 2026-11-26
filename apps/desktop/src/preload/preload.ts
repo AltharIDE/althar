@@ -11,6 +11,7 @@ import {
   type SetupAction,
 } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { isWorkerSetup, type WorkerSetup, type WorkerSetupAction, type WorkerSignInEvent, type WorkersHost } from '../workers'
 
 import type { CanvasDownload, CanvasDownloaded } from '@althar/contracts'
 import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
@@ -82,13 +83,13 @@ ipcRenderer.on('althar:chrome', (_event, next: unknown) => {
   for (const listener of chromes) listener(next)
 })
 
-/* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
-let pending: string | undefined
-const opening = new Set<(threadId: string) => void>()
-ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
+/* A thread to open, because the person clicked its notification or because it raised a prompt itself (`asked`): held until the page listens, as a window that just opened doesn't yet. */
+let pending: { threadId: string; asked: boolean } | undefined
+const opening = new Set<(threadId: string, asked: boolean) => void>()
+ipcRenderer.on('althar:open', (_event, threadId: unknown, asked: unknown) => {
   if (typeof threadId !== 'string') return
-  if (opening.size === 0) pending = threadId
-  for (const listener of opening) listener(threadId)
+  if (opening.size === 0) pending = { threadId, asked: asked === true }
+  for (const listener of opening) listener(threadId, asked === true)
 })
 
 /* A store the runtime can't serve (an update that couldn't move it, a profile in use), as the main process says: held for a page that listens later. */
@@ -163,6 +164,16 @@ const setups = new Set<(setup: HomeSetup | null) => void>()
 ipcRenderer.on('althar:home-setup', (_event, value: unknown) => {
   if (isHomeSetup(value)) for (const listener of setups) listener(value)
 })
+/* A worker being added over SSH, as it goes, and an agent's sign-in on one: for Settings › Computers. */
+const workerSetupListeners = new Set<(setup: WorkerSetup | null) => void>()
+ipcRenderer.on('althar:worker-setup', (_event, value: unknown) => {
+  if (isWorkerSetup(value)) for (const listener of workerSetupListeners) listener(value)
+})
+const workerSignIns = new Set<(event: WorkerSignInEvent) => void>()
+ipcRenderer.on('althar:worker-sign-in', (_event, value: unknown) => {
+  if (typeof value === 'object' && value !== null && 'kind' in value)
+    for (const listener of workerSignIns) listener(value as WorkerSignInEvent)
+})
 /* What main knows of every home, as it changes: for the chip's menu and Manage homes. */
 const overviews = new Set<(overview: HomesOverview) => void>()
 ipcRenderer.on('althar:homes-overview', (_event, value: unknown) => {
@@ -185,6 +196,27 @@ ipcRenderer.on('althar:homes-new-project', () => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
+  workers: {
+    release: (fresh?: boolean) => ipcRenderer.invoke('althar:workers-release', fresh === true),
+    setup: () => ipcRenderer.invoke('althar:workers-setup'),
+    setUp: (target: unknown, here: boolean) => ipcRenderer.invoke('althar:workers-set-up', target, here),
+    act: (action: WorkerSetupAction) => ipcRenderer.invoke('althar:workers-setup-act', action),
+    onSetup: (listener: (setup: WorkerSetup | null) => void) => {
+      workerSetupListeners.add(listener)
+      return () => {
+        workerSetupListeners.delete(listener)
+      }
+    },
+    agents: (ssh: string) => ipcRenderer.invoke('althar:workers-agents', ssh),
+    signIn: (ssh: string, agent: string, way: 'browser' | 'device') => ipcRenderer.invoke('althar:workers-sign-in', ssh, agent, way),
+    signInAct: (action: unknown) => ipcRenderer.invoke('althar:workers-sign-in-act', action),
+    onSignIn: (listener: (event: WorkerSignInEvent) => void) => {
+      workerSignIns.add(listener)
+      return () => {
+        workerSignIns.delete(listener)
+      }
+    },
+  } satisfies WorkersHost,
   homes: {
     state: () => ipcRenderer.invoke('althar:homes-state'),
     list: () => ipcRenderer.invoke('althar:homes-list'),
@@ -215,6 +247,9 @@ contextBridge.exposeInMainWorld('althar', {
       }
     },
     reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
+    update: (accept?: string) => ipcRenderer.invoke('althar:homes-update', accept),
+    updateCheck: () => ipcRenderer.invoke('althar:homes-update-check'),
+    release: (fresh?: boolean) => ipcRenderer.invoke('althar:homes-release', fresh === true),
     onState: (listener: (state: HomeState) => void) => {
       homeStates.add(listener)
       return () => {
@@ -460,10 +495,10 @@ contextBridge.exposeInMainWorld('althar', {
     ipcRenderer.send('althar:window-error', error),
   // What made the page slow, for main's log: its long frames and slow presses, by what they were on, never what it shows.
   logFrames: (frames: unknown): void => ipcRenderer.send('althar:window-frames', frames),
-  onOpen: (listener: (threadId: string) => void): (() => void) => {
+  onOpen: (listener: (threadId: string, asked: boolean) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {
-      listener(pending)
+      listener(pending.threadId, pending.asked)
       pending = undefined
     }
     return () => void opening.delete(listener)

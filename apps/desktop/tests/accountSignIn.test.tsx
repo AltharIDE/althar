@@ -42,6 +42,7 @@ const startOf = (status: Status | null, checkedAt = 1): StartModel => ({
   renameAccount: vi.fn(async () => {}),
   moveAccount: vi.fn(async () => {}),
   removeAccount: vi.fn(async () => {}),
+  signOutAccount: vi.fn(async () => {}),
   unremoved: null,
   removeAnyway: vi.fn(async () => {}),
 })

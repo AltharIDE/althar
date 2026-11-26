@@ -207,9 +207,12 @@ describe('what screens read from git', () => {
       assert.strictEqual((yield* queries.thread(threadId)).task.commits, 1)
 
       // Where git can't tell, as with the repository's folder gone, it isn't merged, and that isn't kept for when it can.
-      // Hide the location before merging so a background read cannot observe the merge through the old location.
+      // The folder is hidden behind the store's back, which no kept card hears of: a card being worked out as it is hidden, as
+      // the watcher works one out once its task moves, may have read where the folder was and would read the merge through it.
+      // Read once it is hidden, the card waits for that one to end, so every read that sees the merge sees the folder gone.
       const sql = yield* SqlClient.SqlClient
       yield* sql`UPDATE repository_locations SET path = ${join(root, 'gone')}`
+      yield* card
       git(root, 'merge', '-q', '--ff-only', head)
       assert.deepStrictEqual(
         (yield* card)?.here.map((one) => one.head),

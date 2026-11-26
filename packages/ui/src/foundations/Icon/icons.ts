@@ -71,11 +71,14 @@ import {
   Settings,
   ShieldCheck,
   SidebarExpand,
+  Sort,
   SoundHigh,
+  Sparks,
   Square,
   TaskList,
   Terminal,
   Tools,
+  TriangleFlag,
   ViewGrid,
   WarningCircle,
   WifiOff,
@@ -186,6 +189,8 @@ export const ICONS = {
   clock: Clock,
   /** An automation: work that starts by itself. */
   automation: ClockRotateRight,
+  /** A goal: what a lead keeps working toward on its own. */
+  goal: TriangleFlag,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */
@@ -207,6 +212,8 @@ export const ICONS = {
   conflict: GitCompare,
   /** A tracker's issues, moving through its statuses as their tasks go. */
   issues: KanbanBoard,
+  /** The order a list is in, and choosing another. */
+  sort: Sort,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
@@ -239,6 +246,8 @@ export const ICONS = {
   info: InfoCircle,
   /** Something failed: the mark before the words that say what, in the danger colour. */
   problem: WarningCircle,
+  /** Althar's own news: its tab, with what's new in an update and what's coming next. */
+  news: Sparks,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

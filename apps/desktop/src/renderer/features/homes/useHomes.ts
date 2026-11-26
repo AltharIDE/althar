@@ -1,5 +1,17 @@
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { HomeSetup, HomeState, HomesHost, HomesOverview, RemoteHome, WindowHome } from '../../../homes'
+import type { HomeUpdateOffer, HomeUpdateRun } from '@althar/ui/screens'
+
+import {
+  releaseMakesProjects,
+  type HomeSetup,
+  type HomeState,
+  type HomeUpdateCheck,
+  type HomesHost,
+  type HomesOverview,
+  type RemoteHome,
+  type WindowHome,
+} from '../../../homes'
 
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
@@ -75,6 +87,104 @@ export const updateOf = (current: WindowHome | undefined): HomeUpdate => {
 export const useHomeUpdate = (): HomeUpdate => {
   const { host } = useServices()
   return updateOf(useHomeState(host.homes)?.current)
+}
+
+type Running = 'idle' | 'running' | 'done' | { readonly problem: string } | { readonly confirm: HomeUpdateCheck }
+
+/**
+ * An older home's update, for its window to offer: run by the window itself where it reaches the home over SSH by the
+ * launcher Althar installs (`known`), each step as it really stands (the release coming down while the connection
+ * holds, the home restarting once it drops), and the window reconnecting onto the new release once it answers; where
+ * the window can't, the command to run there and Check again. `onDone` goes just before the window reconnects.
+ *
+ * Only where a published release would help: the newest is looked for first, and where it's no newer than the last
+ * without making projects, the home is told none is out yet (`release: 'unreleased'`), with Check again looking anew.
+ * A home run from its own launcher may be a source checkout's, which pulling brings it, so it isn't asked; where the
+ * newest can't be found out, the update is offered, and says itself how it went.
+ *
+ * Where the newest release moves the home's data to a new format (a migration, nearly every release), it's asked
+ * about first, in a word: the window looks at what the update changes as it's offered, so the press asks at once, and
+ * where it hadn't yet, main answers that it needs asking. Accepted, it goes for that release only.
+ */
+export const useHomeUpdating = (
+  older: boolean,
+  onDone?: () => void,
+): {
+  readonly offer: HomeUpdateOffer
+  readonly onUpdate?: () => void
+  readonly onCancelUpdate?: () => void
+  readonly onCheckAgain: () => void
+} => {
+  const { host } = useServices()
+  const homes = host.homes
+  const state = useHomeState(homes)
+  const overview = useHomesOverview(homes)
+  const { command, installed } = updateOf(state?.current)
+  const [running, setRunning] = useState<Running>('idle')
+  const asked = homes?.release
+  const [fresh, setFresh] = useState(0)
+  const news = useQuery({
+    queryKey: ['homes', 'hostRelease', fresh],
+    queryFn: () => asked?.(fresh > 0) ?? Promise.resolve(null),
+    enabled: older && asked !== undefined && installed !== 'custom' && state !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+    placeholderData: (previous) => previous,
+  })
+  // Its restart stops what's running there: the tasks this window, or another on the home, last counted.
+  const home = state !== null && state.current.kind !== 'local' ? state.current.home.homeId : null
+  const busy = home === null ? 0 : (overview?.projects[home]?.list.reduce((sum, one) => sum + one.working, 0) ?? 0)
+  const connected = state?.connection === 'connected'
+  const reconnect = () => void homes?.reconnect().catch(() => undefined)
+  const update = homes?.update
+  const asking = homes?.updateCheck
+  const checked = useQuery({
+    queryKey: ['homes', 'updateCheck', home],
+    queryFn: () => asking?.() ?? Promise.reject(new Error('No check')),
+    enabled: older && asking !== undefined && update !== undefined && installed === 'known' && home !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+  }).data
+  const moving = checked?.change === 'data' ? checked : undefined
+  if (asked !== undefined && installed !== 'custom' && running === 'idle') {
+    if (news.isPending || news.isFetching) return { offer: { command, installed, release: 'checking' }, onCheckAgain: reconnect }
+    if (news.data != null && !releaseMakesProjects(news.data))
+      return { offer: { command, installed, release: 'unreleased' }, onCheckAgain: () => setFresh((at) => at + 1) }
+  }
+  if (update === undefined || installed !== 'known') return { offer: { command, installed }, onCheckAgain: reconnect }
+  const run: HomeUpdateRun =
+    running === 'idle'
+      ? { state: 'idle', ...(busy > 0 ? { busy } : {}), ...(moving === undefined ? {} : { moves: true }) }
+      : typeof running === 'object' && 'confirm' in running
+        ? { state: 'confirm', from: running.confirm.from, to: running.confirm.to, ...(busy > 0 ? { busy } : {}) }
+        : running === 'running' || running === 'done'
+          ? {
+              state: 'running',
+              step: running === 'done' ? 'reconnecting' : connected ? 'getting' : 'restarting',
+            }
+          : // The connection dropped on the way: the home may be serving its old release again, for a Reconnect.
+            { state: 'failed', problem: running.problem, ...(connected ? {} : { offline: true }) }
+  return {
+    offer: { command, installed, run },
+    onUpdate: () => {
+      if (running === 'running' || running === 'done') return
+      const accepted = typeof running === 'object' && 'confirm' in running ? running.confirm.to : undefined
+      // Known to move its data: asked at once, before anything runs.
+      if (accepted === undefined && moving !== undefined) return setRunning({ confirm: moving })
+      setRunning('running')
+      update(accepted).then(
+        (updated) => {
+          if (updated.state === 'confirm') return setRunning({ confirm: updated.check })
+          setRunning('done')
+          onDone?.()
+          reconnect()
+        },
+        (error: unknown) => setRunning({ problem: homeProblem(error) }),
+      )
+    },
+    onCancelUpdate: () => setRunning('idle'),
+    onCheckAgain: reconnect,
+  }
 }
 
 /**

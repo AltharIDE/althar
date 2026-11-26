@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
-import { workerNameOf } from '@althar/contracts'
+import { type ProjectWorker, type WorkerUnfit, workerName, workerNameOf, workerUnfitWords } from '@althar/contracts'
 import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import {
   AgentRequestFailed,
   AgentStartFailed,
+  OptionUnavailable,
   type Question,
   type SessionEvent,
   type SessionOptions,
@@ -17,12 +18,13 @@ import {
   inFlatpakSandbox,
   skillsIn,
 } from '@althar/provider-adapters'
-import { Cause, Clock, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
+import { Cause, Clock, Data, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Account, Accounts } from './Accounts'
 import { heldSkillsFor, serversFor } from './agentTools'
 import { touchCard } from './cards'
 import { type AgentEntry, RuntimeConfig, type RuntimeOptions, SIGNED_OUT_GIT_CONFIG } from './Config'
+import { redact } from './diagnostics'
 import { SessionFailed } from './errors'
 import type { FailuresService } from './Failures'
 import type { InstanceInfo } from './Instance'
@@ -67,7 +69,9 @@ import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
-import { folderGoneWords, summarize } from './words'
+import { startsAgain } from './startAgain'
+import { needsAcross, needsOn, toolsToInstall } from './toolNeeds'
+import { folderGoneWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
   readonly accounts: Accounts['Service']
@@ -86,6 +90,8 @@ export interface SessionConnectionsDependencies {
   readonly permissions: Permissions['Service']
   readonly policies: Policies['Service']
   readonly questions: Questions['Service']
+  /** Forgets what Althar holds of an agent, its sign-in as last checked and the models it offers, so both are read again. */
+  readonly refreshAgent: (agentId: string) => Effect.Effect<void>
   readonly quietFor: Duration.Duration
   readonly run: <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.Effect<A, E>
   readonly runtimeConfig: RuntimeOptions
@@ -103,6 +109,8 @@ export interface SessionConnectionsDependencies {
   readonly sessionsScope: Scope.Closeable
   readonly sessionsSql: SqlClient.SqlClient
   readonly setups: Setups['Service']
+  /** Whether the account's usage was last read as needing its sign-in again (PlanUsage). */
+  readonly signInFault: (accountId: string) => Effect.Effect<boolean>
   readonly skillsConfig: RuntimeOptions['skills']
   readonly stopGrace: Duration.Duration
   readonly stopTrees: (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) => Effect.Effect<void>
@@ -111,6 +119,33 @@ export interface SessionConnectionsDependencies {
   readonly treeOfLeft: (running: Running, left: LeftRunning) => Effect.Effect<readonly number[]>
   readonly wakeFor: Duration.Duration
 }
+
+/** A first start that failed in a way that may pass: started again, once, afresh (`connectSession`). */
+class StartAgain extends Data.TaggedError('StartAgain')<{}> {}
+
+/** A first start whose agent's own program isn't there yet, or is of another version: looked for again a while (`connectSession`). */
+class ProgramArriving extends Data.TaggedError('ProgramArriving')<{ readonly check: () => string | undefined }> {}
+
+/**
+ * How long a start waits for the program Althar brings for its agent, and
+ * how often it looks: an install of Althar unpacks Claude Code's 364 MB in
+ * minutes, and one under way when a start comes is usually done well within
+ * a minute of it. A start never waits on it longer; a broken install is said
+ * then, as it stands.
+ */
+const PROGRAM_WAIT = { every: Duration.seconds(3), within: Duration.minutes(1) }
+
+/** The agent's whole answer to the request that failed its start, with any credential in it taken out, for the log and the record. */
+const answerOf = (cause: Cause.Cause<unknown>): string | undefined => {
+  const found = Cause.findErrorOption(cause)
+  return Option.isSome(found) && found.value instanceof AgentRequestFailed && found.value.raw !== undefined
+    ? redact(found.value.raw)
+    : undefined
+}
+
+/** The variables a launch inherits from Althar's own environment, as `process.ts` hands them on. */
+const inherited = (names: ReadonlyArray<string> | undefined): Record<string, string> =>
+  Object.fromEntries((names ?? []).flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])))
 
 export const makeSessionConnections = (dependencies: SessionConnectionsDependencies) => {
   const {
@@ -128,12 +163,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     policies,
     questions,
     quietFor,
+    refreshAgent,
     run,
     runtimeConfig,
     sessionFact,
     sessionsScope,
     sessionsSql,
     setups,
+    signInFault,
     skillsConfig,
     stopGrace,
     stopTrees,
@@ -142,6 +179,18 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     treeOfLeft,
     wakeFor,
   } = dependencies
+
+  /**
+   * Whether a start failed because the agent doesn't offer the step's model while its account's usage reads as needing its
+   * sign-in again: a signed-out Codex lists fewer models, and its `login status` may still say it is signed in, so the model
+   * missing is how its ended sign-in shows. Said as the sign-in, whose call offers signing in again, not as the model.
+   */
+  const signedOutRefusal = (cause: Cause.Cause<unknown>, definition: AgentEntry['definition'], account: Account) => {
+    const error = Cause.findErrorOption(cause)
+    return Option.isSome(error) && error.value instanceof OptionUnavailable && error.value.configId === definition.options.model
+      ? signInFault(account.id)
+      : Effect.succeed(false)
+  }
 
   /**
    * Ends a session: closes it and its process, and records how both ended.
@@ -289,13 +338,14 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
    * its process. The session stays `starting`: it takes over the thread
    * only when `activate` runs, so a failed start leaves the thread as it was.
    */
-  const connectSession = (
+  const connectOnce = (
     thread: ThreadContext,
     sessionId: string,
     entry: AgentEntry,
     account: Account,
     model: string | undefined,
     effort: string | undefined,
+    first: boolean,
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -307,6 +357,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
       const selectedWorker = thread.role !== 'task' ? null : yield* taskWorker(thread.taskId)
+      // The worker as it is now, with what its own check found: whether its agents' sandbox starts there, and its tools.
+      const placedOn =
+        selectedWorker === null ? undefined : runtimeConfig.workers?.list(thread.projectId).find((one) => one.workerId === selectedWorker)
       const startWithin = selectedWorker === null ? SESSION_START_TIMEOUT : Duration.minutes(15)
       // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
       if (selectedWorker === null) yield* accounts.prepare(account)
@@ -495,6 +548,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                     taskBranch: thread.branch,
                     // Its git stops what can't be undone whatever runs it, so a Never of only that needn't read the rest (rules.ts).
                     ...(selectedWorker === null && guardHolds ? { guarded: true } : {}),
+                    // On a worker, running as root there asks the person first.
+                    ...(selectedWorker === null
+                      ? {}
+                      : { worker: placedOn === undefined ? workerNameOf(selectedWorker) : workerName(placedOn) }),
                   },
                 }
               : {
@@ -528,6 +585,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               : { sandbox: upFront }),
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
+        // On a worker, its sandbox is the worker's to say; one that hasn't found it starts takes no work (below).
+        ...(selectedWorker === null ? {} : { sandboxStarts: placedOn?.readiness?.sandbox.starts === true }),
       }
       // A sandbox probe describes the machine running it. A worker starts its own provider process.
       const waiting = selectedWorker === null ? definition.ready?.() : undefined
@@ -553,8 +612,16 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 : Effect.mapError(remote.checkpoint, (error) => new ToolRefused({ message: error.message })),
             ),
       )
+      // What the launch's environment holds: whether it drives the person's own copy rather than the one Althar brings.
+      const launchEnv = transport._tag === 'Process' ? { ...inherited(transport.spec.inheritEnv), ...transport.spec.env } : {}
+      const drivenBy = definition.cli?.drivenBy
+      const ownCopy = drivenBy !== undefined && launchEnv[drivenBy] !== undefined
+      // The program Althar brings for it, there and of the version its adapter needs, before it is spawned (bundledPrograms.ts).
+      const check = selectedWorker === null && definition.program !== undefined ? () => definition.program?.(launchEnv) : undefined
+      const program = check?.()
       const started = yield* Effect.exit(
         Effect.gen(function* () {
+          if (program !== undefined) return yield* new AgentStartFailed({ command: definition.name, reason: program })
           if (untrusted && definition.untrustedRepositories === false)
             return yield* new AgentRequestFailed({
               method: 'session/new',
@@ -576,6 +643,12 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               return yield* refuse('This agent or task can’t run on a worker.')
             if (thread.repositories.length === 0 || thread.repositories.some((repository) => repository.local === 1))
               return yield* refuse('A worker needs the task in a worktree of its own, not Local.')
+            // It takes work only where its own check found its agents' sandbox starts, and this agent started there once;
+            // a worker that hasn't said, or found otherwise, takes none, and says why, before anything opens there.
+            // The worker that receives the run is checked again as it does (agentRuns.ts, `requireReady`), in case it was
+            // replaced meanwhile.
+            const refusal = workerRefusal(placedOn, selectedWorker, definition.id)
+            if (refusal !== undefined) return yield* refuse(refusal)
             const assets =
               !workerCanLoadSkills || skills === undefined || skills.given.length === 0
                 ? []
@@ -622,7 +695,21 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 (workspaceId) => setups.workerPlan(thread.taskId, workspaceId).pipe(Effect.map((plan) => ({ workspaceId, plan }))),
               ).pipe(Effect.mapError(() => refuse(`Althar couldn’t work out the setup for its folder on ${workerNameOf(selectedWorker)}.`)))
               const layouts = plans.flatMap(({ workspaceId, plan }) => (plan?.spec === undefined ? [] : [{ workspaceId, ...plan.spec }]))
-              const setup = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
+              // What the task's files need that the worker lacks and installs itself, into its own folder, before the setup: read
+              // in each repository's folder, as its setup runs there.
+              const across = yield* Effect.promise(() =>
+                needsAcross(
+                  thread.repositories.map((one) => ({
+                    name: one.name,
+                    folder: one.within === null ? one.worktree : join(one.worktree, one.within),
+                  })),
+                ),
+              )
+              // Two repositories pinning versions of a tool that can't be one install: it doesn't go to a worker, which has one.
+              if ('conflict' in across) return yield* refuse(across.conflict)
+              const tools = toolsToInstall(needsOn(across.needs, placedOn?.readiness))
+              const commands = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
+              const setup = tools.length === 0 ? commands : { ...(commands ?? { directory: '', commands: [] }), tools }
               remote = yield* platform.open({
                 workerId: selectedWorker,
                 projectId: thread.projectId,
@@ -752,14 +839,35 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       if (Exit.isFailure(started)) {
         yield* Scope.close(scope, Exit.void)
         yield* tools.revoke
-        yield* Effect.logWarning('Agent could not start', started.cause).pipe(
-          Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
+        // The whole answer, its code and all its data (failures.ts' rawOf), is the log's and the record's; the person reads words.
+        const answer = answerOf(started.cause)
+        yield* Effect.logWarning(first ? 'Agent could not start' : 'Agent could not start again', started.cause).pipe(
+          Effect.annotateLogs({
+            agent: definition.id,
+            session: sessionId,
+            thread: thread.threadId,
+            ...(answer === undefined ? {} : { answer }),
+          }),
         )
-        const reason = Cause.pretty(started.cause)
+        const reason = answer === undefined ? Cause.pretty(started.cause) : `${Cause.pretty(started.cause)}\nIt answered: ${answer}`
         // A folder gone from under it fails its start as a missing command would (ENOENT): said as the folder, never
         // that an agent that is there isn't installed.
         const folder = cwdOf(thread)
-        const summary = existsSync(folder) ? summarize(started.cause) : folderGoneWords(folder)
+        const signInEnded = existsSync(folder) && (yield* signedOutRefusal(started.cause, entry.definition, account))
+        // Its own program missing, or of another version, as while an install of Althar is still under way: looked for again a
+        // while, before anything is said.
+        if (first && program !== undefined && check !== undefined) return yield* new ProgramArriving({ check })
+        // One that may pass starts again once, afresh, by itself: what Althar holds of the agent read again first.
+        if (first && program === undefined && existsSync(folder) && !signInEnded && startsAgain(started.cause)) {
+          if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
+          return yield* new StartAgain()
+        }
+        const summary = existsSync(folder)
+          ? signInEnded
+            ? signInEndedWords
+            : // Whose copy to put right: Althar's, unless this launch drives the person's own (Codex's `CODEX_PATH`).
+              summarize(started.cause, { bundled: definition.source === 'bundled' && !ownCopy })
+          : folderGoneWords(folder)
         yield* sql.withTransaction(
           Effect.gen(function* () {
             if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
@@ -857,6 +965,51 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         upFront,
       }
     })
+
+  /**
+   * Starts the agent and its session, as `connectOnce` does, and once more,
+   * afresh, where its first start failed in a way that may pass: its adapter
+   * stopped, or it failed for no reason Althar can act on. Before the second,
+   * what Althar holds of the agent (its sign-in as last checked, the models it
+   * offers) is forgotten, so both are read again, and the second start is a
+   * new process of its adapter, with probes of its own. Nothing waits on the
+   * person: a start that fails again says why, as any does.
+   */
+  const connectSession = (
+    thread: ThreadContext,
+    sessionId: string,
+    entry: AgentEntry,
+    account: Account,
+    model: string | undefined,
+    effort: string | undefined,
+  ) =>
+    connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
+      Effect.catchTag('ProgramArriving', ({ check }) =>
+        Effect.gen(function* () {
+          const { every, within } = runtimeConfig.programWait ?? PROGRAM_WAIT
+          yield* Effect.logInfo('Waiting for the agent’s own program, which isn’t there yet').pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, problem: check() ?? '' }),
+          )
+          // Looked for again every so often, for a bounded while; then started either way, and said as it stands.
+          const tries = Math.max(1, Math.ceil(Duration.toMillis(within) / Math.max(1, Duration.toMillis(every))))
+          for (let tried = 0; tried < tries && check() !== undefined; tried++) yield* Effect.sleep(every)
+          return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
+            Effect.catchTags({ StartAgain: (again) => Effect.die(again), ProgramArriving: (again) => Effect.die(again) }),
+          )
+        }),
+      ),
+      Effect.catchTag('StartAgain', () =>
+        Effect.gen(function* () {
+          yield* Effect.logInfo('Starting the agent again, afresh').pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId }),
+          )
+          yield* refreshAgent(entry.definition.id)
+          return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
+            Effect.catchTags({ StartAgain: (again) => Effect.die(again), ProgramArriving: (again) => Effect.die(again) }),
+          )
+        }),
+      ),
+    )
 
   type Connected = Effect.Success<ReturnType<typeof connectSession>>
 
@@ -1149,4 +1302,33 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     })
 
   return { activate, beforeTakingOver, busyNow, connectSession, stopRunning }
+}
+
+/**
+ * What keeps a worker from taking an agent's run, from its own check (ADR-103): it hasn't said, its sandbox can't start,
+ * or the agent couldn't start there; none where its check found both start. Not whether it is busy: placement says that.
+ */
+export const unreadyFor = (worker: ProjectWorker, agentId: string): WorkerUnfit | undefined => {
+  const readiness = worker.readiness
+  if (readiness === undefined) return { kind: 'unchecked' }
+  if (!readiness.sandbox.starts)
+    return {
+      kind: 'sandbox',
+      problem: readiness.sandbox.problem,
+      ...(readiness.sandbox.fix === undefined ? {} : { fix: readiness.sandbox.fix }),
+    }
+  const started = readiness.agents?.find((agent) => agent.providerId === agentId)
+  return started?.starts === true
+    ? undefined
+    : { kind: 'agentStarts', agentId, ...(started?.problem === undefined ? {} : { problem: started.problem }) }
+}
+
+/**
+ * Why a run doesn't open on its worker, in words, or none: one not connected to the project now (nothing is known of it,
+ * so nothing opens there), or one its own check didn't find ready for this agent (`unreadyFor`).
+ */
+export const workerRefusal = (placedOn: ProjectWorker | undefined, workerId: string, agentId: string): string | undefined => {
+  if (placedOn === undefined) return workerUnfitWords({ kind: 'gone' }, workerNameOf(workerId))
+  const refusal = unreadyFor(placedOn, agentId)
+  return refusal === undefined ? undefined : workerUnfitWords(refusal, workerName(placedOn))
 }
