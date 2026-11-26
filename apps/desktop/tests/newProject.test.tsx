@@ -528,7 +528,7 @@ describe('where a new project’s code lives', () => {
 })
 
 describe('a new project cloned from its host', () => {
-  it('lists your repositories, those named like it first and none archived, and clones the one chosen where you keep code', async () => {
+  it('lists your repositories, those named like it first and the archived last, and clones the one chosen where you keep code', async () => {
     const order: string[] = []
     const { client, host, draft, onCreated } = opened({
       listConnections: vi.fn(async () => connected),
@@ -548,8 +548,14 @@ describe('a new project cloned from its host', () => {
     })
     await named('Tidepool')
     const rows = await screen.findAllByRole('button', { name: /^Clone [a-z]/ })
-    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['Clone you/tidepool', 'Clone charrette/althar'])
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
+      'Clone you/tidepool',
+      'Clone charrette/althar',
+      'Clone charrette/old',
+    ])
     expect(within(rows[0]!).getByText('Named like the project')).toBeTruthy()
+    // One archived clones too: found by its name, and said so.
+    expect(within(rows[2]!).getByText('Archived')).toBeTruthy()
     await userEvent.click(rows[0]!)
     expect(screen.getByRole('button', { name: 'Chosen you/tidepool' })).toBeTruthy()
     expect(await screen.findByText('Into ~/code')).toBeTruthy()
@@ -696,12 +702,24 @@ describe('a new project cloned from its host', () => {
     )
   })
 
+  it('finds one archived on its host, not on this computer, by its name, and clones it', async () => {
+    const { client, onCreated } = opened({ listConnections: vi.fn(async () => connected) })
+    await named('Old')
+    await userEvent.type(await screen.findByRole('searchbox', { name: 'Find a repository, or paste its URL' }), 'charrette/old')
+    const row = await screen.findByRole('button', { name: 'Clone charrette/old' })
+    expect(within(row).getByText('Archived')).toBeTruthy()
+    await userEvent.click(row)
+    await create('Old')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn1', path: ['charrette', 'old'] })
+  })
+
   it('says a token lists only the repositories it was given, opens where it is given more, and reads them again once back', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const url = 'https://github.com/settings/personal-access-tokens'
     const readHostReach = vi
       .fn()
-      .mockResolvedValueOnce({ limited: { by: 'token', url } })
+      .mockResolvedValueOnce({ limited: { by: 'token', url, owner: null } })
       .mockResolvedValue({ limited: null })
     const listHostRepositories = vi
       .fn()
@@ -719,7 +737,9 @@ describe('a new project cloned from its host', () => {
   })
 
   it('says an app installed on only some lists only those, and nothing where the host lists all it has', async () => {
-    const readHostReach = vi.fn(async () => ({ limited: { by: 'app' as const, url: 'https://github.com/settings/installations' } }))
+    const readHostReach = vi.fn(async () => ({
+      limited: { by: 'app' as const, url: 'https://github.com/settings/installations', owner: null },
+    }))
     const at = opened({ listConnections: vi.fn(async () => connected), readHostReach })
     expect(await screen.findByText('Only the repositories Althar’s GitHub app is installed on are listed.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Install it on more' })).toBeTruthy()
@@ -914,12 +934,12 @@ describe('a new project on a home on another computer', () => {
 
   it('lists every repository the home’s connection reaches, several cloned there at once, and says where its token reaches only some', async () => {
     const readHostReach = vi.fn(async () => ({
-      limited: { by: 'token' as const, url: 'https://github.com/settings/personal-access-tokens' },
+      limited: { by: 'token' as const, url: 'https://github.com/settings/personal-access-tokens', owner: 'ada' },
     }))
     const at = onHome({ listConnections: vi.fn(async () => connected), listHostRepositories: vi.fn(async () => HOSTED), readHostReach })
     await userEvent.click(await screen.findByRole('button', { name: 'Clone you/tidepool' }))
     await userEvent.click(screen.getByRole('button', { name: 'Clone charrette/althar' }))
-    expect(screen.getByText('Only the repositories your GitHub token was given are listed.')).toBeTruthy()
+    expect(screen.getByText('Your GitHub token reaches only what it was given of ada’s repositories.')).toBeTruthy()
     await create('Tidepool')
     await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledTimes(2))
     expect(at.client.cloneRepository).toHaveBeenLastCalledWith('grant_code', { connectionId: 'conn1', path: ['charrette', 'althar'] })

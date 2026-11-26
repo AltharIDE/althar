@@ -62,6 +62,8 @@ export interface HostedRepository {
   readonly pushed: string | null
   /** Named like the project. */
   readonly like: boolean
+  /** Archived on its host: listed after the rest, to clone, said so in place of when it was pushed. */
+  readonly archived?: boolean
   /** Where it is on this computer already, when it is: added, not cloned. */
   readonly here: string | null
   /** Where else it is, said in place of when it was pushed: one of your projects on another computer. */
@@ -77,6 +79,8 @@ export interface SetupLimited {
   readonly by: 'token' | 'app'
   /** Where it is let reach more; null where that isn't known. */
   readonly url: string | null
+  /** The one owner a token is for, whose repositories it was given some or all of: an organization's are out of its reach. */
+  readonly owner: string | null
 }
 
 export interface ProjectSetupText {
@@ -105,8 +109,9 @@ export interface ProjectSetupText {
   reading: string
   readFailed: (host: string) => string
   tryAgain: string
+  archived: string
   /** A host's list is short of what its account has, by what limits it. */
-  limited: (host: string, by: SetupLimited['by']) => string
+  limited: (host: string, by: SetupLimited['by'], owner: string | null) => string
   widen: (by: SetupLimited['by']) => string
   privately: string
   drop: string
@@ -149,10 +154,13 @@ export const projectSetupText: ProjectSetupText = {
   reading: 'Reading your repositories…',
   readFailed: (host) => `${host}’s repositories couldn’t be read.`,
   tryAgain: 'Try again',
-  limited: (host, by) =>
+  archived: 'Archived',
+  limited: (host, by, owner) =>
     by === 'app'
       ? `Only the repositories Althar’s ${host} app is installed on are listed.`
-      : `Only the repositories your ${host} token was given are listed.`,
+      : owner === null
+        ? `Only the repositories your ${host} token was given are listed.`
+        : `Your ${host} token reaches only what it was given of ${owner}’s repositories.`,
   widen: (by) => (by === 'app' ? 'Install it on more' : 'Give it more'),
   privately: 'Private',
   drop: 'Drop a folder here',
@@ -511,7 +519,11 @@ export function SetupRepositories({
             (only === 'all' || one.host === only) &&
             words.every((word) => `${one.owner}/${one.name} ${one.description ?? ''}`.toLowerCase().includes(word)),
         )
-  const shown = [...listed.filter((one) => one.like), ...listed.filter((one) => !one.like)]
+  const shown = [
+    ...listed.filter((one) => one.like && one.archived !== true),
+    ...listed.filter((one) => !one.like && one.archived !== true),
+    ...listed.filter((one) => one.archived === true),
+  ]
   const hostOf = (id: string) => hosts.find((host) => host.id === id)
   const rows = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[data-row]') ?? [])
   const onField = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -619,6 +631,8 @@ export function SetupRepositories({
                         <Icon name="folder" size={11} />
                         {landing}
                       </span>
+                    ) : one.archived === true ? (
+                      <span>{t.archived}</span>
                     ) : (
                       one.pushed !== null && <span>{one.pushed}</span>
                     )}
@@ -694,7 +708,7 @@ export function SetupRepositories({
             <p key={one.host} className={s.limited}>
               <Icon name="info" size={13} />
               <span>
-                {t.limited(host.name, one.by)}{' '}
+                {t.limited(host.name, one.by, one.owner)}{' '}
                 {one.url !== null && onWiden !== undefined && <LinkButton onClick={() => onWiden(one)}>{t.widen(one.by)}</LinkButton>}
               </span>
             </p>,

@@ -25,7 +25,7 @@ import {
 import { device } from '../../shared/device'
 import { ConnectFlow } from '../connections/ConnectFlow'
 import { useConnect } from '../connections/useConnect'
-import type { Draft, DraftFolder } from './draft'
+import { cloneFolders, type Draft, type DraftFolder } from './draft'
 import s from './NewProject.module.css'
 import type { SetupActions, SetupModel } from './useSetup'
 
@@ -194,6 +194,7 @@ export function SetupSide({
     if (setup.way === 'clone') {
       // Being cloned, or some cloned already: each, those still to clone filling as Create works through them.
       if (clones.length > 0 && (creating || clones.some((clone) => clonedOf(clone.id) !== undefined))) {
+        const folders = cloneFolders(clones)
         return (
           <SetupZone>
             <div className={s.folders}>
@@ -207,7 +208,11 @@ export function SetupSide({
                     mark={clone.brand === null ? <Icon name="download" size={18} /> : <BrandMark brand={clone.brand} size={22} />}
                     owner={parts.slice(0, -1).join('/')}
                     name={name}
-                    where={cloned?.where ?? clone.here?.where ?? (clone.where === null ? clone.hostName : `${clone.where}/${name}`)}
+                    where={
+                      cloned?.where ??
+                      clone.here?.where ??
+                      (clone.where === null ? clone.hostName : `${clone.where}/${folders.get(clone.id) ?? name}`)
+                    }
                     filling={creating && setup.statuses.source === 'doing' && cloned === undefined}
                   />
                 )

@@ -1161,6 +1161,8 @@ export const HostReach = Schema.Struct({
     Schema.Struct({
       by: Schema.Literals(['token', 'app']),
       url: Schema.NullOr(Schema.String),
+      /** The one owner a token is for, whose repositories it was given some or all of; null where it isn't one owner's, or unknown. */
+      owner: Schema.NullOr(Schema.String),
     }),
   ),
 })
@@ -5553,7 +5555,9 @@ const ProjectApi = RpcGroup.make(
    * chose (`grant`): one on a connection's host, by its path there; or one by
    * its URL, signed in through the connection whose host it is on, else with
    * the person's own git sign-in. Refused where that folder has something in
-   * it already; what a failed clone made is taken away.
+   * it already; what a failed clone made is taken away. `folder` names it in
+   * place of the repository's own name, as for two of one name cloned into
+   * one place; a single name, never a path.
    */
   command(
     'CloneRepository',
@@ -5563,6 +5567,7 @@ const ProjectApi = RpcGroup.make(
         Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
         Schema.Struct({ url: Schema.String }),
       ]),
+      folder: Schema.optional(Schema.String),
     },
     ClonedRepository,
   ),

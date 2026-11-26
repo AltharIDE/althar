@@ -58,21 +58,25 @@ describe('the repositories a clone is chosen from', () => {
 
   it('says a host lists only what its token was given, or where its app is installed, with where it reaches more', () => {
     const onWiden = vi.fn()
-    const limited = { host: 'github', by: 'token' as const, url: 'https://github.com/settings/personal-access-tokens' }
+    const limited = { host: 'github', by: 'token' as const, url: 'https://github.com/settings/personal-access-tokens', owner: null }
     list({ limited: [limited], onWiden })
     expect(screen.getByText(/Only the repositories your GitHub token was given are listed\./)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Give it more' }))
     expect(onWiden).toHaveBeenCalledWith(limited)
     cleanup()
-    list({ limited: [{ host: 'github', by: 'app', url: 'https://github.com/settings/installations' }], onWiden })
+    list({ limited: [{ host: 'github', by: 'app', url: 'https://github.com/settings/installations', owner: null }], onWiden })
     expect(screen.getByText(/Only the repositories Althar’s GitHub app is installed on are listed\./)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Install it on more' })).toBeTruthy()
+    // A token for one owner says whose: another's, an organization's, are out of its reach.
+    cleanup()
+    list({ limited: [{ ...limited, owner: 'balazs' }], onWiden })
+    expect(screen.getByText(/Your GitHub token reaches only what it was given of balazs’s repositories\./)).toBeTruthy()
     // Where it isn't known where it reaches more, it is said alone; a host not connected says nothing.
     cleanup()
     list({
       limited: [
-        { host: 'github', by: 'token', url: null },
-        { host: 'gitlab', by: 'token', url: null },
+        { host: 'github', by: 'token', url: null, owner: null },
+        { host: 'gitlab', by: 'token', url: null, owner: null },
       ],
       onWiden,
     })

@@ -1133,10 +1133,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
     readHostReach: vi.fn(async (): Promise<HostReach> => ({ limited: null })),
     listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
-    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
-      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
-      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
-    }),
+    cloneRepository: vi.fn(
+      async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }, folder?: string) => {
+        const name = folder ?? ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+        return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+      },
+    ),
     publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
       remote: `${input.owner.id}/${input.name}`,
       webUrl: `https://github.com/${input.owner.id}/${input.name}`,

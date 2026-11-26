@@ -149,15 +149,15 @@ export const useHostRepositories = (
     }
   }
   const all = codeHosts.flatMap((connection, at) =>
-    (listed[at]?.data ?? [])
-      .filter((one) => !one.archived)
-      .map((one) =>
-        repositoryOf(connection, one.path, {
-          description: one.description,
-          private: one.private,
-          pushed: one.pushedAt === null ? null : ago(one.pushedAt),
-        }),
-      ),
+    // Archived ones too: they clone, and are listed after the rest, said so.
+    (listed[at]?.data ?? []).map((one) =>
+      repositoryOf(connection, one.path, {
+        description: one.description,
+        private: one.private,
+        pushed: one.pushedAt === null ? null : ago(one.pushedAt),
+        ...(one.archived ? { archived: true } : {}),
+      }),
+    ),
   )
   // On another computer's home, this computer's projects, by where their code is: one the home lists already says so; the
   // rest are cloned by their address, with the home's own sign-in to that host where it has one.

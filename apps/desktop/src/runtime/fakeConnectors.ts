@@ -75,7 +75,8 @@ if (process.env.ALTHAR_FAKE_QUEUE !== undefined) github.mergeQueue()
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.
 if (process.env.ALTHAR_FAKE_REMOTE_WEB !== undefined) github.addRepository(['meridian', 'web'])
 // A token made for some of the account's repositories, for a test that sees it said (ALTHAR_FAKE_LIMITED).
-if (process.env.ALTHAR_FAKE_LIMITED !== undefined) github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens` })
+if (process.env.ALTHAR_FAKE_LIMITED !== undefined)
+  github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens`, owner: null })
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
 // Pull requests someone else opened on meridian/api, for a test that reviews them: each its title, author and head commit, which
 // the test pushed to the remote as refs/pull/<n>/head, numbered from 1 in the order given.

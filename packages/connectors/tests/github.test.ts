@@ -2904,7 +2904,7 @@ describe('GitHub’s repositories, for cloning one or making one', () => {
     ...overrides,
   })
 
-  it.effect('says where it lists fewer than the account has: a token without repo, or one given some, an app installed on some', () =>
+  it.effect('says where it lists fewer than the account reaches: a token without repo, a fine-grained one, the app, one given fewer', () =>
     Effect.gen(function* () {
       const OWN = `${API}/user/repos?per_page=100&affiliation=owner&page=`
       const reach = (token: string, routes: ReadonlyArray<Route>) => {
@@ -2925,26 +2925,35 @@ describe('GitHub’s repositories, for cloning one or making one', () => {
       const publicOnly = reach('ghp_t', [
         ['GET', `${API}/user`, { headers: { 'x-oauth-scopes': 'public_repo' }, json: { public_repos: 3 } }],
       ])
-      assert.deepStrictEqual(yield* publicOnly.reach, { limited: { by: 'token', url: 'https://github.com/settings/tokens' } })
-      // A fine-grained token says nothing: its own, counted page after page, against those GitHub says the account has.
-      const given = reach('github_pat_t', [
+      assert.deepStrictEqual(yield* publicOnly.reach, { limited: { by: 'token', url: 'https://github.com/settings/tokens', owner: null } })
+      // A fine-grained token is one owner's, an organization's or the account's, and some of its repositories or all: never
+      // what the account reaches elsewhere, though the account's own counts match. It says whose.
+      const fine = reach('github_pat_t', [['GET', `${API}/user/repos?per_page=1`, { json: [{ owner: { login: 'meridian' } }] }]])
+      assert.deepStrictEqual(yield* fine.reach, {
+        limited: { by: 'token', url: 'https://github.com/settings/personal-access-tokens', owner: 'meridian' },
+      })
+      assert.lengthOf(fine.sent, 1)
+      const nothing = reach('github_pat_t', [['GET', `${API}/user/repos?per_page=1`, { json: [] }]])
+      assert.deepStrictEqual(yield* nothing.reach, {
+        limited: { by: 'token', url: 'https://github.com/settings/personal-access-tokens', owner: null },
+      })
+      // Althar's app reaches where it is installed, and no further.
+      const app = reach('ghu_t', [])
+      assert.deepStrictEqual(yield* app.reach, { limited: { by: 'app', url: 'https://github.com/settings/installations', owner: null } })
+      assert.lengthOf(app.sent, 0)
+      // A token that says nothing of itself: its own, counted page after page, against those GitHub says the account has.
+      const given = reach('gho_t', [
         ['GET', `${API}/user`, { json: { public_repos: 101, owned_private_repos: 2 } }],
         ['GET', `${OWN}1`, { json: own(100, 0) }],
         ['GET', `${OWN}2`, { json: own(1, 1) }],
       ])
-      assert.deepStrictEqual(yield* given.reach, { limited: { by: 'token', url: 'https://github.com/settings/personal-access-tokens' } })
+      assert.deepStrictEqual(yield* given.reach, { limited: { by: 'token', url: 'https://github.com/settings/tokens', owner: null } })
       assert.lengthOf(given.sent, 3)
-      const all = reach('github_pat_t', [
+      const all = reach('gho_t', [
         ['GET', `${API}/user`, { json: { public_repos: 2 } }],
         ['GET', `${OWN}1`, { json: own(2, 4) }],
       ])
       assert.deepStrictEqual(yield* all.reach, { limited: null })
-      // Althar's app, installed on some of the account's own: where it is installed on more.
-      const app = reach('ghu_t', [
-        ['GET', `${API}/user`, { json: { public_repos: 5, owned_private_repos: 0 } }],
-        ['GET', `${OWN}1`, { json: own(1, 0) }],
-      ])
-      assert.deepStrictEqual(yield* app.reach, { limited: { by: 'app', url: 'https://github.com/settings/installations' } })
     }),
   )
 
@@ -2966,8 +2975,8 @@ describe('GitHub’s repositories, for cloning one or making one', () => {
         ],
       ])
       const found = yield* host.repositories()
-      assert.lengthOf(found, 103)
-      assert.deepStrictEqual(found.slice(-3), [
+      assert.lengthOf(found, 102)
+      assert.deepStrictEqual(found.slice(-2), [
         {
           path: ['meridian', 'api'],
           description: 'The API',
@@ -2976,21 +2985,13 @@ describe('GitHub’s repositories, for cloning one or making one', () => {
           webUrl: 'https://github.com/meridian/api',
           archived: false,
         },
-        // An empty description is none; one archived, or disabled by GitHub, is never pushed to.
+        // An empty description is none; one archived is listed, to clone, never to push to; one disabled by GitHub isn't.
         {
           path: ['meridian', 'old'],
           description: null,
           private: false,
           pushedAt: null,
           webUrl: 'https://github.com/meridian/old',
-          archived: true,
-        },
-        {
-          path: ['meridian', 'held'],
-          description: null,
-          private: false,
-          pushedAt: '2026-10-01T09:00:00Z',
-          webUrl: 'https://github.com/meridian/held',
           archived: true,
         },
       ])

@@ -223,3 +223,33 @@ it('clones each chosen into one place, asked for once, makes the project of them
     }),
   )
 })
+
+it('clones two of one name into folders of their own, the later one by its owner’s name and its own', async () => {
+  const one: DraftClone = { ...clone, id: 'a', remote: 'org-a/api', from: { connectionId: 'github', path: ['org-a', 'api'] }, here: null }
+  const two: DraftClone = { ...clone, id: 'b', remote: 'org-b/api', from: { connectionId: 'github', path: ['org-b', 'api'] }, here: null }
+  const at = fixture()
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [one, two] }))
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(vi.mocked(at.client.cloneRepository).mock.calls).toEqual([
+    ['grant_code', one.from],
+    ['grant_code', two.from, 'org-b-api'],
+  ])
+  expect(at.store.get()?.folders.map((folder) => folder.path)).toEqual(['/Users/ada/code/api', '/Users/ada/code/org-b-api'])
+})
+
+it('keeps a clone that landed though making it ready failed, and makes it ready on Create again without cloning it again', async () => {
+  const at = fixture({
+    prepareFolder: vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t commit.' }))
+      .mockResolvedValue({ did: 'committed', path: '/Users/ada/code/repo', branch: 'main', files: 0 }),
+  })
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
+  expect(await at.actions.create('clay', plan)).toBeNull()
+  expect(at.store.get()?.error).toEqual({ said: 'Git couldn’t commit.' })
+  expect(at.store.get()?.folders).toMatchObject([{ path: '/Users/ada/code/repo', grant: 'grant_repo', came: 'clone', clone: 'clone' }])
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(at.client.cloneRepository).toHaveBeenCalledOnce()
+  expect(at.client.prepareFolder).toHaveBeenLastCalledWith('grant_repo', '/Users/ada/code/repo')
+  expect(at.store.get()?.folders).toMatchObject([{ git: 'ready' }])
+})

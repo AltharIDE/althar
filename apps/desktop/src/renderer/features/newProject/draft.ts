@@ -209,6 +209,27 @@ export interface DraftActions {
 
 const IDLE: DraftSteps = { source: 'idle', home: 'idle', issues: 'idle' }
 
+/** A repository's own name, as a clone of it is named: api for org/api.git. */
+const nameOf = (remote: string) => (remote.split('/').at(-1) ?? remote).replace(/\.git$/, '')
+
+/**
+ * The folder each repository chosen is cloned into, by its id: its own name,
+ * unless one chosen before it has that name too, when its owner's goes in
+ * front (org-b-api beside api), so no two are cloned into one folder.
+ */
+export const cloneFolders = (clones: ReadonlyArray<DraftClone>): ReadonlyMap<string, string> => {
+  const taken = new Set<string>()
+  const folders = new Map<string, string>()
+  for (const clone of clones) {
+    const name = nameOf(clone.remote)
+    const owner = clone.remote.split('/').slice(0, -1).join('-')
+    const folder = taken.has(name.toLowerCase()) && owner !== '' ? `${owner}-${name}` : name
+    taken.add(folder.toLowerCase())
+    folders.set(clone.id, folder)
+  }
+  return folders
+}
+
 /** Kept here too, where the new project's own code and tests have it. */
 export { sameRepository }
 
@@ -520,6 +541,7 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
           // Each chosen in turn, those cloned already kept: into one place, asked for once, where one isn't here already.
           let place: { readonly grant: string; readonly where: string } | null | undefined
           let cloned: ReadonlyArray<DraftFolder> = []
+          const named = cloneFolders(at.clones)
           for (const clone of at.clones) {
             const done = folders.find((folder) => folder.clone === clone.id)
             if (done !== undefined) {
@@ -533,18 +555,23 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
                 stop({})
                 return null
               }
-              const made = await client.cloneRepository(place.grant, clone.from)
-              // An empty repository clones too, with no commit to branch from: it gets its first, as a folder with no commit does.
-              const prepared = await client.prepareFolder(made.grant, made.path)
+              // Into a folder of its own name, or its owner's and its own where another chosen has that name.
+              const folderName = named.get(clone.id)
+              const made =
+                folderName === undefined || folderName === nameOf(clone.remote)
+                  ? await client.cloneRepository(place.grant, clone.from)
+                  : await client.cloneRepository(place.grant, clone.from, folderName)
+              // Kept as it lands, before it is made ready: Create again makes it ready, never clones it again. An empty repository
+              // clones too, with no commit to branch from: it gets its first, as a folder with no commit does.
               folder = {
-                path: prepared.path,
+                path: made.path,
                 grant: made.grant,
                 name: made.path.split(/[\\/]/).at(-1) ?? clone.remote,
                 where: shortFolder(made.path),
                 remote: clone.remote,
                 project: null,
                 found: null,
-                git: 'ready',
+                git: 'unborn',
                 empty: false,
               }
             }

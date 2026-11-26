@@ -4311,9 +4311,9 @@ describe('a project set up where it starts, through the API', () => {
         assert.deepInclude(listed[0], { path: ['you', 'tidepool'], description: 'Tide tables', private: true })
         // Whether that is all the account has, as the host says: fewer where its token was given some.
         assert.deepStrictEqual(yield* client.ReadHostReach({ connectionId }), { limited: null })
-        github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens` })
+        github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens`, owner: 'you' })
         assert.deepStrictEqual(yield* client.ReadHostReach({ connectionId }), {
-          limited: { by: 'token', url: `${HOST}/settings/personal-access-tokens` },
+          limited: { by: 'token', url: `${HOST}/settings/personal-access-tokens`, owner: 'you' },
         })
         assert.deepStrictEqual(yield* client.ListRepositoryOwners({ connectionId }), [{ id: 'you', name: 'You', kind: 'user' }])
         const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-code-')))
@@ -4332,6 +4332,26 @@ describe('a project set up where it starts, through the API', () => {
           client.CloneRepository({ commandId: commandId(), grant: yield* grant(parent), from: { url: `${HOST}/you/tidepool.git` } }),
         )
         assert.deepInclude(again, { reason: 'FolderRefused', why: 'taken' })
+        // Given a folder of its own, as a second of one name is: cloned beside the first, there.
+        const beside = yield* client.CloneRepository({
+          commandId: commandId(),
+          grant: yield* grant(parent),
+          from: { connectionId, path: ['you', 'tidepool'] },
+          folder: 'you-tidepool',
+        })
+        assert.strictEqual(beside.path, join(parent, 'you-tidepool'))
+        assert.strictEqual(originOf(beside.path), `${HOST}/you/tidepool.git`)
+        // A folder that is anything but a name is refused, and nothing is cloned outside the place.
+        const outside = yield* Effect.flip(
+          client.CloneRepository({
+            commandId: commandId(),
+            grant: yield* grant(parent),
+            from: { connectionId, path: ['you', 'tidepool'] },
+            folder: '../elsewhere',
+          }),
+        )
+        assert.deepInclude(outside, { reason: 'FolderRefused', why: 'taken' })
+        assert.isFalse(existsSync(join(parent, '..', 'elsewhere')))
       }),
     ),
   )

@@ -119,6 +119,8 @@ export const RepositoryReach = Schema.Struct({
     Schema.Struct({
       by: Schema.Literals(['token', 'app']),
       url: Schema.NullOr(Schema.String),
+      /** The one owner a token is for, whose repositories it was given some or all of; null where it isn't one owner's, or unknown. */
+      owner: Schema.NullOr(Schema.String),
     }),
   ),
 })
