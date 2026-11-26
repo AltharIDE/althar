@@ -335,7 +335,8 @@ export const text = {
   fix: {
     githubSet: (what: string) => `Set ${what}, then Update.`,
     githubAdd: (names: ReadonlyArray<string>) => `Add ${these(names)} under Repository access, then Update.`,
-    githubPush: (owner: string) => `Give it Contents: Read and write on these, with ${owner} as its resource owner, then Update.`,
+    githubPush: (names: ReadonlyArray<string>, owner: string) =>
+      `Give it Contents: Read and write on ${these(names)}, with ${owner} as its resource owner, then Update.`,
     push: (service: string) => `Give the token write access there on ${service}, or connect with one that has it.`,
     appPush: (owner: string) => `Let Althar’s app write to these on ${owner}: its owners approve that in its settings there.`,
     githubScope: (scope: string) => `Tick ${scope}, then Update token.`,
@@ -1285,7 +1286,7 @@ function Fix({
       // Althar's app: its owners let it write there; a token: given write access on its page, or one made that has it.
       if (reason.url === null) return listed(text.fix.appPush(owner), reason.names, checkAgain, asItIs)
       return listed(
-        product === 'github' ? text.fix.githubPush(owner) : text.fix.push(service),
+        product === 'github' ? text.fix.githubPush(reason.names, owner) : text.fix.push(service),
         reason.names,
         change(reason.url),
         checkAgain,

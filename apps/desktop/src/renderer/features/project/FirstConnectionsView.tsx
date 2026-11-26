@@ -168,11 +168,16 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
     code === null || service === null || check.data === undefined
       ? null
       : cantPushOf(check.data, code.place.repositories, serviceName(service), code.connection.account.login)
-  // Nothing this window may connect, and nothing in the way: no card.
-  if (offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0 && cantPush === null) return null
+  // Nothing this window may connect, and nothing in the way: no card; but one walking stays till its walk ends, its check shown.
+  if (walking === null && offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0 && cantPush === null)
+    return null
+  // Walking in to a code host, the card stays the code's as it connects, its check shown before Done.
+  const walkingHost =
+    walking !== null && hostsCode(walking.service) && offer.host === undefined ? { host: { service: option(walking.service) } } : {}
   return (
     <FirstConnections
       {...offer}
+      {...walkingHost}
       {...(cantPush === null || service === null ? {} : { cantPush: { service: option(service), ...cantPush } })}
       onConnect={(chosen) => {
         if (!isService(chosen)) return

@@ -896,7 +896,7 @@ describe('connecting GitHub', () => {
       title: 'This token can’t push',
       says: [
         'It can read northwind/meridian-api but not push there.',
-        'Give it Contents: Read and write on these, with northwind as its resource owner, then Update.',
+        'Give it Contents: Read and write on northwind/meridian-api, with northwind as its resource owner, then Update.',
       ],
       press: 'Change it on GitHub',
       opens: 'https://github.com/settings/personal-access-tokens',

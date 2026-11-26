@@ -15,7 +15,7 @@ import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
-import { Queries } from '../src/Queries'
+import { Queries, stuckOf } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -224,6 +224,8 @@ describe('opening a task’s pull request', () => {
         'GitHub refused you’s token for meridian/api: it can read the repository but not push to it. Give the token write access to meridian/api (a fine-grained token’s Contents: Read and write, made for meridian), or connect GitHub with one that can push there, then try again.',
       )
       assert.notInclude(call.detail ?? '', 'git push')
+      // As the window reads the call: the way on it offers is the host's connection, then trying again.
+      assert.strictEqual(stuckOf(call).why, 'push_refused')
       assert.lengthOf(github.changes, 0)
     }).pipe(Effect.scoped, Effect.provide(runtimeWith(github)))
   })
