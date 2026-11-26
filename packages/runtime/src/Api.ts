@@ -1,4 +1,4 @@
-import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
+import { controlGoal, goalLine, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { taskWorker } from './workerExecution'
 import { WorkerSnapshots } from './WorkerSnapshots'
@@ -6,6 +6,7 @@ import { workerPreviewSockets } from './workerPreviewSockets'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
@@ -16,6 +17,9 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  SOCKET_CALLS,
+  SOCKET_CODE_HOSTS,
+  SOCKET_CODE_SERVICES,
   SocketAllowed,
   type MessageSender,
   type ClientIdentity,
@@ -84,9 +88,11 @@ import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestRevi
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
+import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { checkoutNeeds, withNeeds } from './toolNeeds'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Terminals } from './Terminals'
@@ -95,6 +101,7 @@ import { localTasksIn } from './local'
 import { PARENT_KEPT, tellOf, toldOf } from './forks'
 import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
+import { homeWorkers } from './homeWorkers'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
@@ -192,6 +199,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
@@ -235,14 +243,6 @@ export const text = {
     'The person wants issues filed and changed at once from now on: use draft_issue’s file_now and change_issue’s at_once. Each card is the record of it.',
   leadIssuesAskFirst:
     'The person wants to be asked first from now on: each issue, and each change to one, as a card for them to file or apply.',
-}
-
-const realpathOf = (path: string) => {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
-  }
 }
 
 /** Whether something is at a path, a link to nothing included. */
@@ -340,6 +340,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const canvasSaves = yield* CanvasSaves
     const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
@@ -354,11 +355,28 @@ export const handlers = apiLayer(
       identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
         ? effect
         : Effect.fail(
-            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+            new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
           )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
+    /**
+     * A socket sets its home's code hosts up, never its trackers, whose links to projects stay with the person's own window:
+     * a product it names, or a connection's own, must host code, and it follows and ends only the sign-ins it started.
+     */
+    const socketSetUp = identity.role === 'socket'
+    const signInsStarted = new Set<string>()
+    const notTrackers = () => new ApiError({ reason: 'PersonRequired', message: 'Connect or remove a tracker in the person’s own window.' })
+    const codeHostOnly = (product: string) => (socketSetUp && !SOCKET_CODE_HOSTS.has(product) ? Effect.fail(notTrackers()) : Effect.void)
+    const codeServiceOnly = (service: string) =>
+      socketSetUp && !SOCKET_CODE_SERVICES.has(service) ? Effect.fail(notTrackers()) : Effect.void
+    const codeHostConnection = (connectionId: string | undefined) =>
+      !socketSetUp || connectionId === undefined
+        ? Effect.void
+        : Effect.flatMap(Effect.orDie(sql<{ product: string }>`SELECT product FROM connections WHERE id = ${connectionId}`), ([row]) =>
+            row === undefined ? Effect.void : codeHostOnly(row.product),
+          )
+    const ownSignIn = (flowId: string) => (socketSetUp && !signInsStarted.has(flowId) ? Effect.fail(notTrackers()) : Effect.void)
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
     const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
@@ -367,14 +385,7 @@ export const handlers = apiLayer(
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
     /** A folder the person chose, by its grant, or a path inside it, as the runtime read one there: never a path elsewhere. */
-    const within = (grant: string, path?: string) =>
-      Effect.gen(function* () {
-        const chosen = realpathOf(yield* folders.path(grant))
-        if (path === undefined) return chosen
-        const inside = realpathOf(path)
-        if (inside !== chosen && !inside.startsWith(`${chosen}${sep}`)) return yield* new NotFound({ kind: 'folder', id: path })
-        return inside
-      })
+    const within = (grant: string, path?: string) => folders.inside(grant, path)
     /** A connection's code host, signed in through it; refused where it is a tracker's, or gone. */
     const codeHostOf = (connectionId: string) =>
       Effect.flatMap(connections.adapters(connectionId), ({ host }) =>
@@ -429,6 +440,9 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // The person's home on this computer, where they keep code: what a window on another computer finds folders in.
+    const personHome = config.elsewhere?.home ?? homedir()
+    const onHome = homeFolders((path, kind) => folders.allow(path, kind), personHome)
     // What About › Storage measures: kept for the session, and stopped when the window gives up.
     const sizes =
       config.storage === undefined
@@ -548,6 +562,15 @@ export const handlers = apiLayer(
               }
         const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
+        // What changed is said in the thread, as Althar's line: the person sees it there, as the lead and anyone reading after do.
+        yield* Effect.provideContext(
+          addItem({ projectId: result.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: goalLine(control, result.before, result.goal),
+          }),
+          store,
+        )
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
         if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal
@@ -855,9 +878,13 @@ export const handlers = apiLayer(
      */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
-        const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
-          concurrency: 'unbounded',
-        })
+        const statuses = yield* Effect.forEach(
+          yield* accounts.of(entry.definition.id),
+          (account) =>
+            // Checked again, one being signed in in Terminal is asked its models afresh: the sign-in may be done now.
+            recheck ? Effect.andThen(models.signInChecked(account.id), accountStatus(account, recheck)) : accountStatus(account, recheck),
+          { concurrency: 'unbounded' },
+        )
         const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
@@ -874,6 +901,7 @@ export const handlers = apiLayer(
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
+          ...(entry.definition.native === undefined && entry.definition.signIn.logout !== undefined ? { signsOut: true } : {}),
           guide: entry.definition.cli?.guide ?? null,
           problem: null,
         } satisfies AgentStatus
@@ -974,10 +1002,15 @@ export const handlers = apiLayer(
               apiVersion: API_VERSION,
               appVersion: config.appVersion,
               position: { homeId: instance.homeId, cursor: last?.cursor ?? 0, checkpoint: last?.checkpoint ?? null },
+              ...(identity.role === 'socket' ? { calls: [...SOCKET_CALLS] } : {}),
             }),
           ),
         ),
       IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      CreatePairingCode: () => connectionAdmin(pairings.create()),
+      GetPairingStatus: ({ tokenHash }) => connectionAdmin(pairings.status(tokenHash)),
+      GetPhoneAccess: () => connectionAdmin(pairings.access()),
+      SetPhoneAccess: ({ on }) => connectionAdmin(pairings.setAccess(on)),
       RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
       ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
@@ -1057,12 +1090,14 @@ export const handlers = apiLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      FindHomeFolders: () => api(onHome),
+      GetMachine: () => api(machineFacts(personHome)),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.place(grant), (parent) => placeRepository(parent, name))),
       MakeRepository: ({ grant, name }) =>
         api(
           Effect.gen(function* () {
-            const made = yield* makeRepository(yield* folders.path(grant), name)
-            return { grant: yield* folders.allow(made.path), path: made.path }
+            const made = yield* makeRepository(yield* folders.place(grant), name)
+            return { grant: yield* folders.allow(made.path, 'repository'), path: made.path }
           }),
         ),
       PrepareFolder: ({ commandId, grant, path }) =>
@@ -1074,16 +1109,20 @@ export const handlers = apiLayer(
             return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
           }),
         ),
+      // A host that can't tell lists all it says it does.
+      ReadHostReach: ({ connectionId }) =>
+        api(Effect.flatMap(codeHostOf(connectionId), (host) => host.reach?.() ?? Effect.succeed({ limited: null }))),
       ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
-      CloneRepository: ({ commandId, grant, from }) =>
+      CloneRepository: ({ commandId, grant, from, folder }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const parent = yield* folders.path(grant)
+              const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
-              const path = yield* cloneRepository({ parent, ...source })
-              return { grant: yield* folders.allow(path), path }
+              // A name of the window's, in place of the repository's: refused, as one taken is, where it is anything but a name.
+              const path = yield* cloneRepository({ parent, ...source, ...(folder === undefined ? {} : { folder }) })
+              return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
         ),
@@ -1135,15 +1174,7 @@ export const handlers = apiLayer(
             const roots =
               repositories === undefined
                 ? undefined
-                : yield* Effect.forEach(repositories, (repository) =>
-                    Effect.gen(function* () {
-                      const within = realpathOf(yield* folders.path(repository.grant))
-                      const root = realpathOf(repository.path)
-                      if (root !== within && !root.startsWith(`${within}${sep}`))
-                        return yield* new NotFound({ kind: 'folder', id: repository.path })
-                      return root
-                    }),
-                  )
+                : yield* Effect.forEach(repositories, (repository) => within(repository.grant, repository.path))
             const opened = yield* projects.open({
               envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
@@ -1324,7 +1355,15 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
+      ListProjectWorkers: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const workers = config.workers?.list(projectId) ?? []
+            // What the project's files need that each lacks, for a worker that has checked itself.
+            if (workers.every((worker) => worker.readiness === undefined)) return workers
+            return withNeeds(workers, yield* checkoutNeeds(projectId).pipe(Effect.orElseSucceed(() => [])))
+          }).pipe(Effect.provideService(Instance, instance)),
+        ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       GetSearchDocuments: ({ after, search }) =>
         api(
@@ -1386,7 +1425,23 @@ export const handlers = apiLayer(
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
+      // Artifacts whose own chat draws their first version (ADR-104, "Talking to an artifact"), newest first: each shows among
+      // the project's artifacts from the moment it starts, until its first canvas.
+      ListArtifactsDrawing: ({ projectId }) =>
+        api(
+          Effect.map(
+            sql<{ taskId: string; threadId: string; projectId: string; title: string; startedAt: string }>`
+              SELECT k.id AS task_id, t.id AS thread_id, k.project_id, k.title, k.created_at AS started_at
+              FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              WHERE k.project_id = ${projectId} AND k.artifact_chat = 1 AND k.artifact_canvas_id IS NULL
+                AND k.state IN ('open', 'draft')
+              ORDER BY k.created_at DESC, k.id DESC`,
+            (rows) => rows.map((row) => ({ ...row })),
+          ),
+        ),
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
+      GetArtifactsPlace: ({ projectId }) => api(canvasSaves.place(projectId)),
+      ListRepositoryFolders: ({ projectId, repositoryId }) => api(canvasSaves.folders(projectId, repositoryId)),
       ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
       ReadCode: ({ threadId, path, commit, line, image }) =>
@@ -1470,8 +1525,11 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
+      SetModel: ({ commandId, threadId, agentId, model }) =>
+        once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), model })))),
+      SetEffort: ({ commandId, threadId, agentId, effort }) =>
+        once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), effort })))),
+      SetAgent: ({ commandId, threadId, agentId }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, agentId })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
@@ -1612,6 +1670,7 @@ export const handlers = apiLayer(
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
+      StartAnyway: ({ commandId, taskId }) => once(commandId, api(busy.startNow(taskId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -1926,6 +1985,7 @@ export const handlers = apiLayer(
         chat,
         taskId,
         workerId,
+        artifact,
       }) =>
         once(
           commandId,
@@ -1936,12 +1996,20 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              // An artifact has one chat of its own (ADR-104, "Talking to an artifact"): asked again, it is the one open.
+              if (aside && artifact !== undefined && artifact.canvasId !== null) {
+                const [open] = yield* sql<{ id: string }>`
+                  SELECT id FROM tasks WHERE artifact_chat = 1 AND artifact_canvas_id = ${artifact.canvasId}
+                    AND project_id = ${projectId} AND state IN ('open', 'draft')
+                  ORDER BY created_at DESC LIMIT 1`
+                if (open !== undefined) return yield* queries.task(open.id)
+              }
               let repositoryLimit: number | undefined
               if (workerId !== undefined) {
                 const available = config.workers?.list(projectId) ?? []
                 const worker = workerId === 'auto' ? automaticWorker(available, steps) : available.find((one) => one.workerId === workerId)
                 const message = aside
-                  ? 'This task stays on its home.'
+                  ? 'An aside runs on the home.'
                   : workerId === 'auto' && worker === undefined
                     ? automaticWorkerUnavailable
                     : workerProblem(worker, steps)
@@ -1970,7 +2038,12 @@ export const handlers = apiLayer(
                 // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
                 // are the person's, whole, where it was started with them; started with +, they come as its first message.
                 ...(aside
-                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  ? {
+                      plain: true,
+                      shelf: 'scratch' as const,
+                      ...(artifact === undefined ? {} : { artifact }),
+                      ...(description?.trim() ? { request: description } : {}),
+                    }
                   : requestOf(title, description, issue)),
               })
               for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
@@ -2001,6 +2074,7 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      PlacePlan: ({ commandId, planId, workerId, chosenAt }) => once(commandId, api(plans.place(planId, workerId, actorId, chosenAt))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
         once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
@@ -2219,6 +2293,9 @@ export const handlers = apiLayer(
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
+      SetArtifactsHome: ({ commandId, projectId, home }) => once(commandId, api(canvasSaves.setHome(projectId, home))),
+      SaveCanvas: ({ commandId, ...asked }) => once(commandId, api(canvasSaves.save(asked))),
+      StopSavingCanvas: ({ commandId, canvasId }) => once(commandId, api(canvasSaves.stop(canvasId))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
@@ -2236,6 +2313,28 @@ export const handlers = apiLayer(
         once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
       DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.place', { taskId, to }, commandId), (said) =>
+              runs.place({
+                envelope: said,
+                taskId,
+                to,
+                ...(lead === undefined
+                  ? {}
+                  : {
+                      lead: {
+                        ...(lead.model === undefined ? {} : { model: lead.model }),
+                        ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                      },
+                    }),
+                ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
+              }),
+            ),
+          ),
+        ),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -2354,56 +2453,68 @@ export const handlers = apiLayer(
           }),
         ),
       StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            connections.startSignIn({
-              product,
-              actorId: actorId,
-              ...(webUrl === undefined ? {} : { webUrl }),
-              ...(connectionId === undefined ? {} : { connectionId }),
-            }),
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              connections
+                .startSignIn({
+                  product,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                })
+                .pipe(Effect.tap((started) => Effect.sync(() => signInsStarted.add(started.flowId)))),
+            ),
           ),
         ),
-      GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
-      CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
+      GetSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.signIn(flowId))),
+      CancelSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.cancelSignIn(flowId))),
       ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectToken({
-                product,
-                token,
-                actorId: actorId,
-                ...(webUrl === undefined ? {} : { webUrl }),
-                ...(user === undefined ? {} : { user }),
-                ...(key === undefined ? {} : { key }),
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectToken({
+                  product,
+                  token,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(user === undefined ? {} : { user }),
+                  ...(key === undefined ? {} : { key }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      GetConnectGuide: ({ service }) => api(connections.guide(service)),
-      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      GetConnectGuide: ({ service }) => Effect.andThen(codeServiceOnly(service), api(connections.guide(service))),
+      FindServer: ({ service, webUrl }) => Effect.andThen(codeServiceOnly(service), api(connections.findServer(service, webUrl))),
       ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectCli({
-                product,
-                webUrl,
-                actorId: actorId,
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectCli({
+                  product,
+                  webUrl,
+                  actorId: actorId,
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
-      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, actorId))),
+      CheckConnection: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId))),
+      Disconnect: ({ commandId, connectionId }) =>
+        Effect.andThen(codeHostConnection(connectionId), once(commandId, api(connections.remove(connectionId, actorId)))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
       PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
@@ -2419,7 +2530,25 @@ export const handlers = apiLayer(
           ),
         ),
       RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
-      RemoveAccount: ({ commandId, accountId, anyway }) => once(commandId, api(accounts.remove(accountId, { anyway: anyway === true }))),
+      RemoveAccount: ({ commandId, accountId, anyway }) =>
+        once(
+          commandId,
+          // Removed, it offers its agent's models no more.
+          api(accounts.remove(accountId, { anyway: anyway === true }).pipe(Effect.tap(() => models.forgetAccount(accountId)))),
+        ),
+      SignOutAccount: ({ commandId, accountId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* accounts.signOut(accountId)
+              // Signed out, it offers its agent's models no more, and every screen says so: checked again, its plan with it.
+              yield* models.forgetAccount(accountId)
+              yield* signIns.account(yield* accounts.get(accountId), true)
+              yield* planUsage.retell
+            }),
+          ),
+        ),
       OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
       FindAccounts: ({ agentId }) =>
         api(
@@ -2439,6 +2568,9 @@ export const handlers = apiLayer(
             Effect.gen(function* () {
               const line = yield* accounts.login(accountId, host)
               if (host !== undefined) yield* models.forget('copilot')
+              // Signed in again in Terminal, it may be someone else's sign-in, offered other models: asked afresh, and again as
+              // its sign-in is checked for a while, as Althar can't see the sign-in end there.
+              else yield* models.signingIn(accountId)
               // Opened where the app can, in Terminal; elsewhere the person runs it.
               return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
             }),
@@ -2610,6 +2742,57 @@ export const handlers = apiLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlaces: () => api(busy.places),
+      GetWorkers: () => api(homeWorkers(config.workers)),
+      // Adding, changing and removing workers is the home's operator's or the person's own client's, as pairing a device
+      // is: a device paired over the network can't, nor can an agent's socket on another device.
+      RemoveWorker: ({ commandId, workerId }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.revoke === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+              : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+          ),
+        ),
+      AddWorker: ({ commandId, publicKey, name, ssh }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.admin === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+              : config.workers.admin
+                  .add({ publicKey: Buffer.from(publicKey, 'base64url'), name: name.trim(), ssh: ssh?.trim() || null })
+                  .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+          ),
+        ),
+      CreateWorkerCode: ({ name }) =>
+        connectionAdmin(
+          config.workers?.admin === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+            : config.workers.admin.code(name).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+        ),
+      SetWorkerProjects: ({ commandId, workerId, projectIds }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            Effect.gen(function* () {
+              const admin = config.workers?.admin
+              if (admin === undefined)
+                return yield* new ApiError({ reason: 'WorkersOff', message: 'This home’s workers get their projects from its operator.' })
+              const wanted = [...new Set(projectIds)]
+              const known =
+                wanted.length === 0
+                  ? []
+                  : yield* sql<{ id: string }>`SELECT id FROM projects WHERE id IN ${sql.in(wanted)}`.pipe(Effect.orDie)
+              if (known.length !== wanted.length)
+                return yield* new ApiError({ reason: 'NotFound', message: 'That project isn’t on this home.' })
+              return yield* admin
+                .assign(workerId, wanted)
+                .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotChanged', message })))
+            }),
+          ),
+        ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>
@@ -2986,7 +3169,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
                 return yield* new ApiError({
                   reason: 'PersonRequired',
-                  message: 'This call needs the person in the window or on a paired device.',
+                  message: 'This home doesn’t take that from this connection yet.',
                 })
               const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
               const prioritized = effect.pipe(

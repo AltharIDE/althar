@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { mainWindow, openMadeProject, say, toFirstProject } from './support'
+import { displaySwitches, mainWindow, openMadeProject, say, toFirstProject } from './support'
 
 /*
  * The app with a real agent, as a process started from the runtime's utility
@@ -38,7 +38,7 @@ test('a real agent plans a task, leads it and answers', async () => {
   const repo = repository(home)
   const { ALTHAR_FAKE_AGENTS: _, ...env } = process.env
   const app = await electron.launch({
-    args: [join(import.meta.dirname, '..')],
+    args: [join(import.meta.dirname, '..'), ...displaySwitches],
     env: {
       ...env,
       ALTHAR_PROFILE: join(home, 'profile'),

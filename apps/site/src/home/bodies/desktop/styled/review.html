@@ -640,6 +640,8 @@
 
 /* A phone: today above, Althar below; today's two windows one over the other, as on a wide screen, so each reads on its own. */
 @container (max-width: 559px) {
+  /* Althar's lead says what it changed by its lines alone, so the model beside it keeps its name. */
+  .rp-task .after .res code { display: none; }
   .rp-task { font-size: max(10px, 2.7cqw); }
   .rp-task .half {
     left: 5cqw;
@@ -703,6 +705,7 @@
   .rp-task .R1 .tx { display: flex; align-items: flex-start; gap: 0.8em; }
   .rp-task .R1 .hl .out { display: none; }
   .rp-task .R1 .fds { margin: 0 0 0 auto; gap: 0; line-height: 1.36; }
+  .rp-task .R1 .fd { white-space: nowrap; }
   .rp-task .drw { height: 3em; }
   .rp-task .glow { width: 22em; height: 11em; margin: -5.5em 0 0 -11em; }
   .rp-task .acc .a2 svg { display: block; }
@@ -727,7 +730,7 @@
         <div class="h y"><i style="width: 36%"></i></div>
         <div class="h"><i style="width: 86%"></i><i style="width: 68%"></i><i style="width: 30%"></i></div>
         <div class="h y"><i style="width: 48%"></i></div>
-        <div class="m ag" data-t="0" data-k="lc1">Edited <code><span class="dir">src/refunds/</span>retry.ts</code> <span class="dd">+2 −1</span></div>
+        <div class="m ag" data-t="0" data-k="lc1">Edited <code><span class="dir">src/auth/</span>sign-in.tsx</code> <span class="dd">+126 −3</span></div>
         <div class="m you" data-t="5.15"><b>›</b>It says: <span class="paste">[Pasted text +2 lines]</span></div>
         <div class="m think" data-t="5.3" data-off="5.9"></div>
         <div class="m ag" data-t="5.9" data-k="lc3">Good catch. Fixed both.</div>
@@ -751,9 +754,9 @@
         <div class="h"><i style="width: 70%"></i><i style="width: 34%"></i></div>
         <div class="h y"><i style="width: 38%"></i></div>
         <div class="h"><i style="width: 80%"></i><i style="width: 57%"></i></div>
-        <div class="m you" data-t="2.15"><b>›</b>Review this: <span class="paste">retry.ts +2 −1</span></div>
+        <div class="m you" data-t="2.15"><b>›</b>Review this: <span class="paste">sign-in.tsx +126 −3</span></div>
         <div class="m think" data-t="2.3" data-off="2.9"></div>
-        <div class="m ag" data-t="2.9" data-k="lo2"><span class="f"><i></i>Retry-After may be a date</span><span class="f"><i></i>No cap on the wait</span></div>
+        <div class="m ag" data-t="2.9" data-k="lo2"><span class="f"><i></i>No attempt limit</span><span class="f"><i></i>No CSRF token</span></div>
         <div class="m you" data-t="8.15"><b>›</b>It says it fixed both.</div>
         <div class="m think" data-t="8.3" data-off="8.9"></div>
         <div class="m ag ok" data-t="8.9" data-k="lo4"><i></i>Clean.</div>
@@ -778,7 +781,7 @@
     <div class="card">
       <div class="glow"></div>
       <div class="top">
-        <div class="ttl">Honour Retry-After</div>
+        <div class="ttl">Build the sign-in page</div>
         <div class="st">
           <span class="s-run"><i></i>Running</span>
           <span class="s-you"><i></i>Waiting on you</span>
@@ -790,16 +793,16 @@
         <div class="step L">
           <span class="tile"><svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg></span>
           <span class="nd"></span>
-          <div class="tx"><div class="hl"><span class="sn">Implement</span><span class="by">Opus 5.5</span><span class="out"><i class="shim"></i><span class="res"><code>retry.ts</code><span class="dd">+2 −1</span></span></span></div></div>
+          <div class="tx"><div class="hl"><span class="sn">Implement</span><span class="by">Opus 5.5</span><span class="out"><i class="shim"></i><span class="res"><code>sign-in.tsx</code><span class="dd">+126 −3</span></span></span></div></div>
         </div>
         <div class="step R R1">
           <span class="nd"></span>
           <span class="tile"><svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>
           <div class="tx">
-            <div class="hl"><span class="sn">Review</span><span class="by">GLM-5.3</span><span class="out"><i class="shim"></i><span class="res warm">2 findings</span></span></div>
+            <div class="hl"><span class="sn">Review</span><span class="by">Gemini 3 Pro</span><span class="out"><i class="shim"></i><span class="res warm">2 findings</span></span></div>
             <div class="fds">
-              <div class="fd"><b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></b>Retry-After may be a date</div>
-              <div class="fd"><b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></b>No cap on the wait</div>
+              <div class="fd"><b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></b>No attempt limit</div>
+              <div class="fd"><b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></b>No CSRF token</div>
             </div>
           </div>
         </div>
@@ -811,7 +814,7 @@
         <div class="step R">
           <span class="nd"></span>
           <span class="tile"><svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>
-          <div class="tx"><div class="hl"><span class="sn">Review</span><span class="by">GLM-5.3</span><span class="out"><i class="shim"></i><span class="res good"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Clean</span></span></div></div>
+          <div class="tx"><div class="hl"><span class="sn">Review</span><span class="by">Gemini 3 Pro</span><span class="out"><i class="shim"></i><span class="res good"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Clean</span></span></div></div>
         </div>
         <div class="step P">
           <span class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="18.5" r="2.2"/><path d="M6.5 7.7v8.6M17.5 16.3V10a3 3 0 0 0-3-3H11m0 0 2.2-2.2M11 7l2.2 2.2"/></svg></span>
@@ -826,7 +829,7 @@
         <span>Pasted <b>0</b> times today</span>
       </div>
       <div class="drw">
-        <span class="dt"><b>#1191</b><span>Honour Retry-After</span></span>
+        <span class="dt"><b>#1194</b><span>Build the sign-in page</span></span>
         <div class="acc">
           <span class="a1">Accept</span>
           <span class="a2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Accepted</span>
@@ -868,8 +871,8 @@
 
   // Today: you carry each answer across by hand. Each drag leaves a trail; ten are already there.
   const TRIPS = [
-    { t: 0.4, el: msg('lc1'), src: L.cc, dst: L.oc, carry: 'retry.ts +2 −1', bend: 5 },
-    { t: 3.4, el: msg('lo2'), src: L.oc, dst: L.cc, carry: 'Retry-After may be a date…', bend: -4.5 },
+    { t: 0.4, el: msg('lc1'), src: L.cc, dst: L.oc, carry: 'sign-in.tsx +126 −3', bend: 5 },
+    { t: 3.4, el: msg('lo2'), src: L.oc, dst: L.cc, carry: 'No attempt limit…', bend: -4.5 },
     { t: 6.4, el: msg('lc3'), src: L.cc, dst: L.oc, carry: 'Good catch. Fixed both.', bend: -6 },
     { t: 9.4, el: msg('lo4'), src: L.oc, dst: L.cc, carry: 'Clean.', bend: 4 },
   ];
@@ -933,6 +936,8 @@
   const dpath = (a, c, b) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${c.x.toFixed(1)} ${c.y.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 
   let R = { left: 0, top: 0 };
+  // How much the drawing is scaled by what it is in (a transform round it, as on a phone's pinned review): what is measured on the screen is put back into its own px by it.
+  let K = 1;
   let em = 12;
   let padB = 6;
   let memo = new Map();
@@ -940,7 +945,7 @@
     let r = memo.get(el);
     if (!r) {
       const b = el.getBoundingClientRect();
-      r = { x: b.left - R.left, y: b.top - R.top, w: b.width, h: b.height };
+      r = { x: (b.left - R.left) / K, y: (b.top - R.top) / K, w: b.width / K, h: b.height / K };
       memo.set(el, r);
     }
     return r;
@@ -1016,11 +1021,11 @@
     const c = card.getBoundingClientRect();
     const mid = (el) => {
       const b = el.getBoundingClientRect();
-      return { x: b.left - s.left + b.width / 2, y: b.top - s.top + b.height / 2 };
+      return { x: (b.left - s.left + b.width / 2) / K, y: (b.top - s.top + b.height / 2) / K };
     };
     const ys = steps.map(({ nd }) => mid(nd).y);
     const x = mid(steps[0].nd).x;
-    rail = { x, ys, ox: s.left - c.left, oy: s.top - c.top };
+    rail = { x, ys, ox: (s.left - c.left) / K, oy: (s.top - c.top) / K };
     for (const el of [trk, lit]) {
       el.style.left = `${x.toFixed(1)}px`;
       el.style.top = `${ys[0].toFixed(1)}px`;
@@ -1042,6 +1047,7 @@
     const jump = still || t < prevT || t - prevT > 0.3;
     prevT = t;
     R = root.getBoundingClientRect();
+    K = (root.offsetWidth && R.width / root.offsetWidth) || 1;
     memo = new Map();
     tog(root, 'out', !still && t >= OUT);
 
@@ -1187,9 +1193,14 @@
   }
 
   let T = 0;
+  /* Althar's side's own moment, where it is seeked apart from today's (rv-seek with { t, tr }); null where the two play together. */
+  let TR = null;
+  const now = () => render(T, TR ?? T);
   let last = 0;
   let raf = 0;
   let seen = false;
+  /* Driven from outside (rv-drive), it doesn't play by itself: rv-seek sets its moment. */
+  let driven = false;
   const frame = (now) => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
@@ -1199,7 +1210,7 @@
   };
   const still = () => render(STILL[0], STILL[1], true);
   const update = () => {
-    const go = seen && !document.hidden && !mq.matches;
+    const go = !driven && seen && !document.hidden && !mq.matches;
     if (go && !raf) {
       last = performance.now();
       raf = requestAnimationFrame(frame);
@@ -1216,16 +1227,16 @@
   };
   measure();
   if (mq.matches) still();
-  else render(T);
+  else now();
   document.fonts?.ready.then(() => {
     measure();
     if (mq.matches) still();
-    else render(T);
+    else now();
   });
   new ResizeObserver(() => {
     measure();
     if (mq.matches) still();
-    else render(T);
+    else now();
   }).observe(root);
   new IntersectionObserver(([e]) => {
     seen = e.isIntersecting;
@@ -1236,9 +1247,18 @@
     if (mq.matches) still();
     update();
   });
+  root.addEventListener('rv-drive', (e) => {
+    driven = !!e.detail;
+    if (!driven) TR = null;
+    update();
+  });
+  /* A moment for both sides, or { t, tr }: today's side at t, Althar's at tr. */
   root.addEventListener('rv-seek', (e) => {
-    T = ((+e.detail % LOOP) + LOOP) % LOOP;
-    render(T);
+    const d = e.detail;
+    const wrap = (v) => ((+v % LOOP) + LOOP) % LOOP;
+    T = wrap(d && typeof d === 'object' ? d.t : d);
+    TR = d && typeof d === 'object' ? wrap(d.tr) : null;
+    now();
   });
 })();
 </script>

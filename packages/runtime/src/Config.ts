@@ -26,6 +26,7 @@ import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
+import type { ComputerAnswer, ComputerCall, ComputerOwner } from './computerBridge'
 import type { SkillsConfig } from './Skills'
 import type { WorkerExecutionPlatform } from './workerExecution'
 
@@ -110,6 +111,8 @@ export interface RuntimeOptions {
    * Without it, the page tools say this Althar can't drive pages.
    */
   readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
+  readonly computer?: (owner: ComputerOwner, call: ComputerCall) => Effect.Effect<ComputerAnswer, string>
+  readonly computerEnded?: (owner: ComputerOwner) => void
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -183,6 +186,8 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /** How often a start looks again for the program Althar brings for its agent, and for how long, while it isn't there yet. */
+  readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
   /**
    * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
    * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
@@ -260,6 +265,8 @@ export interface ConnectivityOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface IdleOptions {
+  /** How long to let a full session's prompt cache cool before compacting: one hour. */
+  readonly compaction?: Duration.Duration
   /** How long an idle coordinator keeps its provider session: 30 minutes. */
   readonly coordinator?: Duration.Duration
   /** Holds retirement just before provider shutdown in a race test. */

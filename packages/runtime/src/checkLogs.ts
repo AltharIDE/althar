@@ -208,6 +208,7 @@ export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: 
       ],
       main,
       jobs: reads.map((read) => ({ name: read.name, url: read.url, tail: read.log, missing: read.missing })),
+      pages: failed.map((check) => ({ name: check.name, url: check.url })),
       onBaseToo,
       passedOnBase,
     } satisfies QueueDetail

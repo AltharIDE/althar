@@ -321,6 +321,24 @@ describe('a ready card’s own ways', () => {
     expect(cardOf('Retry twice').queryByRole('button', { name: 'Keep for later' })).toBeNull()
   })
 
+  it('offers Keep for later on a prototype whose commits wait to be accepted, beside Ship', async () => {
+    const actions = ways({ ship: vi.fn(async () => true), shipping: new Set<string>() })
+    const held = task({
+      taskId: 'p3',
+      threadId: 'thp3',
+      title: 'Prototype the lanes',
+      phase: 'ready',
+      kind: 'change',
+      change: null,
+      held: { since: NOW, commits: 2 },
+    })
+    show(lanesOf(board([held])), { actions })
+    const shown = cardOf('Prototype the lanes')
+    expect(shown.getByRole('button', { name: 'Ship 2 commits' })).toBeTruthy()
+    await userEvent.click(shown.getByRole('button', { name: 'Keep for later' }))
+    expect(actions.keep).toHaveBeenCalledWith('p3')
+  })
+
   it('says what waits for Ship and ships it from the card, whatever its pull request’s checks say (a task is a conversation plus parts)', async () => {
     const ship = vi.fn(async () => true)
     const actions = ways({ ship, shipping: new Set<string>() })
@@ -509,7 +527,13 @@ describe('up next', () => {
   })
 
   it('says why moving the line failed, and gives a plain task no kind’s word', () => {
-    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: 'The runtime is restarting.' }
+    const line = {
+      move: vi.fn(async () => {}),
+      oldestFirst: vi.fn(),
+      cancelTurn: vi.fn(),
+      startAnyway: vi.fn(),
+      failed: 'The runtime is restarting.',
+    }
     show(
       lanesOf(
         board([

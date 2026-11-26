@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
 import { Limits, whenWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -27,6 +28,12 @@ import { knownModels } from './knownModels'
 
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>) =>
   Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each })))
+
+/** No other agent offers Claude Code's Large, so one standing in for it is on another model. */
+const onlyClaudeHasLarge = Effect.gen(function* () {
+  const models = yield* Models
+  for (const agentId of ['codex', 'opencode']) yield* models.setModelBlocked({ agentId, model: 'large', blocked: true })
+})
 
 /** The notices a thread says, in order. */
 const said = (threadId: string) =>
@@ -104,6 +111,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const queries = yield* Queries
@@ -119,7 +127,7 @@ describe('a task’s lead out of usage outside a step', () => {
       // Said as it happens: the model that ran out and its agent, until when, and who takes over only until then.
       assert.include(
         handed,
-        `Large on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
+        `Large on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Small on Fake codex, a different model, takes over until then.`,
       )
       // The window shows it in the thread, where the passive lines of a limit stay out of it.
       assert.include(
@@ -138,7 +146,7 @@ describe('a task’s lead out of usage outside a step', () => {
       yield* atReset(back)
       const [next] = yield* until(queued(task.threadId), (leads) => leads.length === 1)
       assert.deepInclude(next, { agentId: 'claude-code', model: 'large' })
-      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       assert.notInclude(
         yield* said(task.threadId),
         'Large on Fake claude-code has usage again and takes over again from Small on Fake codex.',
@@ -165,6 +173,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -191,6 +200,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -215,9 +225,11 @@ describe('a task’s lead out of usage outside a step', () => {
 
   it.effect('keeps the stand-in where the given lead can’t start at its reset, and gives it back once it can', () => {
     const back = later()
-    let refuse = false
+    // A start that fails for no reason is tried again once by itself: it refuses both.
+    let refuse = 0
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -231,11 +243,11 @@ describe('a task’s lead out of usage outside a step', () => {
       yield* atReset(back)
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       // The given lead can't start as it takes over: the stand-in carries on, and still stands in.
-      refuse = true
+      refuse = 2
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'First.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.agentId === 'codex' && row.content.includes('First.')))
       assert.include(yield* said(task.threadId), 'Fake codex carries on: the agent it was changed to couldn’t start.')
-      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isSome(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       // Tried again for the next turn, it takes over.
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Second.' })
@@ -248,8 +260,8 @@ describe('a task’s lead out of usage outside a step', () => {
           'claude-code': {
             outOfUsage: { until: back },
             beforeNewSession: async () => {
-              if (!refuse) return
-              refuse = false
+              if (refuse === 0) return
+              refuse -= 1
               throw new Error('Could not start')
             },
           },
@@ -263,6 +275,7 @@ describe('a task’s lead out of usage outside a step', () => {
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const projects = yield* Projects
       const sessions = yield* Sessions
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -288,7 +301,7 @@ describe('a task’s lead out of usage outside a step', () => {
       })
       const isChosen = (one: { agentId: string; model?: string | null } | undefined) => one?.agentId === 'codex' && one.model === 'large'
       yield* until(chosen, isChosen)
-      assert.isTrue(Option.isNone(yield* standInOf(standIn?.id ?? '')))
+      assert.isTrue(Option.isNone(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)))
       // And once chosen, nothing gives it back.
       assert.isFalse(yield* sessions.giveBack({ threadId: task.threadId, sessionId: standIn?.id ?? '' }))
       assert.isTrue(isChosen(yield* chosen))
@@ -301,6 +314,7 @@ describe('a task’s planned lead already out of usage as its step starts', () =
     const back = later()
     return Effect.gen(function* () {
       yield* knownModels
+      yield* onlyClaudeHasLarge
       const sessions = yield* Sessions
       const projects = yield* Projects
       const limits = yield* Limits
@@ -316,7 +330,10 @@ describe('a task’s planned lead already out of usage as its step starts', () =
       yield* ready(projectId)
       const [standIn] = yield* leads(task.threadId)
       assert.deepInclude(standIn, { agentId: 'codex' })
-      assert.deepInclude(Option.getOrUndefined(yield* standInOf(standIn?.id ?? '')) ?? {}, { agentId: 'claude-code', model: 'large' })
+      assert.deepInclude(Option.getOrUndefined(yield* standInOf(standIn?.id ?? '', (yield* Limits).sameModel)) ?? {}, {
+        agentId: 'claude-code',
+        model: 'large',
+      })
       yield* atReset(back)
       yield* until(queued(task.threadId), (leads) => leads.length === 1)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'How does it look?' })
@@ -335,6 +352,8 @@ describe('a step handed on after it ended twice without its report', () => {
   it.effect('goes back to the lead the task was given once that step is done, for the next turn', () =>
     Effect.gen(function* () {
       yield* knownModels
+      // Taken over on Large elsewhere, the step would stay there: on the task's own model, it isn't standing in.
+      yield* onlyClaudeHasLarge
       const sessions = yield* Sessions
       const { projectId, task, start } = yield* planned('claude-code', 'large', 'Fix the heading. [lead:finish]')
       yield* start
@@ -411,7 +430,7 @@ describe('a stand-in on the given lead’s own agent', () => {
       yield* knownModels
       const { task, sessionId } = yield* standingIn({ model: null })
       // Its agent's default ran out and another of its models carries on: there is nothing to go back to, so nothing is said.
-      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId, (yield* Limits).sameModel)))
       const sessions = yield* Sessions
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))
@@ -436,7 +455,7 @@ describe('a stand-in on the given lead’s own agent', () => {
       const sessions = yield* Sessions
       const { task, sessionId } = yield* standingIn({ model: 'large', until: back }, { agentId: 'codex', model: 'small' })
       yield* sessions.setModel({ threadId: task.threadId, model: 'large' })
-      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId, (yield* Limits).sameModel)))
       yield* atReset(back)
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
       yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))

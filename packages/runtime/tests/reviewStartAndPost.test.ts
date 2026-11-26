@@ -263,7 +263,7 @@ describe('a review, at its edges', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
     github.addRepository(['meridian', 'api'])
-    const { pull, head, base } = mergedPullRequest(at, github)
+    const { head, base } = mergedPullRequest(at, github)
     return Effect.gen(function* () {
       const { projectId } = yield* opened(at.working)
       const started = yield* (yield* Reviews).start({
@@ -290,7 +290,7 @@ describe('a review, at its edges', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
     github.addRepository(['meridian', 'api'])
-    const { pull, head, before } = fastForwardedPullRequest(at, github)
+    const { head, before } = fastForwardedPullRequest(at, github)
     return Effect.gen(function* () {
       const { projectId } = yield* opened(at.working)
       const started = yield* (yield* Reviews).start({

@@ -7,6 +7,7 @@ import {
   CodeBlock,
   CommentExcerpt,
   FailedLogs,
+  logLines,
   CanvasLine,
   Gallery,
   glyphOf,
@@ -15,6 +16,7 @@ import {
   LinkButton,
   Markdown,
   MergeLine,
+  MergingLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -502,23 +504,6 @@ export const heardVerb = (arrival: ArrivalContent): string => {
   }
 }
 
-/** A GitHub Actions log line's time, which every line starts with: noise on a card. */
-const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /
-
-/**
- * A failed check's log as its card shows it: by its lines, without their
- * times, ending where GitHub Actions marked it failed (`##[error]`), not in
- * the job's cleanup after.
- */
-export const logLines = (log: string) => {
-  const lines = log
-    .trimEnd()
-    .split('\n')
-    .map((line) => line.replace(STAMP, ''))
-  const failed = lines.findLastIndex((line) => line.startsWith('##[error]'))
-  return failed === -1 ? lines : lines.slice(0, failed + 1)
-}
-
 /**
  * Something heard from outside, as a quoted note: who, what they did, where,
  * and what they said. Failed checks show the end of each one's log, or why
@@ -870,6 +855,14 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
       case 'merge_line':
         return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
+      case 'merging':
+        return (
+          <Fragment key={block.id}>
+            {block.groups.map((group) => (
+              <MergingLine key={group.key} rows={group.rows} branch={group.branch} />
+            ))}
+          </Fragment>
+        )
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':

@@ -1,4 +1,4 @@
-import { checkFailuresIn } from '@althar/contracts'
+import { type CheckLogShown, checkFailuresIn } from '@althar/contracts'
 import {
   type Account,
   ChangeRequest,
@@ -52,6 +52,7 @@ import {
   fromAlthar,
   gaveUpLine,
   leftQueueForLead,
+  leftQueueLinked,
   leftQueueNote,
   leftQueueNoteForLead,
   leftQueueUnclaimed,
@@ -677,8 +678,20 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
     /** Where the checks that failed on one of a task's pull requests stand (`fixesOf`): null where it isn't open, or its task settled. */
     const fixingOn = (link: LinkRow) => Effect.map(fixesOf(link.taskId), (all) => all.find((one) => one.linkId === link.id) ?? null)
 
-    /** A quiet line in the task's thread, with its detail in the notice's description where it has one. */
-    const sayOn = (link: LinkRow, title: string, description?: string) =>
+    /**
+     * A quiet line in the task's thread, in the person's words: its detail in the notice's description where it has one, and
+     * what it is built on folded under it (a host's raw answer, failed checks' logs), with the words it links.
+     */
+    const sayOn = (
+      link: LinkRow,
+      title: string,
+      description?: string,
+      more: {
+        readonly details?: string | undefined
+        readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at?: number }>
+        readonly logs?: ReadonlyArray<CheckLogShown>
+      } = {},
+    ) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${link.taskId} AND kind = 'task'`
@@ -688,6 +701,9 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
             severity: 'info',
             title,
             ...(description === undefined ? {} : { description }),
+            ...(more.details === undefined ? {} : { details: more.details }),
+            ...(more.links === undefined || more.links.length === 0 ? {} : { links: more.links }),
+            ...(more.logs === undefined || more.logs.length === 0 ? {} : { logs: more.logs }),
           })
       })
 
@@ -1245,10 +1261,19 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
           // default branch doesn't, or a conflict with what is ahead of it. Else the person hears that nothing names it, and its
           // lead reads it with its next turn, so it doesn't guess and push.
           const own = now.leftQueue === 'conflict' || queueOwnFailures(now.leftQueue, queued).length > 0
-          // The thread's notice carries the same detail as the lead's line: title its first line, the rest as its description.
-          const detail = queued === null ? undefined : said.slice(head.length).trim() || undefined
-          if (own || now.leftQueue === 'removed') yield* sayOn(link, head, detail)
-          else yield* sayOn(link, head, [leftQueueUnclaimed(name, now.leftQueue, queued), detail].filter(Boolean).join('\n\n'))
+          // The person's line names what failed, each linked to its page, and folds the logs' ends under it; what the lead is told
+          // (the logs as text, their framing, its tools) stays the lead's. Where the build couldn't be read, the host's answer folds.
+          const taken = leftQueueLinked(name, now.url, now.leftQueue, queued)
+          yield* sayOn(
+            link,
+            taken.title,
+            own || now.leftQueue === 'removed' ? undefined : leftQueueUnclaimed(now.leftQueue, queued, repository.defaultBranch),
+            {
+              links: taken.links,
+              logs: (queued?.jobs ?? []).map((job) => ({ name: job.name, url: job.url, log: job.tail, missing: job.missing })),
+              details: queued !== null && queued.failing.length === 0 && queued.logs.length > 0 ? queued.logs.join('\n\n') : undefined,
+            },
+          )
           if (own) {
             // Not a conflict: an update from its target is update_branch or the queue, not a new round.
             const hint = now.leftQueue === 'conflict' ? [] : [sendBackHint(now.target ?? 'the target branch')]

@@ -141,54 +141,34 @@ export const earlierAfter = (
   return [...replaced, ...earlier].filter((shot) => now.has(shot.key)).slice(0, EARLIER_KEPT)
 }
 
-/** A caption as text in the comment: nothing in it reads as markup. */
-const plain = (text: string) =>
-  text
-    .replace(/[\\`*_[\]<>#|~]/g, (char) => `\\${char}`)
-    .replace(/\s+/g, ' ')
-    .trim()
+/** Text in the comment's table: nothing in it reads as markup, and it stays on one line. */
+const text = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\s+/g, ' ').trim()
 
-/** A caption or address in an attribute: quotes, angle brackets and pipes (which would end a table cell) as entities. */
-const attribute = (text: string) =>
-  text
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\|/g, '&#124;')
-    .replace(/\s+/g, ' ')
-    .trim()
+/** Text in an attribute: its quotes as entities too. */
+const attribute = (value: string) => text(value).replace(/"/g, '&quot;')
 
 const short = (head: string | null) => (head === null ? null : head.slice(0, 7))
 
-/** How wide a screenshot shows in the comment, at most: its own width where it is narrower, as a host draws it. */
+/** How wide a screenshot shows where it is the table's only one, at most: its own width where it is narrower, as a host draws it. */
 const SHOWN_WIDTH = 720
 
-const pictureOf = (shot: PostedShot, width = SHOWN_WIDTH) =>
-  shot.url === ''
-    ? plain(shot.note ?? 'Left out: this picture could not be uploaded.')
-    : `${shot.note ? `${plain(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
-
-/** How wide each picture of a Before | After table shows, so the two fit side by side. */
+/** How wide each of two screenshots in a row shows, so the two fit side by side. */
 const PAIRED_WIDTH = 356
 
 const isBefore = (shot: PostedShot) => shot.key.endsWith(BEFORE_SUFFIX)
 
-/** A divider between screenshots: a rule, which both hosts draw in light and dark. */
-const DIVIDER = '---'
-
-/** A screenshot or a pair, as one block: a small heading, then the picture or the table. */
-type Block = { readonly heading: string; readonly body: string }
+/** A screenshot in the table: the picture, with what it is (a before or an after, where it is one of a pair) and its note. */
+type Cell = { readonly shot: PostedShot; readonly label: 'Before' | 'After' | null; readonly note: string }
 
 /**
- * The screenshots as blocks, in order: a view with a before and a picture
- * now is a Before | After table, at the place of whichever comes first; any
- * other, a picture of its own. A before whose view has no picture now
- * shows alone, marked as the before. `note` adds to a heading, as where
- * the picture was taken.
+ * The screenshots in their table's order: a view with a before and a
+ * picture now goes as a pair, before then after, at the place of whichever
+ * comes first; any other, on its own. A before whose view has no picture now
+ * shows alone, marked as the before. `note` adds to a caption, as where the
+ * picture was taken.
  */
-const blocksOf = (shots: ReadonlyArray<PostedShot>, note: (shot: PostedShot) => string): ReadonlyArray<Block> => {
-  const blocks: Array<Block> = []
+const groupsOf = (shots: ReadonlyArray<PostedShot>, note: (shot: PostedShot) => string): ReadonlyArray<ReadonlyArray<Cell>> => {
+  const groups: Array<ReadonlyArray<Cell>> = []
   const done = new Set<PostedShot>()
   for (const shot of shots) {
     if (done.has(shot)) continue
@@ -198,30 +178,72 @@ const blocksOf = (shots: ReadonlyArray<PostedShot>, note: (shot: PostedShot) => 
       (candidate) => !done.has(candidate) && viewOfKey(candidate.key) === view && isBefore(candidate) !== isBefore(shot),
     )
     if (other === undefined) {
-      const label = isBefore(shot) ? ' · Before' : ''
-      blocks.push({ heading: `${plain(shot.caption)}${label}${note(shot)}`, body: pictureOf(shot) })
+      groups.push([{ shot, label: isBefore(shot) ? 'Before' : null, note: note(shot) }])
       continue
     }
     done.add(other)
     const [before, after] = isBefore(shot) ? [shot, other] : [other, shot]
-    blocks.push({
-      heading: `${plain(after.caption)}${note(after)}`,
-      body: `| Before | After |\n| :---: | :---: |\n| ${pictureOf(before, PAIRED_WIDTH)} | ${pictureOf(after, PAIRED_WIDTH)} |`,
-    })
+    groups.push([
+      { shot: before, label: 'Before', note: note(before) },
+      { shot: after, label: 'After', note: note(after) },
+    ])
   }
-  return blocks
+  return groups
 }
 
-const joined = (blocks: ReadonlyArray<Block>) => blocks.map((block) => `#### ${block.heading}\n\n${block.body}`).join(`\n\n${DIVIDER}\n\n`)
+/** The caption under a picture: Before or After first, unless the caption already starts with it. */
+const captionOf = (cell: Cell) => {
+  const caption = text(cell.shot.caption)
+  const labelled =
+    cell.label === null || caption.toLowerCase().startsWith(cell.label.toLowerCase()) ? caption : `<b>${cell.label}</b> · ${caption}`
+  return `${labelled}${cell.note}`
+}
+
+/** A screenshot's cell: spanning its row where it has the row alone, and wide where it has the table alone. */
+const cellOf = (cell: Cell, alone: boolean, wide: boolean) => {
+  const { shot } = cell
+  const picture =
+    shot.url === ''
+      ? text(shot.note ?? 'Left out: this picture could not be uploaded.')
+      : `${shot.note ? `${text(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${wide ? SHOWN_WIDTH : PAIRED_WIDTH}">`
+  const place = alone ? ' colspan="2"' : ' width="50%"'
+  return `<td${place} align="center" valign="top">${picture}<br><sub>${captionOf(cell)}</sub></td>`
+}
 
 /**
- * The comment: the screenshots as they are now, each under its caption (a
- * view with a before, as a Before | After table), set apart by dividers, and
- * the commit they are of; then what they showed before, folded away; signed.
+ * The screenshots as one table, two to a row, each with its caption under
+ * it: a pair has a row of its own, before beside after; the others fill the
+ * rows in order, and one left over has its row alone, as wide as the
+ * others unless it is the only screenshot. An HTML
+ * table, which both hosts draw, so a caption sits with its picture and needs
+ * no header row; it holds no blank line, or the host would end it there.
  */
+const tableOf = (groups: ReadonlyArray<ReadonlyArray<Cell>>) => {
+  const rows: Array<ReadonlyArray<Cell>> = []
+  let waiting: ReadonlyArray<Cell> = []
+  for (const group of groups) {
+    if (group.length === 1 && waiting.length === 0) {
+      waiting = group
+      continue
+    }
+    if (group.length === 1) rows.push([...waiting, ...group])
+    else rows.push(...(waiting.length === 0 ? [] : [waiting]), group)
+    waiting = []
+  }
+  if (waiting.length > 0) rows.push(waiting)
+  const only = rows.length === 1
+  const lines = rows.map((row) => `<tr>\n${row.map((cell) => cellOf(cell, row.length === 1, only && row.length === 1)).join('\n')}\n</tr>`)
+  return `<table>\n${lines.join('\n')}\n</table>`
+}
+
 /** What the comment says once none of the views it showed shows the change as it is now. */
 export const NONE_NOW = 'No screenshots show this change as it is now.'
 
+/**
+ * The comment: the commit the screenshots are of, then a table of them as
+ * they are now, each with its caption (a view with a before, before beside
+ * after); then what they showed before, folded away; signed.
+ */
 export const commentBody = (input: {
   readonly shown: ReadonlyArray<PostedShot>
   readonly earlier: ReadonlyArray<PostedShot>
@@ -229,16 +251,16 @@ export const commentBody = (input: {
 }): string => {
   const of = short(input.head)
   const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** · PR head \`${of}\``]
-  if (input.shown.length > 0) parts.push(joined(blocksOf(input.shown, () => '')))
+  if (input.shown.length > 0) parts.push(tableOf(groupsOf(input.shown, () => '')))
   // The views it showed no longer say anything of the change: it says so, rather than keep them.
   else parts.push(NONE_NOW)
   if (input.earlier.length > 0) {
     // Each earlier picture on its own, with the commit it was taken at.
-    const earlier = joined(
+    const earlier = tableOf(
       input.earlier.flatMap((shot) =>
-        blocksOf([shot], (one) => {
+        groupsOf([shot], (one) => {
           const before = short(one.head)
-          return before === null ? '' : `, at \`${before}\``
+          return before === null ? '' : `, at <code>${before}</code>`
         }),
       ),
     )

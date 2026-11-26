@@ -1,0 +1,60 @@
+/* The views in a row: the one in front in the middle, the others behind it either side, smaller and faded; which is in front follows the scroll. */
+
+.views { position: relative; margin-top: 58px; }
+.row {
+  position: relative;
+  /* As wide as the page's measure, as long as the view in front fits under the heading. */
+  width: min(var(--wrap), calc(100vw - 2 * var(--gut)), calc((100svh - 362px) * 1.846));
+  margin: 0 auto;
+  aspect-ratio: 1440 / 780;
+}
+.view {
+  position: absolute;
+  inset: 0;
+  /* No layer of its own kept: the browser gives it one while it moves, and three window-sized layers held at rest cost the screen dearly, the more so zoomed in. */
+  transition:
+    transform 700ms var(--ease-out),
+    opacity 700ms var(--ease-out);
+}
+/* The pictures' own wrappers are laid out for a page: here each fills its place. */
+.view > * { max-width: none; margin: 0; padding: 0; --gut: 0px; --board-frame: 0 0 0 1px rgba(20, 20, 23, 0.08), 0 34px 90px -34px rgba(20, 20, 23, 0.32); }
+/* In front, each view stands a little off where the first stood (Views.tsx gives each its --at), so the flip from one to the next isn't quite symmetrical. */
+.view[data-off='0'] { z-index: 2; transform: translate(var(--at-x, 0), var(--at-y, 0)); opacity: 1; }
+.view[data-off='-1'] { z-index: 1; transform: translateX(-34%) scale(0.8); opacity: 0.42; }
+.view[data-off='1'] { z-index: 1; transform: translateX(34%) scale(0.8); opacity: 0.42; }
+/* The board's own wrapper is laid out for a page too. */
+.views .board > * { max-width: none; margin: 0; padding: 0; }
+/* Behind, a view holds still: its own loops wait until it is in front. */
+.view:not([data-off='0']) *, .view:not([data-off='0']) *::before, .view:not([data-off='0']) *::after { animation-play-state: paused !important; }
+/* As a view's story starts over, while its screen fades in it stands at the start at once: nothing glides back from the end (kit/loop.ts). */
+.view [data-starting] *, .view [data-starting] *::before, .view [data-starting] *::after { transition: none !important; }
+
+/*
+ * On a tablet or a phone, the views fill what the window has under the heading, as wide as the page leaves them and as tall
+ * as the window lets them be, pinned (Views.tsx measures where they start, --views-top), up to a shape the screen reads
+ * well: wider than tall on a tablet, taller than wide on a phone. Each view shows the part of its window that matters in
+ * that box (Shot's fill), every one the same size, so nothing jumps as they turn.
+ */
+@media (max-width: 900px) {
+  .views { margin-top: 28px; }
+  .row {
+    --across: min(calc(100vw - 2 * var(--gut)), 92vw);
+    --tall: 0.74;
+    width: var(--across);
+    height: max(240px, min(calc(100svh - var(--views-top, 380px) - 18px), calc(var(--across) * var(--tall))));
+    aspect-ratio: auto;
+  }
+  .view[data-off='0'] { transform: none; }
+  .view:not([data-off='0']) { overflow: hidden; border-radius: 14px; }
+  .view[data-off='-1'] { transform: translateX(-24%) scale(0.84); opacity: 0.3; }
+  .view[data-off='1'] { transform: translateX(24%) scale(0.84); opacity: 0.3; }
+}
+/* On a phone, the desktop's shape: the view in front is the whole window, laid out as on a desktop and scaled down (Shot.tsx); those behind it are bare windows (Views.tsx). */
+@media (max-width: 699px) {
+  .row { --across: min(calc(100vw - 2 * var(--gut)), 92vw); height: auto; aspect-ratio: 1120 / 840; }
+  .view[data-bare] { border-radius: 10px; background: #f8f7f3; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.08), 0 24px 60px -28px rgba(20, 20, 23, 0.32); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .view { transition: opacity 200ms linear; }
+}
+

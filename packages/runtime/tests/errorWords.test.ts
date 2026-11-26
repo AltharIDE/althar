@@ -1,10 +1,10 @@
 import { assert, describe, it } from '@effect/vitest'
-import { AgentExited, AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
+import { AgentExited, AgentRequestFailed, AgentStartFailed, classify } from '@althar/provider-adapters'
 import { Cause, Duration } from 'effect'
 
 import { CliSignedOut } from '../src/Connections'
 import { CoordinatorUnavailable } from '../src/Coordinator'
-import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged } from '../src/errors'
+import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged, SessionFailed } from '../src/errors'
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
 import { StartTimedOut } from '../src/Sessions'
 import { agentSaid, expected, signedOutWords, signInEndedWords, stuckWhyOf, summarize, unreachableWords, words } from '../src/words'
@@ -351,6 +351,93 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
     assert.strictEqual(
       agentSaid(exited('Loading plugins…\nError: Cannot find module "./auth"\n    at Module._resolveFilename (node:internal)\n')),
       'The agent stopped: Error: Cannot find module "./auth".',
+    )
+  })
+})
+
+describe('the words for an agent that couldn’t start', () => {
+  const request = (message: string) => new AgentRequestFailed({ method: 'session/new', failure: 'unknown', message })
+  const installed = { bundled: false }
+
+  it.each([
+    // Each agent the person installs, refusing how Althar starts it, in its own parser's words (startFailure.test.ts).
+    ["error: unexpected argument '--acp' found", 'Grok Build'],
+    ["Error: No such command 'acp'.", 'Kimi Code'],
+    ['Unknown argument: experimental-acp', 'Gemini CLI, Qwen Code'],
+    ['vibe-acp: error: unrecognized arguments: --acp', 'Mistral Vibe'],
+    ["Unknown option: '--acp'", 'Junie'],
+    ['Unrecognized flag: --acp in command opencode', 'OpenCode'],
+  ])('says %s (%s) as a version mismatch, to update the agent', (message) => {
+    assert.strictEqual(
+      summarize(Cause.fail(request(message)), installed),
+      `Its program and what drives it are different versions: ${message.replace(/\.$/, '')}. Update it, then try again.`,
+    )
+  })
+
+  it('says the same of one that stopped saying so, as Kimi Code does where it has no `acp` command', () => {
+    const stopped = new AgentExited({
+      code: 2,
+      signal: null,
+      stderr: "Usage: kimi [OPTIONS] COMMAND [ARGS]...\nError: No such command 'acp'.",
+    })
+    assert.strictEqual(
+      agentSaid(stopped, installed),
+      "Its program and what drives it are different versions: Error: No such command 'acp'. Update it, then try again.",
+    )
+  })
+
+  it('says to reinstall Althar where Althar brings it', () => {
+    assert.strictEqual(
+      summarize(
+        Cause.fail(request("Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'")),
+        {
+          bundled: true,
+        },
+      ),
+      "Its program and what drives it are different versions: Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'. Reinstall Althar (in a checkout of Althar, run bun install), then try again.",
+    )
+    assert.strictEqual(
+      summarize(
+        Cause.fail(
+          new AgentStartFailed({
+            command: 'Codex',
+            reason: 'Missing optional dependency @openai/codex-darwin-arm64. Reinstall Codex: npm install -g @openai/codex@latest',
+          }),
+        ),
+        { bundled: true },
+      ),
+      'A part of it is missing: Missing optional dependency @openai/codex-darwin-arm64. Reinstall Codex: npm install -g @openai/codex@latest. Reinstall Althar (in a checkout of Althar, run bun install), then try again.',
+    )
+  })
+
+  it('never says a bare "Internal error"', () => {
+    assert.strictEqual(summarize(Cause.fail(request('Internal error'))), 'It gave no reason. What it wrote is in Althar’s agents log.')
+    assert.strictEqual(
+      said(new SessionFailed({ agentId: 'codex', reason: 'x', summary: summarize(Cause.fail(request('Internal error:'))) })),
+      "Codex couldn't start. It gave no reason. What it wrote is in Althar’s agents log.",
+    )
+  })
+
+  it('never says a bare "Internal error" in any class, a classified answer included', () => {
+    // A transient one, as `classify` reads it from words in its data that it can't say: its words are no more than that.
+    const transient = classify({ code: -32603, message: 'Internal error', data: { status: 503 } }, new Date())
+    assert.strictEqual(transient.failure, 'transient')
+    const said = summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', ...transient })))
+    assert.notInclude(said, 'Internal error')
+    assert.strictEqual(said, 'It gave no reason. What it wrote is in Althar’s agents log.')
+    // Its reason in the data is said where it gives one.
+    const reasoned = classify({ code: -32603, message: 'Internal error', data: { reason: 'upstream returned 503' } }, new Date())
+    assert.strictEqual(summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', ...reasoned }))), 'upstream returned 503.')
+    assert.strictEqual(
+      summarize(Cause.fail(new AgentRequestFailed({ method: 'session/new', failure: 'auth_required', message: 'Internal error' }))),
+      signedOutWords,
+    )
+  })
+
+  it('says one that stopped on the way as that, with what it said', () => {
+    assert.strictEqual(
+      summarize(Cause.fail(request('Query closed before response received'))),
+      'It stopped while starting: Query closed before response received.',
     )
   })
 })

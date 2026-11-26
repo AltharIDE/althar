@@ -38,6 +38,8 @@ export interface RunningProcess {
   where?: string
   /** The branch or pull request it runs a copy of: named on the pill and its row, beside what runs. */
   branch?: string
+  /** Where it runs, on one of the home's workers: Linux worker 3f9a2c. Its address is then the home's, and says preview. */
+  on?: string
   /** It exited on its own, with this code; null where the code isn't known. */
   exited?: number | null
   /** Its output can be shown (`onOutput`); false for one whose output isn't kept anywhere to read. */
@@ -65,6 +67,8 @@ export interface RunningText {
   output: string
   outputLabel: (command: string) => string
   openLabel: (url: string) => string
+  /** Where it runs, on a worker: on Linux worker 3f9a2c. */
+  on: (where: string) => string
 }
 
 export const runningText: RunningText = {
@@ -80,6 +84,7 @@ export const runningText: RunningText = {
   output: 'Output',
   outputLabel: (command) => `Show the output of ${command}`,
   openLabel: (url) => `Open ${url}`,
+  on: (where) => `on ${where}`,
 }
 
 export interface RunningProps {
@@ -211,6 +216,11 @@ export function RunningList({ processes, onStop, onDismiss, onOutput, onOpenUrl,
                       {p.where}
                     </span>
                   )
+                ),
+                p.on !== undefined && (
+                  <span key="on" className={s.where} title={t.on(p.on)}>
+                    {t.on(p.on)}
+                  </span>
                 ),
                 p.exited !== undefined && (
                   <span key="exited" className={cx(bad(p.exited) && s.bad)}>

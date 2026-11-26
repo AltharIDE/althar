@@ -29,6 +29,8 @@ export interface ClearChat {
   readonly ring: MeterClear
   /** The composer's text, if it asks to clear: asked then, and it is not sent. */
   readonly command: (body: string) => boolean
+  /** The composer's /clear: asks it, where there is a conversation to clear; null where there is none. */
+  readonly ask: (() => void) | null
 }
 
 export function useClearChat(model: ProjectModel): ClearChat {
@@ -57,6 +59,7 @@ export function useClearChat(model: ProjectModel): ClearChat {
         />
       ),
     ring: { onClear: () => setAsking('forget'), triggerRef: trigger },
+    ask: view?.forgettable === true ? () => setAsking('view') : null,
     command: (body) => {
       if (body.trim() !== clearText.command) return false
       // With no conversation there is nothing to clear: the words are not sent to the coordinator either.

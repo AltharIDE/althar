@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { ApiError, type AppSettings, type FinishedFolder, type FolderWait } from '@althar/contracts'
 import type { FolderDisk, FinishedFolder as FolderRow, HeldFolder } from '@althar/ui'
 
+import { canCall } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
@@ -31,8 +32,11 @@ export interface TaskFoldersModel {
   /** These stay, each with why, until removed by hand. */
   readonly held: ReadonlyArray<HeldFolder>
   readonly measuring: boolean
-  readonly cleanUp: () => void
-  readonly remove: (taskId: string) => void
+  /** Whether the folders are known: a home on another computer that doesn't list them to this window leaves only when they go. */
+  readonly listed: boolean
+  /** Absent where the window's home leaves removing folders, and what they hold, to the person. */
+  readonly cleanUp?: () => void
+  readonly remove?: (taskId: string) => void
   /** Opens a folder's task; absent where nothing opens one. */
   readonly open?: (taskId: string) => void
   /** What the last Clean up or Remove freed, in bytes. */
@@ -62,7 +66,10 @@ const rowOf = (folder: FinishedFolder, now: Date): FolderRow => ({
 export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFoldersModel | null => {
   const { client, cache } = useServices()
   const settings = useQuery(reads(client).settings()).data
-  const folders = useQuery(reads(client).folders()).data
+  // What the window's home lets it: list them, and remove them; its own runtime, all of it.
+  const lists = canCall(client, 'GetTaskFolders')
+  const removes = canCall(client, 'RemoveTaskFolder') && canCall(client, 'CleanUpFolders')
+  const folders = useQuery({ ...reads(client).folders(), enabled: lists }).data
   const [freed, setFreed] = useState<number | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -116,20 +123,30 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
     [cache],
   )
 
-  if (settings === undefined || folders === undefined) return null
+  if (settings === undefined) return null
+  if (folders === undefined) {
+    if (lists) return null
+    // Only when they go, as the home's settings say it.
+    return { wait: settings.folderWait, setWait, disks: [], goes: [], held: [], measuring: false, listed: false, freed, busy, error }
+  }
   const now = new Date()
   return {
     wait: settings.folderWait,
     setWait,
+    listed: true,
     disks: folders.disks.map((disk) => ({ ...disk, folder: shortFolder(disk.folder) })),
     goes: folders.folders.filter((one) => one.held === null).map((one) => rowOf(one, now)),
     held: folders.folders.flatMap((one) =>
       one.held === null ? [] : [{ ...rowOf(one, now), why: one.held.why, ...(one.held.count === null ? {} : { count: one.held.count }) }],
     ),
     measuring: folders.measuring,
-    cleanUp: () => removing('clean', () => client.cleanUpFolders()),
-    remove: (taskId) =>
-      removing(taskId, () => client.removeTaskFolder(taskId, folders.folders.find((one) => one.taskId === taskId)?.held ?? null)),
+    ...(removes
+      ? {
+          cleanUp: () => removing('clean', () => client.cleanUpFolders()),
+          remove: (taskId: string) =>
+            removing(taskId, () => client.removeTaskFolder(taskId, folders.folders.find((one) => one.taskId === taskId)?.held ?? null)),
+        }
+      : {}),
     ...(onTask === undefined
       ? {}
       : {

@@ -69,7 +69,7 @@
       The loop is write, look, fix.
     - **A tool call that waits on the person holds the turn**
       (Claude Code's `openDiff`; Althar's own lesson in
-      [ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
+      [ADR-087](../tasks.md#helpers)).
   - **The research doesn't show another renderer can replace what pages
     already have.** Pages beside the conversation already have the guards,
     point and comment, and the driving machinery leads use (#723). So the
@@ -601,9 +601,21 @@ columns, which sort it, narrow it; it is sorted by when each was last
 updated unless the person says. Narrow, what it is, its comments and when
 stay.
 
-One opened takes the view, and its Close comes back to the table. Not built
-yet: a picture of each version, a group's directions together with its
-latest pick, and archived canvases a press away.
+**One opened is the artifact itself, with its own chat beside it,** never
+the task or the conversation that drew it: the person who opens an
+artifact wants to look at it and talk to it, not to step into someone
+else's work. The view becomes its room: its chat in a column (see
+"Talking to an artifact"), under a top row that is the artifact's, the way
+back, its name (which opens every artifact on the project, to go to
+another) and who made it; never a task's step or state. The canvas fills
+the rest with its own head. Escape, or the way back, comes back to the
+cards. An artifact no one has talked to has no chat yet: its composer is
+there at once, and the chat starts as the person goes to it or points at a
+part, as an aside starts on +, so it is ready by the time they send; what
+they wrote and pointed at is kept by the artifact until then. One still
+drawing its first version in its own chat is a card too, and opens the same
+way. Not built yet: a group's directions together with its latest pick,
+and archived canvases a press away.
 
 #### In the thread and Outputs
 
@@ -616,6 +628,157 @@ latest pick, and archived canvases a press away.
   as now (ADR-077, ADR-079).
 - **On the coordinator's side,** a canvas it published reads the same in its
   thread.
+
+### A canvas of boards, for design work
+
+Added on 22 November 2026, for design engineers: a design is several
+screens, states, sizes and directions, compared side by side, the way a
+design tool lays out frames.
+
+- **A canvas of boards is a kind of its own, `boards`.** Its entry is
+  `canvas.json`: its pages in order, each a name and its boards, each board
+  a name, a file of the canvas (a page or a picture) and the width and
+  height it is drawn at. One page may be written as its boards alone.
+  Publishing refuses one whose boards' files aren't in the canvas, or whose
+  sizes are out of bounds, and says which.
+- **It is drawn on Althar's ground,** in the canvas's own view, as a page
+  canvas is. The view loads Althar's own empty page at the version's
+  `.althar/boards.html`, and the ground (`src/overlay/ground.ts`) runs in an
+  isolated world of it, as Point and comment's overlay does in a page's: it
+  builds each board as a frame of the canvas's own file, at the canvas's
+  own origin, so it reaches into each to point at a part, while the
+  boards' scripts never see it. It moves and scales them as one: scrolling
+  moves it, pinching zooms it. The view stays the only process the canvas
+  runs in; nothing of it is in Althar's window.
+- **It shows every board of a page, every page at once, or one board at a
+  time.** A page's boards wrap into as many lines as shows them largest in
+  the view. Nothing stacks over a canvas but one row: opened as itself,
+  the artifact's own (in the project's place), with its versions, Save to
+  repo, Download and Comment; beside a conversation, the conversation's
+  own, untouched: nothing of the canvas goes in a task's header. There the
+  canvas has no head of its own; what it is floats on it as a chip (its
+  name, which opens the artifact itself, a comment on the whole of it
+  where it takes one, and its close). A canvas of boards draws the chip
+  beside its zoom, in its ground; a page draws it in its own view, from a
+  small script in an isolated world (src/overlay/chip.ts), in the page's
+  top layer, put back at once where the page takes it out or rewrites its
+  document, back over any popover or dialog the page opens after it, inside
+  the topmost of the page's modals while one is open (all else is inert
+  then): where several are, the one it heard open last is the likeliest,
+  but those opened before it came are unheard, so it takes the one a
+  press at its place reaches, since hitting passes through what is inert;
+  and shown again by the main process whenever things are quiet; its presses are
+  heard as the ground's are. The window draws it over a
+  document, a diagram or a picture. Comment on it, where the conversation
+  has a draft, opens the canvas's comment on all of it, for that draft. Saving, downloading and
+  stepping through versions are the artifact's, done in its room. No line
+  of facts: only a newer version than the one shown is said over it, with
+  Show.
+  Its controls float over the boards, as a design tool's do
+  (the kit's `BoardsControls`): at the top left the page, and every board
+  or one at a time with a step through every page's boards; at the top
+  right the zoom; along the bottom the tools. Nothing of Althar's window
+  can be drawn over the canvas's view, so the ground draws them in the
+  canvas's own page, the kit's components in React with the kit's styles
+  and type, over the canvas's tokens (dark as the system's scheme is); a
+  press changes the ground at once, and the window hears it with the rest
+  of its news. Their menus open over the boards; an open menu has the
+  keys, and a control pressed gives them back to the boards. There is no
+  viewport switch: the boards are the sizes.
+- **Pointing at a part is how the person says what to change.** The point
+  tool outlines and names the part under the pointer (a part the design
+  names with `data-part` first). A press takes it: the view steps aside for
+  a picture of the canvas, and the comment is written in Althar's window
+  over it. The comment's anchor is the element's, with its page and board,
+  and a crop goes with it as a picture. It waits in the draft, as every
+  comment does. Comments on parts are numbered pins on the boards, a draft's
+  drawn as one, matching the numbers in the panel's list, where an agent's
+  answer shows under its comment. The other tools are moving around and
+  using the boards as the pages they are.
+
+### Talking to an artifact
+
+**An artifact is something you talk to.** Opened from the project's
+Artifacts, it has a chat of its own beside it, where anyone who opens it
+asks about it or has it changed. That chat is never a task on the board and
+never an aside: it has no lanes, no step and no state such as Ready or
+Needs you, and nothing of it waits on the person. A designer's workflow is
+looking at a design and saying what they think of it, not moving a card.
+
+- **What it is.** A chat on Scratch, as an aside is (a conversation and a
+  copy of the default branch, nothing installed, nothing leaving this
+  computer), marked as an artifact's (`tasks.artifact_chat`) with the
+  canvas it is about (`tasks.artifact_canvas_id`). The board, the home and
+  the asides' pills leave it out, and it never moves to the board, whatever
+  it writes. A canvas has one open chat; asked for again, the runtime
+  answers with it (`StartTask` with `chat` and `artifact`), and the canvas's
+  summary names it (`CanvasSummary.chat`).
+- **When it starts.** As the person shows they mean to talk: they go to its
+  composer, or point at a part. Only looking at an artifact starts nothing.
+  What they write and point at before then is kept by the artifact, and is
+  the chat's when it starts.
+- **Its agent.** Briefed lightly, as an aside's is, with the artifact named:
+  it answers in its reply, and changes the artifact by getting it
+  (`canvas_get`), changing its files and publishing a new version
+  (`canvas_publish`), which shows beside the conversation at once. It
+  changes nothing outside `.althar/canvases/`; a version it publishes says
+  it came from the artifact's chat. Where the person wants it built in the
+  product, a task builds it.
+- **A lead still makes and changes artifacts,** in its task's conversation,
+  as before. The artifact's chat and the lead are two agents on one canvas,
+  which "Two agents on one canvas" already holds.
+- **Asked of the coordinator.** When the person wants something to look at
+  (a mockup, design directions, a mood board, a diagram), the coordinator
+  starts an artifact (`start_artifact`) rather than a task or an aside: its
+  chat draws it, and it shows among the project's artifacts from the moment
+  it starts (`ListArtifactsDrawing`), until its first version makes it the
+  canvas the chat is about.
+
+### Saving one to a repository
+
+A canvas lives in Althar until someone saves it to a folder in one of the
+project's repositories. Then it is in git with everything else, for people
+who never open Althar.
+
+- **The project keeps one place for artifacts:** a folder in one of its
+  repositories, how they go in (a pull request of their own, or straight to
+  the default branch), and whether each new version is committed. It is a
+  setting under Code and issues, which the coordinator and leads change
+  too, with change_settings (`project/code.artifacts`), as any setting
+  (ADR-097). The first save makes it: Althar's pick is the first
+  repository's design folder, with why.
+- **Save to repo, in the canvas's head, opens on that place** with the
+  canvas's own folder named in place, and Save. Somewhere else opens the
+  repository's folders as a tree, read at the default branch's head, and
+  can make the folder picked the place from now on. Saved, it says where
+  and at which commit, with its pull request. The newest version can be
+  committed, the folder moved, or saving stopped (what was committed
+  stays).
+- **Saving answers at once:** the canvas says it is saving. The runtime
+  writes the version's files in a worktree of its own, commits, and pushes
+  a branch with a pull request or the default branch. The canvas then says
+  how it went, with what to do where it failed. With each version
+  committed, a publish commits again. Comments stay in Althar.
+- **Saving touches only what is the artifact's own.** A first save, and a
+  move, need a folder that holds nothing in git yet. After that, its own
+  files are those its last saved version wrote, each as git keeps it (its
+  bytes, its mode, its kind): a save replaces and removes only those, keeps
+  what others added beside them, submodules and links included, and refuses
+  where someone changed one of them, its mode too, or where a file of the
+  new version would land on one of theirs. Its pull requests come from a
+  branch of its own, named by the canvas's id; an open one is continued only
+  where its last save recorded it, or else by the latest asking to open one
+  from that save's commit: the one the host answered with, kept in its
+  receipt, or, where the answer was lost, the one carrying that asking's
+  mark, a fresh one hidden in its description each time it asks.
+
+### Downloading one
+
+A canvas downloads as its own source (the Markdown, the diagram's words,
+the drawing, the picture), as its files in a folder, or as drawn: a PNG (one
+a board, for a canvas of boards), a PDF (a page a board), or a diagram's
+SVG. The main process draws what it needs in a hidden view in the canvas's
+partition, and writes where the person picks.
 
 ### A person's word back: comments and picks
 
@@ -964,6 +1127,16 @@ need to draw, see, comment and draw again, across the project.
 | Briefs | The lead's and the coordinator's say when to draw one |
 | Proof | Runtime, main, window and kit tests, and `apps/desktop/e2e/canvases.spec.ts`, which draws, comments and draws again in the built app |
 
+The second slice, on 22 November 2026, for design work:
+
+| Part | Built |
+|---|---|
+| Boards | The `boards` kind from `canvas.json`, checked at publish; the ground in the canvas's view; every board, every page and one at a time, with the panel's bar; pointing at a part to comment, with its crop; numbered pins; the brief and the publish tool say when and how |
+| The Artifacts view | Cards with a picture of each (a page's and a canvas of boards' as last drawn), or the table; Filter by saved and by open comments; one opened as itself with its own chat beside it, under the artifact's top row; those still drawing their first version among them |
+| Saving to a repository | The project's place for artifacts, as a setting the first save makes; Save to repo with the tree for somewhere else; commits in a pull request of its own or to the default branch, each version or the one saved; stopping |
+| Downloads | Source, files, PNG, PDF and a diagram's SVG |
+| Proof | `apps/desktop/e2e/boards.spec.ts`, which lays out boards, shows them every way, and comments on a part, light and dark |
+
 **Not built yet:**
 
 - `canvas_look`, and the offscreen drawing with a snapshot bridge it
@@ -973,12 +1146,15 @@ need to draw, see, comment and draw again, across the project.
   view's debugger.
 - Picks: `group` is kept and listed, but directions don't show side by side
   with Choose.
-- Comments on an area of a picture and on an element of a page: those take
-  whole-canvas comments for now.
+- Comments on an area of a picture, and on an element of a page canvas
+  (a canvas of boards takes them): those take whole-canvas comments for
+  now.
 - Refusing hosts under the person's Never in the canvas partition: only
   Althar's own listeners are refused today.
-- The list's pictures, Save files, a task's Outputs' canvases, and
-  deleting a canvas.
+- A picture of a canvas no window has shown yet, a task's Outputs'
+  canvases, and deleting a canvas.
+- Boards that are an address in the task's running copy, rather than a file
+  of the canvas, and far boards drawn as pictures until they come near.
 
 ## Not now
 
@@ -994,10 +1170,9 @@ need to draw, see, comment and draw again, across the project.
     could also edit in their own tools.
   - Each can be loaded by an HTML canvas today.
 - **An infinite whiteboard** (tldraw, Excalidraw) as the canvas itself.
-- **Sharing a canvas off the computer**, as a link or a file to send.
-  Saving its files is the way for now.
-- **Copying a canvas into the repository** as a press. A lead can copy its
-  files there itself, as a change.
+- **Sharing a canvas off the computer** as a link. A canvas is shared by
+  saving it to a repository, or by downloading it; a link needs a service
+  Althar doesn't have, and people signed in to it.
 - **Drawing the person's MCP servers' views** (MCP Apps), above.
 
 ## Risks and open questions
@@ -1073,7 +1248,7 @@ need to draw, see, comment and draw again, across the project.
   partition is reachable by nothing else.
 - **A tool that waits on the person,** like `openDiff`. It holds the turn,
   hides what comes after and holds the person's next message
-  ([ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
+  ([ADR-087](../tasks.md#helpers)).
 - **The publishing session watching its canvases,** like Claude Code. A
   session ends, and a canvas is the project's. The person's comment goes
   where the person is.

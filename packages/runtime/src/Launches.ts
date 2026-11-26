@@ -4,7 +4,13 @@ import { homedir } from 'node:os'
 import { join, sep } from 'node:path'
 import type { Duplex } from 'node:stream'
 
-import { workerPreviewAddress, type WorkerPreviewRequest, type WorkerPreviewResponse, type WorkerPreviewRun } from '@althar/contracts'
+import {
+  workerNameOf,
+  workerPreviewAddress,
+  type WorkerPreviewRequest,
+  type WorkerPreviewResponse,
+  type WorkerPreviewRun,
+} from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
@@ -767,7 +773,10 @@ export class Launches extends Context.Service<
             const { id, run, folder, binding, worker } = input
             const startCommand = config.workers?.startCommand
             if (worker !== undefined && startCommand === undefined)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'Managed runs for this worker task are unavailable.' })
+              return yield* new LaunchRefused({
+                why: 'elsewhere',
+                message: `Update ${workerNameOf(worker.id)} to run this task’s commands on it.`,
+              })
             const directory = yield* Effect.tryPromise(() => stat(folder))
             const copy = input.copy
             const copyDirectory = copy === null || copy === folder ? directory : yield* Effect.tryPromise(() => stat(copy))
@@ -1802,7 +1811,7 @@ export class Launches extends Context.Service<
           ? null
           : { ...current, port }
       }
-      const previewUnavailable = () => new LaunchRefused({ why: 'elsewhere', message: 'This worker preview is unavailable.' })
+      const previewUnavailable = () => new LaunchRefused({ why: 'elsewhere', message: 'This preview isn’t running now.' })
 
       return Launches.of({
         start,
@@ -1825,7 +1834,7 @@ export class Launches extends Context.Service<
                 catch: () =>
                   new LaunchRefused({
                     why: 'elsewhere',
-                    message: 'The worker could not read this preview. Check that the app is listening on localhost.',
+                    message: 'The worker couldn’t reach the app. Check that it listens on localhost.',
                   }),
               }),
             )
@@ -1869,13 +1878,14 @@ export class Launches extends Context.Service<
               if (launch?.workerId != null)
                 return yield* new LaunchRefused({
                   why: 'elsewhere',
-                  message: 'This command runs on a worker. Open its output from the Run menu.',
+                  message: `It runs on ${workerNameOf(launch.workerId)}, where no terminal opens from here. Its output is in its run.`,
                 })
               if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
-              if (taskId !== null && (yield* taskWorker(taskId)) !== null)
+              const onWorker = taskId === null ? null : yield* taskWorker(taskId)
+              if (onWorker !== null)
                 return yield* new LaunchRefused({
                   why: 'elsewhere',
-                  message: 'This task runs on a worker. Save a local copy to work on it here.',
+                  message: `This task works on ${workerNameOf(onWorker)}. To work in its files here, copy them from its Worktree.`,
                 })
               const [place] = yield* placesOf(projectId, taskId, undefined)
               if (place === undefined)

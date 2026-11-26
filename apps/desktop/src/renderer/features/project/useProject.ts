@@ -22,6 +22,7 @@ import { messageOf, type RunRef } from '../../data/client'
 import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import { useProjectWorkers } from '../../shared/useProjectWorkers'
 import type { OutputSoFar } from '../../shared/handed'
 import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
@@ -141,7 +142,8 @@ export interface ProjectModel {
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly workers: ReadonlyArray<ProjectWorker>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<boolean>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers). */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
@@ -149,6 +151,8 @@ export interface ProjectModel {
   /** Discards a task, from its card: the card shows it discarded at once, and as it was again where this fails, the line saying why. */
   readonly discardTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Where a planned task runs once it starts: whether that went through. */
+  readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
@@ -197,13 +201,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const readNow = thread.data ?? null
-  const workers =
-    useQuery({
-      queryKey: ['project-workers', projectId],
-      queryFn: () => client.listProjectWorkers(projectId),
-      retry: false,
-      refetchInterval: 5000,
-    }).data ?? []
+  const workers = useProjectWorkers(projectId)
   // What a clear or a forgotten conversation takes from the thread, gone from the press until the thread is read rewritten:
   // the view's version as it was pressed on, and what goes, by id.
   const [rewriting, setRewriting] = useState<{ readonly version: number; readonly gone: ReadonlySet<string> } | null>(null)
@@ -266,28 +264,6 @@ export const useProject = (projectId: string): ProjectModel => {
   )
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
-
-  /**
-   * Items read or heard join the thread the window shows, by its view: not one of the conversation before a clear while the
-   * view is cleared, nor one after it while the earlier conversation is open. `version` is the view's when the read began: a
-   * read that outlived a clear, a wipe or an undo is of another thread, and is dropped.
-   */
-  const arrived = useCallback(
-    (items: ReadonlyArray<ThreadItem>, version?: number) => {
-      setCoordinator((current) =>
-        version !== undefined && current.view.version !== version
-          ? current
-          : {
-              ...current,
-              items: mergeItems(
-                current.items,
-                items.filter((item) => inView(current.view, current.items, item)),
-              ),
-            },
-      )
-    },
-    [setCoordinator],
-  )
 
   /** The version of the view the window holds now, for a read that lands later. */
   const viewVersion = useCallback(
@@ -667,12 +643,14 @@ export const useProject = (projectId: string): ProjectModel => {
       try {
         // As the cache has it now, not as this render had it: a head read may have landed since.
         const session = (cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId)) ?? coordinator)?.session
-        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
-        if (threadId !== null && session != null && session.held) {
+        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something. One taking it over is.
+        if (threadId !== null && session != null && (session.held || session.handover === true)) {
           // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
+          const holding = lastPick.current ?? runningOn(session)
           lastPick.current = choice
-          await moveTo(client, threadId, from, choice)
+          await moveTo(client, threadId, from, choice, holding)
         }
       } catch (failure) {
         fail(failure)
@@ -723,6 +701,14 @@ export const useProject = (projectId: string): ProjectModel => {
         throw failure
       }),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    placePlan: async (planId, workerId, chosenAt) => {
+      let placed = false
+      await act(async () => {
+        await client.placePlan(planId, workerId, chosenAt)
+        placed = true
+      })
+      return placed
+    },
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
     holdDraft: (threadId, key) =>
       client.holdDraft(threadId, key).catch((failure: unknown) => {

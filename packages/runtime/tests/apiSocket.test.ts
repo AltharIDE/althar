@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { API_VERSION, Api, clientProtocol, emitterPort } from '@althar/contracts'
+import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -13,12 +14,13 @@ import { SqlClient } from 'effect/sql'
 import { services } from '../src/Api'
 import { authenticateApiClient, listenLocalApi, openApiSocket } from '../src/apiSocket'
 import { ClientIdentities } from '../src/ClientIdentities'
+import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
-import { fakeAgents, fakeConnectors, ROOMY } from './support'
+import { fakeAgents, fakeConnectors, HOST, ROOMY } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
-const environment = services({
+const options = {
   database: ':memory:',
   worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-socket-work-')),
   appVersion: 'test',
@@ -27,7 +29,8 @@ const environment = services({
   secrets: Secrets.memory(),
   connectors: fakeConnectors({}),
   busy: { machine: ROOMY },
-})
+}
+const environment = services(options)
 
 const client = (port: Parameters<typeof clientProtocol>[0]) =>
   Effect.gen(function* () {
@@ -156,6 +159,121 @@ describe('the authenticated private API', () => {
       )
     }).pipe(Effect.scoped, Effect.provide(environment)),
   )
+
+  it.live('lets a socket set its home up: connect a code host with a token and add an agent’s account, never a tracker', () => {
+    const github = makeFakeService()
+    return Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const calls = (yield* api.GetConnectionInfo({})).calls ?? []
+      for (const tag of ['ConnectToken', 'StartSignIn', 'AddAccount', 'StartAccountSignIn']) assert.include(calls, tag)
+      const connected = yield* api.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      assert.strictEqual(connected.product, 'github')
+      assert.isTrue((yield* api.ListConnections()).connections.some((one) => one.id === connected.id))
+      const account = yield* api.AddAccount({ commandId: commandId(), agentId: 'codex', name: 'work' })
+      assert.strictEqual(account.name, 'work')
+      // A tracker's connection stays the person's own window's: a socket can't connect one, nor check, sign in again or remove
+      // one the person connected, nor follow a sign-in it didn't start.
+      const refused = (effect: Effect.Effect<unknown, unknown>) =>
+        Effect.map(Effect.flip(effect), (error) => (error as { readonly reason?: string }).reason)
+      assert.strictEqual(
+        yield* refused(api.ConnectToken({ commandId: commandId(), product: 'linear', token: 'lin_api_x' })),
+        'PersonRequired',
+      )
+      assert.strictEqual(yield* refused(api.StartSignIn({ commandId: commandId(), product: 'linear' })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.GetConnectGuide({ service: 'jira' })), 'PersonRequired')
+      const instance = yield* Instance
+      const tracker = yield* (yield* Connections).connectToken({ product: 'linear', token: 'lin_api_x', actorId: instance.personId })
+      assert.strictEqual(yield* refused(api.Disconnect({ commandId: commandId(), connectionId: tracker.id })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.CheckConnection({ connectionId: tracker.id })), 'PersonRequired')
+      assert.strictEqual(
+        yield* refused(api.ConnectToken({ commandId: commandId(), product: 'github', token: 'ghp_y', connectionId: tracker.id })),
+        'PersonRequired',
+      )
+      assert.strictEqual(yield* refused(api.GetSignIn({ flowId: 'flow_not_its_own' })), 'PersonRequired')
+      assert.isTrue((yield* api.ListConnections()).connections.some((one) => one.id === tracker.id))
+      // Its own code host's, it checks and removes.
+      yield* api.CheckConnection({ connectionId: connected.id })
+      yield* api.Disconnect({ commandId: commandId(), connectionId: connected.id })
+      // What stays the person's own window's is still refused: a project's tracker, say.
+      assert.strictEqual(
+        (yield* Effect.flip(api.SetProjectTracker({ commandId: commandId(), projectId: 'proj_x', tracker: null }))).reason,
+        'PersonRequired',
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        services({
+          ...options,
+          accountsRoot: mkdtempSync(join(tmpdir(), 'althar-socket-accounts-')),
+          connectors: fakeConnectors({ github, linear: makeFakeService({ product: 'linear' }) }),
+        }),
+      ),
+    )
+  })
+
+  it.live('lets a socket change its home’s own settings, never a project’s rules', () =>
+    Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const calls = (yield* api.GetConnectionInfo({})).calls ?? []
+      for (const tag of ['SetAgentsAtOnce', 'SetPostTeamReviews', 'GetTaskFolders']) assert.include(calls, tag)
+      yield* api.SetAgentsAtOnce({ commandId: commandId(), count: 3 })
+      yield* api.SetPostTeamReviews({ commandId: commandId(), on: true })
+      const settings = yield* api.GetSettings({})
+      assert.strictEqual(settings.agentsAtOnce.count, 3)
+      assert.isTrue(settings.postTeamReviews)
+      yield* api.GetTaskFolders({})
+      const refused = (effect: Effect.Effect<unknown, unknown>) =>
+        Effect.map(Effect.flip(effect), (error) => (error as { readonly reason?: string }).reason)
+      assert.strictEqual(
+        yield* refused(api.SetProjectRules({ commandId: commandId(), projectId: 'proj_x', allowEverything: true })),
+        'PersonRequired',
+      )
+      // What only the person decides stays theirs: trusting outside code fully, removing folders and what they hold, a preset.
+      assert.strictEqual(yield* refused(api.SetRunOutside({ commandId: commandId(), to: 'full' })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.CleanUpFolders({ commandId: commandId() })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemoveTaskFolder({ commandId: commandId(), taskId: 'task_x', seen: null })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemovePreset({ commandId: commandId(), id: 'preset_x' })), 'PersonRequired')
+      assert.notInclude(calls, 'SetRunOutside')
+      assert.notInclude(calls, 'RemoveTaskFolder')
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
+  it.live('shows a socket its home’s own MCP servers and skills, as a home set up with althar-host has them', () => {
+    // As apps/host sets a home up: its skills' store in its profile, and its agents' settings in its user's own folder.
+    const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+    const home = mkdtempSync(join(tmpdir(), 'althar-socket-user-'))
+    return Effect.gen(function* () {
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const tools = yield* api.GetAgentTools({ projectId: null })
+      assert.isTrue(tools.enabled)
+      assert.isTrue((yield* api.ListSkills({})).enabled)
+      // A server's sign-in opens a browser where its agent runs: not from another computer's window.
+      assert.strictEqual(
+        (yield* Effect.flip(api.SignInToolServer({ commandId: commandId(), agent: 'claude', name: 'linear' }))).reason,
+        'PersonRequired',
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        services({
+          ...options,
+          skills: { root: join(profile, 'skills') },
+          agentConfigs: { homeDir: home, folder: join(profile, 'agent-sync') },
+        }),
+      ),
+    )
+  })
 
   it.live('authenticates a device key, records the client device, and revokes its live connection', () =>
     Effect.gen(function* () {

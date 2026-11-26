@@ -66,7 +66,10 @@ it('checks remote identity before exposing the client and refuses person-only me
   const client = await connect(at.port, identity)
   try {
     expect(client.connection).toEqual(info)
-    await expect(client.answer({ attentionId: 'permission', decision: 'allow' })).rejects.toMatchObject({ reason: 'PersonRequired' })
+    await expect(client.answer({ attentionId: 'permission', decision: 'allow' })).rejects.toMatchObject({
+      reason: 'HomeKeeps',
+      detail: 'Answer',
+    })
     expect(at.called.mock.calls).toEqual([['GetConnectionInfo']])
     expect(() => client.watch(() => {}, 12)).toThrow()
   } finally {

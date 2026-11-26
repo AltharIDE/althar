@@ -60,7 +60,7 @@ export const attachmentPrinter = () => {
       }
       for (const request of snapshot.attention)
         if (!attention.has(request.id))
-          out += `\n? ${terminalText(request.title)}\n${terminalText(request.reason)}\nAnswer in a trusted person client. This SSH/socket client cannot approve it.\n`
+          out += `\n? ${terminalText(request.title)}\n${terminalText(request.reason)}\nAnswer it in the Althar window: this terminal can’t.\n`
       attention = new Set(snapshot.attention.map((request) => request.id))
       return out
     },

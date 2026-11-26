@@ -1,7 +1,8 @@
 /*
  * Whole screens, composed from the parts in @althar/ui: the first run,
  * the launch and what shows if opening fails an update couldn't move the data or the profile is open elsewhere, the home you come back to, a new project, a
- * project's rules and repositories, and its automations, each on its own page. They are one
+ * project's rules and repositories, and its automations, each on its own page, and Althar's own
+ * page after an update, What's new and Coming next. They are one
  * product's compositions, kept apart from the parts so the parts' surface
  * stays general.
  */
@@ -14,7 +15,15 @@ export * from './ProfileInUse/ProfileInUse'
 export * from './ApiVersionMismatch/ApiVersionMismatch'
 export * from './Home/Home'
 export * from './NewProject/NewProject'
+export * from './HomeWelcome/HomeWelcome'
 export * from './ProjectRules/ProjectRules'
 export * from './ProjectRepositories/ProjectRepositories'
 export * from './Automations/Automations'
 export * from './Automations/AutomationPage'
+export * from './WhatsNew/WhatsNew'
+export * from './WhatsNew/notes'
+export * from './WhatsNew/HostAndWorkers'
+export * from './WhatsNew/FeatureArt'
+export * from './WhatsNew/Releases'
+export * from './ComingNext/ComingNext'
+export * from './ComingNext/RoadmapPicture'

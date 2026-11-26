@@ -9,6 +9,7 @@ import {
   apiClient,
   completeDevicePairing,
   createDeviceKey,
+  decodePairingCode,
   openHttpsConnection,
   signDeviceMessage,
   tlsPublicKeyPin,
@@ -92,6 +93,25 @@ const probe = (origin: string, agent: Agent, headers: Record<string, string> = {
   )
 
 describe('direct HTTPS and WSS home connections', () => {
+  it.live('makes a code a phone pairs with through its link, and says which device it paired', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { pairings, code: listening } = yield* home
+        const made = yield* pairings.create()
+        assert.strictEqual(made.link.startsWith('https://althar.ai/pair#1.'), true)
+        // What the phone's camera hands the app: the link, read back into the code, pinned to the listener's certificate.
+        const code = decodePairingCode(made.link)
+        assert.strictEqual(code.origin, listening.origin)
+        assert.strictEqual(code.tlsKeyPin, pin)
+        assert.deepStrictEqual(yield* pairings.status(made.tokenHash), { state: 'waiting', expiresAt: made.expiresAt })
+        const target = yield* completeDevicePairing(code, yield* createDeviceKey, 'iPhone')
+        const status = yield* pairings.status(made.tokenHash)
+        assert.strictEqual(status.state === 'paired' ? status.device.deviceId : null, target.deviceId)
+        assert.strictEqual(status.state === 'paired' ? status.device.name : null, 'iPhone')
+      }).pipe(Effect.provide(environment)),
+    ),
+  )
+
   it.live('rejects foreign browser origins, host headers, malformed bodies and repeated device proofs before admitting RPC', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -119,9 +139,11 @@ describe('direct HTTPS and WSS home connections', () => {
           'sec-websocket-key': randomBytes(16).toString('base64'),
           authorization: `Althar-Device ${Buffer.from(JSON.stringify({ challenge, signature })).toString('base64url')}`,
         }
-        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, authorization: 'Althar-Device invalid' }, '/v1/api'), 0)
+        // A refused upgrade says so with a status, so a phone tells it apart from a lost network.
+        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, authorization: 'Althar-Device invalid' }, '/v1/api'), 403)
+        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, host: 'foreign.test' }, '/v1/api'), 403)
         assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 101)
-        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 0)
+        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 403)
         const statuses = yield* Effect.forEach(Array.from({ length: 60 }), () => probe(code.origin, agent))
         assert.include(statuses, 429)
       }).pipe(Effect.provide(environment)),

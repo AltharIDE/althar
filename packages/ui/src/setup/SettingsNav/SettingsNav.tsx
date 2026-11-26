@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -11,6 +13,9 @@ import s from './SettingsNav.module.css'
  * opens it; which is open is the consumer's to keep. Under them, apart and
  * under a rule, can go one thing to do rather than a section to open, such
  * as taking a project out of Althar, in red where it takes something away.
+ * A group can carry a heading, where the sections are of different things:
+ * in a window on another computer's home, that home's by its name and what
+ * it runs, and this computer's.
  */
 
 export interface SettingsSection<V extends string> {
@@ -19,6 +24,14 @@ export interface SettingsSection<V extends string> {
   icon: IconName
   /** Something in it waits on the person: a violet dot after its name. */
   yours?: boolean
+}
+
+/** Sections under a heading of their own: what they are all about, such as the home they change, and a quieter note. */
+export interface SettingsGroup<V extends string> {
+  title: string
+  /** Beside the title, quieter: what the home runs (Ubuntu 24.04). */
+  note?: string
+  sections: readonly SettingsSection<V>[]
 }
 
 /** Something to do from the side, not a section: it opens what does it, such as a dialog that asks first. */
@@ -39,8 +52,8 @@ export const settingsNavText: SettingsNavText = { yours: 'needs you' }
 export interface SettingsNavProps<V extends string> {
   /** What the list is, for a screen reader: Settings. */
   label: string
-  /** The sections, in groups a little apart: the accounts Althar works with, then its own ways, then about it. */
-  groups: readonly (readonly SettingsSection<V>[])[]
+  /** The sections, in groups a little apart: the accounts Althar works with, then its own ways, then about it; a group may have a heading. */
+  groups: readonly (readonly SettingsSection<V>[] | SettingsGroup<V>)[]
   /** The section open. */
   value: V
   onChange: (id: V) => void
@@ -53,34 +66,60 @@ export interface SettingsNavProps<V extends string> {
 /** The sections of settings, one under another, the one open lifted. */
 export function SettingsNav<V extends string>({ label, groups, value, onChange, action, className, text }: SettingsNavProps<V>) {
   const t = { ...settingsNavText, ...text }
+  const ids = useId()
   return (
     <nav aria-label={label} className={cx(s.nav, className)}>
-      {groups.map((group) => (
-        <ul key={group.map((section) => section.id).join(' ')} className={s.group}>
-          {group.map((section) => {
-            const open = section.id === value
-            return (
-              <li key={section.id}>
-                <button
-                  type="button"
-                  className={cx(s.section, open && s.open)}
-                  aria-current={open ? 'page' : undefined}
-                  onClick={() => onChange(section.id)}
-                >
-                  <Icon name={section.icon} size={14} className={s.icon} />
-                  <span className={s.title}>{section.title}</span>
-                  {section.yours === true && (
-                    <>
-                      <span className={s.dot} aria-hidden="true" />
-                      <VisuallyHidden>, {t.yours}</VisuallyHidden>
-                    </>
-                  )}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      ))}
+      {groups.map((group, index) => {
+        const sections = 'sections' in group ? group.sections : group
+        const heading = 'sections' in group ? group : null
+        const key = sections.map((section) => section.id).join(' ')
+        const headingId = `${ids}-${index}`
+        const list = (
+          <ul key={key} className={s.group} {...(heading === null ? {} : { 'aria-labelledby': headingId })}>
+            {sections.map((section) => {
+              const open = section.id === value
+              return (
+                <li key={section.id}>
+                  <button
+                    type="button"
+                    className={cx(s.section, open && s.open)}
+                    aria-current={open ? 'page' : undefined}
+                    onClick={() => onChange(section.id)}
+                  >
+                    <Icon name={section.icon} size={14} className={s.icon} />
+                    <span className={s.title}>{section.title}</span>
+                    {section.yours === true && (
+                      <>
+                        <span className={s.dot} aria-hidden="true" />
+                        <VisuallyHidden>, {t.yours}</VisuallyHidden>
+                      </>
+                    )}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )
+        if (heading === null) return list
+        return (
+          <div key={key} className={s.headed}>
+            <p
+              className={s.heading}
+              id={headingId}
+              title={heading.note === undefined ? heading.title : `${heading.title} · ${heading.note}`}
+            >
+              <span className={s.headingTitle}>{heading.title}</span>
+              {heading.note !== undefined && (
+                <span className={s.headingNote}>
+                  <VisuallyHidden>, </VisuallyHidden>
+                  {heading.note}
+                </span>
+              )}
+            </p>
+            {list}
+          </div>
+        )
+      })}
       {action !== undefined && (
         <div className={s.foot}>
           <button type="button" className={cx(s.section, action.danger === true && s.danger)} onClick={action.onSelect}>

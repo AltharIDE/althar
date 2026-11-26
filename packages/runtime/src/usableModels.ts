@@ -9,7 +9,7 @@ import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
 import { missedBy, missedReports, missedWords } from './missedReports'
 import { Models } from './Models'
-import { makerOf } from './modelMaker'
+import { makerOf, modelKey } from './modelMaker'
 import { PlanUsage } from './PlanUsage'
 import { SignIns } from './SignIns'
 
@@ -113,7 +113,7 @@ export const usableModels = (projectId?: string) =>
         }
         const refusedProvider = through === undefined ? undefined : refusing.get(starts.value.id)?.get(through)
         const fact = facts.of(agent, model)
-        const key = fact?.slug ?? name.toLowerCase()
+        const key = modelKey(fact, agent, model)
         const misses = missedBy(missed, agent.id, model.id)
         const route: Route = {
           agentId: agent.id,

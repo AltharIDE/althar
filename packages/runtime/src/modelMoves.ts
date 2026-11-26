@@ -136,6 +136,17 @@ export class AutoModels extends Context.Service<
             })),
           )
           if (lighter === undefined) return switched
+          // The same model on another agent with room comes before a lighter one: the step
+          // stays on its model here, and goes to that agent once this plan is nearly out, as Limits ranks the same model first.
+          const elsewhere = yield* limits
+            .free({
+              besides: [input.agentId],
+              projectId: input.projectId,
+              withRoom: true,
+              planned: { agentId: input.agentId, model: input.model },
+            })
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          if (elsewhere !== undefined && elsewhere.otherModel !== true) return switched
           // One line a move: a step after it on the same two models says nothing new.
           const [said] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${input.threadId} AND kind = 'model_move'

@@ -1,14 +1,14 @@
 import { useState } from 'react'
 
 import {
-  type BoardTask,
   type CheckFailures,
   type ChangeSummary,
   checkFailuresOf,
   type ThreadItem,
   type ThreadSnapshot,
+  workerNameOf,
 } from '@althar/contracts'
-import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
+import { Button, device, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
 import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
@@ -29,8 +29,9 @@ import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 export const partsText = {
   worktree: 'Worktree',
-  copyWorker: 'Save a local copy',
-  copyingWorker: 'Saving local copy…',
+  /** A task on a worker: its files, as they are there, copied into a folder the person picks. */
+  copyWorker: `Copy to ${device.this}…`,
+  copyingWorker: 'Copying…',
   local: 'Local',
   /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
   toLocal: 'Move to Local',
@@ -104,6 +105,7 @@ export const partsText = {
   issueStatus: 'Status',
   inTracker: (tracker: string) => `In ${tracker}`,
   running: 'Running',
+  runningOn: (worker: string) => `Running on ${worker}`,
   open: 'Open',
   stop: 'Stop',
   answersAt: 'Address',
@@ -160,6 +162,8 @@ export interface PartsActions {
   readonly move?: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => void
   /** Calls off a move that waits. */
   readonly dropMove?: () => void
+  /** Calls off a move between the home and a worker that waits for its lead's turn. */
+  readonly dropPlace?: () => void
   /** Points the running task at another branch to work toward. */
   readonly workToward?: (branch: string) => void
   /** Stops a helper its lead started. */
@@ -188,36 +192,41 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     const uncommitted = task.files.filter((file) => file.uncommitted).length
     const { move, dropMove } = act
     const moving = task.moving
+    // A move between the home and a worker that waits for its lead's turn: said, and called off, here.
+    const placing = task.placing
     const moves =
-      move === undefined || dropMove === undefined
-        ? []
-        : moving === undefined
-          ? [
-              {
-                label: task.local === true ? t.toWorktree : t.toLocal,
-                onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
-                variant: 'quiet' as const,
-              },
-            ]
-          : moving.seen === undefined
-            ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
-            : [
-                { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
-                { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+      placing !== undefined && placing.why !== '' && act.dropPlace !== undefined
+        ? [{ label: t.callOff, onClick: act.dropPlace, variant: 'quiet' as const }]
+        : move === undefined || dropMove === undefined
+          ? []
+          : moving === undefined
+            ? [
+                {
+                  label: task.local === true ? t.toWorktree : t.toLocal,
+                  onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
+                  variant: 'quiet' as const,
+                },
               ]
+            : moving.seen === undefined
+              ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
+              : [
+                  { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
+                  { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+                ]
     parts.push({
       id: 'worktree',
       icon: 'folder',
       name: task.local === true ? t.local : t.worktree,
       // A move that waits says why, in place of its files; one that asks waits on the person.
-      detail: moving?.why ?? t.files(task.files.length),
+      detail: moving?.why ?? (placing?.why === '' ? undefined : placing?.why) ?? t.files(task.files.length),
       ...(moving?.seen === undefined || move === undefined
         ? {}
         : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),
       facts: [
         ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
         ...(task.toward === undefined ? [] : [[t.into, <code key="t">{task.toward}</code>] as const]),
-        [t.where, <code key="w">{task.worktree}</code>],
+        // On a worker, its folder is there: the home's copy of it is no place to open.
+        [t.where, task.workerId == null ? <code key="w">{task.worktree}</code> : workerNameOf(task.workerId)],
       ],
       ...(task.files.length === 0 && act.workToward === undefined
         ? {}
@@ -263,6 +272,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 onClick: act.copyWorker.open,
                 disabled: act.copyWorker.pending,
                 variant: 'quiet' as const,
+                icon: 'download' as const,
               },
             ]),
         ...(act.removeFolder === undefined
@@ -433,13 +443,15 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
   }
   for (const launch of task.launches.filter((one) => one.ended === null)) {
     const address = launch.url
+    // One on a worker answers through the home, at an address of Althar's own: it goes by what it runs, and where.
+    const on = launch.workerId === undefined ? null : workerNameOf(launch.workerId)
     parts.push({
       id: `run:${launch.id}`,
       icon: address === null ? 'play' : 'globe',
-      name: launch.name ?? (address === null ? (launch.label ?? launch.command) : addressOf(address)),
-      detail: t.running,
+      name: launch.name ?? (address === null || on !== null ? (launch.label ?? launch.command) : addressOf(address)),
+      detail: on === null ? t.running : t.runningOn(on),
       tone: 'live',
-      facts: address === null ? [] : [[t.answersAt, <code key="a">{launch.workerId === undefined ? address : addressOf(address)}</code>]],
+      facts: address === null || on !== null ? [] : [[t.answersAt, <code key="a">{address}</code>]],
       actions: [
         ...(address === null ? [] : [{ label: t.open, onClick: () => act.openUrl(address), icon: 'external' as const }]),
         { label: t.stop, onClick: () => act.stopLaunch(launch.id), variant: 'quiet' as const, end: true },

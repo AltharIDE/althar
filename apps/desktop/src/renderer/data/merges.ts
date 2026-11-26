@@ -8,7 +8,7 @@ import { messageOf } from './client'
 import { useServices } from './services'
 
 // Whether a task is in its merge queue is the one rule every place, the runtime's count too, reads it by.
-export { inMergeQueue, queuedToMerge, shownChangeOf, shownQueued } from '@althar/contracts'
+export { queuedToMerge, shownChangeOf, shownQueued } from '@althar/contracts'
 
 /*
  * Merging a task's pull request, kept by the window rather than by the

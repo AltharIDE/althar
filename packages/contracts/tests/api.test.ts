@@ -25,6 +25,8 @@ import {
   type SentImage,
   SentFiles,
   SentImages,
+  SOCKET_CALLS,
+  socketCanCall,
   TaskCard,
   ThreadItem,
   WatchEvent,
@@ -479,6 +481,10 @@ describe('the API', () => {
               GetConnectionInfo: () => Effect.die('unused'),
               ListClientDevices: () => Effect.die('unused'),
               IssueDevicePairing: () => Effect.die('unused'),
+              CreatePairingCode: () => Effect.die('unused'),
+              GetPairingStatus: () => Effect.die('unused'),
+              GetPhoneAccess: () => Effect.die('unused'),
+              SetPhoneAccess: () => Effect.die('unused'),
               RevokeConnectionDevice: () => Effect.die('unused'),
               RegisterClientDevice: () => Effect.die('unused'),
               RevokeClientDevice: () => Effect.die('unused'),
@@ -487,12 +493,15 @@ describe('the API', () => {
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
+              FindHomeFolders: () => Effect.die('unused'),
+              GetMachine: () => Effect.die('unused'),
               LookElsewhere: () => Effect.die('unused'),
               BringIn: () => Effect.die('unused'),
               PlaceRepository: () => Effect.die('unused'),
               MakeRepository: () => Effect.die('unused'),
               PrepareFolder: () => Effect.die('unused'),
               ListHostRepositories: () => Effect.die('unused'),
+              ReadHostReach: () => Effect.die('unused'),
               ListRepositoryOwners: () => Effect.die('unused'),
               CloneRepository: () => Effect.die('unused'),
               PublishRepository: () => Effect.die('unused'),
@@ -548,6 +557,16 @@ describe('the API', () => {
                   althar: null,
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
+              GetPlaces: () => Effect.succeed({ busy: 1, configured: 4, atOnce: 1, why: 'memory' as const, waiting: 2 }),
+              GetWorkers: () =>
+                Effect.succeed({
+                  enabled: true,
+                  workers: [{ workerId: 'wrk_' + '1'.repeat(32), connected: false, busy: false, providers: [], projects: [], task: null }],
+                }),
+              RemoveWorker: () => Effect.void,
+              AddWorker: () => Effect.die('unused'),
+              CreateWorkerCode: () => Effect.die('unused'),
+              SetWorkerProjects: () => Effect.void,
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
               DismissSignInEnding: () => Effect.void,
               GetModelRooms: () => Effect.succeed([]),
@@ -555,6 +574,7 @@ describe('the API', () => {
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
+              SetAgent: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),
               SetModelBlocked: () => Effect.die('unused'),
@@ -592,6 +612,7 @@ describe('the API', () => {
               AnswerCheckout: () => Effect.die('unused'),
               MoveTask: () => Effect.die('unused'),
               DropMove: () => Effect.die('unused'),
+              MoveTaskTo: () => Effect.die('unused'),
               WorkToward: () => Effect.die('unused'),
               ShelveTask: () => Effect.die('unused'),
               StopHelper: () => Effect.die('unused'),
@@ -624,6 +645,7 @@ describe('the API', () => {
               RemoveTaskFolder: () => Effect.die('unused'),
               MoveInLine: () => Effect.die('unused'),
               LineOldestFirst: () => Effect.die('unused'),
+              StartAnyway: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
               PasteAccountSignInCode: () => Effect.die('unused'),
@@ -633,6 +655,7 @@ describe('the API', () => {
               ReadOutput: () => Effect.die('unused'),
               ReadDocument: () => Effect.die('unused'),
               ListCanvases: () => Effect.succeed([]),
+              ListArtifactsDrawing: () => Effect.succeed([]),
               GetCanvas: () => Effect.die('unused'),
               ReadCanvasText: () => Effect.die('unused'),
               FindCode: () => Effect.die('unused'),
@@ -643,6 +666,7 @@ describe('the API', () => {
               StartPlan: () => Effect.void,
               StopWaiting: () => Effect.void,
               HoldPlan: () => Effect.succeed(true),
+              PlacePlan: () => Effect.succeed(false),
               HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
@@ -682,6 +706,11 @@ describe('the API', () => {
               RenameTask: () => Effect.void,
               TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
+              GetArtifactsPlace: () => Effect.die('unused'),
+              ListRepositoryFolders: () => Effect.die('unused'),
+              SetArtifactsHome: () => Effect.void,
+              SaveCanvas: () => Effect.void,
+              StopSavingCanvas: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               SetThreadGoal: () => Effect.die('unused'),
               Send: ({ body, images }) =>
@@ -744,6 +773,7 @@ describe('the API', () => {
               SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
               RemoveAccount: () => Effect.void,
+              SignOutAccount: () => Effect.die('unused'),
               OrderAccounts: () => Effect.void,
               AddAccount: () => Effect.die('unused'),
               FindAccounts: () => Effect.succeed({ found: [] }),
@@ -813,6 +843,10 @@ describe('the API', () => {
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         // Where Althar's processes can't be read, its work's part is unknown, not none.
         assert.strictEqual((yield* client.GetLoad({})).shares, null)
+        assert.deepStrictEqual(yield* client.GetPlaces({}), { busy: 1, configured: 4, atOnce: 1, why: 'memory', waiting: 2 })
+        // A worker offline says nothing of what it is.
+        assert.notProperty((yield* client.GetWorkers({})).workers[0], 'capacity')
+        yield* client.RemoveWorker({ commandId, workerId: 'wrk_' + '1'.repeat(32) })
         // A search crosses with what matched; one asking for too many, or for pages of text, never leaves.
         const [found] = (yield* client.SearchTasks({ text: 'retr', projectId: 'p2' })).tasks
         assert.deepStrictEqual([found?.projectId, found?.matched?.[1]], ['p2', { text: 'retr', hit: true }])
@@ -901,4 +935,27 @@ describe('the API', () => {
       }),
     ),
   )
+})
+
+describe('the calls a socket may make', () => {
+  it('are those marked for it, whichever way they were marked, as a home tells its window', () => {
+    for (const tag of SOCKET_CALLS) assert.isTrue(socketCanCall(tag), tag)
+    for (const tag of ['ListProjects', 'WatchFrom', 'FindHomeFolders', 'CloneRepository', 'OpenProject']) assert.include(SOCKET_CALLS, tag)
+    // A home is set up from its window: its code hosts connected and its agents signed in there.
+    for (const tag of ['ConnectToken', 'StartSignIn', 'ConnectCli', 'AddAccount', 'StartAccountSignIn', 'PasteAccountSignInCode'])
+      assert.include(SOCKET_CALLS, tag)
+    // Putting a repository on a host, a project's tracker, and the person's word stay with the person's own window.
+    for (const tag of ['PublishRepository', 'ListRepositoryOwners', 'SetProjectTracker', 'ListContainers', 'Answer'])
+      assert.notInclude(SOCKET_CALLS, tag)
+    // Where a plan runs is chosen and started from any window, a remote home's too.
+    for (const tag of ['StartPlan', 'PlacePlan']) assert.include(SOCKET_CALLS, tag)
+    // The home's own settings change from its window; a project's rules stay with the project's own settings.
+    for (const tag of ['SetAgentsAtOnce', 'SetPlansAndReviews', 'SetPostTeamReviews', 'ListPresets', 'SetFolderWait', 'GetTaskFolders'])
+      assert.include(SOCKET_CALLS, tag)
+    for (const tag of ['SetProjectRules', 'SetRunOutside', 'CleanUpFolders', 'RemoveTaskFolder', 'RemovePreset'])
+      assert.notInclude(SOCKET_CALLS, tag)
+    // Its MCP servers and skills show and change there too; a server's sign-in opens a browser where it runs, so stays.
+    for (const tag of ['GetAgentTools', 'ListSkills', 'AddServer', 'ApproveSkill']) assert.include(SOCKET_CALLS, tag)
+    assert.notInclude(SOCKET_CALLS, 'SignInToolServer')
+  })
 })

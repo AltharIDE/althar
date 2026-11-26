@@ -70,3 +70,11 @@
   white-space: nowrap;
   color: var(--t-3);
 }
+/* a long one, such as why it was stopped, gives way too, after the title has had its share: cut with "…", whole on hover */
+.detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

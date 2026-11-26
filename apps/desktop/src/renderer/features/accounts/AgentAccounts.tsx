@@ -1,16 +1,17 @@
 import type { AccountStatus, AgentStatus } from '@althar/contracts'
 import { type AccountEntry, Accounts, AccountSignIn } from '@althar/ui'
 
-import { signInCautionOf, signInWordsOf } from '../../shared/agents'
-import { device } from '../../shared/device'
+import { signInCautionOf, signInWordsOf, waysFrom } from '../../shared/agents'
 import { shortFolder } from '../../shared/folders'
 import { clock } from '../../shared/time'
+import { useHomeName } from '../homes/useHomes'
 import type { StartModel } from '../start/useStart'
 import type { AccountSignInModel } from './useAccountSignIn'
 
 /*
  * An agent's accounts, drawn by the kit: one quiet line each, in the order
- * work tries them, each to sign in again, rename, move and remove. Adding one
+ * work tries them, each to sign in again, rename, move and remove, the usual
+ * folder's to sign out, as it can't be removed. Adding one
  * or signing one in happens in the list, in the line it is for, by the ways
  * the agent offers: the browser and a one-time code where Althar runs its
  * login, Terminal for any with a command of its own, or a folder another
@@ -81,13 +82,16 @@ export function AgentSignIn({
   account?: { readonly name: string }
 }) {
   const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
+  // The home the agent signs in on: this computer, or another's, where no folder of this one's can be chosen.
+  const home = useHomeName()
   if (flow === null) return null
   const caution = signInCautionOf(agent.id)
+  const ways = waysFrom(agent, home.remote)
   return (
     <AccountSignIn
       agent={agent.name}
       text={{
-        folder: `A folder on ${device.this}`,
+        folder: `A folder on ${home.name}`,
         ...(agent.id === 'copilot-direct' ? { checking: () => 'Connecting to GitHub…' } : {}),
       }}
       position={position}
@@ -95,13 +99,13 @@ export function AgentSignIn({
       {...(caution === undefined ? {} : { caution })}
       step={flow.step}
       ways={{
-        ...(agent.ways.includes('browser') ? { browser: signInWordsOf(agent.id).plan } : {}),
-        ...(agent.ways.includes('device') ? { code: true } : {}),
+        ...(ways.includes('browser') ? { browser: signInWordsOf(agent.id).plan } : {}),
+        ...(ways.includes('device') ? { code: true } : {}),
         // An agent that signs in only inside Althar has no command for a terminal.
         terminal: agent.login !== '',
         ...(agent.id === 'copilot-direct' || agent.id === 'copilot' ? { enterprise: true } : {}),
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
-        choose: agent.id !== 'copilot-direct',
+        choose: agent.id !== 'copilot-direct' && !home.remote,
       }}
       onWay={signIn.way}
       onEnterprise={signIn.enterprise}
@@ -117,19 +121,32 @@ export function AgentSignIn({
   )
 }
 
-export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; start: StartModel; signIn: AccountSignInModel }) {
+export function AgentAccounts({
+  agent,
+  start,
+  signIn,
+  readOnly = false,
+}: {
+  agent: AgentStatus
+  start: StartModel
+  signIn: AccountSignInModel
+  /** Shown only, with nothing to press: on a home that doesn't let this window sign its agents in. */
+  readOnly?: boolean
+}) {
   const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
   // The account made for a sign-in under way is that sign-in's line until it is named.
   const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
   const again = flow?.again == null ? undefined : accounts.find((account) => account.id === flow.again)
-  const node = flow && (
-    <AgentSignIn
-      agent={agent}
-      signIn={signIn}
-      position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
-      {...(again === undefined ? {} : { account: { name: again.name } })}
-    />
-  )
+  // Shown only, it has no sign-in to show either.
+  const node =
+    readOnly || flow === null ? null : (
+      <AgentSignIn
+        agent={agent}
+        signIn={signIn}
+        position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
+        {...(again === undefined ? {} : { account: { name: again.name } })}
+      />
+    )
   return (
     <Accounts
       agent={agent.name}
@@ -140,12 +157,18 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
             : account,
         ),
       )}
-      // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
-      {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}
-      onSignIn={(accountId) => signIn.again(agent.id, accountId)}
-      onRename={(accountId, name) => void start.renameAccount(accountId, name)}
-      onMove={(accountId, to) => void start.moveAccount(agent.id, accountId, to)}
-      onRemove={(accountId) => void start.removeAccount(accountId)}
+      {...(readOnly
+        ? {}
+        : {
+            // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
+            ...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {}),
+            onSignIn: (accountId: string) => signIn.again(agent.id, accountId),
+            onRename: (accountId: string, name: string) => void start.renameAccount(accountId, name),
+            onMove: (accountId: string, to: 'up' | 'down') => void start.moveAccount(agent.id, accountId, to),
+            onRemove: (accountId: string) => void start.removeAccount(accountId),
+            // The usual folder's account, signed out with the agent's own command, where it has one that does.
+            ...(agent.signsOut === true ? { onSignOut: (accountId: string) => void start.signOutAccount(accountId) } : {}),
+          })}
       {...(flow === null || node === null ? {} : { signIn: { account: flow.again, at: accounts.length, node } })}
     />
   )

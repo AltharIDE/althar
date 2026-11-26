@@ -31,6 +31,8 @@ export type StatusItem =
       readonly phase: RunPhase
       /** Where it answers, once it does. */
       readonly url?: string
+      /** The worker it runs on, where it isn't the home: said in place of an address, which there is none of here to read. */
+      readonly on?: string
       /** How it ended, where it failed: its exit code. */
       readonly code?: number | null
     }
@@ -60,6 +62,8 @@ export interface StatusLineText {
   closeTerminalWhy: (busy: string) => string
   keep: string
   ended: (code: number) => string
+  /** Where it runs, on a worker: on Linux worker 3f9a2c. */
+  on: (where: string) => string
 }
 
 export const statusLineText: StatusLineText = {
@@ -77,6 +81,7 @@ export const statusLineText: StatusLineText = {
   closeTerminalWhy: (busy) => `${busy} is still running in it. Closing the terminal stops it.`,
   keep: 'Keep',
   ended: (code) => `Exited ${code}`,
+  on: (where) => `on ${where}`,
 }
 
 /** Closing it stops something still running: it asks first. */
@@ -113,7 +118,10 @@ export function RunMark({ phase }: { phase: RunPhase }) {
 /** How a run stands, in words: on its way, where it answers, how it ended. */
 export function RunWords({ item, text }: { item: Extract<StatusItem, { kind: 'run' }>; text?: Partial<StatusLineText> }) {
   const t = { ...statusLineText, ...text }
-  if (item.phase === 'up') return item.url === undefined ? null : <span className={s.address}>{addressOf(item.url)}</span>
+  if (item.phase === 'up') {
+    if (item.on !== undefined) return <span className={s.faint}>{t.on(item.on)}</span>
+    return item.url === undefined ? null : <span className={s.address}>{addressOf(item.url)}</span>
+  }
   if (item.phase === 'failed') return <span className={s.bad}>{t.failed(item.code)}</span>
   return <span className={s.faint}>{item.phase === 'starting' ? t.starting : item.phase === 'finished' ? t.finished : t.stopped}</span>
 }

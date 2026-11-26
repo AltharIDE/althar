@@ -118,8 +118,17 @@ the same order. A waiting task can be stopped, and resumed it waits again.
 While its first step waits, its plan can still be changed. Its card and view
 say what it waits for, such as "Waiting: 4 of 4 agents busy on this Mac". A
 waiting task is left out of its own count, so it never waits behind itself.
-Up next shows the machine-wide count and any temporary limit from host pressure,
-and lists each occupied place while work waits.
+Up next keeps no line of the computer's places: the load meter's popover shows
+Agents beside CPU and memory, how many are at work of the number and how many
+tasks wait, and it and the Agents at once slider say when host pressure lets
+fewer work for now, and whether memory or the CPU is why. While it does, the
+tasks it holds back are said where the person waits for them: Busy marks each
+waiting task that would have a place with the person's number (`Queued.held`,
+with why), Up next heads those rows "Held back until memory frees up", with how
+many may work of the number, which opens the popover, and the rows past them
+"Waiting for an agent to finish"; the task's header and the chip over its
+composer say the same. Start anyway, on a held row or the chip, starts it now
+as what the person did, which never waits (`StartAnyway`).
 
 ## The quick lane
 
@@ -421,6 +430,7 @@ how it stands.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 23 Nov 2026: what host pressure holds back is said in Up next, on the held task's header and chip, and Start anyway starts one as the person's own start.
 - 16 Nov 2026: tasks wait for their blockers, plain ones the coordinator and leads set, and start by themselves once they have merged (DEV-228, DEV-230).
 - 12 Nov 2026: leads can yield on durable external conditions and resume when they are met, without holding an agent place (DEV-176).
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.

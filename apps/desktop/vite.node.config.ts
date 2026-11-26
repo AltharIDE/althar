@@ -48,6 +48,7 @@ export default defineConfig(({ mode }) => ({
         'runtime/runtime': 'src/runtime/boot.ts',
         'speech/speech': 'src/speech/speech.ts',
         'connection/connection': 'src/connection/connection.ts',
+        'computer/worker': 'src/computer/worker.ts',
       },
       external: [
         'sharp',
@@ -55,6 +56,7 @@ export default defineConfig(({ mode }) => ({
         'sherpa-onnx-node',
         'node-pty',
         'electron-updater',
+        '@trycua/cua-driver',
         ...builtinModules,
         ...builtinModules.map((name) => `node:${name}`),
       ],

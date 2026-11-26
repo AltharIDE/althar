@@ -58,6 +58,56 @@ export interface LoadGlance {
   history: readonly LoadPoint[]
 }
 
+/** Why fewer agents than the person's number may work for now: this computer's memory, or its CPU, is under pressure. */
+export type AgentsWhy = 'memory' | 'cpu'
+
+/**
+ * The agents this computer runs at once, as they stand: how many are at work
+ * of the person's number, how many may work for now, fewer while the computer
+ * is under load, and why, and how many tasks wait for one.
+ */
+export interface LoadAgents {
+  busy: number
+  /** The person's number, Agents at once, or the default. */
+  configured: number
+  /** How many may work for now: `configured`, or fewer while the computer is under load. */
+  atOnce: number
+  /** Why fewer, while it is. */
+  why: AgentsWhy | null
+  waiting: number
+  /** Of `busy`, those on the home's workers: the number counts every agent the home starts, wherever it runs. */
+  onWorkers?: number | undefined
+}
+
+/**
+ * Where one of the home's workers stands: at work on a task (one at a time), free for the next, out of memory or disk
+ * space, or not connected.
+ */
+export type WorkerState = 'working' | 'free' | 'full' | 'offline'
+
+/** One of the home's workers, as the peek lists it under the home's own readings. */
+export interface LoadWorker {
+  id: string
+  /** As the person knows it: Linux worker 3f9a2c. */
+  name: string
+  state: WorkerState
+  /** Under the name: the task it runs and its project, or what it has free. */
+  detail: string
+}
+
+/** Fewer than the number may work for now, and why; null while as many may as it says. */
+export const fewerOf = ({ atOnce, configured, why }: Pick<LoadAgents, 'atOnce' | 'configured' | 'why'>) =>
+  why !== null && atOnce < configured ? { atOnce, why } : null
+
+/** Until when fewer may work: “until memory frees up”. */
+export const freesUpWords = (why: AgentsWhy) => `until ${why === 'memory' ? 'memory' : 'the CPU'} frees up`
+
+/** Fewer for now, and until when, as the peek and the slider say it: “1 at a time until memory frees up”. */
+export const fewerWords = (atOnce: number, why: AgentsWhy) => `${atOnce} at a time ${freesUpWords(why)}`
+
+/** A task held back by it, as Up next and the task say it: “Held back until memory frees up”. */
+export const heldBackWords = (why: AgentsWhy) => `Held back ${freesUpWords(why)}`
+
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
 
 /** Whether memory is short enough to say: a Mac compressing it or moving it to disk. */

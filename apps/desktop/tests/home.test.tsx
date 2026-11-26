@@ -172,8 +172,9 @@ function Home({
   onProject = vi.fn(),
   onTalk = vi.fn(),
   onTask = vi.fn(),
-}: Partial<Record<'onProject' | 'onTalk' | 'onTask', (id: string) => void>>) {
-  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTalk={onTalk} onTask={onTask} />
+  onSettings = vi.fn(),
+}: Partial<Record<'onProject' | 'onTalk' | 'onTask' | 'onSettings', (id: string) => void>>) {
+  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTalk={onTalk} onTask={onTask} onSettings={onSettings} />
 }
 
 describe('the home', () => {
@@ -558,7 +559,7 @@ describe('the home', () => {
     const getHome = vi.fn(async () => home({ looked: '2026-10-07T08:00:00.000Z', projects: [project, halyard] }))
     const { client, emit } = fakeClient({ getHome })
     const view = withServices(<Home onProject={onProject} />, client)
-    await within(await screen.findByRole('complementary', { name: 'Projects' })).findByRole('button', { name: /halyard/ })
+    await within(await screen.findByRole('complementary', { name: 'Projects' })).findByRole('button', { name: /^halyard/ })
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     fireEvent.keyDown(window, { key: 'x', metaKey: true })
     expect(onProject).not.toHaveBeenCalled()
@@ -670,6 +671,48 @@ describe('the home', () => {
     expect(lineOf({ kind: 'answered', id: 'c', at, count: 3, by: 'coordinator' }, projects, now)).toMatchObject({
       what: 'Coordinator answered 3 permission asks',
     })
+  })
+
+  it('removes a project from its menu in the list, asked first, at once, and brings it back with why where it did not go', async () => {
+    const removeProject = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'Invalid', message: 'The project is busy' }))
+      .mockResolvedValue(undefined)
+    const { client } = fakeClient({ removeProject, getHome: vi.fn(async () => home({ projects: [project, halyard] })) })
+    withServices(<Home />, client)
+    const list = await screen.findByRole('complementary', { name: 'Projects' })
+    const askToRemove = async () => {
+      await userEvent.click(within(list).getByRole('button', { name: 'Manage halyard' }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove from Althar…' }))
+      return screen.findByRole('dialog', { name: 'Remove halyard from Althar?' })
+    }
+
+    // Cancel leaves it as it was.
+    await userEvent.click(within(await askToRemove()).getByRole('button', { name: 'Cancel' }))
+    expect(removeProject).not.toHaveBeenCalled()
+    expect(within(list).getByText('halyard')).toBeTruthy()
+
+    // Removed, it goes at once; it didn't go, so it comes back, and the home says why.
+    await userEvent.click(within(await askToRemove()).getByRole('button', { name: 'Remove project' }))
+    expect(removeProject).toHaveBeenCalledWith('p2')
+    expect(await screen.findByText('The project is busy')).toBeTruthy()
+    expect(within(list).getByText('halyard')).toBeTruthy()
+
+    await userEvent.click(within(await askToRemove()).getByRole('button', { name: 'Remove project' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(list).queryByText('halyard')).toBeNull()
+    expect(within(list).getByText('meridian')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('The project is busy')).toBeNull())
+  })
+
+  it("opens a project's settings from its menu", async () => {
+    const onSettings = vi.fn()
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [project, halyard] })) })
+    withServices(<Home onSettings={onSettings} />, client)
+    const list = await screen.findByRole('complementary', { name: 'Projects' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Manage meridian' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Project settings' }))
+    expect(onSettings).toHaveBeenCalledWith('p1')
   })
 
   it('draws each project in its ink', () => {

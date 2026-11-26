@@ -27,43 +27,11 @@
   text-wrap: pretty;
 }
 
-
-.places {
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--t-2);
-  font-size: 12px;
-  line-height: 1.5;
+/* Up next's line over what is held back for now: in the load meter's warm, as it says the same of this computer. Its
+   words stay whole, the way to the meter going under them where the lane is narrow. */
+.held {
+  color: var(--warm);
 }
-
-.places summary {
-  color: var(--t-1);
-  cursor: pointer;
-}
-
-.places ul {
-  display: grid;
-  gap: 8px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.places p {
-  margin: 8px 0 0;
-}
-
-.placeTask {
-  display: block;
-  overflow: hidden;
-  color: var(--t-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.placeRole {
-  display: block;
-  font-size: 11px;
+.heldLink {
+  font-size: 11.5px;
 }

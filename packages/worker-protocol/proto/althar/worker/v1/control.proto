@@ -63,6 +63,54 @@ message AgentWorkerHello {
   string journal_id = 4;
   AgentWorkerCapacity capacity = 5;
   bool reserve_before_transfer = 6;
+  // A worker its home set up offers each agent for any project the home grants
+  // it, as a capability whose project_id is "*". The home's grants decide.
+  bool any_project = 7;
+  // It says which of its providers are signed in on it.
+  bool reports_sign_in = 8;
+  repeated string signed_in = 9;
+  // The Althar release it runs, where it was installed from one.
+  string release = 10;
+  // What its own check found it can do, where it has checked.
+  AgentWorkerReadiness readiness = 11;
+}
+
+// A worker's check of itself, as its setup and its hourly timer run it: whether
+// Claude Code's sandbox starts there, which tools it has, and the models its
+// signed-in agents offer.
+message AgentWorkerReadiness {
+  bool sandbox_starts = 1;
+  // Where it doesn't: why, as a code (NoUserNamespaces, NoBubblewrap, NoSocat,
+  // Failed), and the command an administrator runs there to let it, where one would.
+  string sandbox_problem = 2;
+  string sandbox_fix = 3;
+  repeated AgentWorkerTool tools = 4;
+  repeated AgentWorkerModels models = 5;
+  // Each signed-in agent, started once as a run starts it: whether it did, and
+  // where not, why in its own words.
+  repeated AgentWorkerAgentStart agents = 6;
+}
+
+message AgentWorkerAgentStart {
+  string provider_id = 1;
+  bool starts = 2;
+  string problem = 3;
+}
+
+// A program on the worker's PATH, or one a run asks it to have first.
+message AgentWorkerTool {
+  string name = 1;
+  string version = 2;
+}
+
+message AgentWorkerModels {
+  string provider_id = 1;
+  repeated AgentWorkerModel models = 2;
+}
+
+message AgentWorkerModel {
+  string id = 1;
+  string name = 2;
 }
 
 message AgentWorkerCapacity {
@@ -141,6 +189,10 @@ message AgentWorkspaceSetup {
   string directory = 1;
   repeated string commands = 2;
   repeated AgentRepositorySetup repositories = 3;
+  // Tools the project needs that the worker installs into its own folder,
+  // without root, before the commands run: bun, node, pnpm or uv, at a version
+  // or the latest.
+  repeated AgentWorkerTool tools = 4;
 }
 
 message AgentRepositorySetup {
@@ -279,6 +331,12 @@ enum AgentRunOutcome {
 message AgentWorkerHeartbeat {
   uint32 sequence = 1;
   AgentWorkerCapacity capacity = 2;
+  // Which of its providers are signed in now, where it says: an agent signed
+  // in or out during a run reaches the home without the worker starting again.
+  bool reports_sign_in = 3;
+  repeated string signed_in = 4;
+  // Its check again, with every fourth heartbeat.
+  AgentWorkerReadiness readiness = 5;
 }
 
 message AgentFileRef {

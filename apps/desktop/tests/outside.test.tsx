@@ -109,7 +109,8 @@ describe('connections', () => {
     expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
     expect(client.checkConnection).toHaveBeenCalledWith('conn1')
     const can = screen.getByRole('list', { name: 'What GitHub lets Althar do' })
-    expect(within(can).getByText('Reaches meridian-api').closest('li')?.textContent).toContain('northwind')
+    // Named by its owner and name, so the owner isn't a fact beside it.
+    expect(within(can).getByText('Reaches northwind/meridian-api')).toBeTruthy()
     expect(within(can).getByText('Open, update and merge pull requests')).toBeTruthy()
     const expiry = new Date(githubCheck.expiresAt ?? '').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
     expect(screen.getByText(`The token runs out on ${expiry}.`)).toBeTruthy()

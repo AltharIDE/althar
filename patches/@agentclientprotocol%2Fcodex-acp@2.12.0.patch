@@ -1,0 +1,25 @@
+diff --git a/dist/index.js b/dist/index.js
+index 79a2df2a1fab0ce6ba5eee9f158542a0ea2341f7..5cbd4de0dc3bb123c175d3c00d897849aaaec1e6 100755
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -45568,12 +45568,18 @@ var CodexAcpClient = class _CodexAcpClient {
+     return await this.runPromptTurn({
+       threadId: request.sessionId,
+       input: input2,
+-      approvalPolicy: agentMode.approvalPolicy,
++      approvalPolicy: process.env["ALTHAR_APPROVAL_POLICY"] ?? agentMode.approvalPolicy,
+       approvalsReviewer: agentMode.approvalsReviewer,
+       ...permissionProfileId ? {
+         permissions: permissionProfileId,
+         runtimeWorkspaceRoots: [cwd, ...additionalDirectories]
+-      } : { sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories) },
++      } : { sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(
++        typeof this.config["sandbox_workspace_write.network_access"] === "boolean" &&
++        (agentMode.sandboxPolicy.type === "workspaceWrite" || agentMode.sandboxPolicy.type === "readOnly")
++          ? { ...agentMode.sandboxPolicy, networkAccess: this.config["sandbox_workspace_write.network_access"] }
++          : agentMode.sandboxPolicy,
++        additionalDirectories
++      ) },
+       summary: disableSummary ? "none" : "auto",
+       effort,
+       model: modelId.model,

@@ -182,6 +182,28 @@ describe('finished tasks’ folders under Work on this computer', () => {
     expect(onTask).toHaveBeenCalledWith('th1')
   })
 
+  it('says how many folders something kept open, and holds back one it can’t count', async () => {
+    const running: TaskFolders = {
+      ...FOLDERS,
+      folders: [
+        ...FOLDERS.folders,
+        { ...FOLDERS.folders[1]!, taskId: 't3', threadId: 'th3', title: 'Still going', held: { why: 'running', count: null } },
+      ],
+    }
+    const { client } = fakeClient({
+      getTaskFolders: vi.fn(async () => running),
+      cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 2 })),
+    })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: 'Clean up' }))
+    expect((await within(page).findByRole('alert')).textContent).toBe('2 folders couldn’t be removed: something has them open.')
+    await userEvent.click(within(page).getByRole('button', { name: /Can go now/ }))
+    const held = await screen.findByRole('region', { name: 'Held back' })
+    expect(within(held).getByText('Still going')).toBeTruthy()
+    expect(within(held).getByText('Running')).toBeTruthy()
+  })
+
   it('says what couldn’t be done: a folder something has open, or a choice that couldn’t be kept', async () => {
     const { client } = fakeClient({
       getTaskFolders: vi.fn(async () => FOLDERS),

@@ -95,6 +95,8 @@ export interface QueueDetail {
   readonly onBaseToo?: ReadonlyArray<string>
   /** Of the jobs it failed, those the default branch's latest commit reports passing: only these name the pull request. */
   readonly passedOnBase?: ReadonlyArray<string>
+  /** Each job it failed, by name, with its page: the person's line links them all, whose logs were read or not. */
+  readonly pages?: ReadonlyArray<{ readonly name: string; readonly url: string | null }>
 }
 
 /** Of the jobs the queue's build failed, those its default branch's latest commit fails too, as that commit reports them. */
@@ -127,28 +129,68 @@ export const queueOwnFailures = (why: ChangeRequest['leftQueue'], detail: QueueD
     ? []
     : detail.failing.filter((name) => (detail.passedOnBase ?? []).includes(name))
 
+/** Names as people list them: "a", "a and b", "a, b and c". */
+export const listed = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`
+
 /**
- * Said to the person, in the task's thread, as the merge queue takes a pull request out with nothing in its build that names
- * it: why Althar didn't put its lead to work, and what is theirs to do.
+ * Said to the person, in the task's thread, as the merge queue takes a pull request out: what it took out and why, each job its
+ * build failed by name, which the thread links to its page. Never the lead's words: its logs, their framing and its tools are
+ * the lead's (`leftQueueForLead`), and the logs' ends fold under the line.
  */
-export const leftQueueUnclaimed = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) => {
+export const leftQueueLine = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
+  detail !== null && detail !== undefined && detail.failing.length > 0 && (why === 'checks' || why === 'other' || why == null)
+    ? `The merge queue took ${name} out: ${listed(detail.failing)} failed.`
+    : leftQueueNote(name, why)
+
+/**
+ * `leftQueueLine` with its links: the pull request's name, and each failed job that has a page, each where it stands in the
+ * line, so a job whose name also stands earlier in it (test in "test / linux", or "out") links its own.
+ */
+export const leftQueueLinked = (
+  name: string,
+  url: string,
+  why: ChangeRequest['leftQueue'],
+  detail: QueueDetail | null | undefined,
+): { readonly title: string; readonly links: ReadonlyArray<{ readonly label: string; readonly url: string; readonly at: number }> } => {
+  const title = leftQueueLine(name, why, detail)
+  const named = title.indexOf(name)
+  const links: Array<{ readonly label: string; readonly url: string; readonly at: number }> =
+    named < 0 ? [] : [{ label: name, url, at: named }]
+  const failing = detail?.failing ?? []
+  const head = `The merge queue took ${name} out: `
+  if (failing.length === 0 || title !== `${head}${listed(failing)} failed.`) return { title, links }
+  const pages = [...(detail?.pages ?? [])]
+  let at = head.length
+  failing.forEach((job, index) => {
+    // The pages are the failed checks in the same order: each name takes the next of that name, with its page or without one,
+    // so two checks both named test never swap theirs.
+    const page = pages.findIndex((one) => one.name === job)
+    const found = page < 0 ? null : (pages.splice(page, 1)[0]?.url ?? null)
+    if (found !== null) links.push({ label: job, url: found, at })
+    at += job.length + (index === failing.length - 2 ? ' and '.length : ', '.length)
+  })
+  return { title, links }
+}
+
+/**
+ * Said to the person after that line, where nothing in the queue's build names the pull request: why its lead wasn't put to
+ * work, and what is theirs to do. `base` is the default branch the build's jobs were compared with.
+ */
+export const leftQueueUnclaimed = (why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined, base: string) => {
   const failing = detail?.failing ?? []
   const too = failing.filter((job) => (detail?.onBaseToo ?? []).includes(job))
   const unknown = failing.filter((job) => !too.includes(job))
   const because =
     failing.length > 0
       ? [
-          ...(too.length > 0 ? [`${too.join(', ')} fail${too.length === 1 ? 's' : ''} on the default branch too`] : []),
-          ...(unknown.length > 0
-            ? [
-                `the default branch hasn’t reported ${unknown.join(', ')} passing, so Althar can’t tell ${unknown.length === 1 ? 'it' : 'them'} from a failure of its own`,
-              ]
-            : []),
+          ...(too.length > 0 ? [`${listed(too)} fail${too.length === 1 ? 's' : ''} on ${base} too`] : []),
+          ...(unknown.length > 0 ? [`${base} hasn’t shown ${listed(unknown)} passing`] : []),
         ].join(', and ')
       : why === 'checks'
-        ? 'Althar couldn’t read which of its build’s jobs failed'
-        : 'the host gave no specific reason, and its build names no job that failed'
-  return `Nothing names ${name} as why it was taken out: ${because}. Its lead wasn’t asked to change anything. Put it back in the queue when you want, or ask its lead to look.`
+        ? 'Althar couldn’t read which jobs failed'
+        : 'the host gave no reason'
+  return `Its lead wasn’t asked to fix anything: ${because}. Put it back in the queue when you want, or ask its lead to look.`
 }
 
 /** What its lead reads, with its next turn, of a send-back nothing names it in: what happened, and that the person has it. */

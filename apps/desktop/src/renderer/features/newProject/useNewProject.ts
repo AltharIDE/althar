@@ -156,7 +156,7 @@ export const useNewProject = (): NewProjectModel => {
 
   const setup = useSetupOf(draft, store, list)
   const way = setup?.way ?? 'folder'
-  const clone = setup?.clone ?? null
+  const clones = setup?.clones ?? []
   // What it's made of, as the way chosen brings it: the clone, the new repository, or the folders.
   const mine = (came: 'clone' | 'new' | 'folder') => (draft?.folders ?? []).filter((folder) => (folder.came ?? 'folder') === came)
   const folders: ReadonlyArray<NewProjectFolder> =
@@ -165,17 +165,13 @@ export const useNewProject = (): NewProjectModel => {
       : way === 'clone'
         ? mine('clone').length > 0
           ? mine('clone').map((folder) => folderOf(folder, list))
-          : clone === null
-            ? []
-            : [
-                {
-                  id: clone.id,
-                  name: clone.remote.split('/').at(-1) ?? clone.remote,
-                  where: clone.where ?? clone.hostName,
-                  host: { name: clone.hostName, ...(clone.brand === null ? {} : { brand: clone.brand }) },
-                  remote: clone.remote,
-                },
-              ]
+          : clones.map((clone) => ({
+              id: clone.id,
+              name: clone.remote.split('/').at(-1) ?? clone.remote,
+              where: clone.where ?? clone.hostName,
+              host: { name: clone.hostName, ...(clone.brand === null ? {} : { brand: clone.brand }) },
+              remote: clone.remote,
+            }))
         : way === 'new'
           ? [
               ...mine('new').map((folder) => folderOf(folder, list)),
@@ -272,7 +268,7 @@ const PLACEHOLDER: Draft = {
   folders: [],
   fresh: null,
   reading: [],
-  clone: null,
+  clones: [],
   query: '',
   cloneInto: null,
   home: null,

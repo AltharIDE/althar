@@ -279,6 +279,22 @@ describe('a clone', () => {
     }),
   )
 
+  it.effect('makes the place it goes in where it isn’t there yet, as a home’s first place for projects is', () =>
+    Effect.gen(function* () {
+      const bare = bareWith({ 'README.md': '# Tidepool' })
+      const parent = join(temp(), 'projects')
+      const path = yield* cloneRepository({
+        parent,
+        remote: 'balazs/tidepool',
+        host: 'GitHub',
+        folder: 'tidepool',
+        target: { url: bare, header: null },
+      })
+      assert.strictEqual(path, join(realpathSync(parent), 'tidepool'))
+      assert.strictEqual(readFileSync(join(path, 'README.md'), 'utf8'), '# Tidepool')
+    }),
+  )
+
   it.effect('uses an empty folder of its name, and refuses one with something in it', () =>
     Effect.gen(function* () {
       const bare = bareWith({ 'a.md': '' })
@@ -330,14 +346,40 @@ describe('a clone', () => {
           target: { url: `http://127.0.0.1:${port}/held.git`, header: null },
         }),
       )
+      // git writes in this clone's own folder beside it, never in the one it goes to until it's whole.
       yield* until(
-        Effect.sync(() => readdirSync(join(parent, 'held'))),
+        Effect.sync(() =>
+          readdirSync(parent).flatMap((name) => (name.startsWith('.held.cloning-') ? readdirSync(join(parent, name)) : [])),
+        ),
         (names) => names.includes('.git'),
       )
       yield* Fiber.interrupt(fiber)
       for (const socket of sockets) socket.destroy()
       server.close()
       assert.deepStrictEqual(readdirSync(join(parent, 'held')), [])
+      assert.deepStrictEqual(readdirSync(parent), ['held'])
+    }),
+  )
+
+  it.live('two at once of the same name: the first in keeps its checkout whole, and the other takes away only its own', () =>
+    Effect.gen(function* () {
+      const bare = bareWith({ 'README.md': '# Tidepool' })
+      const parent = temp()
+      const source = { parent, remote: 'balazs/tidepool', host: 'GitHub', folder: 'tidepool', target: { url: bare, header: null } }
+      const [one, two] = yield* Effect.all([Effect.result(cloneRepository(source)), Effect.result(cloneRepository(source))], {
+        concurrency: 'unbounded',
+      })
+      const results = [one, two]
+      assert.lengthOf(
+        results.filter((result) => result._tag === 'Success'),
+        1,
+      )
+      const refused = results.find((result) => result._tag === 'Failure')
+      assert.deepInclude(refused?._tag === 'Failure' ? refused.failure : null, { reason: 'taken' })
+      const path = join(parent, 'tidepool')
+      assert.strictEqual(readFileSync(join(path, 'README.md'), 'utf8'), '# Tidepool')
+      assert.strictEqual(git(path, 'status', '--porcelain'), '')
+      assert.deepStrictEqual(readdirSync(parent), ['tidepool'])
     }),
   )
 
