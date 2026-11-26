@@ -103,6 +103,12 @@
 @media (max-width: 900px) {
   .review .stick { position: static; padding-top: 48px; }
 }
+/* On a phone it is pinned again, the window's height under the nav (Patch.module.css lays it out), with room under it for the download as it lets go. */
+@media (max-width: 699px) and (prefers-reduced-motion: no-preference) {
+  .review { padding-bottom: 120px; }
+  .review .stick { position: sticky; box-sizing: border-box; height: calc(100svh - 88px); padding-top: 8px; }
+  .review .stick > .wrap { height: 100%; }
+}
 
 /* A row that runs sideways as the page scrolls (the screens). The flow has its own (Flow.module.css). */
 .track { position: relative; margin-top: 40px; }
@@ -196,17 +202,18 @@
 .end { container-type: inline-size; }
 .aurora {
   --side: max(1440px, 100cqw);
+  --tall: var(--side);
   position: absolute;
   inset: -140px 0 0;
   transform: translateY(calc((1 - var(--p, 1)) * 140px));
   pointer-events: none;
 }
-.aurora i { position: absolute; inset: 0; background: url('./aurora.webp') center bottom / var(--side) var(--side) no-repeat; }
+.aurora i { position: absolute; inset: 0; background: url('./aurora.webp') center bottom / var(--side) var(--tall) no-repeat; }
 .block {
   --mask: radial-gradient(var(--mw) 22% at var(--mx) 100%, #000 0, rgba(0, 0, 0, 0.6) 45%, transparent 100%);
   opacity: 0;
   filter: saturate(2.4) brightness(1.06) contrast(1.08);
-  mask: var(--mask) center bottom / var(--side) var(--side) no-repeat;
+  mask: var(--mask) center bottom / var(--side) var(--tall) no-repeat;
   animation: brighten var(--md) cubic-bezier(0.35, 0.6, 0.3, 1) var(--dl) infinite;
 }
 .block[data-block='1'] { --mx: 8%; --mw: 20%; --md: 4.4s; --dl: -0.7s; }
@@ -214,6 +221,10 @@
 .block[data-block='3'] { --mx: 50%; --mw: 26%; --md: 4.8s; --dl: -3.8s; }
 .block[data-block='4'] { --mx: 70%; --mw: 22%; --md: 6s; --dl: -1.5s; }
 .block[data-block='5'] { --mx: 92%; --mw: 20%; --md: 5.1s; --dl: -4.6s; }
+/* Pinch-zoomed in (lib/zoom.ts) the blocks aren't drawn: their pulse is stopped there, so they show nothing, and a
+   filtered, masked box is still drawn whole, off screen, at the zoom's sharpness; five of them the scene's size were
+   more than a phone's browser has, and it reloaded the page. The light under them stays. */
+:global(html[data-zoomed]) .block { display: none; }
 @keyframes brighten {
   0% { opacity: 0; }
   12% { opacity: 0.8; }
@@ -264,6 +275,9 @@
 @media (max-width: 900px) {
   .head { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .altitude { right: 14px; bottom: 14px; padding: 7px 11px; font-size: 11px; }
+  /* The light as wide as the scene, so a phone sees all its colours, end to end, as a wide screen does; drawn taller
+     than wide, or the band of light along its foot would be a sliver. */
+  .aurora { --side: 100cqw; --tall: 900px; }
 }
 @media (max-width: 1099px) {
   .groups { grid-template-columns: minmax(0, 1fr); }

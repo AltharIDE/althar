@@ -51,6 +51,14 @@ describe('what a new project’s card offers', () => {
     })
   })
 
+  it('offers on another computer’s home only what its window may connect: its code host where the home allows, never a tracker', () => {
+    const offer = firstConnectionsOf(connectionList, 'meridian', { hosts: true, trackers: false })
+    expect(offer.host).toBeDefined()
+    expect(offer.trackers).toEqual([])
+    const older = firstConnectionsOf(connectionList, 'meridian', { hosts: false, trackers: false })
+    expect(older).toEqual({ hosts: [], trackers: [] })
+  })
+
   it('offers every host where the code names none, and none once one is connected', () => {
     expect(firstConnectionsOf(connectionList, 'halyard').hosts).toEqual([{ id: 'github', name: 'GitHub', brand: 'github' }])
     expect(firstConnectionsOf({ ...connectionList, connections: [githubConnection] }, 'halyard').hosts).toEqual([])

@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useState } from 'react'
+import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { useDownload } from '../../lib/download'
 import s from './Patch.module.css'
@@ -20,8 +20,19 @@ import { REVIEW_FACTS, REVIEW_TODAY, REVIEW_TODAY_NOTE, SCENE } from './scenes'
  * headers, and one opened by hand stays so until the next comes in. Under
  * them, once the last has typed in, the download.
  *
+ * On a `phone` it is pinned and played the same, in one column the window's
+ * height, nearly all of it the drawing's, which reads only large: over it
+ * the heading's line in play and one line more (today the paste just made;
+ * with Althar the lead, then the first line of the hunk just in), and no
+ * file's bar; and the preview under those, the window's whole width: the
+ * drawing laid out at a desktop's width and scaled to the room left
+ * (`--fit`), since narrower than 560px it would stand itself upright
+ * (review.html), the side in play in the frame's middle and as wide as the
+ * page's measure where the height allows, the other out of sight until it
+ * pans. The download waits under the picture, there as the scene lets go.
+ *
  * `at` is where the scroll has the story, in s; Infinity where nothing is
- * typed (motion reduced, or a tablet or a phone, where it isn't pinned): all
+ * typed (motion reduced, or a tablet, where it isn't pinned): all
  * there, with the first hunk open, and the preview the whole drawing.
  * `enter`, 0 to 1, is how far the section has scrolled up into place: its
  * parts fade and rise in, in turn, as it does (`--in`), and today's comment
@@ -74,8 +85,33 @@ function Typed({ text, k }: { text: string; k: number }) {
   )
 }
 
-export function Patch({ at, enter = 1, preview }: { at: number; enter?: number; preview: ReactNode }) {
+/** On a phone, how wide the drawing is laid out, in px, both its sides: wide enough that it draws as a desktop's does. */
+const DRAWN = 880
+/** One side's panel's share of the drawing's width (review.html), and the room kept either side of it in the frame, in px: the page's gutter, so it is as wide as the page's measure at most. */
+const PANEL = 0.406
+const ROOM = 22
+
+export function Patch({ at, enter = 1, phone = false, preview }: { at: number; enter?: number; phone?: boolean; preview: ReactNode }) {
   const typing = Number.isFinite(at)
+  // On a phone, the drawing scaled to the room its frame has: one side of it, 16 by 10 across both, the frame's height.
+  const crop = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = crop.current
+    if (!el || !phone) return
+    // As large as the frame's height takes one side of it, and never wider than the frame.
+    const fit = () =>
+      el.style.setProperty(
+        '--fit',
+        Math.min(el.clientHeight / ((DRAWN * 10) / 16), (el.clientWidth - 2 * ROOM) / (DRAWN * PANEL)).toFixed(4),
+      )
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      el.style.removeProperty('--fit')
+    }
+  }, [phone])
   const today = typing && at < PAN[0]
   const ta = at - ALTHAR
   const arrived = typing ? FACT_AT.filter((t) => ta >= t).length : FACT_AT.length
@@ -89,8 +125,32 @@ export function Patch({ at, enter = 1, preview }: { at: number; enter?: number; 
   // Its room is held from the start, so nothing moves as it comes in.
   const get = !typing || ta >= GET_AT
   const vars = { '--pan': typing ? smooth(share(at, PAN)).toFixed(4) : 1, '--in': enter.toFixed(4) } as CSSProperties
+  const getLink = (
+    <a className={s.get} href={download.href} data-in={get || undefined} tabIndex={get ? undefined : -1}>
+      {download.pending ? 'Download' : download.label}
+      <svg
+        aria-hidden="true"
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 4v12M6 11l6 6 6-6M5 20h14" />
+      </svg>
+    </a>
+  )
   return (
-    <div className={s.patch} style={vars} data-today={today || undefined}>
+    <div
+      className={s.patch}
+      style={vars}
+      data-today={today || undefined}
+      data-phone={phone || undefined}
+
+      data-arrived={arrived}
+    >
       <p className={s.file} aria-hidden="true">
         <b>your-workflow.md</b>
         <span className={s.del}>−{(out > 0.5 ? 1 : 0) + pasted}</span>
@@ -189,26 +249,15 @@ export function Patch({ at, enter = 1, preview }: { at: number; enter?: number; 
               )
             })}
           </ol>
-          <a className={s.get} href={download.href} data-in={get || undefined} tabIndex={get ? undefined : -1}>
-            {download.pending ? 'Download' : download.label}
-            <svg
-              aria-hidden="true"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 4v12M6 11l6 6 6-6M5 20h14" />
-            </svg>
-          </a>
+          {!phone && getLink}
         </div>
         <div className={s.preview}>
-          <div className={s.crop}>{preview}</div>
+          <div ref={crop} className={s.crop}>
+            {preview}
+          </div>
         </div>
       </div>
+      {phone && getLink}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { Brand, BrandMark, Logo } from '@althar/ui'
 import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
 
 import { LINKS } from '../content/facts'
+import { DiscordMark } from './DiscordMark'
 import { useHydrated, useStill } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { useDownload } from '../lib/download'
@@ -203,7 +204,11 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
               {p.name}
             </a>
           ))}
-          <a href={LINKS.repo} style={nth(PAGES.length)} onClick={close}>
+          <a href={LINKS.discord} style={nth(PAGES.length)} onClick={close}>
+            <DiscordMark size={16} />
+            Discord
+          </a>
+          <a href={LINKS.repo} style={nth(PAGES.length + 1)} onClick={close}>
             <BrandMark brand={Brand.GitHub} size={16} />
             GitHub
           </a>

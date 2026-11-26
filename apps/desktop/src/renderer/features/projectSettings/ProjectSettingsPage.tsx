@@ -3,12 +3,15 @@ import { useState } from 'react'
 import type { ConnectionList, ProjectRepository, Runnable } from '@althar/contracts'
 import { RemoveProject, SettingsLayout, SettingsNav } from '@althar/ui'
 
+import { canCall } from '../../data/client'
+import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
 import { ConnectDialog, type Opening } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import type { Tracker } from '../project/front'
 import { RulesSection } from '../rules/RulesSection'
 import { ChangedBy } from '../settings/ChangedBy'
+import { farText, HomeHolds, type Unshown } from '../homes/HomeHolds'
 import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
@@ -34,6 +37,30 @@ export const text = {
   label: 'Project settings',
   remove: 'Remove from Althar…',
 }
+
+/**
+ * Each section, where a window on another computer's home can't show it: what isn't shown, and what still holds there.
+ * Where it is shown but can't be changed from here, it says so in one line of its own (HomeHolds).
+ */
+export const unshown = {
+  general: { icon: 'gear', title: (home: string) => `This project’s name stays on ${home} for now`, line: farText('it') },
+  tasks: {
+    icon: 'work',
+    title: (home: string) => `How this project’s tasks go stays on ${home} for now`,
+    line: `${farText('it')} Its tasks there still go as it’s set.`,
+  },
+  rules: {
+    icon: 'lock',
+    title: (home: string) => `This project’s rules stay on ${home} for now`,
+    line: `${farText('them')} Its agents there still follow them.`,
+  },
+  running: { icon: 'play', title: (home: string) => `What this project runs stays on ${home} for now`, line: farText('it') },
+  notes: {
+    icon: 'quote',
+    title: (home: string) => `The coordinator’s notes stay on ${home} for now`,
+    line: `${farText('them')} The coordinator still goes by them.`,
+  },
+} satisfies Record<string, Unshown>
 
 export interface ProjectSettingsPageProps {
   readonly projectId: string
@@ -69,6 +96,7 @@ export function ProjectSettingsPage({
   onConnections,
 }: ProjectSettingsPageProps) {
   const [connecting, setConnecting] = useState<Opening | null>(null)
+  const { client } = useServices()
   // Here, not in the rules' section, so a change on its way outlasts a look at another section.
   const rules = useRules(projectId)
   const open = projectSectionText[section]
@@ -94,7 +122,10 @@ export function ProjectSettingsPage({
               )}
               value={section}
               onChange={onSection}
-              action={{ title: text.remove, icon: 'close', danger: true, onSelect: model.askRemove }}
+              // Removed only where the home lets this window: another computer's home keeps its projects' removal to itself.
+              {...(canCall(client, 'RemoveProject')
+                ? { action: { title: text.remove, icon: 'close' as const, danger: true, onSelect: model.askRemove } }
+                : {})}
             />
           </>
         }
@@ -153,31 +184,50 @@ function SectionBody({
 }) {
   switch (section) {
     case 'general':
-      return <GeneralSection model={model} seed={projectId} />
+      return (
+        <HomeHolds changes={['RenameProject', 'SetProjectInk']} unshown={unshown.general}>
+          <GeneralSection model={model} seed={projectId} />
+        </HomeHolds>
+      )
     case 'tasks':
-      return <TasksSection model={model} seed={projectId} rulesModel={rules} repositories={repositories} onCode={() => onSection('code')} />
+      return (
+        <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.tasks}>
+          <TasksSection model={model} seed={projectId} rulesModel={rules} repositories={repositories} onCode={() => onSection('code')} />
+        </HomeHolds>
+      )
     case 'code':
       return <CodeSection projectId={projectId} trackers={trackers} list={list} onConnect={onConnect} onManage={onConnections} />
     case 'rules':
       return (
         <>
-          <RulesSection model={rules} />
-          <AgentSettingsPart projectId={projectId} />
+          <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.rules}>
+            <RulesSection model={rules} />
+          </HomeHolds>
+          {/* Its own calls: a home that can't read them shows none of it, one that can't change them shows it as it stands. */}
+          <HomeHolds changes={['DecideAgentSettings']} unshown={unshown.rules}>
+            <AgentSettingsPart projectId={projectId} />
+          </HomeHolds>
         </>
       )
     case 'running':
       return (
-        <RunningSection
-          projectId={projectId}
-          project={model.name ?? ''}
-          runnables={runnables}
-          repositories={repositories}
-          worktrees={model.project?.worktrees ?? null}
-          {...(model.rules === null ? {} : { worksIn: model.rules.worksIn })}
-          onWorksIn={() => onSection('tasks')}
-        />
+        <HomeHolds changes={['KeepRunnable', 'DropRunnable', 'OrderRunnables', 'SetRepository']} unshown={unshown.running}>
+          <RunningSection
+            projectId={projectId}
+            project={model.name ?? ''}
+            runnables={runnables}
+            repositories={repositories}
+            worktrees={model.project?.worktrees ?? null}
+            {...(model.rules === null ? {} : { worksIn: model.rules.worksIn })}
+            onWorksIn={() => onSection('tasks')}
+          />
+        </HomeHolds>
       )
     case 'notes':
-      return <NotesSection model={model} />
+      return (
+        <HomeHolds reads={['GetProjectNotes']} changes={['EditProjectNote', 'DropProjectNote']} unshown={unshown.notes}>
+          <NotesSection model={model} />
+        </HomeHolds>
+      )
   }
 }

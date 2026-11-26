@@ -29,11 +29,11 @@ describe('the gallery', () => {
       expect(html).toContain(`<b>${screen.name}</b>`)
       expect(html).toContain(screen.line)
       // The canvas is drawn in the page (CanvasScreen), a picture by its label; the rest are the brand pack's screenshots.
-      // A phone shows the brand pack's picture of a canvas in its place, by what that one shows.
+      // A phone shows a picture of that same card in its place (story/canvas-signin.webp).
       if (screen.file === 'canvas') {
         expect(html).toContain(`role="img" aria-label="${screen.alt}"`)
-        expect(html).toContain(`alt="${screen.still}"`)
-        expect(html).toMatch(/canvas-920h[^"]*\.webp/)
+        expect(html).toContain(`alt="${screen.alt}"`)
+        expect(html).toMatch(/canvas-signin[^"]*\.webp/)
         continue
       }
       expect(html).toContain(`alt="${screen.alt}"`)

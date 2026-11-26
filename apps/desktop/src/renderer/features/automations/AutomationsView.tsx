@@ -8,6 +8,7 @@ import { platform } from '../../shared/device'
 import { PartPending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
 import { useNow } from '../../shared/time'
+import { farText, HomeHolds, type Unshown } from '../homes/HomeHolds'
 import { AutomationCardOf } from './AutomationCardOf'
 import { type AutomationModel, type AutomationsModel, useAutomation, useAutomations, useNewAutomation } from './useAutomations'
 import {
@@ -301,7 +302,26 @@ function New({
   )
 }
 
-export function AutomationsView({
+/** A project's automations, as the window's home shows them: on another computer's home that keeps them from it, a calm line. */
+export function AutomationsView(props: Parameters<typeof AutomationsRoom>[0]) {
+  return (
+    <HomeHolds
+      reads={['GetAutomations', 'GetAutomation']}
+      changes={['MakeAutomation', 'ChangeAutomation', 'PauseAutomation', 'DeleteAutomation']}
+      unshown={unshown}
+    >
+      <AutomationsRoom {...props} />
+    </HomeHolds>
+  )
+}
+
+const unshown = {
+  icon: 'automation',
+  title: (home: string) => `This project’s automations stay on ${home} for now`,
+  line: `${farText('them')} They still run there on their schedules.`,
+} satisfies Unshown
+
+function AutomationsRoom({
   projectId,
   project,
   agents,

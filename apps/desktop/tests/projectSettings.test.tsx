@@ -30,6 +30,7 @@ import {
   githubConnection,
   project,
   projectRules,
+  remoteConnection,
   repositories,
   runnables,
 } from './fixtures'
@@ -831,6 +832,13 @@ describe('a project’s settings', () => {
     await userEvent.click(await sheet('Notes').findByRole('button', { name: 'Remove “Issue drafts need an approval card.”' }))
     expect(await sheet('Notes').findByRole('alert')).toHaveProperty('textContent', 'That project isn’t there any more.')
     await waitFor(() => expect(sheet('Notes').getAllByRole('listitem')).toHaveLength(1))
+  })
+
+  it('offers no Remove on a home that keeps its projects’ removal to itself', async () => {
+    windowAt('/projects/p1', { connection: remoteConnection() })
+    await waitFor(() => expect(tabNamed('meridian')).toBeTruthy())
+    const side = await openSettings()
+    expect(side.queryByRole('button', { name: 'Remove from Althar…' })).toBeNull()
   })
 
   it('removes the project from the foot of the side, after saying what happens, and goes home; its tab goes', async () => {

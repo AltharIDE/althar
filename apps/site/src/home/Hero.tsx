@@ -24,7 +24,7 @@ import { KM } from './story/Altitude'
 const SYSTEMS = [
   { id: 'mac', name: 'macOS' },
   { id: 'linux', name: 'Linux' },
-  { id: 'windows', name: 'Windows', soon: true },
+  { id: 'windows', name: 'Windows' },
 ] as const
 
 export function Hero({ nav }: { nav?: ReactNode }) {
@@ -89,7 +89,6 @@ export function Hero({ nav }: { nav?: ReactNode }) {
               <span key={x.id} className={s.system}>
                 <OsMark id={x.id} size={16} />
                 {x.name}
-                {'soon' in x && <span className={s.soon}>{HERO.soon}</span>}
               </span>
             ))}
           </p>

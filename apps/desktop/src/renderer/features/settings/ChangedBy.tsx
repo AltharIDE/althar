@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { SettingChanged } from '@althar/contracts'
 import { LinkButton } from '@althar/ui'
 
+import { canCall } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { ago } from '../../shared/time'
@@ -56,7 +57,8 @@ function One({ who, labels, at, lines }: { who: string; labels: ReadonlyArray<st
 /** A section's agents' changes, by its address: `althar/plans-and-reviews`, or `project/rules` with its project. */
 export function ChangedBy({ projectId, section }: { projectId: string | null; section: string }) {
   const { client } = useServices()
-  const changed = useQuery(reads(client).settingChanges(projectId)).data ?? []
+  // Not asked of a home that doesn't share its settings' history with this window: nothing to say there.
+  const changed = useQuery({ ...reads(client).settingChanges(projectId), enabled: canCall(client, 'GetSettingChanges') }).data ?? []
   const here = changed.filter((one) => one.section === section)
   if (here.length === 0) return null
   // One line for each agent, its settings in the order Settings changed them, the latest time.

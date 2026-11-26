@@ -422,7 +422,9 @@ const typing = (event: KeyboardEvent) => {
 export const openingFace = (snapshot: ThreadSnapshot): Face => {
   const { task } = snapshot
   if (snapshot.attention.length > 0 || (task.kind !== undefined && task.kind !== 'change')) return 'talk'
-  return (task.phase === 'ready' && hasOutputs(snapshot)) || task.merged.some((one) => one.ahead > 0) ? 'out' : 'talk'
+  return ((task.phase === 'ready' || task.phase === 'kept') && hasOutputs(snapshot)) || task.merged.some((one) => one.ahead > 0)
+    ? 'out'
+    : 'talk'
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
@@ -1215,17 +1217,17 @@ export function TaskView({
     reviewing: snapshot.task.review,
     nothingBuilt: snapshot.task.nothingBuilt,
   })
-  // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
-  const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
-  // Keep for later, for any kind that finished, a prototype or a chat ending on its branch too: not one whose pull request is
-  // open, or held for Ship, which wait on the person in their own ways.
+  // Held for Ship, Ship is its one way on, first in the chip, kept for later as well: a finished task that isn't a change keeps
+  // Done and Keep beside it.
+  const held = !busy && (snapshot.task.phase === 'ready' || snapshot.task.phase === 'kept') ? snapshot.task.held : undefined
+  // Keep for later, for any kind that finished, a prototype or a chat ending on its branch too, and one held for Ship: not one
+  // whose pull request is open, which waits on the person on its host.
   const keeps =
     !busy &&
     takesKeep({
       phase: snapshot.task.phase ?? '',
       state: snapshot.task.state,
       pullOpen: snapshot.task.changes.some((one) => one.state === 'open'),
-      held: snapshot.task.held,
     })
   // What its review after a merge found: Fix it and Leave it, first in the chip.
   const found = !busy && snapshot.task.afterMerge?.state === 'found' ? snapshot.task.afterMerge : undefined

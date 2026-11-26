@@ -125,15 +125,6 @@
 .runs { display: flex; align-items: center; gap: 28px; font-size: 15px; color: var(--t-2); }
 .system { display: flex; align-items: center; gap: 8px; }
 .system svg { color: var(--t-1); }
-.soon {
-  padding: 3px 7px;
-  border-radius: 6px;
-  background: rgba(43, 59, 255, 0.1);
-  color: var(--cobalt);
-  font: 500 10.5px var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
 .install {
   display: flex;
   align-items: center;
@@ -175,6 +166,9 @@
   .runs { flex-wrap: wrap; gap: 16px 24px; }
   .h1 { font-size: clamp(30px, 8.6vw, 44px); }
   .line { white-space: normal; text-wrap: balance; }
+  /* Install and the copy button on one line, the command under them across the whole box, sized to the screen so it isn't cut off. */
+  .install { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; width: 100%; height: auto; padding: 8px 8px 14px 14px; }
+  .install code { grid-row: 2; grid-column: 1 / -1; font-size: min(14px, calc((100vw - 76px) / 25.5)); overflow-x: auto; scrollbar-width: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dot, .feed { display: none; }

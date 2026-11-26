@@ -111,3 +111,48 @@ export const AllStates: Story = {
     pressed: 'nav ul:nth-child(2) li:first-child button',
   }),
 }
+
+/** In a window on another computer's home: what that home keeps under its name and what it runs, then this computer's own. */
+export const OnAHome: Story = {
+  render: function Render() {
+    const [value, setValue] = useState<Id | 'servers' | 'tasks' | 'computers'>('agents')
+    return (
+      <div style={{ width: 248 }}>
+        <SettingsNav
+          label="Settings"
+          groups={[
+            {
+              title: 'runner-1',
+              note: 'Ubuntu 24.04.1 LTS',
+              sections: [
+                { id: 'agents', title: 'Agents', icon: 'agents' },
+                { id: 'servers', title: 'MCP servers', icon: 'plug' },
+                { id: 'hosts', title: 'Code hosts and trackers', icon: 'branch' },
+                { id: 'tasks', title: 'Tasks', icon: 'work' },
+                { id: 'reviews', title: 'Pull requests', icon: 'pr' },
+                { id: 'computers', title: 'Computers', icon: 'worker' },
+              ],
+            },
+            {
+              title: 'This Mac',
+              sections: [
+                { id: 'mac', title: 'Work on this Mac', icon: 'load' },
+                { id: 'notify', title: 'Notifications', icon: 'bell' },
+                { id: 'look', title: 'Appearance', icon: 'image' },
+                { id: 'editor', title: 'Editor and browser', icon: 'file' },
+              ],
+            },
+            [{ id: 'about', title: 'About Althar', icon: 'down' }],
+          ]}
+          value={value}
+          onChange={setValue}
+        />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('list', { name: /runner-1/ })).toBeInTheDocument()
+    await expect(canvas.getByRole('list', { name: 'This Mac' })).toBeInTheDocument()
+  },
+}

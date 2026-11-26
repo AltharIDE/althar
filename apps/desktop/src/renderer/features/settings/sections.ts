@@ -38,6 +38,41 @@ export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
   ['about'],
 ]
 
+/** What a home keeps, in a window on it: its agents and what they're given, how its tasks go, where they run. */
+export const HOME_SECTIONS: ReadonlyArray<Section> = [
+  'agents',
+  'mcp-servers',
+  'skills',
+  'code-hosts',
+  'tasks',
+  'pull-requests',
+  'computers',
+]
+/** What this computer keeps, whichever home its window is on: how Althar works and looks here. */
+export const CLIENT_SECTIONS: ReadonlyArray<Section> = ['this-mac', 'notifications', 'appearance', 'editor-and-browser']
+
+/** A group down the side: under a heading, in a window on another computer's home; else as GROUPS has it. */
+export type SectionGroup =
+  | ReadonlyArray<Section>
+  | { readonly title: string; readonly note?: string; readonly sections: ReadonlyArray<Section> }
+
+/**
+ * The groups down the side. In a window on another computer's home, that home's sections under its name and what it
+ * runs, then this computer's under This Mac, About among them; in this computer's own window, as GROUPS has them.
+ */
+export const groupsFor = (home: {
+  readonly remote: boolean
+  readonly name: string
+  readonly system: string | null
+}): ReadonlyArray<SectionGroup> =>
+  home.remote
+    ? [
+        { title: home.name, ...(home.system === null ? {} : { note: home.system }), sections: HOME_SECTIONS },
+        // Which Althar this is, its updates and what it reports are this computer's own too.
+        { title: device.This, sections: [...CLIENT_SECTIONS, 'about'] },
+      ]
+    : GROUPS
+
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly icon: IconName }>> = {
   agents: { title: 'Agents', icon: 'agents' },
   'mcp-servers': { title: 'MCP servers', icon: 'plug' },

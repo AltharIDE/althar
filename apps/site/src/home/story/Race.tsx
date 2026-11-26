@@ -203,9 +203,12 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
   const fade = smooth(clamp((k - 0.2) / 0.5))
   const f = scale / 0.7222
   const ty = cy + 2.5 * scale + 2 * f
+  // On a phone the core is drawn smaller (its own `scale`, Race.module.css), and that scales its move too: the move and its growth are written for it, so it still lands on the orrery's mark, the mark's size.
+  const small = Number.parseFloat(getComputedStyle(core).scale) || 1
+  const grown = small * (1 + (f / small - 1) * move)
   core.style.transform =
     move > 0
-      ? `translate(${((cx - W / 2) * move).toFixed(1)}px, ${((ty - CORE_MIDDLE) * move).toFixed(1)}px) scale(${(1 + (f - 1) * move).toFixed(3)})`
+      ? `translate(${(((cx - W / 2) * move) / small).toFixed(1)}px, ${(((ty - CORE_MIDDLE) * move) / small).toFixed(1)}px) scale(${(grown / small).toFixed(3)})`
       : ''
   core.style.opacity = k > 0 ? (1 - orrIn).toFixed(3) : ''
   for (const w of all(sec, '[data-word]')) w.style.opacity = k > 0 ? (1 - fade).toFixed(3) : ''
@@ -213,7 +216,7 @@ function draw(sec: HTMLElement, p: number, live: boolean) {
   one<SVGSVGElement>('[data-lines]').style.opacity = (1 - move).toFixed(3)
   // As the core comes down the line, the line goes from the top down ahead of it: none of it under the mark (its foot 54 px under its middle, as it is scaled), none above.
   if (move > 0) {
-    const foot = CORE_MIDDLE + (ty - CORE_MIDDLE) * move + CORE_FOOT * (1 + (f - 1) * move)
+    const foot = CORE_MIDDLE + (ty - CORE_MIDDLE) * move + CORE_FOOT * grown
     trunk.style.strokeDashoffset = (-clamp((foot - TRUNK_TOP) / (branchHeight(step) - TRUNK_TOP))).toFixed(4)
   }
   const headOut = smooth(clamp(k / 0.22))

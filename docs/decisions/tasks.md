@@ -549,9 +549,12 @@ change settles when its pull request merges, or when it is abandoned.
 
 **Keep for later is for every kind of task** that finished, not only one
 that isn't a change: a prototype or a chat planned from a preset ends on
-its branch, which makes it a change, and it keeps all the same. Only a
-task with its pull request open, or commits held for Ship, has no Keep:
-those wait on the person in their own ways, which a kept row doesn't show.
+its branch, which makes it a change, and it keeps all the same, and so
+does one whose commits wait for Ship: they stay held on its branch, and
+Accept or Ship are there when it is opened. Only a task with its pull
+request open has no Keep: it waits on the person on its host, which a kept
+row doesn't show, and Keep for later asked of it anyway is refused, saying
+so, its row back where it was.
 
 The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles

@@ -166,6 +166,8 @@ export function Rings({ className, notes }: { className?: string; notes?: readon
       last = now
       // Pinch-zoomed in, it holds still, drawing nothing, and goes on where it was (lib/zoom.ts).
       if (isZoomed()) {
+        // Untilted: a 3D lean keeps the orrery's whole box a layer, drawn at the zoom's sharpness.
+        if (lean.style.transform) lean.style.transform = ''
         lastY = window.scrollY
         frame = requestAnimationFrame(tick)
         return

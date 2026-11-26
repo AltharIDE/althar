@@ -1,5 +1,6 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostReach,
   HostRepository,
   RepositoryOwner,
   AccountSignInState,
@@ -44,11 +45,11 @@ import type {
   ConnectionInfo,
   HomeFolders,
 } from '@althar/contracts'
-import { SOCKET_CALLS } from '@althar/contracts'
+import { Api, SOCKET_CALLS } from '@althar/contracts'
 import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
-import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { type Client, type ProjectRulesChange, refusedHere } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host, PagesHost } from '../src/renderer/data/services'
 import type { HomeState, HomesHost } from '../src/homes'
@@ -1131,11 +1132,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       files: 1,
     })),
     listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    readHostReach: vi.fn(async (): Promise<HostReach> => ({ limited: null })),
     listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
-    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
-      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
-      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
-    }),
+    cloneRepository: vi.fn(
+      async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }, folder?: string) => {
+        const name = folder ?? ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+        return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+      },
+    ),
     publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
       remote: `${input.owner.id}/${input.name}`,
       webUrl: `https://github.com/${input.owner.id}/${input.name}`,
@@ -1372,6 +1376,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     stopWaiting: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => true),
+    placePlan: vi.fn(async () => false),
     holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),
@@ -1730,6 +1735,24 @@ export const remoteConnection = (calls: ReadonlyArray<string> | null = SOCKET_CA
     position: { homeId, cursor: 0, checkpoint: null },
     ...(calls === null ? {} : { calls }),
   }
+}
+
+/** Every call the API has, by its tag. */
+const API_TAGS: ReadonlySet<string> = new Set(Api.requests.keys())
+
+/**
+ * A fake client as a window on another computer's home has it: each call the home doesn't list for this connection is
+ * refused, as the real client refuses it (`refusedHere`), so a screen meets what that window meets.
+ */
+export const onHomeWindow = (overrides: Partial<Client> = {}, calls: ReadonlyArray<string> = SOCKET_CALLS) => {
+  const fake = fakeClient({ ...overrides, connection: remoteConnection(calls) })
+  const client = fake.client as unknown as Record<string, unknown>
+  for (const [name, method] of Object.entries(client)) {
+    const tag = `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`
+    if (typeof method !== 'function' || !API_TAGS.has(tag) || calls.includes(tag)) continue
+    client[name] = vi.fn(async () => Promise.reject(refusedHere(tag)))
+  }
+  return fake
 }
 
 /** What a home on another computer finds where its person keeps code, and where new code goes there. */

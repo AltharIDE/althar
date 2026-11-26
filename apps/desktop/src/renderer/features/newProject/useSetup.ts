@@ -2,17 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import type { ConnectionList, ConnectionSummary, Product, RepositoryOwner, Service } from '@althar/contracts'
-import { type Brand, type HostedRepository, type SetupHost, type SetupStatus, type SetupWay } from '@althar/ui'
+import { type Brand, type HostedRepository, type SetupHost, type SetupLimited, type SetupStatus, type SetupWay } from '@althar/ui'
 import { repositoryFolder } from '@althar/ui/screens'
 
 import { canCall } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { device } from '../../shared/device'
 import { thingOf, useHostRepositories } from '../../shared/hostRepositories'
 import { productBrand } from '../../shared/products'
 import { changesOn, hostnameOf, remoteOf } from '../../shared/remotes'
 import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
+import { useHomeName } from '../homes/useHomes'
 import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type DraftPlan, type DraftStore, sameRepository } from './draft'
 
 /*
@@ -37,10 +37,13 @@ export interface SetupModel {
   /** Null while they're read; all the hosts' together. */
   readonly repositories: ReadonlyArray<HostedRepository> | null
   readonly failed: ReadonlyArray<string>
+  /** The hosts that list fewer repositories than their account has. */
+  readonly limited: ReadonlyArray<SetupLimited>
   readonly pasted: HostedRepository | null
-  readonly chosen: string | null
-  /** The repository chosen to clone, and where it goes. */
-  readonly clone: (DraftClone & { readonly where: string | null; readonly brand: Brand | null }) | null
+  /** The repositories chosen to clone, by their rows. */
+  readonly chosen: ReadonlyArray<string>
+  /** The repositories chosen to clone, in the order chosen, and where each goes. */
+  readonly clones: ReadonlyArray<DraftClone & { readonly where: string | null; readonly brand: Brand | null }>
   /** A host being connected in place, by its service. */
   readonly connecting: Service | null
   /** Where its code lives: picked, for a repository only here; fixed, for a clone or one on a host already; nothing, for several. */
@@ -78,8 +81,11 @@ export interface SetupModel {
 export interface SetupActions {
   readonly onWay: (way: SetupWay) => void
   readonly onQuery: (query: string) => void
+  /** Chooses a repository to clone, beside those chosen; one chosen already is left out. */
   readonly choose: (id: string) => void
   readonly retry: () => void
+  /** Opens where a host is let reach more, and reads its repositories again once the window is back. */
+  readonly widen: (limited: SetupLimited) => void
   readonly connect: (service: Service) => void
   readonly endConnect: () => void
   readonly onHome: (value: string) => void
@@ -89,6 +95,10 @@ export interface SetupActions {
   readonly onIssues: (value: string) => void
   readonly onContainer: (id: string) => void
 }
+
+/** "a, b and c". */
+const andOf = (names: ReadonlyArray<string>) =>
+  names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`
 
 const ready = (list: ConnectionList | null, wanted: (service: Service) => boolean) =>
   (list?.connections ?? []).filter((connection) => connection.state === 'ready' && wanted(serviceOfProduct(connection.product)))
@@ -106,8 +116,11 @@ const nameOf = (connection: ConnectionSummary, all: ReadonlyArray<ConnectionSumm
 
 export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList | null): SetupModel & SetupActions => {
   const { client, host: system } = useServices()
-  // On another computer's home, a host or tracker is connected on that computer, not from this window: none is offered.
+  // On another computer's home, a code host is connected there from this window, where the home allows it (an older home
+  // doesn't): those it isn't connected to are offered then, and only then. Its trackers stay with the person's own window.
   const remoteHome = client.connection !== undefined
+  const connects = !remoteHome || canCall(client, 'ConnectToken')
+  const here = useHomeName()
   // Put on a host, or given a tracker, only where this window may: a window on another computer's home may not yet.
   const publishes = canCall(client, 'ListRepositoryOwners') && canCall(client, 'PublishRepository')
   const tracks = canCall(client, 'ListContainers') && canCall(client, 'SetProjectTracker')
@@ -123,7 +136,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length >= 3)
-  const { codeHosts, hosts, repositories, failed, pasted, retry, cloneOf } = useHostRepositories(list, draft.query, words)
+  const { codeHosts, hosts, repositories, failed, limited, widened, pasted, retry, cloneOf } = useHostRepositories(list, draft.query, words)
   const slug = repositoryFolder(draft.name.trim())
 
   // Where a clone goes unless the person chooses: read once a window, as where people keep code changes seldom.
@@ -132,7 +145,10 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
   // The one repository only on this computer, for where its code lives: what the way chosen brings, before it's made.
   // The folders the way chosen brings: those it cloned or made, or those chosen.
   const mine = draft.folders.filter((folder) => (folder.came ?? 'folder') === way)
-  const cloned = way === 'clone' ? mine[0] : undefined
+  /** Where a repository chosen was cloned to, once it is. */
+  const clonedOf = (id: string) => (way === 'clone' ? mine.find((folder) => folder.clone === id) : undefined)
+  // The first chosen not cloned yet: what Create clones next.
+  const next = draft.clones.find((clone) => clonedOf(clone.id) === undefined)
   const local =
     way === 'new'
       ? draft.fresh !== null || mine.some((folder) => folder.remote === null)
@@ -161,9 +177,10 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
 
   // The code host its code is on, once chosen: a clone's, a folder's remote's, or the one it is put on.
   const codeProduct: { readonly product: Product | null; readonly connectionId: string | null; readonly where: string } | null = (() => {
+    // Several cloned: the first chosen's host, for its issues.
     if (way === 'clone') {
-      const clone = draft.clone
-      if (clone === null) return null
+      const [clone] = draft.clones
+      if (clone === undefined) return null
       return { product: clone.product, connectionId: 'connectionId' in clone.from ? clone.from.connectionId : null, where: clone.remote }
     }
     if (local) {
@@ -214,12 +231,16 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
 
   const home: SetupModel['home'] = (() => {
     if (way === 'clone') {
-      const clone = draft.clone
-      if (clone === null) return { kind: 'fixed', brand: null, said: 'On the host it’s cloned from.' }
+      const [clone] = draft.clones
+      if (clone === undefined) return { kind: 'fixed', brand: null, said: 'On the host it’s cloned from.' }
+      // Several, on one host, at each of theirs; on several hosts, each at its own.
+      const oneHost = draft.clones.every((one) => one.hostName === clone.hostName)
       return {
         kind: 'fixed',
-        brand: clone.product === null ? null : productBrand(clone.product),
-        said: `On ${clone.hostName}, at ${clone.remote}. Tasks open ${changesOn(clone.product)} there.`,
+        brand: clone.product === null || !oneHost ? null : productBrand(clone.product),
+        said: oneHost
+          ? `On ${clone.hostName}, at ${andOf(draft.clones.map((one) => one.remote))}. Tasks open ${changesOn(clone.product)} there.`
+          : `At ${andOf(draft.clones.map((one) => `${one.remote} on ${one.hostName}`))}.`,
       }
     }
     if (local)
@@ -232,7 +253,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
           brand: productBrand(connection.product),
           thing: thingOf(serviceOfProduct(connection.product)),
         })),
-        away: remoteHome
+        // Put on a host only where the window may publish: a home's window may not, so none is offered to connect for it.
+        away: !publishes
           ? []
           : hosts
               .filter((host) => !host.connected)
@@ -258,7 +280,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
   const doing = (() => {
     if (!draft.creating) return null
     if (draft.steps.source === 'doing') {
-      if (way === 'clone' && draft.clone !== null && cloned === undefined) return `Cloning ${draft.clone.remote}…`
+      if (way === 'clone' && next !== undefined) return `Cloning ${next.remote}…`
       if (way === 'new') return 'Making its repository…'
       return mine.some((folder) => folder.git === 'none') ? 'Starting git…' : 'Reading its folders…'
     }
@@ -269,7 +291,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
   })()
   const said = (() => {
     const parts: Array<string> = []
-    if (way === 'clone' && draft.clone !== null && cloned === undefined) parts.push(`clones ${draft.clone.remote}`)
+    const toClone = way === 'clone' ? draft.clones.filter((clone) => clonedOf(clone.id) === undefined) : []
+    if (toClone.length > 0) parts.push(`clones ${andOf(toClone.map((clone) => clone.remote))}`)
     if (way === 'folder' && mine.some((folder) => folder.git === 'none')) parts.push('starts git in it')
     if (way === 'folder' && mine.some((folder) => folder.git === 'unborn')) parts.push('makes its first commit')
     if (way === 'new' && draft.fresh !== null) parts.push('makes a new repository')
@@ -279,24 +302,22 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     }
     if (parts.length === 0) return null
     const line = parts.length === 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
-    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${device.this}.` : ''}`
+    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${here.name}.` : ''}`
   })()
 
   return {
     way,
-    hosts: remoteHome ? hosts.filter((one) => one.connected) : hosts,
+    hosts: connects ? hosts : hosts.filter((one) => one.connected),
     repositories,
     failed,
+    limited,
     pasted,
-    chosen: draft.clone?.id ?? null,
-    clone:
-      draft.clone === null
-        ? null
-        : {
-            ...draft.clone,
-            where: cloned?.where ?? draft.clone.here?.where ?? (draft.cloneInto ?? usual.data)?.where ?? null,
-            brand: draft.clone.product === null ? null : productBrand(draft.clone.product),
-          },
+    chosen: draft.clones.map((clone) => clone.id),
+    clones: draft.clones.map((clone) => ({
+      ...clone,
+      where: clonedOf(clone.id)?.where ?? clone.here?.where ?? (draft.cloneInto ?? usual.data)?.where ?? null,
+      brand: clone.product === null ? null : productBrand(clone.product),
+    })),
     connecting,
     home,
     issues: {
@@ -325,16 +346,29 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     choose: (id) => {
       const clone = cloneOf(id)
       if (clone === null) return
-      change((now) => ({
-        ...now,
-        clone,
-        error: null,
-        // A clone not cloned yet replaces one cloned before it was made into a project: chosen again, it is cloned again.
-        folders: now.folders.filter((folder) => folder.came !== 'clone' || (now.clone !== null && sameRepository(clone, now.clone))),
-        name: now.name.trim() === '' ? (clone.remote.split('/').at(-1) ?? '').replace(/^./, (first) => first.toUpperCase()) : now.name,
-      }))
+      change((now) => {
+        // Chosen already, by its row or as the same repository pasted: left out, and what it cloned with it.
+        const had = now.clones.some((one) => one.id === clone.id || sameRepository(one, clone))
+        const clones = had ? now.clones.filter((one) => one.id !== clone.id && !sameRepository(one, clone)) : [...now.clones, clone]
+        return {
+          ...now,
+          clones,
+          error: null,
+          folders: now.folders.filter((folder) => folder.came !== 'clone' || clones.some((one) => one.id === folder.clone)),
+          // Named after the first chosen, where it has no name yet.
+          name:
+            now.name.trim() === '' && clones[0] !== undefined
+              ? (clones[0].remote.split('/').at(-1) ?? '').replace(/^./, (first) => first.toUpperCase())
+              : now.name,
+        }
+      })
     },
     retry,
+    widen: (one) => {
+      if (one.url === null) return
+      widened(one.host)
+      window.open(one.url, '_blank')
+    },
     connect: setConnecting,
     endConnect: () => setConnecting(null),
     onHome: (value) =>

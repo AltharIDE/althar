@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
@@ -16,8 +15,8 @@ import {
   Problem,
 } from '@althar/ui'
 
-import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { useAppVersion } from '../../shared/appVersion'
 import { CHANGELOG } from '../../shared/links'
 import { usePlaces } from '../../shared/usePlaces'
 import { usePreferences } from '../../shared/usePreferences'
@@ -27,6 +26,7 @@ import type { Section } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
+import { useSettingsHome } from './home'
 
 /*
  * Althar's quick settings, from the gear at the end of the window's bar, on
@@ -49,13 +49,14 @@ export interface QuickSettingsProps {
 }
 
 export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsProps) {
-  const { client, host } = useServices()
+  const { host } = useServices()
   const { reportProblem } = host
   const preferences = usePreferences()
   const sounds = useSounds()
   const atOnce = useAgentsAtOnce()
+  const home = useSettingsHome()
   const places = usePlaces(open)
-  const version = useQuery(reads(client).status()).data?.appVersion
+  const version = useAppVersion()
   const navigate = useNavigate()
   // Leaving for the Settings tab closes the panel.
   const settings = (section: Section | null) => {
@@ -85,8 +86,9 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
               machine={atOnce.atOnce.machine}
               most={MOST_AT_ONCE}
               onChange={atOnce.set}
+              disabled={!atOnce.canSet}
               fewer={places === null ? null : fewerOf(places)}
-              text={{ value: text.atOnceValue }}
+              text={{ value: text.atOnce(home.name).value }}
             />
             {atOnce.failed && (
               <Problem size="small" className={s.failed}>

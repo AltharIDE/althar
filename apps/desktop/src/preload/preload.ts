@@ -3,6 +3,7 @@ import {
   isHomeSetup,
   isHomesOverview,
   NO_SETUP_ARG,
+  appVersionFromArgs,
   isHomeState,
   type HomeProject,
   type HomeSetup,
@@ -291,6 +292,8 @@ contextBridge.exposeInMainWorld('althar', {
   },
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  // This app's version, as main handed it: what the window says of Althar itself, whichever home it's on.
+  appVersion: appVersionFromArgs(process.argv),
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
   welcomeUsage: (...milestone: WelcomeMilestone): void => ipcRenderer.send('althar:welcome-usage', ...milestone),
   onStartupStage: (listener: (stage: StartupStage) => void): (() => void) => {

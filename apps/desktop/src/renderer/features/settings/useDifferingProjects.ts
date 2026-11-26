@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from 'react'
 
 import type { NewProjectDefaults, ProjectRulesView } from '@althar/contracts'
 
-import { messageOf } from '../../data/client'
+import { canCall, messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
@@ -55,7 +55,10 @@ export const useDifferingProjects = (defaults: NewProjectDefaults | null): Diffe
   const { client, cache } = useServices()
   const listed = useQuery(reads(client).projects()).data?.projects
   const projects = useMemo(() => listed ?? [], [listed])
-  const rules = useQueries({ queries: projects.map((project) => reads(client).rules(project.id)) })
+  // Each project's own rules, where the window's home shows them to it.
+  const rules = useQueries({
+    queries: projects.map((project) => ({ ...reads(client).rules(project.id), enabled: canCall(client, 'GetProjectRules') })),
+  })
   const [busy, setBusy] = useState<DefaultKey | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
 

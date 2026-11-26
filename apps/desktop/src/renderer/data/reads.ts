@@ -3,7 +3,7 @@ import { type EnsureQueryDataOptions, QueryClient, queryOptions } from '@tanstac
 import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
 import { mergeItems, settled } from '../shared/items'
-import type { Client } from './client'
+import { canCall, type Client } from './client'
 import { readModelsAgain } from './models'
 
 /*
@@ -43,6 +43,7 @@ export const keys = {
   containers: (connectionId: string) => ['containers', connectionId] as const,
   /** A code host connection's repositories, to clone one. */
   hostRepositories: (connectionId: string) => ['host-repositories', connectionId] as const,
+  hostReach: (connectionId: string) => ['host-reach', connectionId] as const,
   /** Where a code host connection can make a repository. */
   repositoryOwners: (connectionId: string) => ['repository-owners', connectionId] as const,
   settings: ['settings'] as const,
@@ -132,6 +133,8 @@ export const homeSince = (client: Client) => {
 }
 
 export const reads = (client: Client) => ({
+  /** Whether the window's home lets it make a call: every one, in this computer's own window. */
+  allows: (tag: string) => canCall(client, tag),
   projects: () => queryOptions({ queryKey: keys.projects, queryFn: () => client.listProjects() }),
   status: () => queryOptions({ queryKey: keys.status, queryFn: () => client.status() }),
   home: () =>
@@ -174,6 +177,14 @@ export const reads = (client: Client) => ({
     queryOptions({
       queryKey: keys.hostRepositories(connectionId),
       queryFn: () => client.listHostRepositories(connectionId),
+      staleTime: 60_000,
+      retry: false,
+    }),
+  // Asked beside its list, and kept as long: what a connection was let reach changes only as it is changed on its host.
+  hostReach: (connectionId: string) =>
+    queryOptions({
+      queryKey: keys.hostReach(connectionId),
+      queryFn: () => client.readHostReach(connectionId),
       staleTime: 60_000,
       retry: false,
     }),
@@ -283,9 +294,10 @@ export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read
   read.projects(),
   read.coordinator(projectId),
   read.board(projectId),
-  read.rules(projectId),
+  // What the window's home keeps from it isn't asked: the screens that would show it say so instead.
+  ...(read.allows('GetProjectRules') ? [read.rules(projectId)] : []),
   read.connections(),
-  read.automations(projectId),
+  ...(read.allows('GetAutomations') ? [read.automations(projectId)] : []),
 ]
 
 /** The home reads its local projects, work and calls before opening. Agent checks run afterwards. */

@@ -1,5 +1,6 @@
 import {
   AcceptCard,
+  type BoardFolds,
   BoardLane,
   ChromeButton,
   NextRow,
@@ -20,7 +21,7 @@ import { BoardAtWork, type BoardStory, OUT_OF_USAGE, Tabs, type UsageOut } from 
 import { useNarrow } from '../kit/Narrow'
 import { type Aim, Pointer } from '../kit/Pointer'
 import { useInView, usePageShown } from '../kit/seen'
-import { Shot } from '../kit/Shot'
+import { PHONE_WINDOW, Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
 import v from '../kit/views.module.css'
 import { CODEX, GEMINI_PRO, NEXT, OPUS, READY_TWO_REPOS, SONNET } from '../kit/world'
@@ -98,15 +99,18 @@ function Window({
   out,
   pointer,
   talk,
+  folds,
 }: {
   beat: number
   story: BoardStory
   out?: UsageOut
+  /** The lanes folded to rails: Settled, in the carousel on a phone, for the room it gives the lanes the task goes through. */
+  folds?: BoardFolds
   pointer?: PointerOn | null
   /** The coordinator's conversation, beside the board: the project's home with both showing. */
   talk?: ReactNode
 }) {
-  const board = <BoardAtWork beat={beat} story={story} {...(out ? { out } : {})} />
+  const board = <BoardAtWork beat={beat} story={story} {...(out ? { out } : {})} {...(folds ? { folds } : {})} />
   return (
     <div className={app.window}>
       <Tabs
@@ -135,6 +139,8 @@ function Window({
     </div>
   )
 }
+
+const SETTLED_FOLDED: BoardFolds = { collapsed: [BoardLane.Settled], opened: [] }
 
 /* ---- one task's way through the board ---- */
 
@@ -401,11 +407,19 @@ function Flow({
         w={W}
         h={H}
         phone={{ x: view.left - SIDE, y: TOP, w: view.width + 2 * SIDE, h: TALL }}
+        whole={PHONE_WINDOW}
         {...(fill ? { fill } : {})}
         label={LABEL}
         frame={phone && !clock ? s.lane : s.frame}
       >
-        <Window beat={beat} story={story} {...(out ? { out } : {})} pointer={pointer} talk={talk} />
+        <Window
+          beat={beat}
+          story={story}
+          {...(out ? { out } : {})}
+          pointer={pointer}
+          talk={talk}
+          {...(phone && clock ? { folds: SETTLED_FOLDED } : {})}
+        />
         {frame.flying && (
           <Flight
             key={frame.lane}
