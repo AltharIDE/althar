@@ -2289,11 +2289,8 @@ export class Queries extends Context.Service<
        * hold, and how many commits, those ahead of its open pull requests and those in none yet. The latter are already known
        * when it has a pull request history. Read them for a branch with no pull request only if it has a hold.
        */
-      /**
-       * What of the task waits for Ship (`held`, its commits counted from git), and whether it is held at all (`waits`), which
-       * decides its phase: a read without worktree details (the board's while its projection is worked out) counts no commits,
-       * but a hold still has it wait, as kept or ready, rather than read stopped until the full read comes.
-       */
+      // What waits for Ship (`held`, commits counted from git), and whether it is held at all (`waits`, its phase): a read
+      // without worktree details counts no commits, but a hold still has it wait, kept or ready, never read stopped.
       const heldOf = (taskId: string, after: number | undefined) =>
         Effect.gen(function* () {
           const changes = yield* Changes
@@ -3202,8 +3199,7 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
-            // When the person kept it, as the store has it whatever it reads as (a pull request opening after it was kept reads
-            // ready): its kept row says when, and a saved card is checked by it.
+            // When the person kept it, whatever it reads as: its kept row says when, and a saved card is checked by it.
             ...(task.keptAt === null ? {} : { keptAt: task.keptAt }),
             ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
             // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
