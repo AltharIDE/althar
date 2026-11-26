@@ -804,17 +804,22 @@ describe('a Ship', () => {
       const held = board.tasks.find((card) => card.taskId === task.taskId)
       assert.strictEqual(held?.phase, 'ready')
       assert.isAbove(held?.held?.commits ?? 0, 0)
-      assert.isFalse(yield* keep)
+      // Kept for later while its commits wait for Ship: out of Needs you, its commits held still, and Ship there.
+      assert.isTrue(yield* keep)
+      const kept = (yield* queries.board(task.projectId)).tasks.find((card) => card.taskId === task.taskId)
+      assert.strictEqual(kept?.phase, 'kept')
+      assert.isAbove(kept?.held?.commits ?? 0, 0)
       // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
       // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
       yield* until(heldAt(task.taskId), (at) => at === null)
       assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       assert.lengthOf(github.changes, 0)
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].held === undefined)
-      assert.isTrue(yield* keep)
-      const kept = yield* queries.board(task.projectId)
-      assert.strictEqual(kept.tasks.find((card) => card.taskId === task.taskId)?.phase, 'kept')
+      // Shipped, it stays kept: nothing waits on the person now.
+      yield* until(
+        Effect.map(queries.board(task.projectId), (board) => board.tasks.find((card) => card.taskId === task.taskId)),
+        (card) => card?.phase === 'kept' && card.held === undefined,
+      )
       // The person opens its pull request on purpose, from its Change card: a draft.
       yield* runs.publish(task.taskId)
       assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
@@ -822,6 +827,75 @@ describe('a Ship', () => {
       assert.isUndefined(card?.held)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live('reads a stopped task held for Ship kept at its first board read after Keep, before its card is worked out again', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      const tasks = yield* Tasks
+      const task = yield* opened(working, '[coordinator:plan-no-review]', 'none')
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Stopped, its hold surviving: it waits on Ship, ready, and Keep for later keeps it.
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${task.taskId}`
+      const card = Effect.map(queries.board(task.projectId, true), (board) => board.tasks.find((one) => one.taskId === task.taskId))
+      yield* until(card, (one) => one?.phase === 'ready' && one.held !== undefined)
+      assert.isTrue(yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: task.taskId }), taskId: task.taskId }))
+      // The window's read right after the answer, with no card of it saved since: worked out without its worktrees, it is
+      // kept still, never stopped.
+      yield* sql`DELETE FROM board_card_views WHERE task_id = ${task.taskId}`
+      assert.strictEqual((yield* card)?.phase, 'kept')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live(
+    'keeps a task held for Ship, and its pull request opening after reads ready with Ship on the board as the window reads it',
+    () => {
+      const { working, github } = onGitHub()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const queries = yield* Queries
+        const tasks = yield* Tasks
+        const task = yield* opened(working, '[coordinator:plan-no-review]', 'none')
+        yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+        yield* answered(task.threadId, task.turns + 1)
+        yield* until(heldAt(task.taskId), (at) => at !== null)
+        assert.isTrue(yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: task.taskId }), taskId: task.taskId }))
+        // As the window reads the board, from what is saved of each card: kept, its commits held still.
+        const cached = Effect.map(queries.board(task.projectId, true), (board) => board.tasks.find((card) => card.taskId === task.taskId))
+        const kept = yield* until(cached, (card) => card?.phase === 'kept' && card.held !== undefined)
+        assert.isAbove(kept?.held?.commits ?? 0, 0)
+        // A pull request of its own opening after it was kept, its row kept still: ready, to accept, and Ship there for what waits.
+        const at = new Date().toISOString()
+        yield* sql`INSERT INTO external_links ${sql.insert({
+          id: `xlink_${'6'.repeat(32)}`,
+          projectId: task.projectId,
+          taskId: task.taskId,
+          connectionId: null,
+          product: 'github',
+          kind: 'change',
+          externalId: '9',
+          ref: '9',
+          key: '9',
+          url: 'https://github.com/meridian/api/pull/9',
+          snapshot: JSON.stringify({
+            number: 9,
+            title: 'Retry',
+            url: 'https://github.com/meridian/api/pull/9',
+            state: 'open',
+            draft: false,
+          }),
+          createdAt: at,
+          updatedAt: at,
+        })}`
+        const ready = yield* until(cached, (card) => card?.phase === 'ready' && card.held !== undefined)
+        assert.isNotNull((yield* sql<{ keptAt: string | null }>`SELECT kept_at FROM tasks WHERE id = ${task.taskId}`)[0]?.keptAt)
+        assert.isAbove(ready?.held?.commits ?? 0, 0)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+  )
 
   it.live('leaves a round opened before talking became turns to end as it did: reviewed, then in the next pull request', () => {
     const { working, bare, github } = onGitHub()

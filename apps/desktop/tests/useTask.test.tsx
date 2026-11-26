@@ -7,7 +7,8 @@ import { ApiError, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/co
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { doing } from '../src/renderer/features/task/actions'
-import { presses, settleText, type TaskModel, useTask } from '../src/renderer/features/task/useTask'
+import { presses, type TaskModel, useTask } from '../src/renderer/features/task/useTask'
+import { unmovedText } from '../src/renderer/shared/calls'
 import { change, changed, fakeClient, items, snapshot } from './fixtures'
 import { servicesFor } from './render'
 import { queuedOf, queueShown, readingLocallyOf } from '../src/renderer/shared/items'
@@ -588,12 +589,20 @@ describe('what a press on a task shows, before the runtime says so', () => {
     expect(task.result.current.error).toBeNull()
   })
 
-  it('takes Done back where the runtime answered but something of it opened meanwhile, saying so', async () => {
+  it('takes Done back where the runtime answered but it didn’t move, saying so', async () => {
     const task = runtimeOf({ task: { ...snapshot().task, phase: 'ready', kind: 'plain' } })
     await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
     await act(() => task.result.current.markDone())
     expect(task.result.current.snapshot?.task.phase).toBe('ready')
-    expect(task.result.current.error).toBe(settleText.stillOpen)
+    expect(task.result.current.error).toBe(unmovedText.other)
+  })
+
+  it('takes Keep for later back where its pull request is open, saying that, not that something opened', async () => {
+    const task = runtimeOf({ task: { ...snapshot().task, phase: 'ready', changes: [change()] } })
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    await act(() => task.result.current.keep())
+    expect(task.result.current.snapshot?.task.phase).toBe('ready')
+    expect(task.result.current.error).toBe(unmovedText.pullOpen)
   })
 
   it('takes Done back where it failed, saying why', async () => {

@@ -7,7 +7,7 @@ import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
 import { taskWorker } from './workerExecution'
 import { workerRequirementFields } from './workerRequirements'
-import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
+import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
 
@@ -24,7 +24,6 @@ import {
   type ChangeSummary,
   CheckLogShown,
   checkFailuresOf,
-  ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
   type HomeSnapshot,
@@ -110,7 +109,8 @@ import { reviewOfferOf } from './reviewOffer'
 import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { ASKED_MS, BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
-import { mergeNeedsOf, withPushed } from './mergeNeeds'
+import { changeOf, field, number, parse, PRODUCTS, text } from './changeSnapshot'
+import { withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode, readCodeImage } from './code'
 import type { Artifacts } from './Artifacts'
@@ -297,23 +297,6 @@ const keeper = <A>(owners: Map<string, Owner>) => {
       }),
     drop: (path: string) => kept.delete(path),
   }
-}
-
-export const parse = (json: string | null): unknown => {
-  if (json === null) return null
-  try {
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-export const field = (value: unknown, key: string): unknown =>
-  typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
-
-export const text = (value: unknown, key: string): string => {
-  const found = field(value, key)
-  return typeof found === 'string' ? found : ''
 }
 
 /** A tool call's skills, as `threads.ts` keeps them. */
@@ -503,11 +486,6 @@ export const stuckOf = (payload: unknown): StuckStep => {
   }
 }
 
-const number = (value: unknown, key: string): number | null => {
-  const found = field(value, key)
-  return typeof found === 'number' ? found : null
-}
-
 /** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
 const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
   Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
@@ -586,67 +564,6 @@ const callOf = (request: {
   }
 }
 
-/** A pull request as Althar last saw it (its external link's snapshot), in the contract's shape. */
-export const changeOf = (value: unknown, product: string, listening: boolean): ChangeSummary | null => {
-  const state = text(value, 'state')
-  const words = field(value, 'words')
-  const repository = field(value, 'repository')
-  const checks = field(value, 'checks')
-  const productIs = PRODUCTS.find((candidate) => candidate === product)
-  const n = number(value, 'number')
-  if (n === null || productIs === undefined || (state !== 'open' && state !== 'merged' && state !== 'closed')) return null
-  const outcome = text(checks, 'outcome')
-  const failing = field(checks, 'failing')
-  // Where the host said whether it conflicts, and which branch it merges into: absent from a snapshot kept before them.
-  const conflicts = field(value, 'conflicts')
-  const target = text(value, 'target')
-  const seen: ChangeSummary = {
-    product: productIs,
-    number: n,
-    title: text(value, 'title'),
-    url: text(value, 'url'),
-    state,
-    draft: field(value, 'draft') === true,
-    noun: text(words, 'noun') || 'pull request',
-    short: text(words, 'short') || 'PR',
-    prefix: text(words, 'prefix') || '#',
-    repository: Array.isArray(repository) ? repository.filter((part) => typeof part === 'string').join('/') : '',
-    slug: null,
-    additions: number(value, 'additions'),
-    deletions: number(value, 'deletions'),
-    changedFiles: number(value, 'changedFiles'),
-    checks:
-      checks === null || checks === undefined
-        ? null
-        : {
-            outcome: outcome === 'running' || outcome === 'passed' || outcome === 'failed' ? outcome : 'none',
-            passed: number(checks, 'passed') ?? 0,
-            failed: number(checks, 'failed') ?? 0,
-            running: number(checks, 'running') ?? 0,
-            total: number(checks, 'total') ?? 0,
-            failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
-            list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
-          },
-    ...(target === '' ? {} : { target }),
-    ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
-    ...(field(value, 'queued') === true ? { queued: true } : {}),
-    head: text(value, 'headSha') || null,
-    listening,
-    localHead: null,
-    ...(field(value, 'maintainerEdit') === true ? { maintainerEdit: true } : {}),
-    unpushed: 0,
-    diverged: null,
-  }
-  // What merging it needs, as its host last said, with what Althar knows of it (DEV-204); what is left to push is counted later.
-  const rules = Option.getOrNull(decodeRules(field(value, 'rules')))
-  const needs = mergeNeedsOf(seen, rules)
-  return {
-    ...seen,
-    ...(needs === undefined ? {} : { needs }),
-    ...(state === 'open' && rules?.canBypassQueue !== undefined ? { canBypassQueue: rules.canBypassQueue } : {}),
-  }
-}
-
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeAttached = Schema.decodeUnknownOption(Schema.Array(AttachedFile))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
@@ -664,10 +581,6 @@ const decodeNoticeTask = Schema.decodeUnknownOption(
 )
 /** What a notice offers: parts kept as a preset, or a review a lead or the coordinator offered a task, which its buttons answer. */
 const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.fields.offer)
-const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
-const decodeRules = Schema.decodeUnknownOption(MergeRules)
-
-const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const
 
 /**
  * A stored item as the contract has it: each kind with its own content. A
@@ -1136,6 +1049,8 @@ const ReadAt = Context.Reference<{
  * How long a kept card is given out at most before it is worked out again whatever else holds: what moves it with nothing
  * that says so (Althar's own state no change followed, a write that told no one) shows within this, unless a test says.
  */
+export { changeOf, field, parse, text } from './changeSnapshot'
+
 export const KEPT_FOR = Duration.seconds(10)
 
 /** How many tasks' cards are kept: more than any screen shows. */
@@ -2291,12 +2206,14 @@ export class Queries extends Context.Service<
        * hold, and how many commits, those ahead of its open pull requests and those in none yet. The latter are already known
        * when it has a pull request history. Read them for a branch with no pull request only if it has a hold.
        */
+      // What waits for Ship (`held`, commits counted from git), and whether it is held at all (`waits`, its phase): a read
+      // without worktree details counts no commits, but a hold still has it wait, kept or ready, never read stopped.
       const heldOf = (taskId: string, after: number | undefined) =>
         Effect.gen(function* () {
-          if (!(yield* WorktreeDetails)) return undefined
           const changes = yield* Changes
           const [first] = yield* changes.holds(taskId).pipe(Effect.orElseSucceed(() => []))
-          if (first === undefined) return undefined
+          if (first === undefined) return { held: undefined, waits: false }
+          if (!(yield* WorktreeDetails)) return { held: undefined, waits: true }
           const open = yield* changes.aheadOfOpen(taskId).pipe(Effect.orElseSucceed(() => []))
           const unpublished =
             after ??
@@ -2306,7 +2223,7 @@ export class Queries extends Context.Service<
             )
           const commits = open.reduce((sum, one) => sum + one.count, unpublished)
           // Held with nothing left to send, as where the person pushed it by hand, it waits on nothing: Ship lets go of it.
-          return commits === 0 ? undefined : { since: first.heldAt, commits }
+          return commits === 0 ? { held: undefined, waits: false } : { held: { since: first.heldAt, commits }, waits: true }
         })
 
       const cardOf = (row: ItemRow) =>
@@ -2745,7 +2662,7 @@ export class Queries extends Context.Service<
                 }
           // Held for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): what the person's turns with its lead
           // committed after its plan waits on its branch, on its open pull requests or after the last, and only Ship sends it up.
-          const held = yield* heldOf(taskId, shipping?.changes === 0 ? undefined : (unshipped?.commits ?? 0))
+          const { held, waits: heldWaits } = yield* heldOf(taskId, shipping?.changes === 0 ? undefined : (unshipped?.commits ?? 0))
           // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
           // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
           const replied = yield* repliedAt(taskId)
@@ -2902,7 +2819,7 @@ export class Queries extends Context.Service<
             if (afterMerge?.state === 'found') return 'ready'
             // Held for Ship, it waits on the person's word, whatever its pushed head's checks say: Ship replaces that head. Not while
             // a run is under way, as Ship's own is as it reviews and sends what waited.
-            if (held !== undefined && task.runState !== 'running') return 'ready'
+            if (heldWaits && task.runState !== 'running') return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet, or its lead answered the person since
             // they last had it open.
             if (task.state === 'done') return unshipped === null && replied === undefined ? 'settled' : 'ready'
@@ -2914,10 +2831,10 @@ export class Queries extends Context.Service<
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
           })()
-          // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it. Not while a
-          // pull request of its own is open or commits wait for Ship, however that came after it was kept: those wait on the
-          // person in their own ways (accepting, Ship), which a kept row doesn't show.
-          const keptStands = !changes.some((one) => one.state === 'open') && held === undefined
+          // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it, commits
+          // held for Ship included (Ship is there when it is opened). Not while a pull request of its own is open, however that
+          // came after it was kept: that waits on the person on its host, which a kept row doesn't show.
+          const keptStands = !changes.some((one) => one.state === 'open')
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null && keptStands ? 'kept' : ready
           // Stopped with no agent on it: what stopped its lead (the person declining a call, or interrupting; else Althar, or
           // nothing says), and when, so the board puts it among what waits on the person and says so.
@@ -3200,7 +3117,8 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
-            ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            // When the person kept it, whatever it reads as: its kept row says when, and a saved card is checked by it.
+            ...(task.keptAt === null ? {} : { keptAt: task.keptAt }),
             ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
             // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
             // its drafting on: while the coordinator's turn that made it is open, its plan is still on its way, and its card says
@@ -3216,7 +3134,7 @@ export class Queries extends Context.Service<
             ...offering(yield* presetOfferOn(task.projectId, taskId)),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
           // Its row as the board reads it beside the card: one the board reads otherwise moved since.
-          return { projectId: task.projectId, card, row: `${task.state} ${task.createdAt} ${task.settledAt}` }
+          return { projectId: task.projectId, card, row: `${task.state} ${task.createdAt} ${task.settledAt} ${task.keptAt}` }
         })
 
       /** The automation whose run a task is, by its name now; null where none started it. */
@@ -3539,7 +3457,7 @@ export class Queries extends Context.Service<
         const served = Effect.gen(function* () {
           const kept = yield* keptOf(row.id)
           // Its row moved with nothing recorded: worked out afresh, as the store says it now.
-          if (kept === undefined || kept.row !== `${row.state} ${row.createdAt} ${row.settledAt}`) return undefined
+          if (kept === undefined || kept.row !== `${row.state} ${row.createdAt} ${row.settledAt} ${row.keptAt ?? null}`) return undefined
           if (kept.board !== undefined) return kept.board
           // Its card kept as the coordinator's thread read it, what its board adds is worked out on it.
           const [read, on] = yield* cardWorkedOut(row.id, boardOf(row, kept.card))

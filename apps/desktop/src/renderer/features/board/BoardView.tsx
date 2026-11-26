@@ -809,14 +809,17 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
   // What its review after a merge found comes first: the person's Fix it or Leave it, for the change that merged.
   if (work.afterMerge?.state === 'found')
     return { ...base, word: afterMergeText.word(work.afterMerge.findings), ...afterMergeOf(work, actions) }
-  // Held for Ship, whatever kind it is: what waits, and Ship, which is all the person has to do for it.
+  // Held for Ship, whatever kind it is: what waits, and Ship, which is all the person has to do for it; and Keep for later in
+  // its corner where no pull request of it is open, its commits staying held.
   if (work.held !== undefined && work.kind !== 'review') {
     const change = work.change?.state === 'open' ? work.change : null
+    const corner = settleWaysOf(work, actions)
     return {
       ...base,
       word: shipText.word,
       ...(change === null ? (work.branch === null ? {} : { object: <BranchChip name={work.branch} /> }) : { object: pullChip(change) }),
       ...shipOf(work, work.held, change, actions),
+      ...(corner === null ? {} : { corner }),
     }
   }
   switch (work.kind) {
@@ -1061,7 +1064,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   const { markDone, keep } = actions ?? {}
   if (markDone === undefined || keep === undefined) return null
   const done = isSettleable(work) && takesDone(work)
-  const keeps = takesKeep({ phase: work.phase, state: work.state, pullOpen: work.change?.state === 'open', held: work.held })
+  const keeps = takesKeep({ phase: work.phase, state: work.state, pullOpen: work.change?.state === 'open' })
   if (!done && !keeps) return null
   return (
     <SettleWays

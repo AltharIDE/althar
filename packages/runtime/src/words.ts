@@ -727,6 +727,7 @@ const taskRefused = {
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
   no_lead: 'The task has no lead to change.',
+  pull_open: 'Its pull request is open, so it waits there: merge or close it first.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */
