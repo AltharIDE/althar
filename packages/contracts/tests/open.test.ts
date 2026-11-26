@@ -28,7 +28,7 @@ import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
  * answer reads as before.
  */
 
-const base = { id: 'i1', sequence: 1, agentId: null, createdAt: '2026-11-26T09:00:00.000Z' }
+const base = { id: 'i1', sequence: 1, agentId: null, createdAt: '2026-11-20T09:00:00.000Z' }
 const notice = (role?: string) => ({
   ...base,
   kind: 'notice',
