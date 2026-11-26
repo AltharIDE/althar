@@ -10,7 +10,7 @@ import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
-import { agentGit, Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
+import { agentGit, Agents, Connectors, readingUntrusted, signInsOf, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
 import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -429,6 +429,50 @@ describe('a connection', () => {
       }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
     },
   )
+
+  it('takes Althar’s apps’ ids as the build baked them, each under the environment’s, and keeps Copilot’s own', () => {
+    const baked = { github: 'Iv23.built', githubApp: 'althar', gitlab: '', linear: 'lin-built', copilot: 'Ov23.copilot' }
+    assert.deepStrictEqual(signInsOf(baked, {}), {
+      clientIds: { github: 'Iv23.built', linear: 'lin-built' },
+      githubApp: 'althar',
+      copilotClientId: 'Ov23.copilot',
+    })
+    // A value at run time wins, an empty one leaves the build's, and the GitHub App's id never stands in for Copilot's.
+    assert.deepStrictEqual(
+      signInsOf(baked, { ALTHAR_GITHUB_CLIENT_ID: 'Iv23.here', ALTHAR_GITLAB_CLIENT_ID: 'gl-here', ALTHAR_LINEAR_CLIENT_ID: '' }),
+      { clientIds: { github: 'Iv23.here', gitlab: 'gl-here', linear: 'lin-built' }, githubApp: 'althar', copilotClientId: 'Ov23.copilot' },
+    )
+    // A build given none offers no browser sign-in, and no install page.
+    assert.deepStrictEqual(signInsOf({ github: '', githubApp: '', gitlab: '', linear: '', copilot: '' }, {}), { clientIds: {} })
+  })
+
+  it.live('offers a home only the sign-ins by a code typed in any browser, its loopback being no browser’s', () => {
+    const clientIds = { github: 'Iv23.althar', gitlab: 'gl-althar', linear: 'lin-althar' }
+    const offered = (loopbackSignIn?: boolean) =>
+      Effect.gen(function* () {
+        const connections = yield* Connections
+        return Object.fromEntries(
+          connections.products.filter((info) => info.product in clientIds).map((info) => [info.product, info.browserSignIn] as const),
+        )
+      }).pipe(
+        Effect.provide(
+          Runtime.layer({
+            database: ':memory:',
+            worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+            appVersion: '0.0.0-test',
+            deviceName: 'runner-1',
+            agents: fakeAgents(),
+            secrets: Secrets.memory(),
+            clientIds,
+            ...(loopbackSignIn === undefined ? {} : { loopbackSignIn }),
+          }),
+        ),
+      )
+    return Effect.gen(function* () {
+      assert.deepStrictEqual(yield* offered(), { github: true, gitlab: true, linear: true })
+      assert.deepStrictEqual(yield* offered(false), { github: true, gitlab: true, linear: false })
+    })
+  })
 
   it.live('offers the browser sign-in only where Althar’s app is registered', () => {
     const github = makeFakeService()

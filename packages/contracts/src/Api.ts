@@ -1691,7 +1691,13 @@ export type SignInStart = typeof SignInStart.Type
 export const SignInState = Schema.Union([
   Schema.Struct({ state: Schema.Literal('waiting') }),
   Schema.Struct({ state: Schema.Literal('done'), connectionId: Schema.String }),
-  Schema.Struct({ state: Schema.Literal('ended'), reason: Schema.Literals(['denied', 'expired', 'failed']), message: Schema.String }),
+  Schema.Struct({
+    state: Schema.Literal('ended'),
+    reason: Schema.Literals(['denied', 'expired', 'failed']),
+    message: Schema.String,
+    /** Where Althar's app is installed, where that is what the sign-in lacked: the connection it would replace stays. */
+    install: Schema.optional(Schema.String),
+  }),
 ])
 export type SignInState = typeof SignInState.Type
 

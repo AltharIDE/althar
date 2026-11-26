@@ -105,6 +105,15 @@ jobs:
       - name: Build what the worker's sandbox needs beside Codex's package
         working-directory: .
         run: apps/host/scripts/worker-sandbox-tools.sh "$RUNNER_TEMP/worker-tools"
+      # Built again with the public ids of Althar's own apps (vite.config.ts), repository variables since none is a secret:
+      # a home's window offers GitHub's and GitLab's sign-in by a code typed in any browser. The tests above ran without them.
+      - name: Build with Althar's app ids
+        env:
+          ALTHAR_GITHUB_CLIENT_ID: ${{ vars.ALTHAR_GITHUB_CLIENT_ID }}
+          ALTHAR_GITHUB_APP: ${{ vars.ALTHAR_GITHUB_APP }}
+          ALTHAR_GITLAB_CLIENT_ID: ${{ vars.ALTHAR_GITLAB_CLIENT_ID }}
+          ALTHAR_COPILOT_CLIENT_ID: ${{ vars.ALTHAR_COPILOT_CLIENT_ID }}
+        run: bun run build
       - name: Assemble and sign the complete native Linux release
         env:
           ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
