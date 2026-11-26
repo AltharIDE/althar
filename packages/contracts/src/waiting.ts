@@ -1,4 +1,4 @@
-import type { ChangeSummary, TaskPhase } from './Api'
+import type { ChangeSummary, TaskPhase } from './api/shared'
 import { isBlocked, pushResolves, standingOf } from './standing'
 
 /*

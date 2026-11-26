@@ -13,6 +13,7 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
+    "snapshot": "bun scripts/snapshot.ts && vp fmt api.schema.json",
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
