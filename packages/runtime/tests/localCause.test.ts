@@ -206,6 +206,9 @@ describe('a step whose agent fails for a reason on this computer', () => {
       const [still] = yield* openCalls(task.taskId)
       assert.isString((JSON.parse(still?.payload ?? '{}') as { cause: { askedAt?: string } }).cause.askedAt)
       assert.include(yield* notices(task.threadId), 'Asked the coordinator to fix it.')
+      // A call that isn't there fails out loud, so the card offers it again.
+      const missing = yield* Effect.flip(askToFix('att_missing', yield* Runtime.envelope('attention.fix_with_coordinator', {})))
+      assert.strictEqual(missing._tag, 'NotFound')
     }).pipe(Effect.provide(layer))
   })
 
