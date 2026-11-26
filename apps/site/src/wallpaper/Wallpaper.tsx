@@ -1,7 +1,7 @@
 import { WALLPAPER, wallpaperFile, wallpaperPreview } from '../content/wallpaper'
 import { cx } from '../lib/cx'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import s from './Wallpaper.module.css'
 
@@ -33,7 +33,7 @@ const LARGEST = WALLPAPER.screens.find((sc) => sc.key === 'display')
 export function Wallpaper() {
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
       <Night>
         <Window
           deck={

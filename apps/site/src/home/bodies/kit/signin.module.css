@@ -1,0 +1,95 @@
+/*
+ * Tally's sign-in page, built on the canvas (CanvasAtWork.tsx): flat, as such
+ * a page is drawn now, with no borders, shadows or gradients. Fields are
+ * filled rather than outlined, the one button is solid ink, and type and
+ * room do the rest. Its pieces hold their places from the start, unseen, and
+ * come in as they are built, so the page never shifts as it fills. Split, its
+ * brand's side opens beside the form.
+ */
+
+.page {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0fr) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fbfaf7;
+  color: #141417;
+  font-family: 'Inter Variable', system-ui, sans-serif;
+  transition: grid-template-columns 760ms var(--ease-out);
+}
+.page[data-split] { grid-template-columns: minmax(0, 0.92fr) minmax(0, 1fr); }
+
+/* Tally's mark: its teal, three white strokes; on the brand's side, the other way round. */
+.logo { flex: none; display: block; }
+.logo rect { fill: #0f766e; }
+.logo path { fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; }
+
+/* The brand's side: Tally's teal, its name at the top, what it does at the foot; laid out at its full width as it opens, so nothing in it reflows. */
+.brand { position: relative; min-width: 0; overflow: hidden; background: #0f5f59; color: #fff; }
+.brandName,
+.claim { position: absolute; left: 28px; width: 230px; opacity: 0; transform: translateY(8px); transition: opacity 420ms var(--ease-out), transform 520ms var(--ease-out); }
+.brandName { top: 28px; display: flex; align-items: center; gap: 9px; font: 650 17px var(--head); letter-spacing: -0.02em; }
+.brandName .logo rect { fill: #fff; }
+.brandName .logo path { stroke: #0f5f59; }
+.claim { bottom: 30px; }
+.brandName[data-on],
+.claim[data-on] { opacity: 1; transform: none; }
+.big { margin: 0 0 10px; font: 600 26px/1.12 var(--head); letter-spacing: -0.035em; }
+.small { margin: 0; font-size: 13px; line-height: 1.5; color: rgba(255, 255, 255, 0.72); }
+
+/* The form, in the middle of what is left. */
+.form { display: grid; place-items: center; min-width: 0; padding: 24px; }
+.inner { display: flex; flex-direction: column; width: 100%; max-width: 282px; }
+
+/* Each piece, there but unseen until it is built. */
+.piece { opacity: 0; transform: translateY(8px); transition: opacity 380ms var(--ease-out), transform 480ms var(--ease-out); }
+.piece[data-on] { opacity: 1; transform: none; }
+/* Once the brand's side carries the name, the form's goes. */
+.piece[data-hide] { opacity: 0; }
+
+.name { display: flex; align-items: center; gap: 8px; margin-bottom: 30px; font: 650 16px var(--head); letter-spacing: -0.02em; }
+.title { margin: 0; font: 600 30px/1.08 var(--head); letter-spacing: -0.04em; }
+.lead { margin: 8px 0 26px; font-size: 14px; line-height: 1.45; color: #6b6b73; }
+
+.field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
+.label { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: #2a2a30; }
+.forgot { font-weight: 500; color: #0f766e; }
+.input { display: flex; align-items: center; height: 44px; padding: 0 14px; border-radius: 12px; background: #efeee9; font-size: 14px; color: #9a9aa1; }
+.dots { color: #141417; letter-spacing: 0.14em; }
+
+/* The one solid thing on it. Pressed, it gives a little. */
+.submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 46px;
+  margin-top: 8px;
+  border-radius: 12px;
+  background: #141417;
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 600;
+  transition: opacity 380ms var(--ease-out), transform 480ms var(--ease-out), scale 140ms var(--ease), background-color 140ms var(--ease);
+}
+.submit[data-pressed] { scale: 0.97; background: #2c2c33; }
+
+.ways { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
+.or { font-size: 12.5px; text-align: center; color: #8a8a92; }
+.wayRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.way { display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; border-radius: 12px; background: #efeee9; font-size: 13.5px; font-weight: 600; }
+
+.foot { margin: 26px 0 0; font-size: 13px; text-align: center; color: #6b6b73; }
+.link { font-weight: 600; color: #0f766e; }
+
+@media (prefers-reduced-motion: reduce) {
+  .page, .piece, .brandName, .claim, .submit { transition: none; }
+}
+
+/* On a phone, the page as narrow as the screen: split, the brand's side a band of its teal with the name, the form keeping its room. */
+@media (max-width: 699px) {
+  .page[data-split] { grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr); }
+  .brandName { left: 18px; }
+  .claim { display: none; }
+}
