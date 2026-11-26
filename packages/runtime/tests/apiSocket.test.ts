@@ -1,11 +1,12 @@
-import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync } from 'node:fs'
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { API_VERSION, Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { makeFakeService } from '@althar/connectors/testing'
+import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -13,6 +14,7 @@ import { SqlClient } from 'effect/sql'
 
 import { services } from '../src/Api'
 import { authenticateApiClient, listenLocalApi, openApiSocket } from '../src/apiSocket'
+import { artifactPath } from '../src/artifactFiles'
 import { ClientIdentities } from '../src/ClientIdentities'
 import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
@@ -322,6 +324,39 @@ describe('the authenticated private API', () => {
       assert.isTrue(Exit.isFailure(yield* Effect.exit(second.LeftHome({ commandId: id }))))
     }).pipe(Effect.scoped, Effect.provide(environment)),
   )
+
+  it.live('gives a socket and a paired device a picture the home keeps, through their own authenticated connections', () => {
+    // A home's store holding a lead's screenshot, as the runtime keeps it by its digest.
+    const artifacts = mkdtempSync(join(tmpdir(), 'althar-socket-artifacts-'))
+    const png = Buffer.from(SCREENSHOT_PNG, 'base64')
+    const digest = createHash('sha256').update(png).digest('hex')
+    mkdirSync(join(artifactPath(artifacts, digest), '..'), { recursive: true })
+    writeFileSync(artifactPath(artifacts, digest), png)
+    return Effect.gen(function* () {
+      const identities = yield* ClientIdentities
+      const endpoint = yield* listenLocalApi(mkdtempSync(join(tmpdir(), 'althar-api-profile-')))
+      // A window on another computer, over SSH: the launch secret's socket authority.
+      const socket = yield* openApiSocket(endpoint.address)
+      yield* authenticateApiClient(socket, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })
+      const read = yield* (yield* client(socket)).ReadPicture({ digest })
+      assert.deepStrictEqual(Buffer.from(read.bodyBase64, 'base64'), png)
+      // A phone or a desktop paired over HTTPS: its own device key.
+      const pair = generateKeyPairSync('ed25519')
+      const publicKey = pair.publicKey.export({ format: 'jwk' }).x ?? ''
+      const registered = yield* identities.register({ name: 'Phone', publicKey, role: 'paired_device' })
+      const paired = yield* openApiSocket(endpoint.address)
+      yield* authenticateApiClient(paired, endpoint.homeId, {
+        kind: 'device',
+        deviceId: registered.deviceId,
+        sign: (message) => Effect.sync(() => sign(null, Buffer.from(message), pair.privateKey).toString('base64url')),
+      })
+      const phone = yield* client(paired)
+      assert.strictEqual((yield* phone.ReadPicture({ digest })).mediaType, 'image/png')
+      // Revoked, it reads nothing more.
+      yield* identities.revoke(registered.deviceId)
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(phone.ReadPicture({ digest }))))
+    }).pipe(Effect.scoped, Effect.provide(services({ ...options, artifactsRoot: artifacts })))
+  })
 
   it.live('refuses wrong launch secrets, homes and protocol versions before serving any RPC', () =>
     Effect.gen(function* () {

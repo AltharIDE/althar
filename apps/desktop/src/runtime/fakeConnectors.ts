@@ -11,6 +11,7 @@ import {
   type Product,
   type ProductInfo,
   products,
+  pushAnswer,
 } from '@althar/connectors'
 import { type FakeCheck, makeFakeService, routed } from '@althar/connectors/testing'
 import { Connectors } from '@althar/runtime'
@@ -83,6 +84,30 @@ github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one tr
 for (const pull of JSON.parse(process.env.ALTHAR_FAKE_PULLS ?? '[]') as ReadonlyArray<{ title: string; author: string; headSha: string }>)
   github.addPullRequest({ path: ['meridian', 'api'], ...pull })
 
+/**
+ * Where a test pushes over HTTP to a server of its own on loopback (ALTHAR_FAKE_REMOTE), GitHub's check asks it git's first
+ * question of a push, as the real check does, and says the repository it refuses: the only address these tests reach.
+ */
+const checkedPush: Access = (input) =>
+  Effect.flatMap(github.access(input), (report): Effect.Effect<AccessReport> => {
+    const remote = process.env.ALTHAR_FAKE_REMOTE ?? ''
+    if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(remote)) return Effect.succeed(report)
+    return Effect.map(pushAnswer(globalThis.fetch, remote, 'Basic e2e'), (answer) =>
+      answer !== 'no'
+        ? report
+        : {
+            ...report,
+            lines: report.lines.map((said) =>
+              said.need === 'push'
+                ? line('push', 'no', {
+                    reason: { kind: 'no_push', names: ['meridian/api'], url: 'https://github.com/settings/personal-access-tokens' },
+                  })
+                : said,
+            ),
+          },
+    )
+  })
+
 export const fakeConnectors = Layer.succeed(
   Connectors,
   Connectors.of({
@@ -91,7 +116,7 @@ export const fakeConnectors = Layer.succeed(
         ...products.github,
         hosted: { webUrl: HOST, apiUrl: `${HOST}/api/v3` },
         make: () => ({ host: github, tracker: github }),
-        access: github.access,
+        access: checkedPush,
       },
     ],
     fetch: () => Promise.reject(new Error('The end-to-end tests reach no network')),

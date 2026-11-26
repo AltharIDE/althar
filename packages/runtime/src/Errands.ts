@@ -14,12 +14,14 @@ import {
   afterStep,
   calledOffNote,
   failedNote,
+  type Happened,
   heldNote,
   keptNote,
   type MergeLeft,
   mergesLeft,
   resumedNote,
   type SaidStep,
+  settledNote,
   stepNote,
   type StepNote,
   stillNote,
@@ -223,6 +225,21 @@ export class Errands extends Context.Service<
      * finds its pull request, so the thread's merging line follows it from the task's name to its number.
      */
     retell(errandId: string, note: StepNote): Effect.Effect<void>
+    /**
+     * Closes a held errand whose wait has happened, with its line (`settleHeldErrands` reads that): its `done` steps done
+     * already, and the errand done with them; or, with the steps `left` from the one whose wait came while Althar couldn't
+     * watch for it, closed, for the person to ask for again. Nothing where it has moved since its read (`revision`): resumed,
+     * held anew, or closed.
+     */
+    settle(
+      errandId: string,
+      closing: {
+        readonly revision: number
+        readonly done: ReadonlyArray<string>
+        readonly happened: ReadonlyArray<Happened>
+        readonly left: { readonly steps: ReadonlyArray<SaidStep>; readonly happened: Happened } | undefined
+      },
+    ): Effect.Effect<void, ToolRefused>
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
     /**
      * Whether the person's word for an action still stands, as execute checks
@@ -349,6 +366,8 @@ export class Errands extends Context.Service<
         reason: string | null,
         // Only where the errand is held for a wait Althar cannot watch: its line says that in words, not the reason's.
         plain?: (left: ReadonlyArray<SaidStep>) => ReturnType<typeof unwatched>,
+        // Its own line, said in place of the one its state says.
+        line?: StepNote,
       ) =>
         sql.withTransaction(
           Effect.gen(function* () {
@@ -358,7 +377,8 @@ export class Errands extends Context.Service<
             const revision = yield* change('errands', row.id, {
               state,
               reason,
-              ...(state === 'paused' ? { pausedAfterSequence: last?.sequence ?? 0 } : {}),
+              // Held anew, it reminds the person once more (`remind`).
+              ...(state === 'paused' ? { pausedAfterSequence: last?.sequence ?? 0, remindedAt: null } : {}),
             })
             yield* fact({
               projectId: row.projectId,
@@ -372,7 +392,8 @@ export class Errands extends Context.Service<
             // The last step's note says the errand is done.
             // The person's line says what is left, and why in words they know; the reason itself stays on the errand, for the agents.
             const left = (yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)
-            if (state === 'paused') yield* say(row, heldNote(left, reason, plain?.(left)))
+            if (line !== undefined) yield* say(row, line)
+            else if (state === 'paused') yield* say(row, heldNote(left, reason, plain?.(left)))
             else if (state === 'cancelled') yield* say(row, calledOffNote(left, reason, reason === CALLED_OFF))
           }),
         )
@@ -746,6 +767,22 @@ export class Errands extends Context.Service<
               if (row !== undefined) yield* say(row, note, true, false)
             }),
           ).pipe(Effect.orDie),
+        settle: (errandId, closing) =>
+          provide(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const [row] = yield* sql<ErrandRow & { revision: number }>`SELECT * FROM errands WHERE id = ${errandId}`
+                // What was read was read of this hold: one the person made since, or a resume, is theirs.
+                if (row?.state !== 'paused' || row.revision !== closing.revision) return
+                for (const key of closing.done)
+                  yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${row.id} AND step_key = ${key}`
+                const note = settledNote(closing.happened, closing.left)
+                yield* closing.left === undefined
+                  ? set(row, 'done', null, undefined, note)
+                  : set(row, 'cancelled', `What it waited for happened while Althar couldn’t watch for it: ${note.title}`, undefined, note)
+              }),
+            ),
+          ),
         pause: (access, id, reason) =>
           provide(
             Effect.gen(function* () {
@@ -856,6 +893,8 @@ export class Errands extends Context.Service<
                 >`SELECT * FROM errands WHERE project_id = ${projectId} AND state IN ('open', 'paused')`
                 for (const row of rows) {
                   if (row.state === 'paused' && row.reason?.startsWith(unreachableTaskWait) === true) continue
+                  // Held, it says so once: its hold's own line, then one reminder, and no more until it is held again.
+                  if (row.state === 'paused' && row.remindedAt !== null) continue
                   const steps = (yield* stepsOf(row.id)).filter((s) => s.state !== 'done')
                   const unsupported = steps.flatMap((s) =>
                     (JSON.parse(s.waits) as Array<{ kind: string }>)

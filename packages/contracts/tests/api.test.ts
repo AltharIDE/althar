@@ -471,6 +471,7 @@ describe('the API', () => {
               CloseLaunchPreviewSocket: () => Effect.die('unused'),
               PrepareWorkerSnapshot: () => Effect.die('unused'),
               ReadWorkerFile: () => Effect.die('unused'),
+              ReadPicture: () => Effect.die('unused'),
               ReadWorkerSnapshotChunk: () => Effect.die('unused'),
               ReleaseWorkerSnapshot: () => Effect.die('unused'),
               GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),

@@ -234,6 +234,7 @@ describe('the client', () => {
           CloseLaunchPreviewSocket: () => Effect.die('unused'),
           PrepareWorkerSnapshot: () => Effect.die('unused'),
           ReadWorkerFile: () => Effect.die('unused'),
+          ReadPicture: () => Effect.die('unused'),
           ReadWorkerSnapshotChunk: () => Effect.die('unused'),
           ReleaseWorkerSnapshot: () => Effect.die('unused'),
           WatchAttention: () => Stream.die('unused'),
