@@ -27,7 +27,7 @@ export interface WorkCardText {
 export const workCardText: WorkCardText = {
   status: {
     [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Waiting on you',
+    [TaskStatus.Yours]: 'Needs you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
     [TaskStatus.Queued]: 'Waiting',

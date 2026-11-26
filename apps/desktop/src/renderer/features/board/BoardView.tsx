@@ -137,7 +137,7 @@ export const text = {
   conversation: 'Conversation',
   status: {
     [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Waiting on you',
+    [TaskStatus.Yours]: 'Needs you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
     [TaskStatus.Queued]: 'Waiting',

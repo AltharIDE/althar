@@ -24,7 +24,7 @@ export const Running: Story = {}
 export const OnAReview: Story = { args: REVIEWING }
 /** Out of usage: it says when it resumes. */
 export const Paused: Story = { args: PAUSED }
-export const WaitingOnYou: Story = { args: { status: TaskStatus.Yours, note: 'Your call on the fallback' } }
+export const NeedsYou: Story = { args: { status: TaskStatus.Yours, note: 'Your call on the fallback' } }
 /** Sent back from Verify to Implement. */
 export const SentBack: Story = { args: { at: 1, seen: 3 } }
 export const Stopped: Story = { args: { status: TaskStatus.Stopped } }
@@ -46,7 +46,7 @@ export const AllStates: Story = {
         { state: 'running', node: <WorkCard {...args} /> },
         { state: 'on a review', node: <WorkCard {...args} {...REVIEWING} /> },
         { state: 'paused', node: <WorkCard {...args} {...PAUSED} /> },
-        { state: 'waiting on you', node: <WorkCard {...args} {...WaitingOnYou.args} /> },
+        { state: 'needs you', node: <WorkCard {...args} {...NeedsYou.args} /> },
         { state: 'sent back', node: <WorkCard {...args} {...SentBack.args} /> },
         { state: 'stopped', node: <WorkCard {...args} {...Stopped.args} /> },
         { state: 'current', node: <WorkCard {...args} current /> },

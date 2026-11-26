@@ -1079,7 +1079,6 @@ export const skillCard: SkillReviewCard = {
   changes: [],
 }
 
-/** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
 /** The person's MCP servers and skills, as a profile that reads none has them. */
 export const agentTools: AgentTools = {
   enabled: true,
@@ -1095,11 +1094,42 @@ export const agentTools: AgentTools = {
   checkedAt: null,
 }
 
+/** What a client has that isn't a call: its connection, and what a promise or a printout looks for. */
+const NOT_CALLS = new Set(['connection', 'then', 'toJSON'])
+
+/**
+ * A client with the calls given, and every other call a mock made the first time it is read, resolving to nothing:
+ * the same mock each time after, so a test can still say what it answers, spy on it or ask how it was called.
+ */
+const callsOnDemand = (given: Partial<Client>): Client => {
+  const made = (target: Partial<Client>, name: string | symbol) => {
+    const call = typeof name === 'string' && /^[a-z][A-Za-z]*$/.test(name) && !NOT_CALLS.has(name)
+    if (!call || name in target) return
+    const answersNothing = vi.fn(async () => undefined)
+    Reflect.set(target, name, answersNothing)
+  }
+  return new Proxy(given, {
+    get: (target, name) => {
+      made(target, name)
+      return Reflect.get(target, name)
+    },
+    // As `vi.spyOn` looks.
+    getOwnPropertyDescriptor: (target, name) => {
+      made(target, name)
+      return Reflect.getOwnPropertyDescriptor(target, name)
+    },
+  }) as Client
+}
+
+/**
+ * A client whose calls resolve with the fixtures, or with nothing where there are none, and whose watch the test
+ * drives with `emit`.
+ */
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
-  const client: Client = {
+  const client: Client = callsOnDemand({
     listProjectWorkers: vi.fn(async () => []),
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
@@ -1171,26 +1201,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     readCanvasText: vi.fn(async () => ({ path: 'README.md', text: '# Canvas', bytes: 8 })),
     getArtifactsPlace: vi.fn(async () => ({ home: null, guess: null })),
     listRepositoryFolders: vi.fn(async () => ({ folders: [], truncated: false })),
-    setArtifactsHome: vi.fn(async () => {}),
-    saveCanvas: vi.fn(async () => {}),
-    stopSavingCanvas: vi.fn(async () => {}),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
-    leftHome: vi.fn(async () => {}),
-    seeTask: vi.fn(async () => {}),
-    settledWithOnePress: vi.fn(async () => {}),
-    merge: vi.fn(async () => {}),
-    push: vi.fn(async () => {}),
-    ship: vi.fn(async () => {}),
-    routeShip: vi.fn(async () => {}),
-    fixAfterMerge: vi.fn(async () => {}),
-    leaveAfterMerge: vi.fn(async () => {}),
-    replacePullRequest: vi.fn(async () => {}),
     mergeNote: vi.fn(async () => 'Merge them.'),
-    mergeHere: vi.fn(async () => {}),
-    pushHere: vi.fn(async () => {}),
-    pushBranch: vi.fn(async () => {}),
     listEditors: vi.fn(async () => [
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },
@@ -1198,14 +1212,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getLoad: vi.fn(async () => load),
     getPlaces: vi.fn(async () => ({ busy: 2, configured: 4, atOnce: 4, why: null, waiting: 0 })),
     getWorkers: vi.fn(async () => ({ enabled: false, workers: [] })),
-    removeWorker: vi.fn(async () => undefined),
     addWorker: vi.fn(async () => {
       throw new Error('No worker to add here.')
     }),
     createWorkerCode: vi.fn(async () => ({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 })),
-    setWorkerProjects: vi.fn(async () => undefined),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
-    dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
     getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
@@ -1216,7 +1227,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       messages: messages.map(() => ({ found: [] })),
     })),
     readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
-    installAgent: vi.fn(async () => {}),
     getAgentCatalog: vi.fn(async () => ({ revision: 0, items: [], connections: [], problem: null, refreshing: false })),
     saveAcpConnection: vi.fn(async () => 1),
     startAcpCheck: vi.fn(async () => 1),
@@ -1234,24 +1244,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getLineComments: vi.fn(async (_taskId: string): Promise<TaskLineComments> => ({ comments: [] })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
-    setModel: vi.fn(async () => {}),
-    setEffort: vi.fn(async () => {}),
-    setAgent: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
-    setDefaultEffort: vi.fn(async () => {}),
-    setModelBlocked: vi.fn(async () => {}),
     getAgentTools: vi.fn(async () => agentTools),
-    setToolRoles: vi.fn(async () => {}),
-    setToolInProject: vi.fn(async () => {}),
     getServerDetail: vi.fn(async (name: string) => ({ name, runs: '', files: [], tools: null, toolsWhy: null })),
-    checkServers: vi.fn(async () => {}),
-    addServer: vi.fn(async () => {}),
-    removeServer: vi.fn(async () => {}),
-    setToolSync: vi.fn(async () => {}),
-    setToolKeptOut: vi.fn(async () => {}),
-    pickToolWay: vi.fn(async () => {}),
-    undoToolSync: vi.fn(async () => {}),
-    signInToolServer: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       reviewSeal: { on: true, style: 'ring' as const },
@@ -1272,53 +1267,21 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
         afterMergeReview: 'major',
       } as const,
     })),
-    setCoAuthor: vi.fn(async () => {}),
-    setPostTeamReviews: vi.fn(async () => {}),
-    setSendMidTurn: vi.fn(async () => {}),
-    setShipRoute: vi.fn(async () => {}),
-    setRunOutside: vi.fn(async () => {}),
-    shelveTask: vi.fn(async () => {}),
-    stopHelper: vi.fn(async () => {}),
-    joinChanges: vi.fn(async () => {}),
-    dropChange: vi.fn(async () => {}),
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
-    removePreset: vi.fn(async () => {}),
-    tunePreset: vi.fn(async () => {}),
-    resetPreset: vi.fn(async () => {}),
-    declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
     applyPreset: vi.fn(async () => ''),
-    editPreset: vi.fn(async () => undefined),
-    setReviewSeal: vi.fn(async () => {}),
-    setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
     getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
     makeAutomation: vi.fn(async () => 'auto2'),
-    changeAutomation: vi.fn(async () => {}),
-    turnOnAutomation: vi.fn(async () => {}),
-    pauseAutomation: vi.fn(async () => {}),
-    runAutomationNow: vi.fn(async () => {}),
-    answerTaskAsk: vi.fn(async () => {}),
-    makeItAFullTask: vi.fn(async () => {}),
-    keepTheModel: vi.fn(async () => {}),
-    undoTheModelMove: vi.fn(async () => {}),
-    deleteAutomation: vi.fn(async () => {}),
-    undoAutomationChange: vi.fn(async () => {}),
-    answerSettingChange: vi.fn(async () => {}),
-    undoSettingChange: vi.fn(async () => {}),
     getSettingChanges: vi.fn(async () => []),
-    setAutomationPostsReviews: vi.fn(async () => {}),
-    setAutomationsPaused: vi.fn(async () => {}),
     listSkills: vi.fn(async () => ({ enabled: true, skills: [installedSkill] })),
     findSkills: vi.fn(async ({ source }) => ({ repo: source, ref: 'HEAD', sha: 'a'.repeat(40), paths: ['skills/release-notes'] })),
     stageSkill: vi.fn(async () => skillCard),
     approveSkill: vi.fn(async () => ({ ...installedSkill, id: skillCard.id, source: 'github' as const, repo: skillCard.source.repo })),
     checkSkillUpdates: vi.fn(async () => []),
     rollBackSkill: vi.fn(async () => installedSkill),
-    uninstallSkill: vi.fn(async () => {}),
-    setAgentsAtOnce: vi.fn(async () => {}),
     phoneAccess: vi.fn(async () => ({ origin: null, switchable: true, on: false })),
     setPhoneAccess: vi.fn(async (on: boolean) => ({ origin: on ? 'https://studio-mac.local:6769' : null, switchable: true, on })),
     createPairingCode: vi.fn(async () => ({
@@ -1330,67 +1293,18 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     pairingStatus: vi.fn(async () => ({ state: 'waiting' as const, expiresAt: Date.now() + 5 * 60_000 })),
     pairedDevices: vi.fn(async () => ({ clients: [], next: null })),
-    removePairedDevice: vi.fn(async () => {}),
-    setFolderWait: vi.fn(async () => {}),
-    setPlansAndReviews: vi.fn(async () => {}),
-    setNewProjectDefaults: vi.fn(async () => {}),
     getStorageSize: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
     cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
-    moveInLine: vi.fn(async () => {}),
-    lineOldestFirst: vi.fn(async () => {}),
     startAnyway: vi.fn(async () => true),
-    interrupt: vi.fn(async () => {}),
-    tryAgain: vi.fn(async () => {}),
-    compact: vi.fn(async () => {}),
-    clearView: vi.fn(async () => {}),
-    showEarlier: vi.fn(async () => {}),
-    undoClearView: vi.fn(async () => {}),
-    forgetConversation: vi.fn(async () => {}),
-    stopTask: vi.fn(async () => {}),
-    setTaskResolveConflicts: vi.fn(async () => {}),
-    resolveConflictsNow: vi.fn(async () => {}),
-    lookForConflicts: vi.fn(async () => {}),
-    setTaskAllowEverything: vi.fn(async () => {}),
-    resumeTask: vi.fn(async () => {}),
-    leaveOutCommits: vi.fn(async () => {}),
-    abandonTask: vi.fn(async () => {}),
-    reopenTask: vi.fn(async () => {}),
-    markTaskDone: vi.fn(async () => {}),
-    keepTaskForLater: vi.fn(async () => {}),
-    renameTask: vi.fn(async () => {}),
     setThreadGoal: async () => null,
-    send: vi.fn(async () => {}),
-    takeBack: vi.fn(async () => {}),
     undoTurn: vi.fn(async () => ({ prompt: '', messages: [], restored: 0 })),
-    answer: vi.fn(async () => {}),
-    answerQuestion: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
-    startPlan: vi.fn(async () => {}),
-    stopWaiting: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => true),
-    holdDraft: vi.fn(async () => {}),
-    changePlan: vi.fn(async () => {}),
-    changeTeam: vi.fn(async () => {}),
-    declineReview: vi.fn(async () => {}),
-    changeIssueDraft: vi.fn(async () => {}),
-    fileIssueDraft: vi.fn(async () => {}),
-    discardIssueDraft: vi.fn(async () => {}),
-    applyIssueChanges: vi.fn(async () => {}),
-    discardIssueChanges: vi.fn(async () => {}),
-    preferIssueCards: vi.fn(async () => {}),
-    setTaskIssuePart: vi.fn(async () => {}),
-    changeReviewDraft: vi.fn(async () => {}),
-    postReviewDraft: vi.fn(async () => {}),
-    discardReviewDraft: vi.fn(async () => {}),
-    answerStuck: vi.fn(async () => {}),
-    answerCheckout: vi.fn(async () => {}),
     moveTask: vi.fn(async () => ({ kind: 'moved' as const })),
-    dropMove: vi.fn(async () => {}),
     workToward: vi.fn(async () => []),
-    handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
       flowId: 'flow1',
@@ -1400,29 +1314,17 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       expiresAt: NOW,
     })),
     getSignIn: vi.fn(async () => ({ state: 'waiting' as const })),
-    cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
     getConnectGuide: vi.fn(async () => githubGuide),
     findServer: vi.fn(async (_service, webUrl: string) => ({ product: null, webUrl, reason: 'unreachable' as const, tokenPage: null })),
     connectCli: vi.fn(async () => githubConnection),
     checkConnection: vi.fn(async () => githubCheck),
-    disconnect: vi.fn(async () => {}),
-    renameProject: vi.fn(async () => {}),
-    setProjectInk: vi.fn(async () => {}),
     getProjectTracker: vi.fn(async (): Promise<ProjectTracker | null> => null),
-    setProjectTracker: vi.fn(async () => {}),
     listContainers: vi.fn(async (): Promise<ReadonlyArray<TrackerContainer>> => []),
-    removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
-    addRepositories: vi.fn(async () => {}),
-    leaveOutRepository: vi.fn(async () => {}),
-    addParentRemote: vi.fn(async () => {}),
-    setRepository: vi.fn(async () => {}),
     createBranch: vi.fn(async ({ branch }: { readonly branch: string }) => branch.trim()),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
     getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
-    dropProjectNote: vi.fn(async () => {}),
-    editProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({
       ...withChange(projectRules, change),
@@ -1433,26 +1335,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       name: input.name,
       home: '/Users/me/Library/Application Support/Althar/accounts/acc_added',
     })),
-    renameAccount: vi.fn(async () => {}),
-    removeAccount: vi.fn(async () => {}),
-    signOutAccount: vi.fn(async () => {}),
-    orderAccounts: vi.fn(async () => {}),
     findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
     startAccountSignIn: vi.fn(async () => ({ flowId: 'flow_account', state: { state: 'starting' as const } })),
     getAccountSignIn: vi.fn(async (): Promise<AccountSignInState> => ({ state: 'starting' })),
-    pasteAccountSignInCode: vi.fn(async () => {}),
-    cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
-    markReady: vi.fn(async () => {}),
-    postScreenshots: vi.fn(async () => {}),
-    trustBot: vi.fn(async () => {}),
-    openChange: vi.fn(async () => {}),
-    skipReview: vi.fn(async () => {}),
-    shapeTask: vi.fn(async () => {}),
-    setReviewAfterMerge: vi.fn(async () => {}),
-    refreshTask: vi.fn(async () => {}),
-    stopListening: vi.fn(async () => {}),
     attachPullRequest: vi.fn(async () => ({
       kind: 'attached' as const,
       name: 'PR #1',
@@ -1462,8 +1349,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       own: 0,
     })),
     closePullRequest: vi.fn(async () => ({ branch: null })),
-    stopBackground: vi.fn(async () => {}),
-    clearBackground: vi.fn(async () => {}),
     runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({
       id: 'proc_run',
       taskId,
@@ -1474,8 +1359,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       startedAt: NOW,
       ended: null,
     })),
-    stopLaunch: vi.fn(async () => {}),
-    clearLaunch: vi.fn(async () => {}),
     listLaunches: vi.fn(async () => []),
     openTerminal: vi.fn(async (input: { id: string; projectId: string; taskId: string | null; launchId?: string }) => ({
       id: input.id,
@@ -1491,12 +1374,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     listTerminals: vi.fn(async () => []),
     attachTerminal: vi.fn(() => () => {}),
-    writeTerminal: vi.fn(async () => {}),
-    resizeTerminal: vi.fn(async () => {}),
-    closeTerminal: vi.fn(async () => {}),
     keepRunnable: vi.fn(async () => ({ id: 'rnbl_kept' })),
-    dropRunnable: vi.fn(async () => {}),
-    orderRunnables: vi.fn(async () => {}),
     getRepositoryScripts: vi.fn(async () => scripts),
     getRunnableRefs: vi.fn(async () => []),
     watch: (listener, since, onWatching) => {
@@ -1512,9 +1390,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
         if (onWatching !== undefined) starts.delete(onWatching)
       }
     },
-    close: vi.fn(async () => {}),
     ...overrides,
-  }
+  })
   return {
     client,
     emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)),
