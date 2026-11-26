@@ -1,6 +1,6 @@
 # Foundations
 
-How Althar is put together: the shell and the runtime, how the UI stays instant and quick while the computer is busy, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
+How Althar is put together: the shell and the runtime, clients of another version, how the UI stays instant and quick while the computer is busy, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
 
 **Replaces:** ADR-003, ADR-008, ADR-009, ADR-010, ADR-047, ADR-048, ADR-074, ADR-082
 
@@ -73,6 +73,17 @@ Not built yet: protected desktop enrollment, protected mobile key storage, manag
 - **A code** carries the home's ID, its addresses, its authority's certificate and a random token; the home keeps the token's SHA-256 in memory for ten minutes, takes one worker by it (the same key may ask again), and listens for codes only while one waits. The code's machine takes the newest release and its public key from the releases page over HTTPS and checks the archive against its manifest: trust on first use, then every update signed by that key.
 
 These decisions narrow [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md); they do not accept all of its pool, placement, file-transfer, hosting or multiplayer design. Its delivery plan records the remaining work and proof. The implementation and remaining release gates above distinguish the delivered connection path from the native worker direction.
+
+## Clients of another version
+
+Decided 26 Nov 2026. A home, the desktop and the phone ship apart, so a client connects to a home of another release. `API_VERSION` refuses a client that speaks another version, but it has never moved: they connect, and a newer home's answers must read in an older client. They didn't. When a notice's `role` went from four values to six (#717), every older client failed to read a newer home's threads, whole.
+
+- **The wire is a file a reviewer reads.** `packages/contracts/api.schema.json` records every call, command and stream: whether a socket may make it, its lane, and its payload, success and error as JSON Schema, with each schema the contract exports under its name. `bun run snapshot` writes it from the contract, and a test fails while the two differ, so the pull request that changes what crosses shows it in its diff.
+- **A client reads what it doesn't know yet.** A union in an answer that grows is open on decode (`packages/contracts/src/open.ts`). A member the client doesn't know takes the union's fallback, as a notice's role is `unknown`, drawn as Althar's own line, and a watch's event is `Unknown`, which the window passes over. Where nothing could show it, it is left out: an item of a thread, a call waiting on the person, a connection to a product the client doesn't know. One item read alone is none.
+- **A home sends only what it lists.** Encoding stays strict: a runtime can't send a fallback, or a member its contract doesn't have. Payloads are never open, so a home refuses what it can't do rather than guessing.
+- **Adding to an open union is compatible; adding to one that isn't, breaks.** A union in an answer that will grow is opened first, in a release of its own, so the clients out there read the member when it comes. `API_VERSION` still goes up for a change no older client survives. An error's `reason` and an agent's id are words already, so a new one reads.
+
+Not open yet: a product elsewhere than in `ListConnections`, a nudge's kind, a notice's step, a task's phase and a tool call's kinds. A new one of those still fails an older client.
 
 ## The UI is instant
 
@@ -247,3 +258,4 @@ Not built yet:
 - 20 Nov 2026: numbers that can't collide (ADR-107): `numbers` refuses a migration or ADR number main or a pull request ahead in the merge queue has, and warns a pull request, when its check runs, of an open one that adds a migration or proposal file with the same number.
 - 23 Nov 2026: adding a worker from the window: the home as its own authority, signing a worker's own key, opening its worker port without a restart; SSH setup from the signed release as a systemd user service that updates itself; a one-time code for a machine without SSH; agents for any project the home grants, picked in the window; sign-in reported by the worker and run from the window. Who may manage workers moved to `connectionAdmin`: the person's window or the home's operator, not a paired device.
 - 22 Nov 2026: a window on another computer's home makes projects there. The home finds where code is kept on its disk and where a new project's code goes, and grants each folder itself (`FindHomeFolders`), as the folder picker does on a desktop; reading, cloning, starting a repository and opening a project by those grants, its connections and its code hosts' repositories, and what its machine is (`GetMachine`), are allowed to a socket. Nothing that gives the person's word moved. The grants the home makes for it open only what they name (a repository found or made, or the place for new code), and it says which calls a socket may make, so a window on an older home offers its update rather than what would fail.
+- 26 Nov 2026: clients of another version: the wire's snapshot (`api.schema.json`), in the diff of each change to it, and unions in answers opened on decode, with encoding strict.
