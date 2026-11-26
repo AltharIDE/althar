@@ -88,3 +88,62 @@ describe('where a held plan runs', () => {
     expect(hints(gone).at(-1)).toEqual(['Linux worker ffffff', runsOnText.gone, true])
   })
 })
+
+describe('a worker’s own check, in Runs on (ADR-103)', () => {
+  const ready = { sandbox: { starts: true as const }, tools: [{ name: 'git', version: '2.43.0' }], models: [] }
+  const checked = (change: Partial<ProjectWorker> = {}): ProjectWorker => ({
+    ...free,
+    signedIn: ['claude-code'],
+    readiness: ready,
+    ...change,
+  })
+
+  it('greys out a worker that isn’t ready, with why, and says why it can’t start there', () => {
+    const workers: ReadonlyArray<ProjectWorker> = [
+      checked({ readiness: { ...ready, sandbox: { starts: false, problem: 'NoUserNamespaces', fix: 'sudo sh -c x' } } }),
+      checked({ workerId: id('b'), signedIn: [] }),
+      checked({ workerId: id('c'), capacity: { ...capacity, freeDiskMib: 1_200 } }),
+      checked({ workerId: id('d'), readiness: { ...ready, tools: [] } }),
+    ]
+    expect(hints(placementOf({ ...base, workers })).slice(2)).toEqual([
+      ['Linux worker aaaaaa', 'Sandbox can’t start', true],
+      ['Linux worker bbbbbb', 'Claude Code signed out', true],
+      ['Linux worker cccccc', 'Only 1.2 GB free', true],
+      ['Linux worker dddddd', 'No git', true],
+    ])
+    expect(placementOf({ ...base, workers, selected: id('a') }).problem).toBe(
+      'Linux worker aaaaaa can’t start its agents’ sandbox until its administrator allows it once: Settings › Computers has the command.',
+    )
+  })
+
+  it('says what a ready worker installs first for the project, or leaves to its lead', () => {
+    const needs = [
+      { name: 'bun', version: '1.3.5', why: 'bun.lock', installs: true },
+      { name: 'cargo', why: 'Cargo.toml', installs: false },
+    ]
+    expect(hints(placementOf({ ...base, workers: [checked({ needs })] }))[2]).toEqual([
+      'Linux worker aaaaaa',
+      '12 GB free · Installs Bun first',
+      false,
+    ])
+    expect(hints(placementOf({ ...base, workers: [checked({ needs: [needs[1]!] })] }))[2]?.[1]).toBe('12 GB free · Needs cargo')
+  })
+
+  it('takes a worker whose agent doesn’t offer the lead’s model, and says to pick one it has', () => {
+    const worker = checked({
+      readiness: { ...ready, models: [{ providerId: 'claude-code', models: [{ id: 'sonnet', name: 'Claude Sonnet 5.5' }] }] },
+    })
+    const placement = placementOf({
+      ...base,
+      workers: [worker],
+      selected: worker.workerId,
+      steps: [{ ...lead, model: 'opus' }],
+      modelName: (_agent, model) => (model === 'opus' ? 'Claude Opus 5.5' : model),
+    })
+    expect(hints(placement)[2]?.[2]).toBe(false)
+    expect(placement.problem).toBe('Linux worker aaaaaa doesn’t offer Claude Opus 5.5. Pick a model it has.')
+    expect(
+      placementOf({ ...base, workers: [worker], selected: worker.workerId, steps: [{ ...lead, model: 'sonnet' }] }).problem,
+    ).toBeUndefined()
+  })
+})

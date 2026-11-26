@@ -96,7 +96,7 @@ export const workerExecution = (
     },
     list: (projectId) => {
       const names = named()
-      return (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {
+      return (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity, signedIn, readiness }) => {
         const multiRepoProviders = capabilities.filter((one) => one.workspaceSets === true).map(({ providerId }) => providerId)
         const name = names.get(workerId)
         return {
@@ -106,6 +106,8 @@ export const workerExecution = (
           ...(multiRepoProviders.length === 0 ? {} : { multiRepoProviders }),
           busy: busy || preparing.has(workerId),
           ...(capacity === undefined ? {} : { capacity }),
+          ...(signedIn === undefined ? {} : { signedIn: [...signedIn] }),
+          ...(readiness === undefined ? {} : { readiness }),
         }
       })
     },
@@ -126,6 +128,7 @@ export const workerExecution = (
           ...known,
           ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
           ...(worker.release === undefined ? {} : { release: worker.release }),
+          ...(worker.readiness === undefined ? {} : { readiness: worker.readiness }),
           ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
           connected: true,
           busy: worker.busy || preparing.has(workerId) || workspaceId !== undefined,

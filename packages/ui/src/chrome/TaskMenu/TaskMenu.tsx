@@ -1,6 +1,6 @@
 import { type ReactElement, useRef } from 'react'
 
-import { Menu, MenuItem, MenuSegments, MenuSeparator, MenuSwitchItem } from '../../primitives/Menu/Menu'
+import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSegments, MenuSeparator, MenuSwitchItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
@@ -23,6 +23,10 @@ import s from './TaskMenu.module.css'
  * pressing it again. Stopping a task is not interrupting its lead: the
  * composer's square stops one turn and the task keeps going; this stops every
  * agent on it until you resume it.
+ *
+ * Where the home has workers, where it runs is one choice among them: picking
+ * another place moves it there, its work coming along, once its lead's turn
+ * ends; a place that can't take it now is there, greyed, with why.
  *
  * Where the task resolves conflicts otherwise than its project, a dot on the
  * button says so, and its tooltip how; otherwise nothing shows of it until the
@@ -73,6 +77,9 @@ export interface TaskMenuText {
   /** The branch its work goes into (ADR-093): the word before it, and what choosing it does, at the menu's foot. */
   into: string
   intoAbout: string
+  /** Where it runs (ADR-103): the group's heading, and what picking another place does, at the menu's foot. */
+  runsOn: string
+  runsOnAbout: string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -105,6 +112,16 @@ export const taskMenuText: TaskMenuText = {
   allowAllHeld: 'On for the project, in its Rules',
   into: 'Into',
   intoAbout: 'Its pull request goes into this branch. Copies its name.',
+  runsOn: 'Runs on',
+  runsOnAbout: 'Moves it there once its lead’s turn ends, with its work.',
+}
+
+/** A place a task can run: the home, or one of its workers, with how it stands, and greyed where it can't take the task now. */
+export interface TaskPlaceOption {
+  readonly value: string
+  readonly label: string
+  readonly hint?: string
+  readonly disabled?: boolean
 }
 
 export interface TaskMenuProps {
@@ -152,6 +169,8 @@ export interface TaskMenuProps {
   allowEverything?: { readonly on: boolean; readonly project: boolean; readonly onChange: (on: boolean) => void }
   /** Opens its project's rules: where its project allows everything, the task's held switch opens them. */
   onRules?: () => void
+  /** Where it runs, among the home and its workers: picking another moves it there. Given where it has somewhere to go. */
+  runsOn?: { readonly value: string; readonly places: ReadonlyArray<TaskPlaceOption>; readonly onMove: (place: string) => void }
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -184,6 +203,7 @@ export function TaskMenu({
   conflicts,
   allowEverything,
   onRules,
+  runsOn,
   open,
   defaultOpen,
   onOpenChange,
@@ -271,6 +291,31 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(present)
+  // Where it runs: another place moves it there.
+  const place = runsOn
+    ? [
+        <MenuRadioGroup
+          key="runs-on"
+          label={t.runsOn}
+          value={runsOn.value}
+          onChange={(next) => {
+            if (next !== runsOn.value) runsOn.onMove(next)
+          }}
+        >
+          {runsOn.places.map((option) => (
+            <MenuRadioItem
+              key={option.value}
+              value={option.value}
+              {...(option.hint === undefined ? {} : { hint: option.hint })}
+              {...(option.value === runsOn.value || option.disabled === true ? {} : { description: t.runsOnAbout })}
+              {...(option.disabled === true ? { disabled: true } : {})}
+            >
+              {option.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>,
+      ]
+    : []
   // Its own settings, changed in place.
   const settings = [
     conflicts && (
@@ -320,7 +365,7 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(present)
-  const groups = [into, work, settings, end].filter((group) => group.length > 0)
+  const groups = [into, work, place, settings, end].filter((group) => group.length > 0)
   if (groups.length === 0) return null
   // Said on the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project

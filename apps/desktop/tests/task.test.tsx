@@ -2188,6 +2188,54 @@ describe('a task', () => {
     expect(screen.getAllByText('release/0.8.0')).toHaveLength(1)
   })
 
+  it('moves between this home and its workers from its menu, asking for a model where the lead’s isn’t offered (ADR-103)', async () => {
+    const ready = { sandbox: { starts: true as const }, tools: [{ name: 'git', version: '2.43.0' }] }
+    const capacity = { platform: 'linux' as const, architecture: 'x64' as const, cpuCores: 8, freeMemoryMib: 12_288, freeDiskMib: 81_920 }
+    const runner = {
+      workerId: `wrk_${'a'.repeat(32)}`,
+      name: 'runner-1',
+      providers: ['claude-code'],
+      signedIn: ['claude-code'],
+      busy: false,
+      capacity,
+      readiness: { ...ready, models: [{ providerId: 'claude-code', models: [{ id: 'sonnet', name: 'Claude Sonnet' }] }] },
+    }
+    const unready = {
+      ...runner,
+      workerId: `wrk_${'b'.repeat(32)}`,
+      name: 'runner-2',
+      readiness: { ...ready, sandbox: { starts: false as const, problem: 'NoUserNamespaces' }, models: [] },
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread()),
+      listProjectWorkers: vi.fn(async () => [runner, unready]),
+      moveTaskTo: vi.fn(async () => ({ kind: 'waits' as const, why: 'Moves to runner-1 once its lead’s turn ends.' })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const menu = await screen.findByRole('menu', { name: 'This task' })
+    expect(
+      within(menu)
+        .getByRole('menuitemradio', { name: /This Mac/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(
+      within(menu)
+        .getByRole('menuitemradio', { name: /runner-2/ })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+    // runner-1 doesn't offer the lead's Claude Opus: the person picks a model it does, and it moves with it.
+    await userEvent.click(await within(menu).findByRole('menuitemradio', { name: /runner-1/ }))
+    const asking = await screen.findByRole('dialog', { name: 'Move to runner-1' })
+    expect(within(asking).getByText(/runner-1 doesn’t offer Claude Opus/u)).toBeTruthy()
+    expect(within(asking).getByRole('button', { name: 'Move' }).hasAttribute('disabled')).toBe(true)
+    await userEvent.click(within(asking).getByRole('button', { name: /^Lead:/u }))
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Sonnet/u }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(within(asking).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', runner.workerId, { model: 'sonnet' }))
+  })
+
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
     expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Save as preset', 'Stop the task', 'Abandon'])

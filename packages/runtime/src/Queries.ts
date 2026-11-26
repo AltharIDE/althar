@@ -4,6 +4,7 @@ import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { placingOf } from './taskPlaces'
 import { taskWorker } from './workerExecution'
 import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
@@ -4598,6 +4599,10 @@ export class Queries extends Context.Service<
               ],
               planId: standing.planId,
               workerId: yield* taskWorker(head.taskId),
+              ...(yield* placingOf(head.taskId).pipe(
+                Effect.map((placing) => (placing === undefined ? {} : { placing })),
+                Effect.orElseSucceed(() => ({})),
+              )),
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {

@@ -13,6 +13,7 @@ import {
   type ReviewVerdict,
   type ShipRoute,
   type ShipUnderWay,
+  type TaskPlace,
   type ThreadItem,
   type ThreadSnapshot,
   type GoalControl,
@@ -260,6 +261,11 @@ export interface TaskModel {
   readonly stopRunning: () => Promise<void>
   /** Puts the task on Scratch, or on the board with null (a task is a conversation plus parts). */
   readonly shelve: (shelf: 'scratch' | null) => Promise<void>
+  /**
+   * Moves it between the home and its workers (ADR-103): shown going there at once; there once its lead's turn ends, with
+   * its work, its lead on `lead`'s model where its own isn't offered there. Back where it runs calls off a move that waits.
+   */
+  readonly moveTo: (place: string, lead?: { readonly model?: string; readonly effort?: string }) => Promise<void>
   /** Saves the task's parts, team and the start of its brief as a preset, by name. */
   readonly savePreset: (name: string) => Promise<void>
   /** Stops a helper its lead started, by its id. */
@@ -1143,6 +1149,15 @@ export const useTask = (threadId: string): TaskModel => {
       onTask((taskId) => client.shelveTask(taskId, shelf), presses.act, {
         setting: 'shelf',
         show: (task) => ({ ...task, scratch: shelf === 'scratch' }),
+      }),
+    moveTo: (place, lead) =>
+      onTask((taskId) => client.moveTaskTo(taskId, place as TaskPlace, lead), presses.act, {
+        setting: 'place',
+        // Going there at once; the runtime's word says whether it is there or waits for its lead's turn.
+        show: (task) =>
+          place === (task.workerId ?? 'home')
+            ? (({ placing: _gone, ...rest }) => rest)(task)
+            : { ...task, placing: { to: place, why: '' } },
       }),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),

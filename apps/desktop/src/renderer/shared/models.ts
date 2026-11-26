@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import {
   type AgentModels,
   type AgentStatus,
+  type ProjectWorker,
   agentDefaultName,
   isAgentDefault,
   knownModelName,
@@ -531,4 +532,35 @@ export const moveTo = async (client: Client, threadId: string, current: Choice, 
   if (back && model === null && effort === null) await client.setAgent({ threadId, agentId })
   if (model !== null && (back || model !== current.model)) await client.setModel({ threadId, agentId, model })
   if (effort !== null && (back || effort !== current.effort)) await client.setEffort({ threadId, agentId, effort })
+}
+
+/** The worker a pick is for: the agents it has and has signed in, and the models each offers there, as its check found. */
+export type PickOn = Pick<ProjectWorker, 'providers' | 'signedIn' | 'readiness'>
+
+/**
+ * What a worker offers of the home's agents and models (ADR-103): only its agents, signed in there where it says, and of
+ * each only the models its check found it offers there, in the home's order and with what the home knows of them, then
+ * any the home hasn't heard of. An agent it hasn't said its models for keeps the home's list.
+ */
+export const onWorker = (
+  known: ReadonlyArray<AgentModels>,
+  agents: ReadonlyArray<AgentStatus>,
+  worker: PickOn,
+): { readonly known: ReadonlyArray<AgentModels>; readonly agents: ReadonlyArray<AgentStatus> } => {
+  const there = new Map(
+    (worker.readiness?.models ?? []).filter((entry) => entry.models.length > 0).map((entry) => [entry.providerId, entry.models]),
+  )
+  return {
+    agents: agents.filter((agent) => worker.providers.includes(agent.id) && (worker.signedIn?.includes(agent.id) ?? true)),
+    known: known.map((offered) => {
+      const models = there.get(offered.agentId)
+      if (models === undefined) return offered
+      const ids = new Set(models.map((model) => model.id))
+      const kept = offered.models.filter((model) => ids.has(model.id))
+      const more = models
+        .filter((model) => !offered.models.some((home) => home.id === model.id))
+        .map((model) => ({ id: model.id, name: model.name, description: null, efforts: [], effort: null }))
+      return { ...offered, models: [...kept, ...more] }
+    }),
+  }
 }

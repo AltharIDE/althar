@@ -450,7 +450,7 @@ export class Sessions extends Context.Service<
      * The lead's folder moved (a worktree to Local, or back): what is said to it next starts a fresh session in the new
      * folder, handed the work so far. Nothing where no session is: the next starts there anyway.
      */
-    moved(threadId: string): Effect.Effect<void>
+    moved(threadId: string, lead?: { readonly model?: string; readonly effort?: string }): Effect.Effect<void>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -2132,8 +2132,10 @@ export class Sessions extends Context.Service<
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
-            const model = session?.model ?? undefined
-            const effort = session?.effort ?? undefined
+            // Moved to where its model isn't offered, it starts on the one the person picked for there.
+            const picked = reason === 'moved' ? previous.movedLead : undefined
+            const model = picked?.model ?? session?.model ?? undefined
+            const effort = picked?.effort ?? session?.effort ?? undefined
             // Written first: the old session takes no more turns, so the record already holds everything it did.
             const brief =
               thread.role === 'coordinator'
@@ -2973,10 +2975,12 @@ export class Sessions extends Context.Service<
             }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not give a lead back', cause), false))),
           ),
         switchAgent: (input) => run(switchAgent(input)),
-        moved: (threadId) =>
+        moved: (threadId, lead) =>
           Effect.sync(() => {
             const running = threads.get(threadId)
-            if (running !== undefined) running.moved = true
+            if (running === undefined) return
+            running.moved = true
+            if (lead !== undefined) running.movedLead = lead
           }),
         interrupt: (threadId, by, background = false) =>
           Effect.suspend(() => {
