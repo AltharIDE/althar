@@ -59,6 +59,7 @@ export const WINDOW_ACTIONS = {
   rename: { tool: 'rename_task' },
   attach: { tool: 'attach_pull_request' },
   moveToFront: { tool: 'move_to_front' },
+  startAnyway: { tool: 'start_anyway' },
   // The plan card.
   startPlan: { tool: 'restart_task' },
   reopenBlocker: { tool: 'restart_task' },
@@ -70,6 +71,7 @@ export const WINDOW_ACTIONS = {
   answerCheckout: { person: 'lets a Local task take their own checkout' },
   move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
   dropMove: { person: 'calls off a move into or out of their own checkout' },
+  moveTo: { tool: 'change_part' },
   workToward: { tool: 'work_toward' },
   runIt: { person: 'says how far to trust a pull request’s code: a lead’s run_it only relays their word' },
   stopRunning: { person: 'takes back the trust they gave a pull request’s code: only they stop running it' },

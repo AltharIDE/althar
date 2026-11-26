@@ -4,9 +4,9 @@ import { resolve } from 'node:path'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { Gallery } from '../src/home/bodies/desktop/Gallery'
 import { SCREENS } from '../src/home/bodies/desktop/screens/list'
 import SIZES from '../src/home/bodies/desktop/screens/sizes.json'
+import { Story } from '../src/home/story/Story'
 
 const screens = resolve(import.meta.dirname, '../src/home/bodies/desktop/screens')
 const brand = resolve(import.meta.dirname, '../../../brand/export/screenshots')
@@ -23,19 +23,21 @@ describe('the gallery', () => {
     expect(Object.keys(SIZES)).toEqual(SCREENS.map((screen) => screen.file))
   })
 
-  it('shows every screen in the strip, named, with its line and what it shows, each keeping its place before it loads', () => {
-    const html = renderToString(<Gallery />)
-    const cards = html.match(/<li /g) ?? []
-    expect(cards).toHaveLength(SCREENS.length)
+  it('shows every screen in the home page’s row, named, with its line and what it shows', () => {
+    const html = renderToString(<Story />)
     for (const screen of SCREENS) {
-      const [w, h] = SIZES[screen.file as keyof typeof SIZES].card
       expect(html).toContain(`<b>${screen.name}</b>`)
       expect(html).toContain(screen.line)
+      // The canvas is drawn in the page (CanvasScreen), a picture by its label; the rest are the brand pack's screenshots.
+      // A phone shows the brand pack's picture of a canvas in its place, by what that one shows.
+      if (screen.file === 'canvas') {
+        expect(html).toContain(`role="img" aria-label="${screen.alt}"`)
+        expect(html).toContain(`alt="${screen.still}"`)
+        expect(html).toMatch(/canvas-920h[^"]*\.webp/)
+        continue
+      }
       expect(html).toContain(`alt="${screen.alt}"`)
-      expect(html).toContain(`width="${w}" height="${h}"`)
-      expect(html).toMatch(new RegExp(`${screen.file}-460h[^"]*\\.webp \\d+w, [^"]*${screen.file}-920h[^"]*\\.webp \\d+w`))
+      expect(html).toMatch(new RegExp(`${screen.file}-920h[^"]*\\.webp`))
     }
-    // Nothing opened until a screen is pressed.
-    expect(html).not.toContain('<dialog')
   })
 })

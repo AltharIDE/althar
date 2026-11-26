@@ -39,6 +39,7 @@ import {
 } from './runRecords'
 import type { Sessions } from './Sessions'
 import { Setups } from './Setups'
+import { makeTaskPlaces, placesWaiting } from './taskPlaces'
 import { summarize } from './words'
 
 interface RunCheckoutsDependencies {
@@ -79,6 +80,8 @@ interface RunCheckoutsDependencies {
 export const makeRunCheckouts = (dependencies: RunCheckoutsDependencies) =>
   Effect.gen(function* () {
     const { busy, changes, currentRun, instance, notYetStopped, sessions, stepsOf, stuck, waitForPlace } = dependencies
+    // Moving a task between the home and its workers (taskPlaces.ts): one that waits is tried again with the moves below.
+    const places = makeTaskPlaces({ sessions })
 
     /* ---- Local tasks (ADR-091): a plan's first step takes its checkouts, or waits for them ---- */
 
@@ -267,7 +270,20 @@ export const makeRunCheckouts = (dependencies: RunCheckoutsDependencies) =>
         yield* moving(one.taskId, one.movingTo, one.change, instance.systemId).pipe(
           Effect.catchCause((cause) => Effect.logWarning('Could not move a task between a worktree and its checkout', cause)),
         )
-      return held.length > 0 || moves.length > 0 || (yield* checkoutsHeld)
+      // And moves between the home and its workers that wait for the lead's turn to end.
+      const placing = yield* placesWaiting
+      for (const one of placing)
+        yield* places
+          .place({
+            taskId: one.taskId,
+            to: one.movingTo.to,
+            ...(one.movingTo.lead === undefined ? {} : { lead: one.movingTo.lead }),
+            ...(one.movingTo.fromLastTurn === true ? { fromLastTurn: true } : {}),
+            retry: true,
+            actorId: instance.systemId,
+          })
+          .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task between the home and a worker', cause)))
+      return held.length > 0 || moves.length > 0 || placing.length > 0 || (yield* checkoutsHeld)
     })
 
     const workToward = (input: {
@@ -410,5 +426,15 @@ export const makeRunCheckouts = (dependencies: RunCheckoutsDependencies) =>
         yield* Queue.offer(checkoutWakes, undefined)
       })
 
-    return { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, placeFirst, workToward, worksInOf }
+    return {
+      answerCheckout,
+      checkoutWakes,
+      checkoutsEvery,
+      lookAtCheckouts,
+      moving,
+      place: places.place,
+      placeFirst,
+      workToward,
+      worksInOf,
+    }
   })

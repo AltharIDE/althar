@@ -1,4 +1,4 @@
-import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
+import { controlGoal, goalLine, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { taskWorker } from './workerExecution'
 import { WorkerSnapshots } from './WorkerSnapshots'
@@ -90,6 +90,7 @@ import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { checkoutNeeds, withNeeds } from './toolNeeds'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Terminals } from './Terminals'
@@ -542,6 +543,15 @@ export const handlers = apiLayer(
               }
         const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
+        // What changed is said in the thread, as Althar's line: the person sees it there, as the lead and anyone reading after do.
+        yield* Effect.provideContext(
+          addItem({ projectId: result.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: goalLine(control, result.before, result.goal),
+          }),
+          store,
+        )
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
         if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal
@@ -849,9 +859,13 @@ export const handlers = apiLayer(
      */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
-        const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
-          concurrency: 'unbounded',
-        })
+        const statuses = yield* Effect.forEach(
+          yield* accounts.of(entry.definition.id),
+          (account) =>
+            // Checked again, one being signed in in Terminal is asked its models afresh: the sign-in may be done now.
+            recheck ? Effect.andThen(models.signInChecked(account.id), accountStatus(account, recheck)) : accountStatus(account, recheck),
+          { concurrency: 'unbounded' },
+        )
         const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
@@ -868,6 +882,7 @@ export const handlers = apiLayer(
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
+          ...(entry.definition.native === undefined && entry.definition.signIn.logout !== undefined ? { signsOut: true } : {}),
           guide: entry.definition.cli?.guide ?? null,
           problem: null,
         } satisfies AgentStatus
@@ -1317,7 +1332,15 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
+      ListProjectWorkers: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const workers = config.workers?.list(projectId) ?? []
+            // What the project's files need that each lacks, for a worker that has checked itself.
+            if (workers.every((worker) => worker.readiness === undefined)) return workers
+            return withNeeds(workers, yield* checkoutNeeds(projectId).pipe(Effect.orElseSucceed(() => [])))
+          }).pipe(Effect.provideService(Instance, instance)),
+        ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       GetSearchDocuments: ({ after, search }) =>
         api(
@@ -1624,6 +1647,7 @@ export const handlers = apiLayer(
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
+      StartAnyway: ({ commandId, taskId }) => once(commandId, api(busy.startNow(taskId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -2265,6 +2289,28 @@ export const handlers = apiLayer(
         once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
       DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.place', { taskId, to }, commandId), (said) =>
+              runs.place({
+                envelope: said,
+                taskId,
+                to,
+                ...(lead === undefined
+                  ? {}
+                  : {
+                      lead: {
+                        ...(lead.model === undefined ? {} : { model: lead.model }),
+                        ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                      },
+                    }),
+                ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
+              }),
+            ),
+          ),
+        ),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -2448,7 +2494,25 @@ export const handlers = apiLayer(
           ),
         ),
       RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
-      RemoveAccount: ({ commandId, accountId, anyway }) => once(commandId, api(accounts.remove(accountId, { anyway: anyway === true }))),
+      RemoveAccount: ({ commandId, accountId, anyway }) =>
+        once(
+          commandId,
+          // Removed, it offers its agent's models no more.
+          api(accounts.remove(accountId, { anyway: anyway === true }).pipe(Effect.tap(() => models.forgetAccount(accountId)))),
+        ),
+      SignOutAccount: ({ commandId, accountId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* accounts.signOut(accountId)
+              // Signed out, it offers its agent's models no more, and every screen says so: checked again, its plan with it.
+              yield* models.forgetAccount(accountId)
+              yield* signIns.account(yield* accounts.get(accountId), true)
+              yield* planUsage.retell
+            }),
+          ),
+        ),
       OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
       FindAccounts: ({ agentId }) =>
         api(
@@ -2468,6 +2532,9 @@ export const handlers = apiLayer(
             Effect.gen(function* () {
               const line = yield* accounts.login(accountId, host)
               if (host !== undefined) yield* models.forget('copilot')
+              // Signed in again in Terminal, it may be someone else's sign-in, offered other models: asked afresh, and again as
+              // its sign-in is checked for a while, as Althar can't see the sign-in end there.
+              else yield* models.signingIn(accountId)
               // Opened where the app can, in Terminal; elsewhere the person runs it.
               return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
             }),
@@ -2641,12 +2708,54 @@ export const handlers = apiLayer(
       GetLoad: () => api(machine.now),
       GetPlaces: () => api(busy.places),
       GetWorkers: () => api(homeWorkers(config.workers)),
+      // Adding, changing and removing workers is the home's operator's or the person's own client's, as pairing a device
+      // is: a device paired over the network can't, nor can an agent's socket on another device.
       RemoveWorker: ({ commandId, workerId }) =>
-        once(
-          commandId,
-          config.workers?.revoke === undefined
-            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
-            : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.revoke === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+              : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
+          ),
+        ),
+      AddWorker: ({ commandId, publicKey, name, ssh }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            config.workers?.admin === undefined
+              ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+              : config.workers.admin
+                  .add({ publicKey: Buffer.from(publicKey, 'base64url'), name: name.trim(), ssh: ssh?.trim() || null })
+                  .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+          ),
+        ),
+      CreateWorkerCode: ({ name }) =>
+        connectionAdmin(
+          config.workers?.admin === undefined
+            ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes workers only by its operator’s certificates.' }))
+            : config.workers.admin.code(name).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotAdded', message }))),
+        ),
+      SetWorkerProjects: ({ commandId, workerId, projectIds }) =>
+        connectionAdmin(
+          once(
+            commandId,
+            Effect.gen(function* () {
+              const admin = config.workers?.admin
+              if (admin === undefined)
+                return yield* new ApiError({ reason: 'WorkersOff', message: 'This home’s workers get their projects from its operator.' })
+              const wanted = [...new Set(projectIds)]
+              const known =
+                wanted.length === 0
+                  ? []
+                  : yield* sql<{ id: string }>`SELECT id FROM projects WHERE id IN ${sql.in(wanted)}`.pipe(Effect.orDie)
+              if (known.length !== wanted.length)
+                return yield* new ApiError({ reason: 'NotFound', message: 'That project isn’t on this home.' })
+              return yield* admin
+                .assign(workerId, wanted)
+                .pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotChanged', message })))
+            }),
+          ),
         ),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
       DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),

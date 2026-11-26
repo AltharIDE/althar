@@ -1,12 +1,28 @@
-/* The developer page's ground: the parts bring their own. */
-.page { background: var(--n-2); }
+/* The page's paper, and the measure its first screen and its story share: 1272px of content between the gutters. */
 
-/* The Runs on band in the first screen's night, its hairlines and words as the orrery draws them; the band is its own. */
-.night {
-  --n-2: #070605;
-  --t-1: rgba(255, 248, 240, 0.88);
-  --t-3: #8f887e;
-  --t-4: rgba(255, 244, 232, 0.3);
-  --line-2: rgba(255, 244, 232, 0.11);
-  color-scheme: dark;
+.page {
+  --wrap: 1272px;
+  --gut: 64px;
+  /* Headings in Instrument Sans; their second beat in Instrument Serif's italic. */
+  --head: 'Instrument Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  --beat: 'Instrument Serif', Georgia, serif;
+  background: var(--n-2);
+}
+@media (max-width: 900px) { .page { --gut: 22px; } }
+
+/* The site's nav and its room, on a phone only: wider, the page's own bar stands in for it. */
+.narrow { display: none; }
+@media (max-width: 900px) { .narrow { display: contents; } }
+
+/*
+ * Pinch-zoomed in (lib/zoom.ts): every animation holds, so the browser draws
+ * the page once at its new size rather than flashing blank as moving
+ * pictures undo its tiles. Only the animations: the page's layers stay as
+ * they are, as taking them apart and making them again all at once, as it
+ * zooms back out, is its own flash.
+ */
+:global(html[data-zoomed]) .page *,
+:global(html[data-zoomed]) .page *::before,
+:global(html[data-zoomed]) .page *::after {
+  animation-play-state: paused !important;
 }

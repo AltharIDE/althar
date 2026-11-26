@@ -97,7 +97,7 @@ export const BETTER = [
 export const FOLLOW: readonly FollowLink[] = [
   { kind: 'github', href: 'https://github.com/AltharIDE/althar', handle: 'AltharIDE/althar' },
   { kind: 'discord', href: 'https://discord.gg/QA2g8MwKda', handle: 'Althar’s server' },
-  { kind: 'x', href: 'https://x.com/AltharAiUS', handle: '@AltharAiUS' },
+  { kind: 'x', href: 'https://x.com/GetAlthar', handle: '@GetAlthar' },
   { kind: 'linkedin', href: 'https://www.linkedin.com/company/althar-ai/', handle: 'althar-ai' },
 ]
 

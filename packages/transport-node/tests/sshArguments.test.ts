@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { sshArguments, sshEnvironment, sshUpdateArguments } from '../src/sshArguments'
+import { sshArguments, sshEnvironment, sshReleaseInfoArguments, sshUpdateArguments } from '../src/sshArguments'
 import { sshProgram } from '../src/sshProcess'
 
 describe('SSH transport arguments', () => {
@@ -40,6 +40,10 @@ describe('SSH transport arguments', () => {
     expect(args.at(-1)).toMatch(/\/private\/launcher'\\'' update --apply --wait --json --profile '\\''\/private\/profile/)
     expect(sshUpdateArguments({ target: 'my-vps' }).at(-1)).toContain('althar-host-program/launcher" update --apply --wait --json')
     expect(() => sshUpdateArguments({ target: 'my-vps; rm -rf ~' })).toThrow()
+    // A data change the person accepted: the updater's own approval.
+    expect(sshUpdateArguments({ target: 'my-vps' }, true).at(-1)).toContain(' update --apply --allow-incompatible --wait --json')
+    // What the home runs, asked first.
+    expect(sshReleaseInfoArguments({ target: 'my-vps', profile: '/p' }).at(-1)).toContain('launcher" release-info --json --profile')
   })
   it.skipIf(process.platform === 'win32')(
     'quotes remote paths as literal arguments, including apostrophes, dollars and shell syntax',

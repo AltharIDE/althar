@@ -503,7 +503,7 @@ describe('the start', () => {
     const { client, emit, watching } = fakeClient()
     withServices(<Start onProject={onProject} />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    await userEvent.click(await within(projects).findByRole('button', { name: /meridian/ }))
+    await userEvent.click(await within(projects).findByRole('button', { name: /^meridian/ }))
     expect(onProject).toHaveBeenCalledWith('p1')
 
     // A change to a project reads the list again; a change to anything else doesn't.
@@ -1043,6 +1043,56 @@ it('updates an older home reached over SSH in one press, each step as it stands,
   expect(window.localStorage.getItem('althar.homeToured')).toBe('1')
 })
 
+it('asks once, at the press, before an update that moves the home’s data, and goes only for the release accepted', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    updateCheck: vi.fn(async () => ({ from: '0.1.0', to: '0.2.0', change: 'data' })),
+    update: vi.fn(() => new Promise(() => {})),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await waitFor(() => expect(homes.updateCheck).toHaveBeenCalledOnce())
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  // Asked at once, nothing run yet.
+  expect(screen.getByText('Update runner-1 to 0.2.0?')).not.toBeNull()
+  expect(screen.getByText('Its data moves to a new format, with a snapshot kept. runner-1 can’t go back to 0.1.0 after.')).not.toBeNull()
+  expect(homes.update).not.toHaveBeenCalled()
+  // Not now: back where it was.
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(homes.update).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Update' }))
+  expect(homes.update).toHaveBeenCalledExactlyOnceWith('0.2.0')
+  expect(screen.getByText('Getting the new release')).not.toBeNull()
+})
+
+it('asks where the update learned only on the press that it moves the home’s data', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'confirm', check: { from: '0.1.0', to: '0.2.0', change: 'data' } })
+      .mockResolvedValueOnce({ state: 'applied', version: '0.2.0' }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('Update runner-1 to 0.2.0?')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Update' }))
+  expect(homes.update).toHaveBeenLastCalledWith('0.2.0')
+  await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+})
+
 it('offers Reconnect where an update failed after the home dropped the window’s connection', async () => {
   window.localStorage.clear()
   const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
@@ -1090,6 +1140,58 @@ it('says why an older home couldn’t update, with Try again and its command fol
   await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(homes.update).toHaveBeenCalledTimes(2)
   expect(homes.reconnect).not.toHaveBeenCalled()
+})
+
+it('doesn’t offer an older home an update no release would help: says none is out yet, and Check again looks anew', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  // The only host release out is 0.1.0, from before projects were made from a window; then 0.2.0 comes out.
+  const release = vi.fn().mockResolvedValueOnce({ newest: '0.1.0' }).mockResolvedValueOnce({ newest: '0.2.0' })
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => ({ state: 'applied' })),
+    release,
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  expect(await screen.findByText('No newer release yet')).not.toBeNull()
+  expect(screen.getByText('runner-1 runs an Althar host from before projects could be made from here.')).not.toBeNull()
+  expect(screen.getByText('The next Althar host release brings it. Once it’s out, update runner-1 here.')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'How to update it' })).toBeNull()
+  expect(release).toHaveBeenCalledWith(false)
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  // Looked for afresh, past main's few minutes; out now, so it's offered.
+  expect(release).toHaveBeenLastCalledWith(true)
+  const update = await screen.findByRole('button', { name: 'Update runner-1' })
+  // Looking again isn't reconnecting: nothing on the home changed.
+  expect(homes.reconnect).not.toHaveBeenCalled()
+  await userEvent.click(update)
+  expect(homes.update).toHaveBeenCalledOnce()
+})
+
+it('offers the update where the newest release can’t be found out, which says itself how it went', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'althar:homes-update': Error: runner-1’s DNS didn’t answer for api.github.com.")
+    }),
+    release: vi.fn(async () => {
+      throw new Error('Couldn’t find out the newest host release.')
+    }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('runner-1’s DNS didn’t answer for api.github.com.')).not.toBeNull()
 })
 
 it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {

@@ -100,7 +100,9 @@ export function usePairedPhones() {
     void queries.invalidateQueries({ queryKey: DEVICES })
   }
   const shown = devices.data?.filter((device) => !removing.has(device.deviceId)) ?? null
-  return { devices: shown, fresh, problem, remove: (id: string) => removal.mutate(id), paired }
+  // A list that couldn't be read says so, rather than looking like a home with no phones.
+  const said = problem ?? (devices.isError && devices.data === undefined ? problemOf(devices.error) : null)
+  return { devices: shown, fresh, problem: said, remove: (id: string) => removal.mutate(id), paired }
 }
 
 /** One pairing, from opening to Done: what PairPhone shows, and what its presses do. */

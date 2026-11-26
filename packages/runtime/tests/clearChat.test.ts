@@ -163,11 +163,19 @@ describe('clearing the coordinator’s view', () => {
       // Everything before the mark is still there to read: the record, the tool and the brief of a handover.
       const record = yield* transcript(threadId, WHOLE)
       assert.include(record.text, '[person] First question')
-      // The tool reads its latest page first, and back from where it says, as an agent does.
-      const latest = yield* callTool(access, 'read_thread', {})
-      const back = /read_thread with before (\d+)/.exec(latest)?.[1]
-      const reached = back === undefined ? latest : `${yield* callTool(access, 'read_thread', { before: Number(back) })}\n${latest}`
-      assert.include(reached, '[person] First question')
+      // The tool reads its latest page first, and back from where each says, as an agent does, however many pages the brief
+      // the first answer echoes takes.
+      let page = yield* callTool(access, 'read_thread', {})
+      const pages = [page]
+      for (
+        let back = /read_thread with before (\d+)/.exec(page)?.[1];
+        back !== undefined;
+        back = /read_thread with before (\d+)/.exec(page)?.[1]
+      ) {
+        page = yield* callTool(access, 'read_thread', { before: Number(back) })
+        pages.unshift(page)
+      }
+      assert.include(pages.join('\n'), '[person] First question')
       const handover = yield* handoverRecord({ projectId, threadId, modelOf: () => 'a model', working: () => false })
       assert.include(handover.sections.join('\n'), '[person] Second question')
     }).pipe(Effect.provide(withQueries())),

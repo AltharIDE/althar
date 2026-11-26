@@ -200,7 +200,10 @@ jobs:
         with:
           node-version-file: .node-version
       - uses: ./.github/actions/electron
+      # The display is xvfb-run's, with its window manager, so the run keeps it (apps/desktop/scripts/display.ts).
       - if: runner.os == 'Linux'
+        env:
+          ALTHAR_E2E_DISPLAY: inherit
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update

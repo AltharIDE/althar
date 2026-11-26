@@ -187,3 +187,73 @@ describe('anything else', () => {
     expect(firstErrorLine('')).toBe('')
   })
 })
+
+describe('an agent at another version than what drives it', () => {
+  it.each([
+    // claude-agent-acp 0.110.1 driving the hoisted Claude Code 2.1.326, 24 November 2026: session/new's `data.details`.
+    ["Claude Code process exited with code 1. stderr: error: unknown option '--initialize-fields=settings'", 'Claude Code'],
+    // Each agent asked for an option it doesn't know, on 24 November 2026: Claude Code 2.1.323 and Copilot CLI 1.0.30
+    // (Commander), Codex 0.169.0 and Grok Build 1.0.77 (clap), OpenCode 2.3.0.
+    ["error: unknown option '--althar-unknown-flag'", 'Claude Code, Copilot'],
+    ["error: unexpected argument '--althar-unknown-flag' found", 'Codex, Grok Build'],
+    ['Unrecognized flag: --althar-unknown-flag in command opencode', 'OpenCode'],
+    // The same, in the words of the parsers of the agents not installed here: yargs (Gemini CLI, Qwen Code), Click (Kimi
+    // Code), argparse (Mistral Vibe), picocli (Junie), from each parser's own source.
+    ['Unknown argument: experimental-acp', 'Gemini CLI, Qwen Code'],
+    ["Error: No such command 'acp'.", 'Kimi Code'],
+    ['vibe-acp: error: unrecognized arguments: --acp', 'Mistral Vibe'],
+    ["Unknown option: '--acp'", 'Junie'],
+    // Claude Code 2.1.323 driven by Agent SDK 0.3.326 (claude-cli.ts in claude-agent-acp 0.110.1).
+    ['Claude Code is too old to read MCP servers from the initialize request', 'Claude Code'],
+    // Althar's own check before it starts one (bundledPrograms.ts).
+    ["Claude Code's own program is version 0.3.326, and its adapter needs 0.3.330.", 'Althar'],
+  ])('%s (%s)', (said) => {
+    expect(startFailureOf(said)).toBe('version_mismatch')
+  })
+
+  it('is its sign-in where it stopped for that, and never an MCP server’s or a hook’s', () => {
+    expect(startFailureOf('Claude Code process exited with code 1. stderr: Not logged in · Please run /login')).toBe('signed_out')
+    expect(startFailureOf("MCP server 'github': error: unknown option '--stdio'")).toBeUndefined()
+  })
+
+  it('is read from an agent that stopped, by its last lines', () => {
+    expect(closingFailureOf("Starting ACP server\nerror: unexpected argument '--acp' found\n\nUsage: grok [OPTIONS]")).toBe(
+      'version_mismatch',
+    )
+  })
+})
+
+describe('an agent a part of which is missing', () => {
+  it.each([
+    // Agent SDK 0.3.330's `query`, and claude-agent-acp 0.110.1's `claudeCliPath`, where the platform package isn't installed.
+    [
+      'Native CLI binary for darwin-arm64 not found. Reinstall @anthropic-ai/claude-agent-sdk without --omit=optional, or set options.pathToClaudeCodeExecutable.',
+      'Agent SDK',
+    ],
+    [
+      'Claude native binary not found for darwin-arm64. Reinstall @anthropic-ai/claude-agent-sdk without --omit=optional, or set CLAUDE_CODE_EXECUTABLE.',
+      'claude-agent-acp',
+    ],
+    // @openai/codex 0.171.0's bin/codex.js.
+    ['Missing optional dependency @openai/codex-darwin-arm64. Reinstall Codex: npm install -g @openai/codex@latest', 'Codex'],
+    // Althar's own check before it starts one (bundledPrograms.ts).
+    ["Claude Code's own program for this computer (@anthropic-ai/claude-agent-sdk-darwin-arm64 0.3.330) is missing.", 'Althar'],
+  ])('%s (%s)', (said) => {
+    expect(startFailureOf(said)).toBe('incomplete')
+  })
+})
+
+describe('an agent that stopped while it started', () => {
+  it.each([
+    // Agent SDK 0.3.330, its Claude Code process gone with nothing said, and the query it held closed.
+    ['Claude Code process exited with code 137', 'Agent SDK'],
+    ['Query closed before response received', 'Agent SDK'],
+    // claude-agent-acp 0.110.1, its Claude Code process gone under a session.
+    ['The Claude Agent process exited unexpectedly. Please start a new session.', 'claude-agent-acp'],
+    // A Rust agent's panic (Codex, Grok Build), and a signal.
+    ["thread 'main' panicked at src/main.rs:12:5", 'Codex, Grok Build'],
+    ['codex app-server terminated by signal SIGSEGV', 'Codex'],
+  ])('%s (%s)', (said) => {
+    expect(startFailureOf(said)).toBe('crashed')
+  })
+})

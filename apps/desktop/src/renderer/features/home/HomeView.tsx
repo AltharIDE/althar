@@ -1,9 +1,13 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, modKey, PermissionAnswers, type ProjectRef, Problem } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef, Problem, RemoveProject } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
+import { messageOf } from '../../data/client'
+import { keys } from '../../data/reads'
+import { useServices } from '../../data/services'
+import { shortFolder } from '../../shared/folders'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { queuedOfWords } from '../../shared/agents'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
@@ -31,7 +35,10 @@ import { useModelNames } from '../../shared/modelNames'
  * free agent stands still in its project's row, which says what it waits
  * for. There is no composer: coordinators belong to projects. A new project
  * starts in a tab of its own, from the projects' +, or with folders dropped
- * on the home.
+ * on the home. Each project's row has a menu, on hover: its conversation,
+ * its settings, and taking it out of Althar, asked first as its settings
+ * ask it; once asked, it goes from the home at once, and comes back, with
+ * why, where it didn't go.
  */
 
 export const text = {
@@ -101,6 +108,7 @@ export function HomeView({
   onProject,
   onTalk,
   onTask,
+  onSettings,
   onSignIn,
 }: {
   model: HomeModel
@@ -109,10 +117,19 @@ export function HomeView({
   /** Open a project's conversation with its coordinator. */
   onTalk: (projectId: string) => void
   onTask: (threadId: string) => void
+  /** Open a project's settings. */
+  onSettings?: (projectId: string) => void
   /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
   onSignIn?: (agentId: string) => void
 }) {
-  const home = model.home
+  const { client, cache } = useServices()
+  // The project whose removal is being asked; those removed here, gone from the home until it is read without them.
+  const [asking, setAsking] = useState<string | null>(null)
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set())
+  const [removeFailed, setRemoveFailed] = useState<string | null>(null)
+  const read = model.home
+  const home =
+    read === null || removed.size === 0 ? read : { ...read, projects: read.projects.filter((project) => !removed.has(project.id)) }
   // The home says only minutes and times of day: it is drawn again once a minute, not each second.
   const now = useNow(true, MINUTE)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
@@ -222,7 +239,24 @@ export function HomeView({
       if (files.length > 0) newTab.start(files)
     },
   }
-  const error = start.error ?? model.error
+  // Gone at once; read again without it, as its settings do. One that didn't go comes back, and says why.
+  const remove = (projectId: string) => {
+    setAsking(null)
+    setRemoveFailed(null)
+    setRemoved((now) => new Set([...now, projectId]))
+    void client
+      .removeProject(projectId)
+      .then(() =>
+        Promise.all([cache.refetchQueries({ queryKey: keys.projects }), cache.refetchQueries({ queryKey: keys.home, exact: true })]),
+      )
+      .catch((failure: unknown) => {
+        setRemoveFailed(messageOf(failure))
+        setRemoved((now) => new Set([...now].filter((id) => id !== projectId)))
+      })
+  }
+  const askedOf = asking === null ? undefined : projects.find((project) => project.id === asking)
+
+  const error = removeFailed ?? start.error ?? model.error
 
   return (
     <div className={s.window} {...drop}>
@@ -252,9 +286,20 @@ export function HomeView({
             onOpenProject={onProject}
             onTalk={onTalk}
             onNewProject={() => newTab.start()}
+            {...(onSettings === undefined ? {} : { onProjectSettings: onSettings })}
+            onRemoveProject={setAsking}
           />
         )}
       </div>
+      {askedOf !== undefined && (
+        <RemoveProject
+          project={askedOf.name}
+          working={askedOf.working}
+          worktrees={askedOf.worktrees === null ? null : shortFolder(askedOf.worktrees)}
+          onRemove={() => remove(askedOf.id)}
+          onClose={() => setAsking(null)}
+        />
+      )}
     </div>
   )
 }

@@ -18,7 +18,9 @@ import s from './Behind.module.css'
  * listens to. One chip, so nothing stacks over the field or the thread; each
  * part says only its name, and the rest opens in one popover: who holds the
  * places it waits for, each thing running with where it answers, and each
- * source with when it last heard from it.
+ * source with when it last heard from it. Held back for now, while the
+ * computer lets fewer agents work than the number, its wait says so and
+ * until when, and offers to start it anyway.
  *
  * What finished well isn't counted on the chip, and folds away in the list;
  * a failure is named. Where nothing else is left to say, the chip stays as a
@@ -63,6 +65,11 @@ export interface BehindHolder {
 export interface BehindWait {
   /** Where it stands in its line: 2nd in Up next. */
   place?: string
+  /**
+   * Held back for now, and until what frees it: until memory frees up. It would have a place with the person's number, but
+   * the computer lets fewer agents work for now: the chip says Held back, rather than that it waits for a place.
+   */
+  held?: string
   holders: readonly BehindHolder[]
 }
 
@@ -70,6 +77,10 @@ export interface BehindText {
   /** The popover's name. */
   title: string
   waiting: string
+  /** Its wait, while it is held back. */
+  held: string
+  /** Starts it now, though fewer may work for now. */
+  startAnyway: string
   /** Under a task that holds a place only by what it left running: what that is, by name, or how many. */
   keptBy: (names: readonly string[]) => string
   stopKept: string
@@ -96,6 +107,8 @@ export interface BehindText {
 export const behindText: BehindText = {
   title: 'Behind this task',
   waiting: 'Waiting for a place',
+  held: 'Held back',
+  startAnyway: 'Start anyway',
   keptBy: (names) => `${names.length === 1 ? names[0] : names.length} left running`,
   stopKept: 'Stop',
   stopKeptLabel: (title) => `Stop what ${title} left running`,
@@ -120,6 +133,8 @@ export interface BehindProps {
   onStopHeld?: (id: string) => void
   /** Put the task at the front of its line; absent where it is first, or not in one. */
   onFront?: () => void
+  /** Start it now, as the person's own start, which never waits: offered while it is held back. */
+  onStartAnyway?: () => void
   /** What it left running, and what ran and ended. */
   processes?: readonly RunningProcess[]
   onStop?: (id: string) => void
@@ -148,6 +163,7 @@ export function Behind({
   wait = null,
   onStopHeld,
   onFront,
+  onStartAnyway,
   processes = [],
   onStop,
   onDismiss,
@@ -200,9 +216,12 @@ export function Behind({
         ? t.exitedOne(calledOf(failed[0]!), failed[0]!.exited ?? null)
         : t.failed(failed.length)
   const sourceWords = sources.length === 1 ? sources[0]!.label : t.sources(sources.length)
+  const held = wait?.held
+  const waitWords = held === undefined ? t.waiting : t.held
+  const anyway = held === undefined ? undefined : onStartAnyway
   // The chip says it whole to a screen reader, however much of it the width shows.
   const said = [
-    wait !== null && [t.waiting, wait.place].filter(Boolean).join(', '),
+    wait !== null && [waitWords, held, wait.place].filter(Boolean).join(', '),
     ran && [ranWords, one?.url, live.length > 0 && failed.length > 0 && t.failed(failed.length)].filter(Boolean).join(', '),
     quiet && ranWords,
     sources.length > 0 && `${t.listening} ${sourceWords}`,
@@ -227,8 +246,12 @@ export function Behind({
           <button type="button" className={cx(s.chip, heardNow && s.heard)} aria-label={said}>
             {wait !== null && (
               <span className={s.part}>
-                <Icon name="clock" size={12} className={s.glyph} />
-                <span className={s.waiting}>{t.waiting}</span>
+                {held === undefined ? (
+                  <Icon name="clock" size={12} className={s.glyph} />
+                ) : (
+                  <Icon name="load" size={12} className={cx(s.glyph, s.heldGlyph)} />
+                )}
+                <span className={s.waiting}>{waitWords}</span>
                 {wait.place !== undefined && <span className={cx(s.aside, s.extra)}>{wait.place}</span>}
               </span>
             )}
@@ -274,11 +297,12 @@ export function Behind({
         }
       >
         {wait !== null && (
-          <section className={s.section} aria-label={t.waiting}>
+          <section className={s.section} aria-label={waitWords}>
             <div className={s.head} aria-hidden="true">
-              {t.waiting}
+              {waitWords}
               {wait.place !== undefined && <span className={s.headAside}>{wait.place}</span>}
             </div>
+            {held !== undefined && <p className={s.heldLine}>{held.charAt(0).toUpperCase() + held.slice(1)}</p>}
             {wait.holders.length > 0 && (
               <ul className={s.list}>
                 {wait.holders.map((holder) => (
@@ -299,9 +323,10 @@ export function Behind({
                 ))}
               </ul>
             )}
-            {onFront && (
+            {(onFront || anyway) && (
               <div className={s.foot}>
-                <LinkButton onClick={onFront}>{t.front}</LinkButton>
+                {anyway && <LinkButton onClick={anyway}>{t.startAnyway}</LinkButton>}
+                {onFront && <LinkButton onClick={onFront}>{t.front}</LinkButton>}
               </div>
             )}
           </section>

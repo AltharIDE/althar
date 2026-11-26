@@ -310,7 +310,8 @@ export class Limits extends Context.Service<
     nearlyOut(agentId: string, projectId?: string, model?: string): Effect.Effect<Option.Option<Room>, Failure>
     /**
      * The account a session on the agent runs on, of those the project
-     * allows: the one given; else the thread's own, while it can and isn't
+     * allows and, where the model is named, not known not to offer it: the
+     * one given; else the thread's own, while it can and isn't
      * nearly out; else, where the project rotates, follow its account strategy
      * among those not signed out or out of usage; where it doesn't, the first not signed out; else the
      * first. Room is for the model where named, so a model's own window
@@ -713,7 +714,10 @@ export class Limits extends Context.Service<
                     (fact.intelligence ?? 0) / 1000
               let room: boolean | undefined
               let accountId: string | undefined
+              // Only an account that may offer the model: one known not to (Models' `lacking`) would fail its turn.
+              const lacking = model.id === null ? [] : yield* models.lacking(agentId, model.id)
               for (const account of yield* byStrategy(yield* runnable(agentId, input.projectId), model.id ?? undefined, input.projectId)) {
+                if (lacking.includes(account.id)) continue
                 if (Option.isSome(yield* outOf(account))) continue
                 const status = yield* signIns.account(account)
                 // A model the agent picks itself goes through the provider of its default.
@@ -809,7 +813,10 @@ export class Limits extends Context.Service<
       const nearlyOut = (agentId: string, projectId?: string, model?: string) =>
         Effect.gen(function* () {
           const low: Array<Room> = []
+          // Of those that may offer the model: one known not to is no way to it, room or not.
+          const lacking = model === undefined ? [] : yield* models.lacking(agentId, model)
           for (const account of yield* runnable(agentId, projectId)) {
+            if (lacking.includes(account.id)) continue
             if (Option.isSome(yield* outOf(account))) continue
             const room = yield* roomOf(account, model)
             if (!nearly(room)) return Option.none<Room>()
@@ -834,8 +841,11 @@ export class Limits extends Context.Service<
               projectId: input.projectId,
               ...(input.planned === undefined ? {} : { planned: input.planned }),
             })
+            // An account known not to offer the model runs its own default instead: the pair the person picks always runs.
+            const lacking = model === null ? [] : yield* models.lacking(agentId, model)
             for (const account of yield* allowed(agentId, input.projectId))
-              if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
+              if (account.id !== input.accountId)
+                found.push({ agentId, accountId: account.id, model: lacking.includes(account.id) ? null : model })
           }
           return found
         })
@@ -952,14 +962,27 @@ export class Limits extends Context.Service<
           ),
         pick: (input) =>
           Effect.gen(function* () {
-            // One given is the agent's own: another agent's would sign it in as someone else.
+            // A model named runs on an account offered it: each plan has models of its own, and one known not to offer it
+            // (Models' `lacking`) is passed. One not asked yet may.
+            const lacking = input.model === undefined ? [] : yield* models.lacking(input.agentId, input.model)
+            const all = yield* allowed(input.agentId, input.projectId)
+            const offered = all.filter((account) => !lacking.includes(account.id))
+            // Every account the project allows is known not to offer it, where another of the agent's is known to: it can't run
+            // here, as the project keeps that one out. Where none is known to, the model may still be offered, as an agent's
+            // older list leaves out what its maker offers now, so every one allowed is as before.
+            if (offered.length === 0 && lacking.length > 0) {
+              const every = yield* accounts.of(input.agentId)
+              if (every.some((account) => !lacking.includes(account.id)))
+                return yield* new NotFound({ kind: 'offered_model', id: input.model ?? input.agentId })
+            }
+            // One given is the agent's own: another agent's would sign it in as someone else. Given but known not to offer the
+            // model, as a choice read before its account said, the step goes to one of the agent's that may instead.
             if (input.accountId !== undefined) {
               const given = yield* accounts.get(input.accountId)
               if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
-              return given
+              if (!lacking.includes(given.id) || offered.length === 0) return given
             }
-            const all = yield* allowed(input.agentId, input.projectId)
-            const list = all
+            const list = offered.length === 0 ? all : offered
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>

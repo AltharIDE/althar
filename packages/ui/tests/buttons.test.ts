@@ -14,7 +14,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'screens/HomeWelcome/HomeWelcome.tsx': 'a way in, a card with its picture, the whole of which starts it',
-  'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
   'outputs/ChangeSet/MergeNeeds.tsx':
     'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',

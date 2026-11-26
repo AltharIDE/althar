@@ -99,9 +99,14 @@ export interface LoadWorker {
 export const fewerOf = ({ atOnce, configured, why }: Pick<LoadAgents, 'atOnce' | 'configured' | 'why'>) =>
   why !== null && atOnce < configured ? { atOnce, why } : null
 
+/** Until when fewer may work: “until memory frees up”. */
+export const freesUpWords = (why: AgentsWhy) => `until ${why === 'memory' ? 'memory' : 'the CPU'} frees up`
+
 /** Fewer for now, and until when, as the peek and the slider say it: “1 at a time until memory frees up”. */
-export const fewerWords = (atOnce: number, why: AgentsWhy) =>
-  `${atOnce} at a time until ${why === 'memory' ? 'memory' : 'the CPU'} frees up`
+export const fewerWords = (atOnce: number, why: AgentsWhy) => `${atOnce} at a time ${freesUpWords(why)}`
+
+/** A task held back by it, as Up next and the task say it: “Held back until memory frees up”. */
+export const heldBackWords = (why: AgentsWhy) => `Held back ${freesUpWords(why)}`
 
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
 

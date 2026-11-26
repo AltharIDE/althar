@@ -107,7 +107,7 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
   const { repositories } = useHostRepositories(list, '')
   const [toured] = useState(touredHere)
   // Updated from here, the window reconnects onto the ways in: the tour is for another visit.
-  const updating = useHomeUpdating(markTouredHere)
+  const updating = useHomeUpdating(!makes, markTouredHere)
   const settings = useSettingsWays()
   const home = here !== null && here.current.kind !== 'local' ? here.current.home : null
 
@@ -134,6 +134,7 @@ export const useHomeWelcome = (onNew: () => void): HomeWelcomeProps | null => {
       : {
           update: updating.offer,
           ...(updating.onUpdate === undefined ? {} : { onUpdate: updating.onUpdate }),
+          ...(updating.onCancelUpdate === undefined ? {} : { onCancelUpdate: updating.onCancelUpdate }),
           onCheckAgain: updating.onCheckAgain,
         }),
     onSignIn: (agentId) => settings.signIn(agentId),

@@ -16,9 +16,12 @@ const root = join(import.meta.dirname, '../../..')
 /*
  * The specs that drive real agents keep their own times: they run only by hand, with the person's own sign-in, and a
  * real agent's turn takes as long as it and its service do, which no budget for the machine bounds. The real speech
- * model runs on the machine, so its spec takes the budget as every other does.
+ * model runs on the machine, so its spec takes the budget as every other does. The worker lab runs only by hand too,
+ * against a fresh machine of the person's own over SSH: installing a release there takes as long as that machine and its
+ * network do.
  */
-const apart = (file: string) => file.endsWith('/e2e/real.spec.ts') || file.endsWith('/e2e/real-tools.spec.ts')
+const apart = (file: string) =>
+  file.endsWith('/e2e/real.spec.ts') || file.endsWith('/e2e/real-tools.spec.ts') || file.endsWith('/e2e/workerLab.spec.ts')
 
 const specs = globSync('apps/desktop/e2e/**/*.ts', { cwd: root })
   .map((file) => file.replaceAll('\\', '/'))

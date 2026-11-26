@@ -4,4 +4,4 @@
  * renderer reads it from here.
  */
 
-export { device, deviceWords, platform, type DeviceWords } from '@althar/ui'
+export { device, deviceWords, platform } from '@althar/ui'

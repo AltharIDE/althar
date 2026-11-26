@@ -1,4 +1,4 @@
-/* The footer: cobalt words over a landscape engraved in cobalt, on the page's paper. Never taller than the screen. */
+/* The footer: cobalt words over the LinkedIn banner's scene, on the page's paper. Never taller than the screen. */
 
 .footer {
   position: relative;
@@ -7,29 +7,48 @@
   background: var(--n-2);
   color: #1f35c8;
 }
-/* The engraving, placed by the script, comes in when it has loaded, and the light with it. */
+/* The scene, placed by the script, comes in when it has loaded. */
 .land { position: absolute; max-width: none; pointer-events: none; opacity: 0; transition: opacity 900ms ease; }
-/* The light's canvas is as wide as the light; the script places it. */
-.glow { position: absolute; top: 0; height: 100%; pointer-events: none; opacity: 0; transition: opacity 900ms ease 300ms; }
-.land[data-loaded], .glow[data-loaded] { opacity: 1; }
+.land[data-loaded] { opacity: 1; }
 
 .words {
   position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 48px;
   max-width: var(--max); margin: 0 auto; padding: clamp(72px, 12svh, 140px) var(--gut) 0;
 }
 .left { display: grid; justify-items: start; gap: clamp(22px, 3.4svh, 34px); }
+/*
+ * What it says, as every heading on the home page is set: Instrument Sans in ink, its second beat in Instrument Serif's
+ * italic in cobalt, a little larger. The fonts are named here, not taken from the home page, as the footer closes every
+ * page (Footer.tsx loads them).
+ */
 .statement {
   margin: 0;
-  font-family: 'Inter Display', var(--display);
-  font-weight: 200;
+  font-family: 'Instrument Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  font-weight: 600;
   /* As wide as the page allows, and short enough that the landscape keeps its room on a short screen. */
-  font-size: clamp(44px, min(6.6vw, 9.6svh), 100px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
+  font-size: clamp(34px, min(4.4vw, 6.8svh), 66px);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  color: var(--t-1);
+  max-width: 13em;
+  text-wrap: balance;
 }
-.statement b { font-weight: 720; letter-spacing: -0.056em; }
+/* Who it is for, on its own lines. */
+.statement b {
+  display: block;
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: 1.14em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 0.92;
+  letter-spacing: -0.015em;
+  color: #1f35c8;
+  -webkit-text-stroke: 0.018em currentColor;
+  text-wrap: balance;
+}
 .line { margin: 6px 0 0; font-size: 15px; letter-spacing: -0.01em; }
-.links { padding-top: 10px; }
+/* The links keep their own width; the words wrap beside them. */
+.links { flex: none; padding-top: 10px; }
 
 @media (max-width: 900px) {
   .footer { height: max(100svh, 720px); }
@@ -37,5 +56,5 @@
   .links { padding-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .land, .glow { transition: none; }
+  .land { transition: none; }
 }

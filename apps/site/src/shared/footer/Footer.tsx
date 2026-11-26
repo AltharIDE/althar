@@ -1,36 +1,35 @@
+import '@fontsource-variable/instrument-sans'
+import '@fontsource/instrument-serif/400-italic.css'
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from 'react'
 
-import { type Clear, drawLight, type Ground, lightBox, lightOf } from './engrave'
-import { ALTAR_X, ASPECT, engravingUrl, groundAt, LAND_Y } from './engraving'
+import { ASPECT, type Clear, engravingUrl, LAND_Y, LIGHTHOUSE_X } from './engraving'
 import s from './Footer.module.css'
-import { Links, Signature, still, useOnScreen, YEAR } from './parts'
+import { Links, Signature, YEAR } from './parts'
 
 /*
- * The page's last word, as a print: the words in cobalt ink over a
- * landscape engraved in the same ink, rising from the page's foot. Far
- * hills over a lake, wooded cliffs at the left, a headland with an altar on
- * it, and on the altar Althar's light, rising from its table in fine lines
- * that break up as they climb, drift and breathe, its streak shimmering in
- * the water. Nothing in it reaches into the words. It is never taller than
- * the screen.
+ * The page's last word, as a print: the words in cobalt ink over the
+ * LinkedIn banner's scene, rising from the page's foot. Far hills over a
+ * lake, wooded cliffs at the left, a headland with a lighthouse on it, its
+ * beam lit; on the water, canoes flying the labs' flags, someone at work in
+ * a boat in the lighthouse's light, and Althar's boats with their crews.
+ * Nothing in it reaches into the words. It is never taller than the screen.
  *
- * The landscape is an engraving made once (engraving/), in the page's two
- * inks, without the light: it rests on the footer's foot as wide as the
- * screen, and on a narrow screen it is shown larger and cut around the
- * altar, so the altar stays in view. It loads as the footer comes near (or
- * once the page has opened and is idle), and fades in when it is ready.
- * Only the light moves, drawn over the engraving's altar on a canvas as
- * narrow as it is, and only while it is seen.
+ * The scene is a picture made once (engraving/, scripts/engraving.ts): it
+ * rests on the footer's foot as wide as the screen, and on a narrow screen
+ * it is shown larger and cut around the lighthouse, so the lighthouse stays
+ * in view. It loads as the footer comes near (or once the page has opened
+ * and is idle), and fades in when it is ready.
  */
 
-const STATEMENT = ['The most beautiful', 'IDE ever built', 'at your fingertips'] as const
+/** What the footer says: what Althar is, and who it is for, the second its beat. */
+const STATEMENT = ['The agentic development environment (ADE)', 'for your entire software team.'] as const
 
 /** How far ahead of the footer, in screens, the engraving starts loading. */
 const AHEAD = '0px 0px 150% 0px'
 /** Otherwise it loads this long after the page opens, once the page is idle, so it is ready when it is reached. */
 const ANYWAY = 4500
 
-/** The narrow crop starts this far in, at the far hills: the headland, the altar and the hills at the right. */
+/** The narrow crop starts this far in, at the far hills: the headland, the lighthouse, the boats and the hills at the right. */
 const CROP = 766 / 1916
 /** How much of the water may go under the footer's foot, to keep the trees under the words on a short screen. */
 const DROP = 0.12
@@ -43,14 +42,14 @@ const srcSet = (narrow: boolean, ext: string) =>
 
 const clamp = (x: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x))
 
-/** Where the engraving is, in the footer's px: its whole box, wherever it is cut, whether only the narrow crop is in view, and the ground the light stands on. */
+/** Where the engraving is, in the footer's px: its whole box, wherever it is cut, whether only the narrow crop is in view, and how wide the footer is. */
 interface Place {
   left: number
   top: number
   iw: number
   ih: number
   narrow: boolean
-  g: Ground
+  w: number
 }
 
 /** Where the engraving goes in a footer `w` by `h` whose words are `clear`. */
@@ -69,11 +68,10 @@ function placeOf(w: number, h: number, clear: Clear[]): Place {
   }
   const drop = clamp(sky - (h - ih + LAND_Y * ih), 0, DROP * ih)
   const top = h - ih + drop
-  // Wider than the screen, the altar sits a little right of the middle, or in the middle where the words stand over each other; narrower, it keeps its place in the picture.
+  // Wider than the screen, the lighthouse sits a little right of the middle, or in the middle where the words stand over each other; narrower, it keeps its place in the picture.
   const at = w < 900 ? 0.5 : 0.62
-  const left = iw >= w ? clamp(w * at - ALTAR_X * iw, w - iw, 0) : (w - iw) * ALTAR_X
-  const g = groundAt(left, top, iw, ih, w, h, clear)
-  return { left, top, iw, ih, narrow: left + CROP * iw <= 0, g }
+  const left = iw >= w ? clamp(w * at - LIGHTHOUSE_X * iw, w - iw, 0) : (w - iw) * LIGHTHOUSE_X
+  return { left, top, iw, ih, narrow: left + CROP * iw <= 0, w }
 }
 
 /** Whether the footer is near, or the page has been open a while: from then on, the engraving is wanted. Stays true. */
@@ -103,11 +101,9 @@ function useWanted(ref: RefObject<Element | null>) {
 
 export function Footer() {
   const box = useRef<HTMLElement>(null)
-  const glow = useRef<HTMLCanvasElement>(null)
   const words = useRef<HTMLDivElement>(null)
   const [place, setPlace] = useState<Place | null>(null)
   const [loaded, setLoaded] = useState(false)
-  const on = useOnScreen(box)
   const wanted = useWanted(box)
 
   // Placed again for each size: the landscape keeps below the words.
@@ -130,40 +126,15 @@ export function Footer() {
     return () => ro.disconnect()
   }, [])
 
-  useEffect(() => {
-    const el = glow.current
-    const g = place?.g
-    if (!el || !g || !on) return
-    // The light's canvas is only as wide as the light.
-    const dpr = Math.min(2, window.devicePixelRatio || 1)
-    const { left, width } = lightBox(g)
-    el.style.left = `${left}px`
-    el.style.width = `${width}px`
-    el.width = Math.round(width * dpr)
-    el.height = Math.round(g.h * dpr)
-    const ctx = el.getContext('2d')
-    if (!ctx) return
-    ctx.setTransform(dpr, 0, 0, dpr, -left * dpr, 0)
-    const light = lightOf(g)
-    const start = performance.now()
-    let frame = 0
-    const tick = (now: number) => {
-      drawLight(ctx, g, light, still() ? 0 : now - start + 4000)
-      if (!still()) frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [on, place])
-
   let picture: CSSProperties = {}
   let sizes = '100vw'
   if (place) {
-    const { left, top, iw, ih, narrow, g } = place
+    const { left, top, iw, ih, narrow, w } = place
     const width = (narrow ? 1 - CROP : 1) * iw
     sizes = `${Math.ceil(width)}px`
     picture = { left: left + (narrow ? CROP * iw : 0), top, width, height: ih }
     // Narrower than the screen, on a short and wide one: its sides fade into the paper.
-    if (iw < g.w) {
+    if (iw < w) {
       const f = `${Math.round(Math.min(160, iw * 0.12))}px`
       const mask = `linear-gradient(to right, transparent, #000 ${f}, #000 calc(100% - ${f}), transparent)`
       picture = { ...picture, maskImage: mask, WebkitMaskImage: mask }
@@ -189,16 +160,11 @@ export function Footer() {
           />
         </picture>
       )}
-      <canvas ref={glow} className={s.glow} data-loaded={loaded ? '' : undefined} aria-hidden="true" />
       <div ref={words} className={s.words}>
         <div className={s.left}>
           <Signature />
           <h2 className={s.statement}>
-            {STATEMENT[0]}
-            <br />
-            <b>{STATEMENT[1]}</b>
-            <br />
-            {STATEMENT[2]}
+            {STATEMENT[0]} <b>{STATEMENT[1]}</b>
           </h2>
           <p className={s.line}>Althar © {YEAR} · Free and open source.</p>
         </div>

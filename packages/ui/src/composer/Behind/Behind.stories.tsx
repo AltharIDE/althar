@@ -89,6 +89,26 @@ export const Waiting: Story = {
     await expect(args.onFront).toHaveBeenCalled()
   },
 }
+/**
+ * Held back while the computer lets fewer agents work than the number: it says so and until when, with whatever is free
+ * it starts anyway, and who is at work meanwhile.
+ */
+export const HeldBack: Story = {
+  args: {
+    wait: { place: 'First in Up next', held: 'until memory frees up', holders: HOLDERS.slice(0, 1) },
+    onFront: undefined,
+    onStartAnyway: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const chip = within(canvasElement).getByRole('button', { name: /^Held back, until memory frees up, First in Up next/ })
+    await expect(chip).toHaveTextContent('Held back')
+    await userEvent.click(chip)
+    const page = within(document.body)
+    await expect(await page.findByText('Until memory frees up')).toBeVisible()
+    await userEvent.click(page.getByRole('button', { name: 'Start anyway' }))
+    await expect(args.onStartAnyway).toHaveBeenCalled()
+  },
+}
 /** Next in line, with nothing running and no pull request: the wait alone. */
 export const OnlyWaiting: Story = { args: { wait: { place: 'Next in Up next', holders: HOLDERS.slice(0, 2) }, onFront: undefined } }
 /** Every place held only by a server its task left running: each can be stopped from here. */

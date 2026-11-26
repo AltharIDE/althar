@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, BoardTask, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { IconButton, Menu, MenuItem, TeamDialog } from '@althar/ui'
+import { IconButton, Menu, MenuItem, MenuSeparator, TeamDialog } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -34,6 +34,8 @@ export const text = {
   start: 'Start',
   hold: 'Hold',
   change: 'Change the team…',
+  /** Gives up a row's task, asked first: last in its menu, grey until pointed at, as in a task's own ⋯. */
+  abandon: 'Abandon',
   /** The team in a line, at the head of a row's menu: Opus 5.5 · High, GPT-6.1 Sol reviews. */
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
   reviews: (name: string) => `${name} reviews`,
@@ -148,18 +150,21 @@ const useTeamLine = (plan: Plan) => {
   )
 }
 
-/** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
+/** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, Change the team…, and Abandon. */
 export function TeamMenu({
   task,
   onStart,
   onHold,
   onChange,
+  onAbandon,
 }: {
   projectId: string
   task: Teamed
   onStart?: () => void
   onHold?: () => void
   onChange: () => void
+  /** Abandons it: the consumer asks first, since it settles the task. */
+  onAbandon?: () => void
 }) {
   const line = useTeamLine(task.plan!)
   return (
@@ -183,6 +188,12 @@ export function TeamMenu({
       <MenuItem icon="agents" onSelect={onChange}>
         {text.change}
       </MenuItem>
+      {onAbandon !== undefined && <MenuSeparator />}
+      {onAbandon !== undefined && (
+        <MenuItem icon="close" tone="danger" quiet onSelect={onAbandon}>
+          {text.abandon}
+        </MenuItem>
+      )}
     </Menu>
   )
 }

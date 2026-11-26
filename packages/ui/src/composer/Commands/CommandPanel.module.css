@@ -1,0 +1,159 @@
+/* On the composer's top edge, joined to it as dictation's tray is: a shade off the paper, open at its foot. There at once: it
+   opens by key many times a day. */
+.panel {
+  max-height: min(340px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 1px solid var(--line-2);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--n-3);
+  color: var(--t-1);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* under what the command acts on, set off by a hairline */
+.under {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+/* a command or what it takes: its mark, its name as typed, what it does, and where it stands now */
+.row {
+  display: grid;
+  grid-template-columns: 22px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: default;
+}
+.row[aria-selected='true'] {
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.row:active {
+  background: var(--pressed-paper);
+}
+.row[aria-disabled='true'] .name,
+.row[aria-disabled='true'] .does {
+  color: var(--t-4);
+}
+.tile {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--tile);
+  color: var(--t-2);
+}
+.row[aria-selected='true'] .tile {
+  background: var(--tile-hover);
+  color: var(--live);
+}
+.name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.does {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.row[aria-selected='true'] .does {
+  color: var(--t-2);
+}
+.now {
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* what Enter does with what is written: the list's one row, chosen */
+.act {
+  grid-column: 2 / -1;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+
+/* the command picked, with nothing of its own to show */
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+.head > .does {
+  flex: 1;
+}
+.title {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.title > svg {
+  align-self: center;
+  color: var(--live);
+}
+.head > .title {
+  font-family: var(--mono);
+  font-weight: 400;
+}
+
+/* what it acts on: the goal itself */
+.detail {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px 6px;
+}
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.body {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  /* a long objective keeps to four lines; the panel isn't where it is read whole */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+.note {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}

@@ -3,7 +3,7 @@ import { hostname, homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { API_VERSION } from '@althar/contracts'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Scope } from 'effect'
 import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services } from '@althar/runtime'
 
 import metadata from '../package.json'
@@ -11,7 +11,7 @@ import { configuredHome } from './configuration'
 import { HostError } from './errors'
 import type { HostOptions } from './options'
 import { initializeVault, openVault } from './vault'
-import { listenWorkers } from './workers'
+import { listenWorkers, openWorkers } from './workers'
 import { workerExecution } from './agentExecution'
 
 export const HOST_VERSION = metadata.version
@@ -83,6 +83,8 @@ export const serveHome = (
       const options = yield* configuredHome(given)
       const vault = yield* openVault(options)
       let worker: Effect.Success<ReturnType<typeof listenWorkers>>
+      let homeId: string | undefined
+      const scope = yield* Effect.scope
       const context = yield* Layer.build(
         runtime(options, vault.secrets, {
           ...dependencies,
@@ -91,6 +93,18 @@ export const serveHome = (
             workerExecution(
               () => worker?.agentWorkers,
               () => worker,
+              // The person adds a worker from a window: the home opens its worker port then, as its own authority.
+              () =>
+                Effect.gen(function* () {
+                  if (worker !== undefined) return worker
+                  if (homeId === undefined) return yield* Effect.fail('The home isn’t ready yet. Try again in a moment.')
+                  const opened = yield* openWorkers(options, homeId).pipe(
+                    Scope.provide(scope),
+                    Effect.mapError((error) => error.message),
+                  )
+                  worker = opened
+                  return opened
+                }),
             ),
         }),
       )
@@ -112,6 +126,9 @@ export const serveHome = (
         }).pipe(Effect.provideContext(context), Effect.ensuring(Effect.sync(() => files.key.fill(0))))
         networkFingerprint = files.networkFingerprint
       }
+      homeId = instance.homeId
+      // The home's own worker port falls back to a free one where it is taken; an operator's configured listener that
+      // can't start stops the home, as it always has, rather than leave it serving without the workers it was set up for.
       worker = yield* listenWorkers(options, instance.homeId)
       const endpoint = yield* listenLocalApi(options.profile, networkFingerprint).pipe(Effect.provideContext(context))
       yield* ready({

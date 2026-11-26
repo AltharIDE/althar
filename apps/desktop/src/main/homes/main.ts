@@ -14,10 +14,12 @@ import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { findRelease, HOST_RELEASE_KEYS } from './release'
+import { findRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
+import { startWorkerSetups } from './workerMain'
+import type { WorkerLog } from './workerSetup'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -46,9 +48,12 @@ export const startHomeConnections = ({
   mine,
   open,
   log,
+  logs,
   protect,
   usage,
 }: {
+  /** main.log at each level, for what adding a worker does. */
+  readonly logs: WorkerLog
   readonly protect: ProtectCredential
   readonly profile: string
   readonly entry: string
@@ -152,6 +157,16 @@ export const startHomeConnections = ({
   const setups = homeSetups(system, (setup) => {
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+  })
+  // Workers added over SSH from Settings › Computers, from the same releases.
+  const workers = startWorkerSetups({
+    system,
+    tools: source.tools,
+    mine,
+    // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
+    reachesOwnHome: (id) => controller.state(id).current.kind !== 'https',
+    log: logs,
+    release: (signal) => workerRelease(source, signal),
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
@@ -299,12 +314,38 @@ export const startHomeConnections = ({
   const updates = homeUpdates({
     run: runProgram,
     program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
+    latest: (arch, signal) => findRelease(arch, source, signal),
     signal: quitting.signal,
+    log,
   })
-  ipcMain.handle('althar:homes-update', (event) => {
+  const sshHome = (event: IpcMainInvokeEvent) => {
     const { current } = controller.state(owner(event))
     if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
-    return updates.update(current.home)
+    return current.home
+  }
+  ipcMain.handle('althar:homes-update', (event, accept: unknown) =>
+    updates.update(sshHome(event), typeof accept === 'string' ? accept : undefined),
+  )
+  ipcMain.handle('althar:homes-update-check', (event) => updates.check(sshHome(event)))
+  // The newest host release, for an older home's welcome to offer its update by: asked of GitHub a few minutes apart at
+  // most, from here rather than over the home's own network, and afresh on Check again.
+  let news: { readonly at: number; readonly newest: Promise<string | null> } | undefined
+  ipcMain.handle('althar:homes-release', async (event, fresh: unknown) => {
+    owner(event)
+    if (fresh === true || news === undefined || Date.now() - news.at > 10 * 60_000) {
+      const newest = newestHostVersion(source, AbortSignal.any([quitting.signal, AbortSignal.timeout(20_000)]))
+      news = { at: Date.now(), newest }
+      // A failed look isn't kept: the next asks again.
+      newest.catch(() => {
+        if (news?.newest === newest) news = undefined
+      })
+    }
+    try {
+      return { newest: await news.newest }
+    } catch (error) {
+      log(`The newest host release couldn’t be found: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error('Couldn’t find out the newest host release.')
+    }
   })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
@@ -443,6 +484,7 @@ export const startHomeConnections = ({
     previewPort,
     stopAll: async () => {
       controller.stopping()
+      workers.stop()
       quitting.abort()
       await setups.stop()
       await keyChanges
