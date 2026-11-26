@@ -2,13 +2,7 @@ import { type GoalLead, endGoalRound, goalLaunchChoice, pauseGoal, runnableGoal 
 import type { MessageSender, SentCanvasComment, UndoTurnResult } from '@althar/contracts'
 import { type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import { Commands, bumpRevision } from '@althar/persistence-sqlite'
-import {
-  type AgentExited,
-  AgentRequestFailed,
-  type PermissionDecision,
-  type PermissionRequest,
-  type SessionEvent,
-} from '@althar/provider-adapters'
+import type { AgentExited, AgentRequestFailed, PermissionDecision, PermissionRequest, SessionEvent } from '@althar/provider-adapters'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
@@ -106,26 +100,6 @@ import { type OutputSoFar, addItem, keepAltharCall, moveToEnd, toolItem } from '
 import { ToolServer } from './ToolServer'
 import { canUndoTask, recoverTurnUndo, undoConversation, undoTarget } from './turnUndo'
 import { agentSaid, lostWords, startedAfreshWords } from './words'
-
-export { COMPACT } from './compact'
-export {
-  AcceptedInput,
-  DICTATED,
-  type Disposition,
-  INTERRUPTED,
-  OTHER_TASKS,
-  StartTimedOut,
-  agentLost,
-  asTold,
-  compactedWords,
-  errorClassOf,
-  heldFor,
-  onlyReads,
-  passedOn,
-  promptFor,
-  sentWithWords,
-  upFrontSaid,
-} from './sessionState'
 
 /** A switch or a fresh session under way on a thread, and what the person picked for it meanwhile (`handovers`). */
 interface Handing {

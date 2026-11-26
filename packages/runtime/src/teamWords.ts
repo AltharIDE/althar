@@ -1,5 +1,5 @@
 import type { ModelNamer } from './coordinatorNews'
-import type { TeamChanged } from './Runs'
+import type { TeamChanged } from './runRecords'
 
 /*
  * What a change of a task's team says in its thread, after who made it: "changed the review to GPT-6.1 Terra". A caller puts

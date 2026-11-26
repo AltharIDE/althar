@@ -11,9 +11,9 @@ import {
   transition,
 } from '@althar/domain'
 import { hostOf, plainTitle } from '@althar/contracts'
-import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { Commands, type Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
-import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
+import { Cause, Context, type Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { AlwaysNotOffered, AttentionClosed, NotFound } from './errors'
@@ -26,29 +26,23 @@ import { runRules } from './automated'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import {
-  type AllowRule,
   type Always,
   type AlwaysScope,
   alwaysOf,
   alwaysRuleOf,
   holds,
-  commandOf,
   decide,
   decideInside,
-  decideReader,
-  essentials,
   gitRunsOf,
   type Hold,
   lasting,
-  pathsOf,
-  type ProjectRuleSet,
-  type RuleContext,
   runsInside,
-  sayAllowRule,
   type TallyKind,
   tallyKindOf,
-  type Verdict,
 } from './rules'
+import { decideReader } from './readerRules'
+import { type AllowRule, type ProjectRuleSet, type RuleContext, type Verdict, sayAllowRule } from './ruleContext'
+import { commandOf, essentials, pathsOf } from './rulePaths'
 import { irreversibleOf } from './irreversible'
 import { passGuard } from './pushGuard'
 import { type Reach, withEdits, workedOutReach } from './sandboxReach'

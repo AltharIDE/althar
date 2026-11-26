@@ -18,7 +18,7 @@ import {
   type PublishRow,
   type Published,
   type PublishedOne,
-  Snapshot,
+  type Snapshot,
   type Store,
   type Unshipped,
   filesWord,
@@ -78,7 +78,7 @@ import type { Sessions } from './Sessions'
 import { ShipBranchMove } from './shipBranchMove'
 import { TITLE_LENGTH } from './taskTitle'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { removeWorktree } from './worktreeRemoval'
 
 export interface ChangePublishingDependencies {

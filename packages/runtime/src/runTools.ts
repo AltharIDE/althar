@@ -42,7 +42,7 @@ import { unreviewedLine } from './pullRequestReview'
 import { DESCRIPTION_SHAPE, type Undescribed, descriptionAsk, filesLine } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import {
-  Finding,
+  type Finding,
   Finished,
   type Lead,
   type PlanParameters,
@@ -61,7 +61,8 @@ import {
   titleOf,
 } from './runRecords'
 import { addItem } from './threads'
-import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, type ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 interface RunToolsDependencies {
   readonly acceptShipWork: (run: RunRow) => Effect.Effect<void, GitFailed | SqlError.SqlError | Schema.SchemaError, SqlClient.SqlClient>

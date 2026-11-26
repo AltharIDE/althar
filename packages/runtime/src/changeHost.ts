@@ -27,7 +27,7 @@ import {
   LANDING_EVERY,
   LANDING_TURNS,
   type LinkRow,
-  Snapshot,
+  type Snapshot,
   type Store,
   TAG_ANSWERED_WITHIN,
   decodeAsked,
@@ -45,7 +45,7 @@ import { envelope } from './envelope'
 import {
   CantMerge,
   ChangedSinceSeen,
-  GitFailed,
+  type GitFailed,
   NotFound,
   OutwardUncertain,
   PushRefused,
@@ -90,7 +90,8 @@ import { guardPush } from './repositoryGuard'
 import type { Sessions } from './Sessions'
 import { TITLE_LENGTH, retitleTask } from './taskTitle'
 import { addItem, updateItem } from './threads'
-import { type ToolAccess, ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import type { ToolAccess } from './ToolServer'
 import { words } from './words'
 
 // A connected token can be scoped to the target repository. The person's configured Git can also sign in to the fork.

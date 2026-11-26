@@ -21,7 +21,8 @@ import {
   Word,
   write,
 } from './integrationSupport'
-import { ActionNotPerformed, type Tool, type ToolAccess } from './ToolServer'
+import type { Tool, ToolAccess } from './ToolServer'
+import { ActionNotPerformed } from './toolErrors'
 
 export type IntegrationTool = (
   name: string,

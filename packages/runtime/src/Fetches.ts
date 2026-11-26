@@ -7,7 +7,8 @@ import { forkOf, parentRemote } from './forks'
 import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, hostNameOf, namedRemotes, redactUrl, remoteHeads } from './git'
 import { Instance } from './Instance'
 import { canonicalHost } from './sshHosts'
-import { type Tool, ToolRefused, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import { type Tool, ToolServer } from './ToolServer'
 
 /*
  * Fetching from the code host, which only Althar reaches (ADR-011, ADR-066):

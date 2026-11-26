@@ -41,7 +41,7 @@ import { change, fact, timestamp } from './records'
 import type { LimitedStep } from './runCapacity'
 import {
   type Finding,
-  Hold,
+  type Hold,
   type Lead,
   type Place,
   type PlanParameters,
@@ -62,7 +62,7 @@ import {
 import type { Sessions } from './Sessions'
 import { standInOf, whenBack } from './standIn'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { summarize } from './words'
 
 /** A step a restart stopped, to carry on once the launch is up. */

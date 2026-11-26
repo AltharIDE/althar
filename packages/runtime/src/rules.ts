@@ -70,21 +70,6 @@ import type { PermissionRequest, McpCall } from '@althar/provider-adapters'
 import { existsSync, statSync, readFileSync, realpathSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 
-export {
-  type Verdict,
-  RULES,
-  type RuleId,
-  type AllowRule,
-  type ProjectRuleSet,
-  sayAllowRule,
-  sayRules,
-  MVP_RULES,
-  type RuleContext,
-} from './ruleContext'
-export { commandOf, commandIn, essentials, pathsOf } from './rulePaths'
-export { parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
-export { ALTHAR_TOOL, OFFLINE, decideReader } from './readerRules'
-
 /** Visible irreversible code-host actions. Unknown operations run (ADR-097). */
 const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
   const program = (words[0] ?? '').split('/').at(-1)

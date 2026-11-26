@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { type Allowance, type Check, ConnectorFailed, type ListedChange, type Repository } from '@althar/connectors'
-import { Ledger } from '@althar/persistence-sqlite'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 

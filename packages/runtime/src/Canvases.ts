@@ -37,13 +37,14 @@ import {
   writeCopy,
 } from './canvasFiles'
 import { CanvasSaves } from './CanvasSaves'
-import { RuntimeConfig } from './Config'
+import type { RuntimeConfig } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { timestamp } from './records'
 import { agentFolderOf } from './sentFiles'
 import { addItem } from './threads'
-import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolRole, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import { POOL, type Tool, type ToolAccess, type ToolRole, ToolServer } from './ToolServer'
 
 /*
  * A project's canvases (ADR-104): what its agents draw for the person to

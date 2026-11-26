@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { listenDue } from '../src/Changes'
+import { listenDue } from '../src/changeRecords'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { makeFollowing } from '../src/Follow'

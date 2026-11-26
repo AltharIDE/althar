@@ -1,4 +1,4 @@
-import { type CheckoutAnswer, type CheckoutAsk, type CheckoutWait, WorksIn } from '@althar/contracts'
+import type { CheckoutAnswer, CheckoutAsk, CheckoutWait, WorksIn } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { type Crypto, Duration, Effect, Option, Queue, type Schema } from 'effect'

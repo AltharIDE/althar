@@ -6,7 +6,7 @@ import { CliSignedOut } from '../src/Connections'
 import { CoordinatorUnavailable } from '../src/Coordinator'
 import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged, SessionFailed } from '../src/errors'
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
-import { StartTimedOut } from '../src/Sessions'
+import { StartTimedOut } from '../src/sessionState'
 import { agentSaid, expected, signedOutWords, signInEndedWords, stuckWhyOf, summarize, unreachableWords, words } from '../src/words'
 import { thisDevice } from '../src/device'
 

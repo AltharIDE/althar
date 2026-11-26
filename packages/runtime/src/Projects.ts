@@ -15,8 +15,15 @@ import {
   type ThreadId,
   type WorksIn,
 } from '@althar/domain'
-import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
-import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
+import {
+  bumpRevision,
+  Commands,
+  type CommandIdReused,
+  type Ledger,
+  type RevisionConflict,
+  type RowNotFound,
+} from '@althar/persistence-sqlite'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { postCard } from './cards'

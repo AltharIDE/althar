@@ -1,6 +1,6 @@
 import { basename, dirname } from 'node:path'
 
-import { MESSAGE_FILES } from '@althar/contracts'
+import { MESSAGE_FILES, MESSAGE_IMAGES, NOTE_LENGTH } from '@althar/contracts'
 import { products } from '@althar/connectors'
 import { closingErrorLine, closingFailureOf, firstErrorLine, type StartFailure, startFailureOf } from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
@@ -19,8 +19,7 @@ import type {
   ShipRefused,
   TaskRefused,
 } from './errors'
-import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
-import { MESSAGE_IMAGES } from './pictures'
+import { type NoteRefused, NOTES_KEPT } from './notes'
 import { pushDetailOf, secondsOf } from './pushFailure'
 import type { ReviewDraftIncomplete } from './Reviews'
 

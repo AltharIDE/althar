@@ -16,7 +16,8 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import type { Artifacts } from './Artifacts'
 import type { Order } from './Busy'
 import { touchCard } from './cards'
-import type { ChangeSummary, Changes, Published } from './Changes'
+import type { Changes } from './Changes'
+import type { ChangeSummary, Published } from './changeRecords'
 import { NotConnected } from './Connections'
 import { NoChangeToOpen, NotFound, ShipRefused } from './errors'
 import { evidencePaths } from './evidence'
@@ -49,7 +50,7 @@ import {
   type Store,
   type StuckInfo,
   TINY_LINES,
-  TaskEnd,
+  type TaskEnd,
   digestOf,
   farOf,
   roundOf,
@@ -58,7 +59,7 @@ import {
 import type { Sessions } from './Sessions'
 import { type MergeStanding, mergeStandingOf, reviewsBeforeShip, taskShipRoute } from './shipRoute'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { summarize, words } from './words'
 
 interface RunShippingDependencies {

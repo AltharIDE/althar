@@ -1,7 +1,8 @@
 import { agents } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import { asTold, COMPACT, heldFor } from '../src/Sessions'
+import { COMPACT } from '../src/compact'
+import { asTold, heldFor } from '../src/sessionState'
 
 /*
  * What keeps an agent asking, from the registry, as a session starts and a

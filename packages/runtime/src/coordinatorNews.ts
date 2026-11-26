@@ -9,7 +9,7 @@ import { Agents } from './Config'
 import { Instance } from './Instance'
 import { changeWords, type Said } from './issueChangeWords'
 import { Models } from './Models'
-import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
+import { PlanParameters, type PlanStep, type TaskEnd } from './runRecords'
 
 /*
  * What became of the coordinator's plans while it wasn't speaking: the

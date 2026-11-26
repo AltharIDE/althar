@@ -10,10 +10,16 @@ import { Cause, Effect, Layer, Option, Schema, type Scope } from 'effect'
 import { connection } from './Api'
 import { ClientIdentities } from './ClientIdentities'
 import { Instance } from './Instance'
-import { MAX_SOCKET_FRAME, socketPort, type SocketPort } from './socketPort'
 
-import { AUTH_FRAME_LIMIT, untilPortCloses, LocalApiEndpoint, readFrame as read } from '@althar/transport-node'
-export { authenticateApiClient, openApiSocket, LocalApiEndpoint, type ClientAuthentication } from '@althar/transport-node'
+import {
+  AUTH_FRAME_LIMIT,
+  type LocalApiEndpoint,
+  MAX_SOCKET_FRAME,
+  type SocketPort,
+  readFrame as read,
+  socketPort,
+  untilPortCloses,
+} from '@althar/transport-node'
 const MAX_CONNECTIONS = 32
 const failed = () =>
   new ApiError({

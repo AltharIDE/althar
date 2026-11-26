@@ -34,7 +34,8 @@ import { projectTracker } from './projectTracker'
 import { DESCRIPTION_LENGTH, descriptionWords } from './pullRequestWords'
 import { indexTask } from './Search'
 import { addItem, updateItem } from './threads'
-import { ToolRefused, ToolServer } from './ToolServer'
+import { ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 /*
  * Issues, and links to things on connected services (docs/architecture/06;

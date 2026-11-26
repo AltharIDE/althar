@@ -1,10 +1,11 @@
 import { Context, Effect, Layer } from 'effect'
-import { SqlClient } from 'effect/sql'
+import type { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { LONGEST_SCRIPT, LONGEST_TEXT, type PageAnswer, type PageCall, type PageTarget, type PageViewport, WAIT } from './pageBridge'
 import { settledAmong } from './settled'
-import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolPicture, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import { POOL, type Tool, type ToolAccess, type ToolPicture, ToolServer } from './ToolServer'
 
 /*
  * The page beside a conversation, read and driven by the conversation's agent

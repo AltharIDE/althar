@@ -2,7 +2,9 @@ import type { Irreversible } from '@althar/contracts'
 import type { PermissionRequest } from '@althar/provider-adapters'
 
 import { mcpActOf } from './mcpActs'
-import { commandOf, lastingKept, type RuleContext } from './rules'
+import type { RuleContext } from './ruleContext'
+import { commandOf } from './rulePaths'
+import { lastingKept } from './rules'
 
 /*
  * What the ask card says of a request that can't be undone (ADR-097): its

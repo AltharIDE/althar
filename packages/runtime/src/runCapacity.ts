@@ -11,15 +11,15 @@ import type { Connectivity } from './Connectivity'
 import { envelope } from './envelope'
 import type { NotFound } from './errors'
 import type { Instance, InstanceInfo } from './Instance'
-import { type Limits, NEARLY_OUT, type Out, type Room, lowWords, outStep, outWords, whoWords } from './Limits'
+import { type Limits, NEARLY_OUT, type Out, type Room, lowWords, type outStep, outWords, whoWords } from './Limits'
 import type { AutoModels } from './modelMoves'
 import { type Policies, type UsageLimit, usageLimitOf } from './Policies'
 import { change, fact, timestamp } from './records'
 import {
-  Hold,
+  type Hold,
   type HoldWhy,
   type PlanParameters,
-  PlanStep,
+  type PlanStep,
   type RunRow,
   type Store,
   type StuckAnswer,

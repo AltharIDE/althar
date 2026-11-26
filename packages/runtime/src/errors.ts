@@ -418,8 +418,6 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   message: Schema.String,
 }) {}
 
-/** A skills store operation that couldn't be done, in words for the person, is `@althar/skills`' own `SkillRefused`. */
-export { SkillRefused } from '@althar/skills'
 /**
  * A task's screenshots can't go in a comment on its pull request as asked
  * (ADR-077): its host takes no pictures, there are none to post, or a

@@ -7,7 +7,8 @@ import { hostName, logForLead, readLog } from './checkLogs'
 import { Connections } from './Connections'
 import { withoutAgentCredit } from './credit'
 import { checksOf, nameOf, sameDescription, signed, titleWords, withDescribed } from './pullRequestWords'
-import { type ToolAccess, ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import type { ToolAccess } from './ToolServer'
 
 /*
  * What the coordinator does on the code host to the project's pull requests

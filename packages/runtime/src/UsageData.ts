@@ -4,7 +4,7 @@ import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Schema, Stream
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from './Instance'
-import { PlanParameters } from './Runs'
+import { PlanParameters } from './runRecords'
 import { SignIns } from './SignIns'
 
 /*

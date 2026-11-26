@@ -3,8 +3,7 @@ import { createConnection, createServer, type Socket } from 'node:net'
 
 import { encodeWire } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-
-import { socketPort } from '../src/socketPort'
+import { socketPort } from '@althar/transport-node'
 
 const frame = (value: unknown) => {
   const body = Buffer.from(encodeWire(value))

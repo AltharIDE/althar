@@ -3,7 +3,7 @@ import { Cause, Data, Duration, Effect, Fiber, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { backoff, contained, type Failure, failureOf, Failures, failuresLayer, keptGoing } from '../src/Failures'
-import { agentLost } from '../src/Sessions'
+import { agentLost } from '../src/sessionState'
 
 class StoreBusy extends Data.TaggedError('StoreBusy')<{ readonly table: string }> {}
 

@@ -15,7 +15,7 @@ import {
 } from '@althar/connectors'
 import { Effect, Schema } from 'effect'
 
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 /*
  * An issue's fields as agents name them, read against its tracker

@@ -13,7 +13,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { change, timestamp } from './records'
-import { type ProjectRuleSet, type RuleContext, sayRules } from './rules'
+import { type ProjectRuleSet, type RuleContext, sayRules } from './ruleContext'
 import { SignIns } from './SignIns'
 
 const Answer = Schema.Struct({ decision: Schema.Literals(['allow', 'deny', 'ask']), reason: Schema.String })

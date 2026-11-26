@@ -6,26 +6,11 @@ import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import {
-  ALTHAR_TOOL,
-  alwaysOf,
-  commandOf,
-  decide,
-  decideReader,
-  OFFLINE,
-  essentials,
-  matchesPattern,
-  MVP_RULES,
-  RULES,
-  parseCommandLine,
-  refusesHostsUnder,
-  pathsOf,
-  type ProjectRuleSet,
-  type RuleContext,
-  sayRules,
-  shortCommand,
-  withoutQuotedHeredocs,
-} from '../src/rules'
+import { ALTHAR_TOOL, OFFLINE, decideReader } from '../src/readerRules'
+import { MVP_RULES, type ProjectRuleSet, RULES, type RuleContext, sayRules } from '../src/ruleContext'
+import { commandOf, essentials, pathsOf } from '../src/rulePaths'
+import { alwaysOf, decide, matchesPattern, refusesHostsUnder } from '../src/rules'
+import { parseCommandLine, shortCommand, withoutQuotedHeredocs } from '../src/shellCommands'
 
 const worktree = '/work/meridian/retry/app'
 /**

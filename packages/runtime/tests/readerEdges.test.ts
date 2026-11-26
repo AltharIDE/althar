@@ -1,7 +1,7 @@
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { describe, expect, it } from 'vitest'
 
-import { decideReader } from '../src/rules'
+import { decideReader } from '../src/readerRules'
 
 /*
  * The coordinator as a trusted reader (ADR-058), on lines it can't read through: a substitution or arithmetic left

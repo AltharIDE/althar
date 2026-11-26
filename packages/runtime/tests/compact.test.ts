@@ -3,13 +3,15 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { COMPACT } from '../src/compact'
 import { Agents } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { COMPACT, compactedWords, Sessions } from '../src/Sessions'
+import { Sessions } from '../src/Sessions'
+import { compactedWords } from '../src/sessionState'
 import { fakeAgents, notices, repository, runtime, until } from './support'
 
 /*

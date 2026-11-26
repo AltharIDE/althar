@@ -13,7 +13,6 @@ import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
-export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
  * Althar's tools, served to agents over MCP (docs/architecture/04): how the

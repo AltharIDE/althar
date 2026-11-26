@@ -25,7 +25,7 @@ import {
 } from './shellCommands'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { realpathSync } from 'node:fs'
-import { posix } from 'node:path'
+import type { posix } from 'node:path'
 
 // ---- Roles that only read ----------------------------------------------------
 
