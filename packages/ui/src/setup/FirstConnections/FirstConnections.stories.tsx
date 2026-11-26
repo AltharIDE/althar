@@ -52,6 +52,25 @@ export const NoHostNamed: Story = { args: { host: undefined, hosts: HOSTS } }
 /** A code host is connected: only a tracker is asked for. */
 export const OnlyIssues: Story = { args: { host: undefined } }
 
+/** GitHub is connected, but its token may only read the project's repository: said as the project is added, with Connect again. */
+export const CantPush: Story = {
+  args: {
+    host: undefined,
+    trackers: [],
+    cantPush: {
+      service: GITHUB,
+      names: ['AltharIDE/althar'],
+      why: 'GitHub took sam’s token, but it may only read there. Give it write access on GitHub, or connect again with one that can push.',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Can’t push to AltharIDE/althar')).toBeVisible()
+    await userEvent.click(c.getByRole('button', { name: 'Connect again' }))
+    await expect(onConnect).toHaveBeenCalledWith('github')
+  },
+}
+
 const WAYS = [
   { id: 'gh', title: 'Use gh’s sign-in', line: 'Signed in as balazs on this Mac', icon: 'terminal' as const },
   { id: 'token', title: 'Make a token', line: 'On GitHub’s token page, opened filled in', icon: 'lock' as const },

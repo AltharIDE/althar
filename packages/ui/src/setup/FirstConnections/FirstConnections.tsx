@@ -56,6 +56,10 @@ export interface FirstConnectionsText {
   code: string
   issues: string
   connect: string
+  /** Its host's sign-in may not push to these: GitHub can’t push to acme/api. */
+  cantPush: (names: readonly string[]) => string
+  /** Signs in to the host again, with a sign-in that may push. */
+  connectAgain: string
   /** What × does, said and read out. */
   hide: string
   /** The services behind a menu, by name: Linear, Jira or Trello. */
@@ -73,6 +77,9 @@ export const firstConnectionsText: FirstConnectionsText = {
   code: 'Code',
   issues: 'Issues',
   connect: 'Connect',
+  cantPush: (names) =>
+    `Can’t push to ${names.length <= 2 ? names.join(' or ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`}`,
+  connectAgain: 'Connect again',
   hide: 'Not now',
   either: (names) => (names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`),
   hostsLabel: 'Code hosts',
@@ -82,6 +89,11 @@ export const firstConnectionsText: FirstConnectionsText = {
 export type FirstConnectionsProps = RootProps<
   'section',
   {
+    /**
+     * Its host, connected, but whose sign-in may not push to these of its repositories, and why in a line: Connect again
+     * (`onConnect`) signs in with one that may.
+     */
+    cantPush?: { readonly service: FirstConnectionsService; readonly names: readonly string[]; readonly why: string }
     /** Where the project's code is, on a host not connected yet: the host, and the place there. */
     host?: { readonly service: FirstConnectionsService; readonly where?: string }
     /** The code hosts to choose from, where the project's code names none and none is connected. */
@@ -102,6 +114,7 @@ export type FirstConnectionsProps = RootProps<
 
 /** What a new project's tasks will need later, to connect now or not: its code host, and a tracker. */
 export function FirstConnections({
+  cantPush,
   host,
   hosts = [],
   trackers = [],
@@ -114,7 +127,7 @@ export function FirstConnections({
   ...rest
 }: FirstConnectionsProps) {
   const t = { ...firstConnectionsText, ...text }
-  const code = host !== undefined || hosts.length > 0
+  const code = host !== undefined || hosts.length > 0 || cantPush !== undefined
   if (!code && trackers.length === 0 && rows.length === 0) return null
   return (
     <section aria-label={code ? t.title : t.issuesTitle} className={cx(s.card, className)} {...rest}>
@@ -138,6 +151,22 @@ export function FirstConnections({
                 {row.end !== undefined && <span className={s.end}>{row.end}</span>}
               </li>
             ))}
+            {cantPush !== undefined && (
+              <li className={cx(s.row, s.problem)}>
+                <span className={s.marks}>
+                  <Mark service={cantPush.service} />
+                </span>
+                <span className={s.said}>
+                  <span className={s.name}>{t.cantPush(cantPush.names)}</span>
+                  <span className={s.why}>{cantPush.why}</span>
+                </span>
+                <span className={s.end}>
+                  <Button size="small" onClick={() => onConnect(cantPush.service.id)}>
+                    {t.connectAgain}
+                  </Button>
+                </span>
+              </li>
+            )}
             {host !== undefined && (
               <li className={s.row}>
                 <span className={s.marks}>

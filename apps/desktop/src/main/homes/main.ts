@@ -12,6 +12,7 @@ import { sshEnvironment, sshProgram } from '@althar/transport-node'
 import type { WindowHome } from '../../homes'
 import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
+import { homePictures } from './pictures'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
@@ -453,6 +454,22 @@ export const startHomeConnections = ({
       }
     })
   }
+  /* A home's pictures, through a connection of their own, opened as a connected window of that home would open one. */
+  const pictures = homePictures(async (homeId, signal) => {
+    const owner = [...connections.keys()].find((id) => {
+      const state = controller.state(id)
+      return state.current.kind !== 'local' && state.current.home.homeId === homeId && state.connection === 'connected'
+    })
+    if (owner === undefined) throw new Error('No window is connected to this home.')
+    return previewPort(owner, signal)
+  })
+  /** Whether another window than this one is on the home. */
+  const otherOn = (homeId: string, but: number) =>
+    BrowserWindow.getAllWindows().some((window) => {
+      if (window.isDestroyed() || window.webContents.id === but) return false
+      const { current } = controller.state(window.webContents.id)
+      return current.kind !== 'local' && current.home.homeId === homeId
+    })
   ipcMain.handle('althar:homes-reconnect', (event) => {
     const id = owner(event)
     if (controller.state(id).current.kind === 'local') return
@@ -474,6 +491,8 @@ export const startHomeConnections = ({
       window.once('closed', () => {
         controller.closed(id)
         void stop(id)
+        // Its home's pictures need no connection once no window is on it.
+        if (home.kind !== 'local' && !otherOn(home.home.homeId, id)) pictures.forget(home.home.homeId)
       })
       if (homePartition(home) !== undefined) {
         window.webContents.session.setPermissionRequestHandler((_contents, _permission, reply) => reply(false))
@@ -482,8 +501,11 @@ export const startHomeConnections = ({
     },
     connect,
     previewPort,
+    /** A picture the home keeps, by its digest: what main serves a window on the home (pictures.ts). */
+    readPicture: pictures.read,
     stopAll: async () => {
       controller.stopping()
+      pictures.stop()
       workers.stop()
       quitting.abort()
       await setups.stop()

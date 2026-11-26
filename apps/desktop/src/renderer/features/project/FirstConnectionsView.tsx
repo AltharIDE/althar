@@ -1,6 +1,7 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useSyncExternalStore } from 'react'
 
-import type { ConnectionList, Service } from '@althar/contracts'
+import type { AccessReason, ConnectionCheck, ConnectionList, Service } from '@althar/contracts'
 import { FirstConnections, type FirstConnectionsService, LinkButton } from '@althar/ui'
 
 import { canCall } from '../../data/client'
@@ -17,7 +18,10 @@ import { SERVICES, hostsCode, serviceBrand, serviceName, serviceOf } from '../co
  * host its repositories' remotes name, or every host where they name none,
  * and a tracker. Connecting one opens its walk in the card. Each project's
  * Not now is kept on this computer (`althar.firstConnections`), and the card
- * goes once the conversation has begun.
+ * goes once the conversation has begun. Where its host is connected, the
+ * card asks what that sign-in can do there as the project is added, and
+ * where it may not push to the project's repositories, says so, with
+ * Connect again in place: found here, not on a task's last step.
  */
 
 const STORED = 'althar.firstConnections'
@@ -90,6 +94,46 @@ export const firstConnectionsOf = (
   }
 }
 
+/** The connection that reaches a project's code, where one does: what its check is asked of. */
+export const codeConnectionOf = (list: ConnectionList, project: string) => {
+  const place = list.places.find((one) => one.project === project)
+  if (place === undefined) return null
+  const connection = list.connections.find((one) => one.product === place.product && one.webUrl === place.webUrl)
+  return connection === undefined ? null : { connection, place }
+}
+
+/** Why a sign-in may not push, in a line with what puts it right. */
+const cantPushWhy = (reason: AccessReason | null, service: string, login: string): string => {
+  switch (reason?.kind) {
+    case 'no_push':
+      return reason.url === null
+        ? `Althar’s ${service} app may only read there. Its owners can let it write, or connect again with a token that can push.`
+        : `${service} took ${login}’s token, but it may only read there. Give it write access on ${service}, or connect again with one that can push.`
+    case 'scope':
+      return `The token wasn’t given the ${reason.scope} scope. Connect again with one that has it.`
+    case 'role':
+      return 'Your account can’t push there: its owners can change its role, or connect again as one that can.'
+    default:
+      return `${service} won’t take a push from this sign-in there. Connect again with one that can push.`
+  }
+}
+
+/**
+ * What the check says of pushing to the project's repositories: those its sign-in may not push to, and why; null where it
+ * may, or the check doesn't say.
+ */
+export const cantPushOf = (check: ConnectionCheck, repositories: ReadonlyArray<string>, service: string, login: string) => {
+  const push = check.lines.find((line) => line.need === 'push')
+  if (push === undefined || push.state !== 'no') return null
+  const lower = (path: string) => path.toLowerCase()
+  const names =
+    push.reason?.kind === 'no_push'
+      ? repositories.filter((path) => (push.reason?.kind === 'no_push' ? push.reason.names : []).some((one) => lower(one) === lower(path)))
+      : repositories
+  if (names.length === 0) return null
+  return { names, why: cantPushWhy(push.reason, service, login) }
+}
+
 export interface FirstConnectionsViewProps {
   projectId: string
   /** The project's name, as the connections' places name it. */
@@ -101,30 +145,64 @@ export interface FirstConnectionsViewProps {
 /** A new project's card for its code host and a tracker, while either isn't connected and it wasn't put away. */
 export function FirstConnectionsView({ projectId, project, model, className }: FirstConnectionsViewProps) {
   const hidden = useSyncExternalStore(subscribe, read)
-  const [walking, setWalking] = useState<Service | null>(null)
+  const [walking, setWalking] = useState<{ readonly service: Service; readonly again: string | null } | null>(null)
   const { client } = useServices()
+  const cache = useQueryClient()
   const list = model.list
+  const hosts = canCall(client, 'ConnectToken')
+  // The project's host, connected: asked what its sign-in can do there, once a while, while the card shows.
+  const code = list === null || hidden.includes(projectId) || !hosts ? null : codeConnectionOf(list, project)
+  const checkKey = ['connection-check', code?.connection.id ?? ''] as const
+  const check = useQuery({
+    queryKey: checkKey,
+    queryFn: () => client.checkConnection(code?.connection.id ?? ''),
+    enabled: code !== null && canCall(client, 'CheckConnection'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
   if (list === null || hidden.includes(projectId)) return null
   const remote = client.connection !== undefined
-  const offer = firstConnectionsOf(list, project, { hosts: canCall(client, 'ConnectToken'), trackers: !remote })
-  // Nothing this window may connect: no card.
-  if (offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0) return null
+  const offer = firstConnectionsOf(list, project, { hosts, trackers: !remote })
+  const service = code === null ? null : (serviceOf(list.products, code.connection.product) ?? null)
+  const cantPush =
+    code === null || service === null || check.data === undefined
+      ? null
+      : cantPushOf(check.data, code.place.repositories, serviceName(service), code.connection.account.login)
+  // Nothing this window may connect, and nothing in the way: no card.
+  if (offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0 && cantPush === null) return null
   return (
     <FirstConnections
       {...offer}
-      onConnect={(service) => {
-        if (isService(service)) setWalking(service)
+      {...(cantPush === null || service === null ? {} : { cantPush: { service: option(service), ...cantPush } })}
+      onConnect={(chosen) => {
+        if (!isService(chosen)) return
+        // The host whose sign-in can't push: signed in to again, so the same connection takes one that can.
+        const again = cantPush !== null && chosen === service ? (code?.connection.id ?? null) : null
+        setWalking({ service: chosen, again })
       }}
       onHide={() => hide(projectId)}
-      {...(walking === null ? {} : { walk: <Walk service={walking} onClose={() => setWalking(null)} /> })}
+      {...(walking === null
+        ? {}
+        : {
+            walk: (
+              <Walk
+                service={walking.service}
+                again={walking.again}
+                onClose={() => {
+                  setWalking(null)
+                  void cache.invalidateQueries({ queryKey: checkKey })
+                }}
+              />
+            ),
+          })}
       {...(className === undefined ? {} : { className })}
     />
   )
 }
 
 /** A service's walk in, in the card: the one Settings shows, from the card's left edge, with the way back to the card's rows on it too. */
-function Walk({ service, onClose }: { service: Service; onClose: () => void }) {
-  const flow = useConnect({ service, again: null, onClose })
+function Walk({ service, again, onClose }: { service: Service; again: string | null; onClose: () => void }) {
+  const flow = useConnect({ service, again, onClose })
   return (
     <div className={s.inCard}>
       <ConnectFlow model={flow} compact align="start" />

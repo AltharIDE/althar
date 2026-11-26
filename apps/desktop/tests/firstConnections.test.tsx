@@ -6,10 +6,10 @@ import { Room } from '@althar/ui'
 
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
-import { firstConnectionsOf } from '../src/renderer/features/project/FirstConnectionsView'
+import { cantPushOf, firstConnectionsOf } from '../src/renderer/features/project/FirstConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { connectionList, coordinatorSnapshot, fakeClient, githubConnection, items } from './fixtures'
+import { connectionList, coordinatorSnapshot, fakeClient, githubCheck, githubConnection, items } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
 /*
@@ -119,5 +119,49 @@ describe('a new project’s card', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Not now' }))
     expect(screen.queryByRole('region', { name: 'Before the first pull request' })).toBeNull()
     vi.restoreAllMocks()
+  })
+})
+
+/** GitHub's check, its push line refused for the repositories given, as git's first question of a push was answered. */
+const refusing = (names: ReadonlyArray<string>, url: string | null = 'https://github.com/settings/personal-access-tokens') => ({
+  ...githubCheck,
+  lines: githubCheck.lines.map((line) =>
+    line.need === 'push' ? { ...line, state: 'no' as const, reason: { kind: 'no_push' as const, names, url } } : line,
+  ),
+})
+
+describe('a new project whose host is connected but can’t push there', () => {
+  it('names the project’s repositories its sign-in can’t push to, and why, and nothing where it can', () => {
+    expect(cantPushOf(refusing(['Northwind/Meridian-API', 'northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toEqual({
+      names: ['northwind/meridian-api'],
+      why: 'GitHub took you’s token, but it may only read there. Give it write access on GitHub, or connect again with one that can push.',
+    })
+    expect(cantPushOf(refusing(['northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
+    expect(cantPushOf(githubCheck, ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
+    expect(cantPushOf(refusing(['northwind/meridian-api'], null), ['northwind/meridian-api'], 'GitHub', 'you')?.why).toContain(
+      'Althar’s GitHub app may only read there',
+    )
+  })
+
+  it('says so as the project is added, and connects again in the card', async () => {
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, LINEAR] })),
+      checkConnection: vi.fn(async () => refusing(['northwind/meridian-api'])),
+    })
+    withServices(<Project />, client)
+    const card = await screen.findByRole('region', { name: 'Before the first pull request' })
+    expect(await screen.findByText('Can’t push to northwind/meridian-api')).toBeTruthy()
+    expect(card.textContent).toContain('may only read there')
+    expect(client.checkConnection).toHaveBeenCalledWith(githubConnection.id)
+    await userEvent.click(screen.getByRole('button', { name: 'Connect again' }))
+    await waitFor(() => expect(client.getConnectGuide).toHaveBeenCalledWith('github'))
+  })
+
+  it('asks nothing more of a project whose host can push, with its tracker connected', async () => {
+    const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, LINEAR] })) })
+    withServices(<Project />, client)
+    await screen.findByRole('textbox')
+    await waitFor(() => expect(client.checkConnection).toHaveBeenCalled())
+    expect(screen.queryByRole('region', { name: 'Before the first pull request' })).toBeNull()
   })
 })
