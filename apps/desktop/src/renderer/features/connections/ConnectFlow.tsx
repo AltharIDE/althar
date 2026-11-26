@@ -141,6 +141,7 @@ export const text = {
     </>
   ),
   install: (owner: string) => `Install Althar on ${owner}`,
+  installIt: 'Install Althar',
   installSteps: (repositories: ReadonlyArray<string>) => [
     'Choose Only select repositories.',
     toPick(repositories, (names) => `Pick ${names}.`),
@@ -750,16 +751,25 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
   switch (step) {
     case 'code': {
       const signIn = model.signIn
-      if (signIn?.ended != null)
+      if (signIn?.ended != null) {
+        const install = signIn.install
         return (
           <>
             <ConnectFound tone="no">{signIn.ended}</ConnectFound>
+            {install !== undefined && (
+              <ConnectActions primary>
+                <Button trailingIcon="external" onClick={() => model.open(install)}>
+                  {text.installIt}
+                </Button>
+              </ConnectActions>
+            )}
             <ConnectActions>
               <Button onClick={model.retrySignIn}>{text.tryAgain}</Button>
               {another}
             </ConnectActions>
           </>
         )
+      }
       if (signIn === null || signIn.code === null)
         return (
           <ConnectActions>

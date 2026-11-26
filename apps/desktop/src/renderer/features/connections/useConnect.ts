@@ -58,6 +58,8 @@ export interface SignIn {
   readonly code: string | null
   readonly expiresAt: string | null
   readonly ended: string | null
+  /** Where Althar's app is installed, where its absence is how the sign-in ended. */
+  readonly install?: string
 }
 
 export interface ConnectModel {
@@ -513,7 +515,10 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
         (state) => {
           if (flow.current !== current || state.state === 'waiting') return
           flow.current = null
-          if (state.state === 'ended') return setSignIn((was) => (was === null ? was : { ...was, ended: state.message }))
+          if (state.state === 'ended')
+            return setSignIn((was) =>
+              was === null ? was : { ...was, ended: state.message, ...(state.install === undefined ? {} : { install: state.install }) },
+            )
           setConnection({ id: state.connectionId, login: '' })
           setCheck(null)
           setCheckError(null)

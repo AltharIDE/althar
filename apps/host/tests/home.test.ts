@@ -103,35 +103,95 @@ describe('a persistent headless home', () => {
     ),
   )
 
-  it.live('offers a window GitHub’s and GitLab’s sign-in by a code typed in any browser, and never Linear’s loopback', () =>
+  it.live('signs a window in to GitHub and GitLab by a code typed in any browser, and never by Linear’s loopback', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { options, dependencies } = fixture()
+        // The ids as a release gives them, read by the home itself, which the home's environment would override.
+        const given = {
+          ALTHAR_GITHUB_CLIENT_ID: 'Iv23.fake-github',
+          ALTHAR_GITLAB_CLIENT_ID: 'fake-gitlab',
+          ALTHAR_LINEAR_CLIENT_ID: 'fake-linear',
+        }
+        const before = Object.fromEntries(Object.keys(given).map((name) => [name, process.env[name]]))
+        yield* Effect.acquireRelease(
+          Effect.sync(() => Object.assign(process.env, given)),
+          () =>
+            Effect.sync(() => {
+              for (const [name, value] of Object.entries(before)) {
+                if (value === undefined) delete process.env[name]
+                else process.env[name] = value
+              }
+            }),
+        )
         const asked: Array<string> = []
+        const answers: Readonly<Record<string, unknown>> = {
+          'https://github.com/login/device/code': {
+            device_code: 'gh-device',
+            user_code: 'WDJB-MJHT',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 0,
+          },
+          'https://github.com/login/oauth/access_token': { access_token: 'ghu_home', refresh_token: 'ghr_home', expires_in: 28_800 },
+          'https://api.github.com/user': { id: 5, login: 'you', name: 'You' },
+          'https://gitlab.com/oauth/authorize_device': {
+            device_code: 'gl-device',
+            user_code: 'GLAB-CODE',
+            verification_uri: 'https://gitlab.com/oauth/device',
+            verification_uri_complete: 'https://gitlab.com/oauth/device?user_code=GLAB-CODE',
+            expires_in: 900,
+            interval: 0,
+          },
+          'https://gitlab.com/oauth/token': { access_token: 'glo_home', refresh_token: 'glr_home', expires_in: 7200 },
+          'https://gitlab.com/api/v4/user': { id: 9, username: 'you', name: 'You' },
+        }
         yield* initializeHome(options, dependencies)
         yield* start(options, {
           ...dependencies,
-          clientIds: { github: 'Iv23.fake-github', gitlab: 'fake-gitlab', linear: 'fake-linear' },
-          githubApp: 'althar-fake',
           fetch: async (url: string) => {
             asked.push(url)
-            if (url === 'https://github.com/login/device/code')
-              return Response.json({
-                device_code: 'device',
-                user_code: 'WDJB-MJHT',
-                verification_uri: 'https://github.com/login/device',
-                expires_in: 900,
-                interval: 5,
-              })
-            return Response.json({ message: 'Not Found' }, { status: 404 })
+            const answer = answers[url.replace(/\?.*$/, '')]
+            return answer === undefined ? Response.json({ message: 'Not Found' }, { status: 404 }) : Response.json(answer)
           },
         })
         const api = yield* client(options.profile)
         const offered = Object.fromEntries((yield* api.ListConnections()).products.map((option) => [option.product, option.browserSignIn]))
         assert.deepInclude(offered, { github: true, gitlab: true, linear: false })
-        const started = yield* api.StartSignIn({ commandId: `cmd_${'2'.repeat(32)}`, product: 'github' })
-        assert.deepInclude(started, { kind: 'device', userCode: 'WDJB-MJHT', verificationUri: 'https://github.com/login/device' })
-        assert.include(asked, 'https://github.com/login/device/code')
+
+        // Each code as the window shows it, approved elsewhere: the connection made, kept on the home, and working there.
+        const signIn = (product: 'github' | 'gitlab', commandId: string) =>
+          Effect.gen(function* () {
+            const started = yield* api.StartSignIn({ commandId, product })
+            const [state] = yield* until(
+              Effect.map(
+                Effect.suspend(() => api.GetSignIn({ flowId: started.flowId })),
+                (one) => [one],
+              ),
+              (states) => states[0]?.state !== 'waiting',
+            )
+            assert.strictEqual(state?.state, 'done')
+            const connectionId = state?.state === 'done' ? state.connectionId : ''
+            const check = yield* api.CheckConnection({ connectionId })
+            assert.deepInclude(check.lines[0], { need: 'account', state: 'ok', fact: 'you' })
+            return started
+          })
+        const github = yield* signIn('github', `cmd_${'2'.repeat(32)}`)
+        assert.deepInclude(github, { kind: 'device', userCode: 'WDJB-MJHT', verificationUri: 'https://github.com/login/device' })
+        const gitlab = yield* signIn('gitlab', `cmd_${'3'.repeat(32)}`)
+        assert.deepInclude(gitlab, {
+          kind: 'device',
+          userCode: 'GLAB-CODE',
+          verificationUri: 'https://gitlab.com/oauth/device?user_code=GLAB-CODE',
+        })
+        assert.deepStrictEqual(
+          (yield* api.ListConnections()).connections.map((one) => [one.product, one.auth, one.state, one.account.login]),
+          [
+            ['github', 'device_flow', 'ready', 'you'],
+            ['gitlab', 'device_flow', 'ready', 'you'],
+          ],
+        )
+        assert.includeMembers(asked, ['https://github.com/login/oauth/access_token', 'https://gitlab.com/oauth/token'])
       }),
     ),
   )

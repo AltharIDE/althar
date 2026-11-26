@@ -2258,6 +2258,20 @@ export const expiryOf = (said: string | null): string | null => {
   return Number.isNaN(at) ? null : new Date(at).toISOString()
 }
 
+/** Where Althar's GitHub App is installed for the person signed in: on which owner, and on all its repositories or some. */
+const Installations = Schema.Struct({
+  installations: Schema.Array(
+    Schema.Struct({
+      id: Schema.Number,
+      account: Schema.NullOr(Schema.Struct({ login: Schema.String })),
+      repository_selection: Schema.String,
+    }),
+  ),
+})
+
+/** The repositories an installation of some is let into. */
+const InstallationRepositories = Schema.Struct({ repositories: Schema.Array(Schema.Struct({ full_name: Schema.String })) })
+
 /** A repository it sees: its owner as GitHub spells it, whether the account may push there (GitHub says so only to some), and its default branch. */
 interface Found {
   readonly path: ReadonlyArray<string>
@@ -2289,9 +2303,70 @@ export const accessGitHub: Access = (input: AccessInput) =>
     // Where a token is put right: a classic one in the list of classic tokens.
     const settings = kind === 'classic' ? `${web}/settings/tokens` : tokensPage(web)
 
+    /** Every page of a list GitHub gives a hundred at a time, or why it couldn't be read. */
+    const everyPage = <A, B>(url: (page: number) => string, schema: Schema.Codec<A, unknown>, items: (read: A) => ReadonlyArray<B>) =>
+      Effect.gen(function* () {
+        const all: Array<B> = []
+        for (let page = 1; page <= 20; page++) {
+          const answer = yield* ask(url(page))
+          if (!answered(answer)) return { reason: failedOf(answer) } as const
+          const read = readAs(schema, answer)
+          if (read === undefined) return { reason: UNREADABLE } as const
+          all.push(...items(read))
+          if (items(read).length < 100) break
+        }
+        return { items: all } as const
+      })
+
+    /*
+     * Where the App is installed, asked of GitHub itself: a repository's own answer can't say, since GitHub shows a public
+     * one to any token, and hides a private one for more reasons than the App's absence. An installation on some of an
+     * owner's repositories names them.
+     */
+    const askedOwners = new Set(input.repositories.map((path) => (path[0] ?? '').toLowerCase()))
+    const installs =
+      kind !== 'app' || input.repositories.length === 0
+        ? undefined
+        : yield* everyPage(
+            (page) => `${api}/user/installations?per_page=100&page=${page}`,
+            Installations,
+            (read) => read.installations,
+          )
+    const chosen = new Map<number, { readonly items: ReadonlyArray<string> } | { readonly reason: AccessReason }>()
+    if (installs !== undefined && 'items' in installs)
+      for (const install of installs.items)
+        if (install.repository_selection !== 'all' && askedOwners.has((install.account?.login ?? '').toLowerCase()))
+          chosen.set(
+            install.id,
+            yield* everyPage(
+              (page) => `${api}/user/installations/${install.id}/repositories?per_page=100&page=${page}`,
+              InstallationRepositories,
+              (read) => read.repositories.map((repository) => repository.full_name.toLowerCase()),
+            ),
+          )
+    /** Whether the App reaches a repository: yes, no, or why GitHub didn't say; yes for any token not the App's. */
+    const coverageOf = (path: ReadonlyArray<string>): 'yes' | 'no' | AccessReason => {
+      if (installs === undefined) return 'yes'
+      if ('reason' in installs) return installs.reason
+      const install = installs.items.find((one) => (one.account?.login ?? '').toLowerCase() === (path[0] ?? '').toLowerCase())
+      if (install === undefined) return 'no'
+      if (install.repository_selection === 'all') return 'yes'
+      const repositories = chosen.get(install.id)
+      if (repositories === undefined || 'reason' in repositories) return repositories?.reason ?? UNREADABLE
+      return repositories.items.includes(path.join('/').toLowerCase()) ? 'yes' : 'no'
+    }
+    const notInstalled = (owner: string): AccessReason => ({
+      kind: 'not_installed',
+      owner,
+      url: input.appSlug === undefined ? null : `${web}/apps/${input.appSlug}/installations/new`,
+    })
+
     const reachOf = (path: ReadonlyArray<string>) =>
       Effect.map(ask(repo(path)), (answer): Reached<Found> => {
         const owner = path[0] ?? ''
+        const coverage = coverageOf(path)
+        if (coverage === 'no') return { path, missed: notInstalled(owner) }
+        if (coverage !== 'yes') return { path, missed: coverage }
         if (answered(answer)) {
           const found = readAs(RepositoryAnswer, answer)
           return found === undefined
@@ -2301,18 +2376,9 @@ export const accessGitHub: Access = (input: AccessInput) =>
                 seen: { path, owner: found.full_name.split('/')[0] ?? owner, push: found.permissions?.push, branch: found.default_branch },
               }
         }
+        // The App is installed there, so a repository it doesn't see is one that isn't there for this account.
         if (answer.status === 404)
-          return {
-            path,
-            missed:
-              kind === 'app'
-                ? {
-                    kind: 'not_installed',
-                    owner,
-                    url: input.appSlug === undefined ? null : `${web}/apps/${input.appSlug}/installations/new`,
-                  }
-                : { kind: 'unseen', names: [path.join('/')], url: settings },
-          }
+          return { path, missed: { kind: 'unseen', names: [path.join('/')], url: kind === 'app' ? null : settings } }
         if (answer.status === 403 && !limited(answer)) {
           const sso = /^required; url=(\S+)/.exec(answer.headers.get('x-github-sso') ?? '')?.[1]
           if (sso !== undefined) return { path, missed: { kind: 'sso', owner, url: sso } }
@@ -2355,14 +2421,19 @@ export const accessGitHub: Access = (input: AccessInput) =>
     const owners = [...new Set(seen.map((found) => found.owner))].join(', ')
     if (reached.length > 0) lines.push(reachLine(reached, owners === '' ? null : owners))
     const [first] = seen
+    // The App's permissions are its registration's, so they hold wherever it is installed; where it reaches none of the
+    // repositories, nothing is known of them yet.
+    const appLine = (need: AccessNeed) =>
+      seen.length > 0 || input.repositories.length === 0 ? line(need, 'ok') : line(need, 'unknown', { reason: UNSAID })
 
     // Where GitHub says the account itself may not push, no token of it may.
     if (seen.some((found) => found.push === false)) lines.push(line('push', 'no', { reason: { kind: 'role', role: null } }))
     else if (kind === 'classic') lines.push(byScope('push'))
-    else lines.push(kind === 'app' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID }))
+    else if (kind === 'app') lines.push(appLine('push'))
+    else lines.push(line('push', 'unknown', { reason: UNSAID }))
 
     if (kind === 'classic') lines.push(byScope('changes'), byScope('checks'), byScope('issues'))
-    else if (kind === 'app') lines.push(line('changes', 'ok'), line('checks', 'ok'), line('issues', 'ok'))
+    else if (kind === 'app') lines.push(appLine('changes'), appLine('checks'), appLine('issues'))
     else if (first === undefined)
       lines.push(...(['changes', 'checks', 'issues'] as const).map((need) => line(need, 'unknown', { reason: UNSAID })))
     else

@@ -104,6 +104,16 @@ export class OtherAccount extends Schema.TaggedError<OtherAccount>()('OtherAccou
   expected: Schema.String,
 }) {}
 
+/**
+ * A browser sign-in that reaches none of the projects' repositories its account's working connection reaches: that
+ * connection's sign-in stays, rather than one that would lose them.
+ */
+export class WouldLoseReach extends Schema.TaggedError<WouldLoseReach>()('WouldLoseReach', {
+  product: Schema.String,
+  message: Schema.String,
+  install: Schema.NullOr(Schema.String),
+}) {}
+
 /** The keychain keeps no token for a connection, or none Althar can read. */
 class NoToken extends Schema.TaggedError<NoToken>()('NoToken', { message: Schema.String }) {}
 
@@ -192,7 +202,13 @@ export type SignInStart =
 export type SignInState =
   | { readonly state: 'waiting' }
   | { readonly state: 'done'; readonly connectionId: string }
-  | { readonly state: 'ended'; readonly reason: 'denied' | 'expired' | 'failed'; readonly message: string }
+  | {
+      readonly state: 'ended'
+      readonly reason: 'denied' | 'expired' | 'failed'
+      readonly message: string
+      /** Where Althar's app is installed, where that is what the sign-in lacked. */
+      readonly install?: string
+    }
 
 /** What the keychain holds for a connection. */
 const Stored = Schema.Union([
@@ -897,6 +913,9 @@ export class Connections extends Context.Service<
             ORDER BY workspace_key IS NULL LIMIT 1`
           const kept = workspace === null ? {} : { workspaceKey: workspace.key, workspaceName: workspace.name }
           const where = workspace === null ? {} : { workspace: workspace.key }
+          // A browser sign-in over a connection that works by another sign-in replaces it only where it loses nothing.
+          if (existing !== undefined && existing.state === 'ready' && input.auth !== 'token' && existing.auth !== input.auth)
+            yield* keepsReach(existing, { product: input.product, webUrl, apiUrl, credential, auth: input.auth })
           const id = existing?.id ?? (yield* newId(Ids.connection))
           const credentialRef = existing?.credentialRef ?? id
           const movedOnFrom = input.still === undefined ? Effect.succeed(false) : movedOn(input.still)
@@ -966,6 +985,49 @@ export class Connections extends Context.Service<
           return toInfo(yield* rowOf(id))
         })
 
+      /**
+       * Fails where a new sign-in reaches none of the projects' repositories on its instance and the connection it would
+       * replace reaches them: an organisation that refuses Althar's app keeps the token it was connected with.
+       */
+      const keepsReach = (
+        existing: Row,
+        fresh: {
+          readonly product: Product
+          readonly webUrl: string
+          readonly apiUrl: string
+          readonly credential: Credential
+          readonly auth: ConnectionInfo['auth']
+        },
+      ) =>
+        Effect.gen(function* () {
+          const repositories = yield* repositoriesAt(fresh.product, fresh.webUrl)
+          if (repositories.length === 0) return
+          const reachIn = (report: { readonly lines: ReadonlyArray<AccessLine> }) => report.lines.find((one) => one.need === 'reach')
+          const now = reachIn(yield* accessOf(fresh.product, fresh.webUrl, fresh.apiUrl, fresh.credential, fresh.auth, repositories))
+          if (now?.state !== 'no') return
+          const before = yield* credential(existing.id).pipe(Effect.option)
+          if (Option.isNone(before)) return
+          const was = reachIn(
+            yield* accessOf(existing.product, existing.webUrl, existing.apiUrl, before.value, existing.auth, repositories),
+          )
+          if (was?.state !== 'ok') return
+          const reason = now.reason
+          const name = infoOf(fresh.product)?.name ?? fresh.product
+          return yield* new WouldLoseReach({
+            product: fresh.product,
+            message:
+              reason?.kind === 'not_installed'
+                ? `Althar isn’t installed on ${reason.owner}, so your connection keeps the sign-in it had. Install it there, then try again.`
+                : `This sign-in can’t reach the projects’ repositories on ${name}, so your connection keeps the sign-in it had.`,
+            install: reason?.kind === 'not_installed' ? reason.url : null,
+          })
+        }).pipe(
+          Effect.catchIf(
+            (error) => !(error instanceof WouldLoseReach),
+            () => Effect.void,
+          ),
+        )
+
       /*
        * Sign-ins under way, by flow id. One that ends is kept a while for its
        * window to read, then let go: a window closed meanwhile never cancels it.
@@ -981,18 +1043,25 @@ export class Connections extends Context.Service<
         const flow = flows.get(flowId)
         if (flow === undefined) return
         flow.state =
-          error instanceof SignInEnded
-            ? { state: 'ended', reason: error.reason, message: error.reason === 'denied' ? 'Sign-in was declined.' : 'The code expired.' }
-            : {
+          error instanceof WouldLoseReach
+            ? {
                 state: 'ended',
                 reason: 'failed',
-                message:
-                  error instanceof ConnectorFailed
-                    ? error.message
-                    : error instanceof OtherAccount
-                      ? `That signed in as ${error.login}, not ${error.expected}.`
-                      : 'Sign-in didn’t finish.',
+                message: error.message,
+                ...(error.install === null ? {} : { install: error.install }),
               }
+            : error instanceof SignInEnded
+              ? { state: 'ended', reason: error.reason, message: error.reason === 'denied' ? 'Sign-in was declined.' : 'The code expired.' }
+              : {
+                  state: 'ended',
+                  reason: 'failed',
+                  message:
+                    error instanceof ConnectorFailed
+                      ? error.message
+                      : error instanceof OtherAccount
+                        ? `That signed in as ${error.login}, not ${error.expected}.`
+                        : 'Sign-in didn’t finish.',
+                }
       }
 
       /** Runs a sign-in to its end in the background, recording how it went. */
@@ -1567,18 +1636,23 @@ export class Connections extends Context.Service<
         }
       })
 
+      /** The projects' repositories on an instance, each once. */
+      const repositoriesAt = (product: Product, webUrl: string) =>
+        Effect.map(placesOf(false), (found) => {
+          const repositories = found
+            .map((entry) => entry.place)
+            .filter((place) => place.product === product && place.webUrl === webUrl)
+            .flatMap((place) => place.repositories.map((path) => path.split('/')))
+          return [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
+        })
+
       const check = (connectionId: string) =>
         Effect.gen(function* () {
           const row = yield* rowOf(connectionId)
           const info = infoOf(row.product)
           const kept = yield* stored(row).pipe(Effect.mapError(refusedFor(row)))
           const now = yield* credential(connectionId).pipe(Effect.mapError(refusedFor(row)))
-          const places = (yield* placesOf(false)).map((entry) => entry.place)
-          const repositories = places
-            .filter((place) => place.product === row.product && place.webUrl === row.webUrl)
-            .flatMap((place) => place.repositories.map((path) => path.split('/')))
-          const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
-          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, yield* repositoriesAt(row.product, row.webUrl))
           if (report.account?.workspace !== undefined && report.account.id === row.accountId)
             yield* learnWorkspace(row, report.account.workspace)
           return {

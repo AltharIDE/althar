@@ -17,7 +17,7 @@ import { workerExecution } from './agentExecution'
 export const HOST_VERSION = metadata.version
 export type HostDependencies = Pick<
   Runtime.RuntimeLayerOptions,
-  'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers' | 'clientIds' | 'githubApp'
+  'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers'
 > & { readonly maintenanceToken?: string }
 export interface HomeReady {
   readonly homeId: string

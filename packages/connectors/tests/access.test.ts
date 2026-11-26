@@ -171,24 +171,84 @@ describe('checking a GitHub connection', () => {
     Effect.gen(function* () {
       const routes: ReadonlyArray<Route> = [
         me({ 'github-authentication-token-expiration': '2026-10-11 17:00:00 +0200' }),
+        ['GET', `${GH}/user/installations?per_page=100&page=1`, { json: { total_count: 0, installations: [] } }],
         ['GET', NORTHWIND, { status: 404, json: { message: 'Not Found' } }],
       ]
       const installed = gitHub(routes, { auth: 'device_flow', appSlug: 'althar', repositories: [['northwind', 'api']] })
       const report = yield* installed.check
+      // Nothing it reaches, so nothing is known of what it may do there.
       assert.deepStrictEqual(report.lines, [
         line('account', 'ok', { fact: 'you' }),
         line('reach', 'no', {
           reason: { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' },
         }),
-        line('push', 'ok'),
-        line('changes', 'ok'),
-        line('checks', 'ok'),
-        line('issues', 'ok'),
+        line('push', 'unknown', { reason: UNSAID }),
+        line('changes', 'unknown', { reason: UNSAID }),
+        line('checks', 'unknown', { reason: UNSAID }),
+        line('issues', 'unknown', { reason: UNSAID }),
       ])
       assert.strictEqual(report.expiresAt, '2026-10-11T15:00:00.000Z')
       assert.isNull(report.scopes)
       const unnamed = yield* gitHub(routes, { auth: 'device_flow', repositories: [['northwind', 'api']] }).check
       assert.deepStrictEqual(reasonOf(unnamed, 'reach'), { kind: 'not_installed', owner: 'northwind', url: null })
+    }),
+  )
+
+  it.effect('signed in by the App, asks GitHub where it is installed, since any token reads a public repository', () =>
+    Effect.gen(function* () {
+      const installations = (...installs: ReadonlyArray<Record<string, unknown>>): Route => [
+        'GET',
+        `${GH}/user/installations?per_page=100&page=1`,
+        { json: { total_count: installs.length, installations: installs } },
+      ]
+      const check = (routes: ReadonlyArray<Route>) =>
+        gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ...routes], {
+          auth: 'device_flow',
+          appSlug: 'althar',
+          repositories: [['northwind', 'api']],
+        }).check
+      const NOT_INSTALLED = { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' } as const
+
+      // A public repository answers, but the App is on no owner: not installed, with its page.
+      assert.deepStrictEqual(reasonOf(yield* check([installations()]), 'reach'), NOT_INSTALLED)
+      // On another owner only.
+      const elsewhere = installations({ id: 1, account: { login: 'initech' }, repository_selection: 'all' })
+      assert.deepStrictEqual(reasonOf(yield* check([elsewhere]), 'reach'), NOT_INSTALLED)
+      // On every repository of the owner, whatever case GitHub spells it in: reached, and the App's permissions hold.
+      const everywhere = yield* check([installations({ id: 2, account: { login: 'Northwind' }, repository_selection: 'all' })])
+      assert.deepStrictEqual(states(everywhere), ['account ok', 'reach ok', 'push ok', 'changes ok', 'checks ok', 'issues ok'])
+      // On some of its repositories: those it was let into, page after page.
+      const some = installations({ id: 3, account: { login: 'northwind' }, repository_selection: 'selected' })
+      const chosen = (names: ReadonlyArray<string>): ReadonlyArray<Route> => [
+        some,
+        [
+          'GET',
+          `${GH}/user/installations/3/repositories?per_page=100&page=1`,
+          { json: { repositories: Array.from({ length: 100 }, (_, n) => ({ full_name: `northwind/other-${n}` })) } },
+        ],
+        [
+          'GET',
+          `${GH}/user/installations/3/repositories?per_page=100&page=2`,
+          { json: { repositories: names.map((full_name) => ({ full_name })) } },
+        ],
+      ]
+      assert.deepStrictEqual(reasonOf(yield* check(chosen(['northwind/web'])), 'reach'), NOT_INSTALLED)
+      assert.deepStrictEqual(states(yield* check(chosen(['northwind/API']))).slice(0, 2), ['account ok', 'reach ok'])
+      // Installed there, yet the repository isn't there for this account: not seen, rather than not installed.
+      const gone = yield* gitHub(
+        [
+          me(),
+          installations({ id: 2, account: { login: 'northwind' }, repository_selection: 'all' }),
+          ['GET', NORTHWIND, { status: 404, json: { message: 'Not Found' } }],
+        ],
+        { auth: 'device_flow', appSlug: 'althar', repositories: [['northwind', 'api']] },
+      ).check
+      assert.deepStrictEqual(reasonOf(gone, 'reach'), { kind: 'unseen', names: ['northwind/api'], url: null })
+      // GitHub didn't say where it is installed: why, rather than a guess either way.
+      const unsaid = yield* check([
+        ['GET', `${GH}/user/installations?per_page=100&page=1`, { status: 502, json: { message: 'Server Error' } }],
+      ])
+      assert.deepStrictEqual(reasonOf(unsaid, 'reach'), { kind: 'failed', message: 'Server Error' })
     }),
   )
 

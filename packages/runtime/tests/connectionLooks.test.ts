@@ -113,6 +113,7 @@ const device = [
   { json: { device_code: 'dev', user_code: 'ABCD-1234', verification_uri: `${GITHUB}/login/device`, expires_in: 900, interval: 0 } },
 ] as const
 const you = { json: { id: 5, login: 'you', name: 'You Person' } }
+const INSTALLATIONS = 'https://api.github.com/user/installations?per_page=100&page=1'
 const refusal: Answer = { status: 401, json: { message: 'Bad credentials' } }
 
 /** GitHub, taking only the tokens it hasn't let go of, and answering for others as the test says. */
@@ -439,6 +440,7 @@ describe('a connection’s check', () => {
       device,
       ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
       ['GET', USER, you],
+      ['GET', INSTALLATIONS, { json: { total_count: 0, installations: [] } }],
     ])
     return Effect.gen(function* () {
       const connections = yield* Connections
@@ -453,6 +455,62 @@ describe('a connection’s check', () => {
         { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' },
       )
     }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar' })))
+  })
+})
+
+describe('a browser sign-in over a working token', () => {
+  it.live('keeps the token where GitHub’s App can’t reach the projects’ repositories, and says where to install it', () => {
+    let installed = false
+    const { fetch } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      // A public repository: any token reads it, the App's included, wherever the App is installed.
+      [
+        'GET',
+        'https://api.github.com/repos/northwind/api',
+        { json: { id: 7, full_name: 'northwind/api', default_branch: 'main', html_url: 'https://github.com/northwind/api' } },
+      ],
+      [
+        'GET',
+        INSTALLATIONS,
+        () => ({ json: { installations: installed ? [{ id: 1, account: { login: 'northwind' }, repository_selection: 'all' }] : [] } }),
+      ],
+    ])
+    const map = new Map<string, string>()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const path = repository()
+      execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/northwind/api.git'], { cwd: path })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const token = yield* connections.connectToken({ product: 'github', token: 'github_pat_working', actorId: instance.personId })
+
+      // northwind refuses the App: the sign-in ends, saying so with its install page, and the token connection stays as it was.
+      const refused = yield* connections.startSignIn({ product: 'github', actorId: instance.personId })
+      const [ended] = yield* until(
+        Effect.map(
+          Effect.suspend(() => connections.signIn(refused.flowId)),
+          (state) => [state],
+        ),
+        (states) => states[0]?.state !== 'waiting',
+      )
+      assert.deepInclude(ended, { state: 'ended', reason: 'failed', install: 'https://github.com/apps/althar/installations/new' })
+      assert.include(ended?.state === 'ended' ? ended.message : '', 'Althar isn’t installed on northwind')
+      assert.deepStrictEqual(
+        (yield* connections.list).map((one) => [one.id, one.auth, one.state]),
+        [[token.id, 'token', 'ready']],
+      )
+      assert.include(map.get(token.id) ?? '', 'github_pat_working')
+
+      // Installed there, the sign-in replaces the token: the same connection, now the App's.
+      installed = true
+      const connection = yield* signedIn
+      assert.strictEqual(connection.id, token.id)
+      assert.deepInclude((yield* connections.list)[0], { auth: 'device_flow', state: 'ready' })
+      assert.include(map.get(token.id) ?? '', 'ghu_first')
+    }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar', secrets: kept(map) })))
   })
 })
 
