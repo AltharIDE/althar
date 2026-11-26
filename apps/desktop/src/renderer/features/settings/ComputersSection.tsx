@@ -156,7 +156,7 @@ export function ComputersSection({
             })}
         homeSettings={
           atOnce === null && folders === undefined ? null : (
-            <HomeSettings>
+            <HomeSettings inset>
               {atOnce !== null && (
                 <SettingList>
                   <AgentsAtOnce

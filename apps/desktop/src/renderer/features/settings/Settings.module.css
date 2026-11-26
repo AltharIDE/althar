@@ -42,6 +42,16 @@
   gap: 8px 12px;
 }
 
+/* An older home's settings, under the strip that offers its update: on the section's sheet, or inset in a card of its own. */
+.heldPage,
+.heldInset {
+  display: grid;
+  gap: 16px;
+}
+.heldInset {
+  padding: 18px 0 4px;
+}
+
 /* A home's settings it doesn't take from this window yet: as they stand there, quieter, with nothing to press. */
 .held {
   display: grid;
