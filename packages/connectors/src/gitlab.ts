@@ -1778,5 +1778,10 @@ export const accessGitLab: Access = (input) =>
       given('issues', 'api', 'api'),
     )
 
-    return { account: { id: String(user.id), login: user.username, name: user.name ?? null }, lines, ...token }
+    return {
+      account: { id: String(user.id), login: user.username, name: user.name ?? null },
+      lines,
+      ...token,
+      reached: reached.flatMap((one) => ('seen' in one ? [one.path.join('/')] : [])),
+    }
   })

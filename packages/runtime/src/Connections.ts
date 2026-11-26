@@ -986,9 +986,17 @@ export class Connections extends Context.Service<
         })
 
       /**
-       * Fails where a new sign-in reaches none of the projects' repositories on its instance and the connection it would
-       * replace reaches them: an organisation that refuses Althar's app keeps the token it was connected with.
+       * Fails where a new sign-in doesn't reach a repository of the projects' on its instance that the connection it would
+       * replace reaches: an organisation that refuses Althar's app keeps the token it was connected with.
        */
+      /** Paths as a sentence names them: a, b and 2 more. */
+      const listed = (paths: ReadonlyArray<string>) =>
+        paths.length <= 3
+          ? paths.length === 1
+            ? (paths[0] ?? '')
+            : `${paths.slice(0, -1).join(', ')} and ${paths.at(-1) ?? ''}`
+          : `${paths.slice(0, 2).join(', ')} and ${paths.length - 2} more`
+
       const keepsReach = (
         existing: Row,
         fresh: {
@@ -1003,23 +1011,29 @@ export class Connections extends Context.Service<
           const repositories = yield* repositoriesAt(fresh.product, fresh.webUrl)
           if (repositories.length === 0) return
           const reachIn = (report: { readonly lines: ReadonlyArray<AccessLine> }) => report.lines.find((one) => one.need === 'reach')
-          const now = reachIn(yield* accessOf(fresh.product, fresh.webUrl, fresh.apiUrl, fresh.credential, fresh.auth, repositories))
-          if (now?.state !== 'no') return
+          const now = yield* accessOf(fresh.product, fresh.webUrl, fresh.apiUrl, fresh.credential, fresh.auth, repositories)
+          if (reachIn(now)?.state === 'ok') return
           const before = yield* credential(existing.id).pipe(Effect.option)
           if (Option.isNone(before)) return
-          const was = reachIn(
-            yield* accessOf(existing.product, existing.webUrl, existing.apiUrl, before.value, existing.auth, repositories),
-          )
-          if (was?.state !== 'ok') return
-          const reason = now.reason
-          const name = infoOf(fresh.product)?.name ?? fresh.product
+          const was = yield* accessOf(existing.product, existing.webUrl, existing.apiUrl, before.value, existing.auth, repositories)
+          // Repository by repository where both checks say each; else by the whole, all reached before and not now.
+          const lost =
+            now.reached !== undefined && was.reached !== undefined
+              ? was.reached.filter((path) => !now.reached?.includes(path))
+              : reachIn(was)?.state === 'ok'
+                ? repositories.map((path) => path.join('/'))
+                : []
+          if (lost.length === 0) return
+          const reason = reachIn(now)?.reason
+          const owners = new Set(lost.map((path) => (path.split('/')[0] ?? '').toLowerCase()))
+          const missing = reason?.kind === 'not_installed' && owners.has(reason.owner.toLowerCase()) ? reason : null
           return yield* new WouldLoseReach({
             product: fresh.product,
             message:
-              reason?.kind === 'not_installed'
-                ? `Althar isn’t installed on ${reason.owner}, so your connection keeps the sign-in it had. Install it there, then try again.`
-                : `This sign-in can’t reach the projects’ repositories on ${name}, so your connection keeps the sign-in it had.`,
-            install: reason?.kind === 'not_installed' ? reason.url : null,
+              missing !== null
+                ? `Althar isn’t installed on ${missing.owner}, so your connection keeps the sign-in it had. Install it there, then try again.`
+                : `This sign-in can’t reach ${listed(lost)}, which your connection reaches, so it keeps the sign-in it had.`,
+            install: missing?.url ?? null,
           })
         }).pipe(
           Effect.catchIf(

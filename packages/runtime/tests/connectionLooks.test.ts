@@ -514,6 +514,71 @@ describe('a browser sign-in over a working token', () => {
   })
 })
 
+describe('a browser sign-in over a token that reaches only some of the repositories', () => {
+  it.live('keeps the token where the App reaches fewer of those it reaches, and replaces it once it reaches them all', () => {
+    let chosen: ReadonlyArray<string> = ['northwind/api']
+    const repo = (name: string) =>
+      [
+        'GET',
+        `https://api.github.com/repos/northwind/${name}`,
+        {
+          json: {
+            id: name.length,
+            full_name: `northwind/${name}`,
+            default_branch: 'main',
+            html_url: `https://github.com/northwind/${name}`,
+          },
+        },
+      ] as const
+    const { fetch } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      // Two of the three it sees, to either token; the third is no one's here.
+      repo('api'),
+      repo('web'),
+      ['GET', INSTALLATIONS, { json: { installations: [{ id: 1, account: { login: 'northwind' }, repository_selection: 'selected' }] } }],
+      [
+        'GET',
+        'https://api.github.com/user/installations/1/repositories?per_page=100&page=1',
+        () => ({ json: { repositories: chosen.map((full_name) => ({ full_name })) } }),
+      ],
+    ])
+    const map = new Map<string, string>()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const instance = yield* Instance
+      for (const name of ['api', 'web', 'secret']) {
+        const path = repository()
+        execFileSync('git', ['remote', 'add', 'origin', `https://github.com/northwind/${name}.git`], { cwd: path })
+        yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      }
+      const token = yield* connections.connectToken({ product: 'github', token: 'github_pat_working', actorId: instance.personId })
+
+      // The token reaches api and web, the App api alone: neither reaches all three, and the App still loses web.
+      const refused = yield* connections.startSignIn({ product: 'github', actorId: instance.personId })
+      const [ended] = yield* until(
+        Effect.map(
+          Effect.suspend(() => connections.signIn(refused.flowId)),
+          (state) => [state],
+        ),
+        (states) => states[0]?.state !== 'waiting',
+      )
+      assert.deepInclude(ended, { state: 'ended', reason: 'failed' })
+      assert.deepInclude((yield* connections.list)[0], { id: token.id, auth: 'token', state: 'ready' })
+      assert.include(map.get(token.id) ?? '', 'github_pat_working')
+
+      // Let into web too, it reaches all the token does: the token is replaced, though neither reaches secret.
+      chosen = ['northwind/api', 'northwind/web']
+      const connection = yield* signedIn
+      assert.strictEqual(connection.id, token.id)
+      assert.deepInclude((yield* connections.list)[0], { auth: 'device_flow', state: 'ready' })
+      assert.include(map.get(token.id) ?? '', 'ghu_first')
+    }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar', secrets: kept(map) })))
+  })
+})
+
 describe('the guide to connecting a code host', () => {
   it.live('lists a repository on GitHub as a place for GitHub, and none for GitLab', () => {
     const { fetch } = stub([])

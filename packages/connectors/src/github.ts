@@ -2269,6 +2269,15 @@ const Installations = Schema.Struct({
   ),
 })
 
+/** How many pages of a hundred an App's installations, or an installation's repositories, are asked for at most. */
+const PAGES_ASKED = 20
+
+/** Why the App's reach there isn't known: its installations, or the repositories of one, run past what is asked for. */
+const TOO_MANY: AccessReason = {
+  kind: 'failed',
+  message: 'GitHub lists more of where Althar is installed than Althar reads, so whether it reaches this isn’t known',
+}
+
 /** The repositories an installation of some is let into. */
 const InstallationRepositories = Schema.Struct({ repositories: Schema.Array(Schema.Struct({ full_name: Schema.String })) })
 
@@ -2307,15 +2316,17 @@ export const accessGitHub: Access = (input: AccessInput) =>
     const everyPage = <A, B>(url: (page: number) => string, schema: Schema.Codec<A, unknown>, items: (read: A) => ReadonlyArray<B>) =>
       Effect.gen(function* () {
         const all: Array<B> = []
-        for (let page = 1; page <= 20; page++) {
+        for (let page = 1; page <= PAGES_ASKED; page++) {
           const answer = yield* ask(url(page))
           if (!answered(answer)) return { reason: failedOf(answer) } as const
           const read = readAs(schema, answer)
           if (read === undefined) return { reason: UNREADABLE } as const
           all.push(...items(read))
-          if (items(read).length < 100) break
+          // A page short of a hundred is the last.
+          if (items(read).length < 100) return { items: all, complete: true } as const
         }
-        return { items: all } as const
+        // More than it asks for: what isn't among them may be on a page it didn't ask.
+        return { items: all, complete: false } as const
       })
 
     /*
@@ -2332,7 +2343,10 @@ export const accessGitHub: Access = (input: AccessInput) =>
             Installations,
             (read) => read.installations,
           )
-    const chosen = new Map<number, { readonly items: ReadonlyArray<string> } | { readonly reason: AccessReason }>()
+    const chosen = new Map<
+      number,
+      { readonly items: ReadonlyArray<string>; readonly complete: boolean } | { readonly reason: AccessReason }
+    >()
     if (installs !== undefined && 'items' in installs)
       for (const install of installs.items)
         if (install.repository_selection !== 'all' && askedOwners.has((install.account?.login ?? '').toLowerCase()))
@@ -2349,11 +2363,12 @@ export const accessGitHub: Access = (input: AccessInput) =>
       if (installs === undefined) return 'yes'
       if ('reason' in installs) return installs.reason
       const install = installs.items.find((one) => (one.account?.login ?? '').toLowerCase() === (path[0] ?? '').toLowerCase())
-      if (install === undefined) return 'no'
+      if (install === undefined) return installs.complete ? 'no' : TOO_MANY
       if (install.repository_selection === 'all') return 'yes'
       const repositories = chosen.get(install.id)
       if (repositories === undefined || 'reason' in repositories) return repositories?.reason ?? UNREADABLE
-      return repositories.items.includes(path.join('/').toLowerCase()) ? 'yes' : 'no'
+      if (repositories.items.includes(path.join('/').toLowerCase())) return 'yes'
+      return repositories.complete ? 'no' : TOO_MANY
     }
     const notInstalled = (owner: string): AccessReason => ({
       kind: 'not_installed',
@@ -2448,5 +2463,6 @@ export const accessGitHub: Access = (input: AccessInput) =>
       lines,
       expiresAt: expiryOf(me.headers.get('github-authentication-token-expiration')),
       scopes,
+      reached: reached.flatMap((one) => ('seen' in one ? [one.path.join('/')] : [])),
     }
   })

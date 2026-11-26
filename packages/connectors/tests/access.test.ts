@@ -119,6 +119,8 @@ describe('checking a GitHub connection', () => {
         ],
         expiresAt: '2025-01-08T00:00:00.000Z',
         scopes: ['repo', 'workflow'],
+        // Each repository it reaches, by its path as asked.
+        reached: ['northwind/api', 'Northwind/web'],
       })
       for (const request of sent) {
         assert.strictEqual(request.method, 'GET')
@@ -234,6 +236,19 @@ describe('checking a GitHub connection', () => {
       ]
       assert.deepStrictEqual(reasonOf(yield* check(chosen(['northwind/web'])), 'reach'), NOT_INSTALLED)
       assert.deepStrictEqual(states(yield* check(chosen(['northwind/API']))).slice(0, 2), ['account ok', 'reach ok'])
+      // More chosen repositories than it reads: one not among them isn't known, rather than not installed.
+      const endless = yield* check([
+        some,
+        [
+          'GET',
+          /\/user\/installations\/3\/repositories\?per_page=100&page=\d+$/,
+          { json: { repositories: Array.from({ length: 100 }, (_, n) => ({ full_name: `northwind/other-${n}` })) } },
+        ],
+      ])
+      assert.strictEqual(reasonOf(endless, 'reach')?.kind, 'failed')
+      // The repositories it reaches, by their paths as asked.
+      assert.deepStrictEqual(everywhere.reached, ['northwind/api'])
+      assert.deepStrictEqual((yield* check([installations()])).reached, [])
       // Installed there, yet the repository isn't there for this account: not seen, rather than not installed.
       const gone = yield* gitHub(
         [
@@ -474,6 +489,7 @@ describe('checking a GitLab connection', () => {
         ],
         expiresAt: '2025-12-31T00:00:00.000Z',
         scopes: ['api'],
+        reached: ['northwind/api', 'northwind/platform/web'],
       })
     }),
   )

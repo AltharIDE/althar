@@ -85,6 +85,8 @@ export interface AccessReport {
   readonly expiresAt: string | null
   /** The scopes it was given, where the service says (a classic or OAuth token's, GitLab's). */
   readonly scopes: ReadonlyArray<string> | null
+  /** The repositories asked of it that it reaches, by their paths as asked, where the check says each (a code host's). */
+  readonly reached?: ReadonlyArray<string>
 }
 
 /** What a check is asked with: where the instance is, how it signs in, and the repositories to look for there. */
