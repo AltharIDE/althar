@@ -24,6 +24,7 @@ const testTime = await rule('budget.js', 'testTime')
 const specTime = await rule('budget.js', 'specTime')
 const systemKeys = await rule('keys.js', 'systemKeys')
 const noFutureDates = await rule('dates.js', 'noFutureDates')
+const callsInAreas = await rule('areas.js', 'callsInAreas')
 
 const tsx = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'tsx' } } })
 const ts = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'ts' } } })
@@ -237,5 +238,31 @@ check(ts, 'no-future-dates', noFutureDates, {
     { code: `const day = '${tomorrow.slice(0, 10)}'`, errors: [{ messageId: 'future' }] },
     { code: `const json = '{"at":"${tomorrow}"}'`, errors: [{ messageId: 'future' }] },
     { code: `sql\`SELECT '${tomorrow}'\``, errors: [{ messageId: 'future' }] },
+  ],
+})
+
+check(ts, 'calls-in-areas', callsInAreas, {
+  valid: [
+    // The contract's Api.ts merges the areas' groups, and the runtime's spreads their handlers.
+    `export const Api = HomeApi.merge(DevicesApi, ThreadsApi)`,
+    `const handlers = { ...areas.home, ...areas.threads } satisfies ApiHandlers`,
+    `function* compose(kit) { return { home: yield* homeHandlers(kit), threads: yield* threadsHandlers(kit) } }`,
+    `const all = merged satisfies ApiHandlers`,
+    // A call elsewhere is no RPC.
+    `function* read(api, threadId) { return yield* api.call(threadId) }`,
+  ],
+  invalid: [
+    { code: `export const Planted = call('Planted', {}, Schema.String)`, errors: [{ messageId: 'defined' }] },
+    { code: `export const Planted = command('Planted', {})`, errors: [{ messageId: 'defined' }] },
+    { code: `const Planted = Rpc.make('Planted', { success: Schema.String })`, errors: [{ messageId: 'defined' }] },
+    { code: `export const PlantedApi = RpcGroup.make(Planted)`, errors: [{ messageId: 'defined' }] },
+    {
+      code: `const handlers = { ...areas.home, Planted: () => Effect.void } satisfies ApiHandlers`,
+      errors: [{ messageId: 'handled' }],
+    },
+    {
+      code: `const more = { Planted: () => Effect.void, Again() { return Effect.void } } satisfies Partial<ApiHandlers>`,
+      errors: [{ messageId: 'handled' }, { messageId: 'handled' }],
+    },
   ],
 })

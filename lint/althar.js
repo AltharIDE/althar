@@ -1,5 +1,6 @@
 import { definePlugin } from 'vite-plus/lint/plugins'
 
+import { callsInAreas } from './areas.js'
 import { specTime, testTime } from './budget.js'
 import { oneClock } from './clock.js'
 import { noFutureDates } from './dates.js'
@@ -24,5 +25,6 @@ export default definePlugin({
     'no-future-dates': noFutureDates,
     layers,
     'exported-where-made': exportedWhereMade,
+    'calls-in-areas': callsInAreas,
   },
 })

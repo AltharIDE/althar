@@ -72,6 +72,14 @@ export default defineConfig({
           'typescript/no-import-type-side-effects': 'error',
         },
       },
+      /*
+       * A call is made in its area, and each package's Api.ts only puts the areas together (lint/areas.js; AGENTS.md,
+       * "Where a change goes").
+       */
+      {
+        files: ['packages/contracts/src/Api.ts', 'packages/runtime/src/Api.ts'],
+        rules: { 'althar/calls-in-areas': 'error' },
+      },
       /* A press in the window or the kit shows its result at once, never after a call answers (lint/press.js). */
       {
         files: ['apps/desktop/src/renderer/**/*.tsx', 'packages/ui/src/**/*.tsx'],
