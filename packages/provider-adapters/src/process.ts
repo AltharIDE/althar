@@ -194,6 +194,23 @@ const tapped = <T extends ReadableStream<Uint8Array> | WritableStream<Uint8Array
   return tap.writable as T
 }
 
+/**
+ * A tree that goes with its root (a Windows keeper's job) is gone once the
+ * root has been reaped, and its pid is then free for the OS to give to
+ * another process: looked up or killed by that pid, it would be that other
+ * process, as a test runner's worker once was. Until Node has seen the root
+ * exit it holds the root's handle, so the pid is still the root's; after, the
+ * tree is not looked for or sent anything.
+ */
+const whileUnreaped = (trees: ProcessTrees, exited: Deferred.Deferred<ProcessExit>): ProcessTrees =>
+  trees.outlivesRoot
+    ? trees
+    : {
+        ...trees,
+        alive: (pid) => Effect.suspend(() => (Deferred.isDoneUnsafe(exited) ? Effect.succeed(false) : trees.alive(pid))),
+        signal: (pid, signal) => Effect.suspend(() => (Deferred.isDoneUnsafe(exited) ? Effect.void : trees.signal(pid, signal))),
+      }
+
 export const spawnOwned = (
   spec: LaunchSpec,
   cwd: string,
@@ -293,7 +310,11 @@ export const spawnOwned = (
       ),
       (owned) =>
         Effect.gen(function* () {
-          const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
+          const stop = yield* stopProcessGroup(
+            owned.pid,
+            options.grace ?? Duration.seconds(2),
+            whileUnreaped(options.trees ?? platformTrees(), owned.exited),
+          )
           // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
           yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
           // A scheduling group can still contain a child that detached from the Unix process group.

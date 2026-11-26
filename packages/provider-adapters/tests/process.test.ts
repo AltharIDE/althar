@@ -101,6 +101,35 @@ describe('the process transport', () => {
     }),
   )
 
+  it.live('leaves alone the pid of a tree that went with its root, which another process may have by then', () =>
+    Effect.gen(function* () {
+      // As a Windows keeper's job: the tree goes with its root, and a reused pid looks alive to the OS.
+      const sent: Array<number> = []
+      const looked: Array<number> = []
+      const report = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const owned = yield* spawnOwned(onNode(''), here, {
+            grace: '10 millis',
+            trees: {
+              ...unixTrees,
+              launch: (command, args) => Effect.succeed({ command, args, detached: false }),
+              asks: false,
+              outlivesRoot: false,
+              alive: (pid) => Effect.sync(() => (looked.push(pid), true)),
+              signal: (pid) => Effect.sync(() => void sent.push(pid)),
+              startedAt: () => Effect.succeed(undefined),
+            },
+          })
+          yield* Deferred.await(owned.exited)
+          return owned.stopped
+        }),
+      ).pipe(Effect.flatMap(Deferred.await))
+      assert.deepStrictEqual(report, { signal: 'none', survivors: false })
+      assert.deepStrictEqual(sent, [])
+      assert.deepStrictEqual(looked, [])
+    }),
+  )
+
   it.live.skipIf(windows)('stops a group when the effect that started it times out', () =>
     Effect.gen(function* () {
       const pids: Array<number> = []
