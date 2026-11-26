@@ -32,6 +32,7 @@
     "test:responsiveness": "vp test run --config vite.real.config.ts tests/real/responsiveness.test.ts"
   },
   "dependencies": {
+    "@althar/access": "workspace:*",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",
     "@althar/domain": "workspace:*",

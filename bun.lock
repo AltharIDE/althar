@@ -295,6 +295,7 @@
       "name": "@althar/runtime",
       "version": "0.0.0",
       "dependencies": {
+        "@althar/access": "workspace:*",
         "@althar/connectors": "workspace:*",
         "@althar/contracts": "workspace:*",
         "@althar/domain": "workspace:*",
