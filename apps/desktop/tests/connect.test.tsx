@@ -887,6 +887,21 @@ describe('connecting GitHub', () => {
       press: 'Check again',
     },
     {
+      // A token kept to reading, or made for another owner, as git's first question of a push was answered.
+      check: lacking('push', {
+        kind: 'no_push',
+        names: ['northwind/meridian-api'],
+        url: 'https://github.com/settings/personal-access-tokens',
+      }),
+      title: 'This token can’t push',
+      says: [
+        'It can read northwind/meridian-api but not push there.',
+        'Give it Contents: Read and write on northwind/meridian-api, with northwind as its resource owner, then Update.',
+      ],
+      press: 'Change it on GitHub',
+      opens: 'https://github.com/settings/personal-access-tokens',
+    },
+    {
       check: lacking('push', { kind: 'role', role: null }),
       title: 'Your account can’t push there',
       says: ['Your account can’t do this there.'],

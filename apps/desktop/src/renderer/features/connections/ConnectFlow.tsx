@@ -338,6 +338,7 @@ export const text = {
         ? `It’s ${ownersOf(names)}’s repository, and your account can only read it.`
         : `Your account can only read ${ownersOf(names)}’s repositories.`,
     unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${named(names)}.`,
+    noPush: (names: ReadonlyArray<string>) => `It can read ${named(names)} but not push there.`,
     notInstalled: (owner: string) => `Althar isn’t installed on ${owner} yet.`,
     restricted: (owner: string) => `${owner} keeps out apps that sign in with OAuth, gh among them, until its owners approve one.`,
     sso: (owner: string) => `${owner} signs in with SAML: the token needs authorizing for it.`,
@@ -347,6 +348,10 @@ export const text = {
   fix: {
     githubSet: (what: string) => `Set ${what}, then Update.`,
     githubAdd: (names: ReadonlyArray<string>) => `Add ${these(names)} under Repository access, then Update.`,
+    githubPush: (names: ReadonlyArray<string>, owner: string) =>
+      `Give it Contents: Read and write on ${these(names)}, with ${owner} as its resource owner, then Update.`,
+    push: (service: string) => `Give the token write access there on ${service}, or connect with one that has it.`,
+    appPush: (owner: string) => `Let Althar’s app write to these on ${owner}: its owners approve that in its settings there.`,
     githubScope: (scope: string) => `Tick ${scope}, then Update token.`,
     remake: (service: string, scope: string) => `A ${service} token keeps the scopes it was made with: make one with ${scope}.`,
     restricted: (owner: string) => `Its owners can approve GitHub CLI for ${owner}, or you can make a token instead.`,
@@ -553,6 +558,8 @@ const whyOf = (reason: AccessReason, line: AccessLine, product: Product, service
       return reason.names !== undefined && reason.names.length > 0 ? text.why.readOnly(reason.names) : text.why.role(reason.role)
     case 'unseen':
       return text.why.unseen(reason.names)
+    case 'no_push':
+      return text.why.noPush(reason.names)
     case 'not_installed':
       return text.why.notInstalled(reason.owner)
     case 'restricted':
@@ -1311,6 +1318,18 @@ function Fix({
       return product === 'github' && reason.url !== null
         ? listed(text.fix.githubAdd(reason.names), reason.names, change(reason.url), checkAgain, asItIs)
         : row(null, checkAgain, asItIs)
+    case 'no_push': {
+      const owner = reason.names[0]?.split('/')[0] ?? ''
+      // Althar's app: its owners let it write there; a token: given write access on its page, or one made that has it.
+      if (reason.url === null) return listed(text.fix.appPush(owner), reason.names, checkAgain, asItIs)
+      return listed(
+        product === 'github' ? text.fix.githubPush(reason.names, owner) : text.fix.push(service),
+        reason.names,
+        change(reason.url),
+        checkAgain,
+        asItIs,
+      )
+    }
     case 'not_installed':
       return row(null, checkAgain, asItIs)
     case 'restricted': {

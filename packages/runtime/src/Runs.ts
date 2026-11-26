@@ -14,7 +14,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { NotConnected } from './Connections'
 import { Connectivity } from './Connectivity'
 import { envelope } from './envelope'
-import { NoChangeToOpen, NotFound } from './errors'
+import { NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { evidenceForReview } from './evidence'
 import { externalWaitOf } from './externalWaits'
 import { keptGoing } from './Failures'
@@ -993,12 +993,18 @@ export class Runs extends Context.Service<
           if (published._tag === 'Failure') {
             const error = Cause.findErrorOption(published.cause)
             const notConnected = Option.isSome(error) && error.value instanceof NotConnected
+            // The host refused the connection's sign-in for the push: said by whose and where, and put right in Settings.
+            const refused =
+              Option.isSome(error) &&
+              error.value instanceof PushRefused &&
+              error.value.signIn !== undefined &&
+              (error.value.why === 'forbidden' || error.value.why === 'denied')
             return yield* stuck(
               run,
               { id: attemptId },
               {
                 step: 'publish',
-                why: notConnected ? 'not_connected' : 'failed_to_start',
+                why: notConnected ? 'not_connected' : refused ? 'push_refused' : 'failed_to_start',
                 detail: summarize(published.cause) || null,
                 agentId: null,
                 round: 0,

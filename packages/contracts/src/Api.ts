@@ -1629,6 +1629,7 @@ export const AccessReason = Schema.Union([
   /** `names`: the repositories (owner/name) the account's role there keeps it from, where the service says which. */
   Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String), names: Schema.optional(Schema.Array(Schema.String)) }),
   Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('no_push'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
@@ -1646,6 +1647,18 @@ export const AccessLine = Schema.Struct({
   /** How many, where the fact is a count: boards, teams, projects. */
   count: Schema.NullOr(Schema.Number),
   reason: Schema.NullOr(AccessReason),
+  /** Each repository it asked on its own, with its outcome and why: what a project's card says of its own repositories. */
+  repositories: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        state: Schema.Literals(['ok', 'no', 'unknown']),
+        reason: Schema.NullOr(AccessReason),
+        /** Whether the service said the account itself may push there; null where it didn't say. */
+        accountPush: Schema.optional(Schema.NullOr(Schema.Boolean)),
+      }),
+    ),
+  ),
 })
 export type AccessLine = typeof AccessLine.Type
 
@@ -1994,6 +2007,16 @@ export const Picture = Schema.Struct({
   unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
 })
 export type Picture = typeof Picture.Type
+
+/** The most a picture's bytes can be: what the runtime keeps of one (`PICTURE_KEPT`). */
+export const PICTURE_BYTES = 20 * 1024 * 1024
+
+/** A kept picture's bytes, read by its digest (`ReadPicture`): what kind it is, and the bytes in base64. */
+export const PictureBytes = Schema.Struct({
+  mediaType: Schema.Literals(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+  bodyBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(PICTURE_BYTES / 3) * 4)),
+})
+export type PictureBytes = typeof PictureBytes.Type
 
 /**
  * An image the person sends with a message: its bytes, in base64, as the
@@ -4169,6 +4192,9 @@ export const StuckStep = Schema.Struct({
     'not_installed',
     // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
     'waiting_on_person',
+    // The code host refused the push that opens the pull request: its detail says whose sign-in, for which repository, and what
+    // puts it right; the host's connection is changed in Settings, then it is tried again.
+    'push_refused',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -5417,6 +5443,8 @@ const socketCalls = new Set<string>([
   'ReadWorkerSnapshotChunk',
   'ReleaseWorkerSnapshot',
   'ReadWorkerFile',
+  // A picture a thread shows, by its digest: what a window on another computer, or a phone, draws it from (PictureApi).
+  'ReadPicture',
   // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
   // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
   'FindHomeFolders',
@@ -6614,7 +6642,8 @@ const WorkApi = RpcGroup.make(
   /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
   command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
   /** Asks the service what a connection can do. */
-  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
+  /** A connection's check; for one project, by its name, only that project's repositories, and where its work is pushed. */
+  call('CheckConnection', { connectionId: Schema.String, project: Schema.optional(Schema.String) }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),
@@ -7092,7 +7121,16 @@ export const WorkerSnapshotApi = RpcGroup.make(
   call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
+/**
+ * A picture a thread shows (a lead's report, show_pictures, a check's or review's shots, a canvas's picture), by its digest in
+ * the home's artifact store: how a window on another computer and a phone draw what the home keeps, through the home's own
+ * connection. Only what a window draws is given (PNG, JPEG, GIF, WebP), whole: a smaller copy is made where it is shown.
+ */
+export const PictureApi = RpcGroup.make(
+  call('ReadPicture', { digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)) }, PictureBytes),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi, PictureApi)
 export type Api = typeof Api
 
 /** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
@@ -7118,6 +7156,7 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
           handlers,
         ),
+        PictureApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof PictureApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
       ),
     ),
   )

@@ -464,7 +464,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'signed_out' ||
       why === 'sign_in_ended' ||
       why === 'not_installed' ||
-      why === 'waiting_on_person'
+      why === 'waiting_on_person' ||
+      why === 'push_refused'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,

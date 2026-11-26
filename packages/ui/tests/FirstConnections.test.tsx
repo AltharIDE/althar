@@ -61,4 +61,53 @@ describe('a new project’s card for its code host and tracker', () => {
     rerender(<FirstConnections onConnect={vi.fn()} onHide={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('says where its connected host can’t push, as a problem with why, and connects again in place', () => {
+    const onConnect = vi.fn()
+    const why = 'GitHub took sam’s token, but it may only read there.'
+    const { rerender } = render(
+      <FirstConnections
+        cantPush={[{ id: 'gh', service: GITHUB, names: ['northwind/meridian'], why, onConnectAgain: () => onConnect('github') }]}
+        onConnect={onConnect}
+        onHide={vi.fn()}
+      />,
+    )
+    // Its code isn't ready for a pull request: the card is the code's, though its host is connected.
+    expect(screen.getByRole('region', { name: 'Before the first pull request' })).toBeInTheDocument()
+    expect(screen.getByText('Can’t push to northwind/meridian')).toBeInTheDocument()
+    expect(screen.getByText(why)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect again' }))
+    expect(onConnect).toHaveBeenCalledWith('github')
+    // Several, named two at a time and the rest counted.
+    rerender(
+      <FirstConnections
+        cantPush={[
+          { id: 'gh', service: GITHUB, names: ['a/one', 'a/two', 'a/three', 'a/four'], why, onConnectAgain: () => onConnect('github') },
+        ]}
+        onConnect={onConnect}
+        onHide={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Can’t push to a/one, a/two and 2 more')).toBeInTheDocument()
+    rerender(
+      <FirstConnections
+        cantPush={[
+          { id: 'gh', service: GITHUB, names: ['a/one', 'a/two'], why, onConnectAgain: () => onConnect('github') },
+          {
+            id: 'gl',
+            service: { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab },
+            names: ['b/one'],
+            why: 'GitLab too.',
+            onConnectAgain: vi.fn(),
+          },
+        ]}
+        onConnect={onConnect}
+        onHide={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Can’t push to a/one or a/two')).toBeInTheDocument()
+    // A host of its own, its own row.
+    expect(screen.getByText('Can’t push to b/one')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Connect again' })).toHaveLength(2)
+  })
 })

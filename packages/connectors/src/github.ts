@@ -1,6 +1,6 @@
 import { Clock, Effect, Schema } from 'effect'
 
-import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
+import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line, type RepositoryAccess } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
@@ -63,6 +63,7 @@ import {
   failedOf,
   limited,
   probe,
+  pushAnswer,
   type Reached,
   reachLine,
   readAs,
@@ -2424,11 +2425,55 @@ export const accessGitHub: Access = (input: AccessInput) =>
     if (reached.length > 0) lines.push(reachLine(reached, owners === '' ? null : owners))
     const [first] = seen
 
+    // Each repository it sees, asked as git asks before a push, signed in as a push is: a public one reads with any token,
+    // and GitHub's own answers say what the account may do, not what this token may, so only this shows a token kept to
+    // reading, or made for another owner.
+    const authorization =
+      input.credential.kind === 'bearer'
+        ? `Basic ${Buffer.from(`x-access-token:${input.credential.token}`).toString('base64')}`
+        : authorizationOf(input.credential)
+    // Only where a task's work is pushed: a fork's own, never the repository it came from, which it only reads.
+    const pushedTo = input.pushes?.map((path) => path.join('/').toLowerCase())
+    const destinations = pushedTo === undefined ? seen : seen.filter((found) => pushedTo.includes(found.path.join('/').toLowerCase()))
+    const scopeless = kind === 'classic' && scopes?.includes('repo') !== true
+    // Each one's own outcome: the account's role there, a classic token's scope, then what git's question was answered.
+    const outcomes = yield* Effect.forEach(
+      destinations,
+      (found): Effect.Effect<RepositoryAccess> => {
+        const path = found.path.join('/')
+        // What GitHub said of the account there, kept apart from what it didn't say.
+        const accountPush = found.push ?? null
+        if (found.push === false)
+          return Effect.succeed({ path, state: 'no', reason: { kind: 'role', role: null, names: [path] }, accountPush })
+        if (scopeless) return Effect.succeed({ path, state: 'no', reason: { kind: 'scope', scope: 'repo', url: settings }, accountPush })
+        return Effect.map(pushAnswer(input.fetch, `${web}/${path}.git`, authorization), (answer): RepositoryAccess => {
+          if (answer === 'no')
+            return { path, state: 'no', reason: { kind: 'no_push', names: [path], url: kind === 'app' ? null : settings }, accountPush }
+          return answer === 'yes' || kind !== 'fine' ? { path, state: 'ok', reason: null } : { path, state: 'unknown', reason: UNSAID }
+        })
+      },
+      { concurrency: 4 },
+    )
+    const repositories = outcomes.length === 0 ? {} : { repositories: outcomes }
+    const refusedBy = (kinds: ReadonlyArray<AccessReason['kind']>) =>
+      outcomes.filter((one) => one.state === 'no' && one.reason !== null && kinds.includes(one.reason.kind))
+    const byRole = refusedBy(['role'])
+    const byToken = refusedBy(['no_push'])
     // Where GitHub says the account itself may not push, no token of it may: which repositories, by their owner and name.
-    const readOnly = seen.filter((found) => found.push === false).map((found) => found.path.join('/'))
-    if (readOnly.length > 0) lines.push(line('push', 'no', { reason: { kind: 'role', role: null, names: readOnly } }))
-    else if (kind === 'classic') lines.push(byScope('push'))
-    else lines.push(kind === 'app' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID }))
+    if (byRole.length > 0)
+      lines.push(line('push', 'no', { reason: { kind: 'role', role: null, names: byRole.map((one) => one.path) }, ...repositories }))
+    // A classic token without repo says so by its scope, which is what puts it right.
+    else if (scopeless) lines.push({ ...byScope('push'), ...repositories })
+    else if (byToken.length > 0)
+      lines.push(
+        line('push', 'no', {
+          reason: { kind: 'no_push', names: byToken.map((one) => one.path), url: kind === 'app' ? null : settings },
+          ...repositories,
+        }),
+      )
+    else if (kind !== 'fine' || (outcomes.length > 0 && outcomes.every((one) => one.state === 'ok')))
+      lines.push(line('push', 'ok', repositories))
+    else lines.push(line('push', 'unknown', { reason: UNSAID, ...repositories }))
 
     if (kind === 'classic') lines.push(byScope('changes'), byScope('checks'), byScope('issues'))
     else if (kind === 'app') lines.push(line('changes', 'ok'), line('checks', 'ok'), line('issues', 'ok'))
