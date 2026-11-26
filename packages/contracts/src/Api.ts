@@ -5263,8 +5263,6 @@ const socketCalls = new Set<string>([
   'Status',
   'ListProjects',
   'ListProjectWorkers',
-  'GetProject',
-  'GetTask',
   'GetThread',
   'GetThreadItem',
   'GetThreadItems',
