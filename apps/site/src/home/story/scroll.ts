@@ -56,6 +56,14 @@ export function smallWindow() {
 export const pinnedHeight = (picture: number, run: number, tall: number, pad: number) => Math.max(picture + tall * run, tall * 2) + pad
 
 /** How tall a track is: a window, and as far as its row runs sideways. */
+/**
+ * How far a row runs sideways, in px: `row` wide, starting `left` px into a window `across`, its last piece `last` wide.
+ * On a wide window, until its end is 128px short of the window's far side. On a phone, where a piece is nearly the
+ * window's width, until its last piece is in the window's middle: it is the last, and stops there to be looked at.
+ */
+export const trackRun = (row: number, across: number, left: number, last: number) =>
+  Math.max(0, across < 700 && last > 0 ? left + row - (across + last) / 2 : row - across + 128)
+
 export const trackHeight = (extra: number, tall: number) => tall + extra
 
 /**
@@ -100,7 +108,12 @@ export function useScrolled(ref: RefObject<HTMLElement | null>, measure: Measure
         el.style.height = `${pinnedHeight(stick.offsetHeight, kind.pin, tall, pad)}px`
       }
       if ('track' in kind && row) {
-        extra = Math.max(0, row.scrollWidth - window.innerWidth + 128)
+        extra = trackRun(
+          row.scrollWidth,
+          window.innerWidth,
+          row.getBoundingClientRect().left - (parseFloat(row.style.getPropertyValue('--x')) || 0),
+          (row.lastElementChild as HTMLElement | null)?.offsetWidth ?? 0,
+        )
         el.style.height = `${trackHeight(extra, tall)}px`
       }
     }

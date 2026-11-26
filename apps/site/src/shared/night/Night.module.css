@@ -81,10 +81,10 @@
 /* ---- the head, large in the middle: a line over it, the headline, and why ---- */
 
 .head { display: grid; justify-items: center; gap: 16px; width: min(1180px, 100%); margin-top: 52px; text-align: center; }
-.over { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 12px; font: 400 18px/1.3 var(--font); letter-spacing: -0.01em; color: rgba(255, 248, 240, 0.66); }
+.over { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 12px; font: 400 18px/1.3 var(--heading); letter-spacing: -0.01em; color: rgba(255, 248, 240, 0.66); }
 /* Its figure, lit: a version, a count. */
 .overLit { font: 500 18px/1 var(--mono); letter-spacing: -0.01em; color: var(--lit); text-shadow: 0 0 18px rgba(60, 76, 255, 0.7); }
-.headline { font-family: 'Inter Display', var(--display); font-size: clamp(40px, 5vw, 72px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+.headline { font-family: var(--heading); font-size: clamp(40px, 5vw, 72px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
 .why { max-width: 38em; margin-top: 2px; font-size: 16.5px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
 
 /* What the page shows under its head, standing on the planet's lit edge. */
@@ -116,7 +116,7 @@
   transition: background 200ms ease, box-shadow 200ms ease;
 }
 .panes a:hover { background: rgba(34, 29, 25, 0.8); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.2), inset 0 1px 0 rgba(255, 244, 232, 0.1), 0 30px 60px -30px rgba(0, 0, 0, 0.9), 0 0 80px -30px rgba(60, 76, 255, 0.8); }
-.panes b { display: flex; align-items: center; gap: 8px; font: 550 22px/1.2 'Inter Display', var(--display); letter-spacing: -0.025em; color: #fff; }
+.panes b { display: flex; align-items: center; gap: 8px; font: 550 22px/1.2 var(--heading); letter-spacing: -0.025em; color: #fff; }
 .panes b svg { color: var(--ink-3); }
 .panes span { font-size: 15px; line-height: 1.45; color: var(--ink-2); }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { pinnedHeight, progress, trackHeight } from '../src/home/story/scroll'
+import { pinnedHeight, progress, trackHeight, trackRun } from '../src/home/story/scroll'
 
 /*
  * The home page's scenes are sized in windows, and a window is the small one
@@ -54,5 +54,21 @@ describe('the browser\u2019s bar sliding away', () => {
     expect(progress(true, BAR_AWAY, 500, BAR_AWAY)).toBe(0)
     expect(progress(true, 0, 500, BAR_AWAY)).toBe(1)
     expect(progress(true, SMALL / 2, 500, SMALL)).toBeCloseTo(0.5)
+  })
+})
+
+describe('a row that runs sideways', () => {
+  it('runs until its end is 128px short of a wide window’s far side', () => {
+    expect(trackRun(4000, 1440, 80, 560)).toBe(4000 - 1440 + 128)
+  })
+
+  it('on a phone, runs until its last piece is in the window’s middle', () => {
+    const run = trackRun(2244, 390, 22, 304)
+    // Where the last piece's middle ends up: the row's start, its width less half the piece, back by the run.
+    expect(22 + 2244 - 304 / 2 - run).toBe(390 / 2)
+  })
+
+  it('never runs backwards', () => {
+    expect(trackRun(300, 1440, 80, 300)).toBe(0)
   })
 })

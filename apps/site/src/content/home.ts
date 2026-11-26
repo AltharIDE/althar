@@ -19,7 +19,6 @@ export const HERO = {
   agentsName: 'Althar at the centre, with the agents it runs in orbit',
   install: 'Install',
   runsOn: 'Runs on',
-  soon: 'Coming soon',
 } as const
 
 export const CLOSE = {

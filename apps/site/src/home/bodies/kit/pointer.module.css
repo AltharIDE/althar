@@ -44,7 +44,8 @@
   .pointer[data-press] .ring { animation: none; }
 }
 
-/* On a phone, with nothing to point with, it is a tap: the ring where it presses, no arrow. */
+/* On a phone, with nothing to point with, it is a tap: the ring where it presses, no arrow. In the carousel's views, which are the desktop's window there, it is the desktop's pointer. */
 @media (max-width: 699px) {
   .arrow { display: none; }
+  :global([data-fit-box]) .arrow { display: block; }
 }

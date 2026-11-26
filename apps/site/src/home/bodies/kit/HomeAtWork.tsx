@@ -9,7 +9,7 @@ import { Pointer } from './Pointer'
 import { Tabs } from './app'
 import app from './app.module.css'
 import { useMarks } from './loop'
-import { Shot } from './Shot'
+import { PHONE_WINDOW, Shot } from './Shot'
 import s from './views.module.css'
 import { DECISION, HALYARD, PROJECT_LIST, PUBLISH, READY, RUNNING, SIGNED_OUT, SINCE, STUCK, TALLY } from './world'
 
@@ -234,6 +234,7 @@ export function HomeAtWork({ active = true }: { active?: boolean } = {}) {
         h={780}
         phone={{ x: 170, y: 0, w: 780, h: 640 }}
         phoneW={PHONE_W}
+        whole={PHONE_WINDOW}
         fill={{ phone: { x: 0, y: 0, w: PHONE_W }, tablet: { x: 150, y: 0, w: 840 } }}
         label={LABEL}
         frame={cx(s.frame, s.homeFit)}
