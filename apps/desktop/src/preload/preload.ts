@@ -3,6 +3,7 @@ import {
   isHomeSetup,
   isHomesOverview,
   NO_SETUP_ARG,
+  appVersionFromArgs,
   isHomeState,
   type HomeProject,
   type HomeSetup,
@@ -197,6 +198,7 @@ ipcRenderer.on('althar:homes-new-project', () => {
 
 contextBridge.exposeInMainWorld('althar', {
   workers: {
+    release: (fresh?: boolean) => ipcRenderer.invoke('althar:workers-release', fresh === true),
     setup: () => ipcRenderer.invoke('althar:workers-setup'),
     setUp: (target: unknown, here: boolean) => ipcRenderer.invoke('althar:workers-set-up', target, here),
     act: (action: WorkerSetupAction) => ipcRenderer.invoke('althar:workers-setup-act', action),
@@ -246,7 +248,8 @@ contextBridge.exposeInMainWorld('althar', {
       }
     },
     reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
-    update: () => ipcRenderer.invoke('althar:homes-update'),
+    update: (accept?: string) => ipcRenderer.invoke('althar:homes-update', accept),
+    updateCheck: () => ipcRenderer.invoke('althar:homes-update-check'),
     release: (fresh?: boolean) => ipcRenderer.invoke('althar:homes-release', fresh === true),
     onState: (listener: (state: HomeState) => void) => {
       homeStates.add(listener)
@@ -289,6 +292,8 @@ contextBridge.exposeInMainWorld('althar', {
   },
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  // This app's version, as main handed it: what the window says of Althar itself, whichever home it's on.
+  appVersion: appVersionFromArgs(process.argv),
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
   welcomeUsage: (...milestone: WelcomeMilestone): void => ipcRenderer.send('althar:welcome-usage', ...milestone),
   onStartupStage: (listener: (stage: StartupStage) => void): (() => void) => {

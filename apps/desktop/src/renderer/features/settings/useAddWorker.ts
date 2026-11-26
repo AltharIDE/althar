@@ -4,7 +4,7 @@ import type { HomeWorkers } from '@althar/contracts'
 import type { WorkerCodeView, WorkerSetupView } from '@althar/ui'
 
 import type { SshHomeTarget } from '../../../homes'
-import type { WorkerSetup } from '../../../workers'
+import { WORKER_STEPS, type WorkerCheck, type WorkerReleaseState, type WorkerSetup } from '../../../workers'
 import { useServices } from '../../data/services'
 
 /*
@@ -17,15 +17,25 @@ import { useServices } from '../../data/services'
  * Pressing Add shows its first step at once; the steps follow as main says them.
  */
 
-/** Where the code's line fetches the bootstrap from: beside the newest release. */
-export const WORKER_SCRIPT = 'https://github.com/AltharIDE/althar/releases/latest/download/althar-worker.sh'
+/** Where the code's line fetches the bootstrap from, where it's said: beside the newest host release that has it. */
+export const workerScript = (base: string) => `${base}/althar-worker.sh`
 
 const text = {
   emptyAddress: 'Give its SSH address, as you would after ssh.',
   badAddress: 'That isn’t an SSH address. Use a name from your SSH config, or user@host.',
   lasts: (minutes: number) => (minutes <= 1 ? 'a minute' : `${minutes} minutes`),
   codeFailed: 'The home couldn’t make a code.',
+  noRelease: 'There’s no Althar release with workers yet.',
+  newest: (newest: string | null) =>
+    newest === null
+      ? 'No host release is published. Check again once one is out.'
+      : `The newest host release, ${newest}, came before workers. Check again once a newer one is out.`,
+  releaseUnknown: 'Couldn’t find out which release to install from. Check your connection, then check again.',
 }
+
+/** Where no release can add a worker, in words: for both ways, before anything is pressed. */
+export const unavailableOf = (release: WorkerReleaseState | null) =>
+  release?.kind === 'none' ? { title: text.noRelease, body: text.newest(release.newest) } : null
 
 /** An address as the person types it: `user@host`, `host`, or with `:port`. */
 export const sshTargetOf = (address: string): SshHomeTarget | null => {
@@ -41,7 +51,7 @@ const addressOf = (target: SshHomeTarget) => (target.port === undefined ? target
 /** Where it stopped, in words: what happened, what to do, and whether trying again can help. */
 export const problemOf = (
   code: string,
-  setup: Pick<WorkerSetup, 'name' | 'target'>,
+  setup: Pick<WorkerSetup, 'name' | 'target'> & { readonly version?: string | undefined },
   said?: string,
 ): NonNullable<WorkerSetupView['problem']> => {
   const name = setup.name
@@ -70,6 +80,15 @@ export const problemOf = (
       return { title: 'A worker needs systemd, with a service manager for its user.', retry: false }
     case 'NotEnoughDisk':
       return { title: `${name} hasn’t the room for the worker.`, body: 'Free a gigabyte or so, then try again.', retry: true }
+    // Found out as it starts, with the newest release's version; or the release it was given has no worker in it.
+    case 'NoWorkerRelease':
+      return { title: text.noRelease, body: text.newest(said ?? null), retry: true }
+    case 'NoWorker':
+      return {
+        title: text.noRelease,
+        ...(setup.version === undefined ? {} : { body: text.newest(setup.version) }),
+        retry: true,
+      }
     case 'NoRelease':
       return {
         title: 'There’s no Althar release to install yet.',
@@ -80,7 +99,7 @@ export const problemOf = (
       return { title: 'The release didn’t pass its signature check.', body: 'Nothing was installed.', retry: true }
     case 'CannotDownload':
     case 'UploadFailed':
-      return { title: `The release couldn’t get to ${name}.`, ...(said === undefined ? {} : { body: said }), retry: true }
+      return { title: `The release couldn’t get to ${name}.`, retry: true }
     case 'AccountConflict':
       return {
         title: `${name} has a user named althar that Althar didn’t make.`,
@@ -105,9 +124,68 @@ export const problemOf = (
     case 'Stopped':
       return { title: 'Stopped.', retry: true }
     default:
-      return { title: 'Adding the worker stopped.', ...(said === undefined ? {} : { body: said }), retry: true }
+      // What it said goes to Althar's log (main.log), not here: a short line only.
+      return { title: 'Adding the worker stopped.', retry: true }
   }
 }
+
+/** An agent's name list in words: Claude Code, or Claude Code and Codex. */
+const andList = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+
+/** What a worker's check found, in a line, where nothing stops a task there. */
+export const checkedLine = (check: WorkerCheck) => {
+  const started = check.agents.filter((agent) => agent.started === true).map((agent) => agent.name)
+  return started.length === 0
+    ? 'Its sandbox starts. Sign its agents in on its sheet.'
+    : `Its sandbox starts, and ${andList(started)} started.`
+}
+
+/**
+ * What a worker's check found that stops a task there, in words: its sandbox, which a task's agent can't run without, and
+ * what lets it; or an agent that couldn't start, with its words. Undefined where nothing does.
+ */
+export const checkProblem = (check: WorkerCheck, name: string): NonNullable<WorkerSetupView['problem']> | undefined => {
+  if (!check.sandbox.starts) {
+    const fix = check.sandbox.fix
+    switch (check.sandbox.problem) {
+      case 'NoUserNamespaces':
+        return {
+          title: `Its agents’ sandbox can’t start on ${name}.`,
+          body:
+            check.allowed === 'NeedsAdministrator'
+              ? 'Its login can’t use sudo without a password. Have its administrator run this once, then check again:'
+              : check.allowed === 'SandboxStillFails'
+                ? 'It still can’t after that. Have its administrator look at this, then check again:'
+                : fix === undefined
+                  ? 'This Linux keeps user namespaces off, which the sandbox needs. Have its administrator turn them on.'
+                  : 'This Linux lets only programs it names make the namespaces the sandbox needs. Allow the worker’s once, as an administrator:',
+          ...(fix === undefined ? {} : { command: fix }),
+          retry: true,
+        }
+      case 'NoBubblewrap':
+      case 'NoSocat':
+        return {
+          title: `The worker on ${name} is missing what its sandbox needs.`,
+          body: 'Try again to install it afresh.',
+          retry: true,
+        }
+      default:
+        return { title: `Its agents’ sandbox can’t start on ${name}.`, body: 'Althar’s log says what it found.', retry: true }
+    }
+  }
+  const failed = check.agents.find((agent) => agent.started === false)
+  if (failed !== undefined)
+    return {
+      title: `${failed.name} couldn’t start on ${name}.`,
+      ...(failed.message === undefined ? {} : { body: failed.message }),
+      retry: true,
+    }
+  return undefined
+}
+
+/** Whether the worker a setup added passed its check, or comes from a release that doesn't check itself. */
+export const checkPassed = (setup: Pick<WorkerSetup, 'phase' | 'at'>) => setup.phase === 'done' && setup.at >= WORKER_STEPS.length
 
 /** A setup as the kit's dialog draws it. */
 export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
@@ -125,7 +203,17 @@ export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
         },
   version: setup.version,
   hostKey: setup.hostKey === undefined ? undefined : { fingerprint: setup.hostKey.fingerprint, type: setup.hostKey.type },
-  problem: setup.problem === undefined ? undefined : problemOf(setup.problem.code, setup, setup.problem.said),
+  problem:
+    setup.phase === 'done' && setup.check !== undefined
+      ? checkProblem(setup.check, setup.name)
+      : setup.problem === undefined
+        ? undefined
+        : problemOf(setup.problem.code, setup, setup.problem.said),
+  checked: setup.check === undefined ? undefined : checkPassed(setup) ? checkedLine(setup.check) : undefined,
+  checking: setup.checking === true,
+  // One press over SSH: sudo, where the login may; once it couldn't, the command stays to copy.
+  canAllow:
+    setup.check !== undefined && !setup.check.sandbox.starts && setup.check.sandbox.fix !== undefined && setup.check.allowed === undefined,
 })
 
 /** The code's way as the dialog draws it: its line and how long it lasts, being made, or why the home made none. */
@@ -133,13 +221,15 @@ export const codeView = (
   code: { readonly code: string; readonly expiresAt: number } | null,
   failed: string | null,
   now: number,
+  /** Where the release's files are: the line takes the script and the release from there. Null while it's found out. */
+  base: string | null,
 ): WorkerCodeView =>
   failed !== null
     ? { command: null, lasts: null, failed }
-    : code === null || code.expiresAt <= now
+    : code === null || code.expiresAt <= now || base === null
       ? { command: null, lasts: null }
       : {
-          command: `curl -fsSL ${WORKER_SCRIPT} | sh -s -- join '${code.code}'`,
+          command: `curl -fsSL ${workerScript(base)} | ALTHAR_RELEASE_BASE=${base} sh -s -- join '${code.code}'`,
           lasts: text.lasts(Math.max(1, Math.round((code.expiresAt - now) / 60_000))),
         }
 
@@ -154,7 +244,16 @@ export interface AddWorkerModel {
   readonly trust: () => void
   readonly again: () => void
   readonly stop: () => void
+  /** Its check again, once added; and allowing its sandbox with sudo over SSH. */
+  readonly checkWorker: () => void
+  readonly allow: () => void
   readonly code: WorkerCodeView | null
+  /** Where no release can add a worker: said in place of both ways. */
+  readonly unavailable: { readonly title: string; readonly body: string } | null
+  /** Check again is pressed and not yet answered. */
+  readonly checking: boolean
+  /** Asks afresh whether a release can, and the home for a code where it made none. */
+  readonly check: () => void
   /** Closes it; a setup that went on stays as it is, and one that ended is put away. */
   readonly close: () => void
   /** This build can add one over SSH. */
@@ -187,6 +286,14 @@ export const useAddWorker = ({
   const [code, setCode] = useState<{ code: string; expiresAt: number } | null>(null)
   const [codeFailed, setCodeFailed] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [release, setRelease] = useState<WorkerReleaseState | null>(null)
+  const [releaseFailed, setReleaseFailed] = useState(false)
+  const [checks, setChecks] = useState(0)
+  // Check again pressed and not yet answered: what it said before stays meanwhile, its button saying it's checking.
+  const [checking, setChecking] = useState(false)
+  // A code asked again by Check again, where the home made none: its error stays shown until this one is answered.
+  const [codeAsking, setCodeAsking] = useState(false)
+  const codeAsked = useRef(0)
   const enrolled = useRef<string | null>(null)
 
   useEffect(() => {
@@ -213,12 +320,37 @@ export const useAddWorker = ({
             ? was
             : { ...was, phase: 'failed', problem: { code: 'WorkerNotAdded', said: error instanceof Error ? error.message : undefined } },
         )
+        // Main keeps it in the log and tells every window.
+        void bridge.act({ kind: 'unsigned', said: error instanceof Error ? error.message : String(error) })
       },
     )
   }, [bridge, client, setup])
 
-  // Started and connected: the dialog gives way to its sheet.
-  const workerId = setup?.phase === 'done' ? setup.workerId : undefined
+  // Whether a release can add a worker, asked as the dialog opens: no press waits on it, and main asks again as setup starts.
+  useEffect(() => {
+    if (!open || bridge === undefined) return
+    let live = true
+    bridge.release(checks > 0).then(
+      (found) => {
+        if (!live) return
+        setRelease(found)
+        setReleaseFailed(false)
+        setChecking(false)
+      },
+      () => {
+        if (!live) return
+        setRelease(null)
+        setReleaseFailed(true)
+        setChecking(false)
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [bridge, checks, open])
+
+  // Started, checked and connected: the dialog gives way to its sheet. One its check stopped stays, with what to do.
+  const workerId = setup !== null && checkPassed(setup) ? setup.workerId : undefined
   const connected = workerId !== undefined && workers?.workers.some((one) => one.workerId === workerId && one.connected) === true
   const shown = useRef<string | null>(null)
   useEffect(() => {
@@ -273,6 +405,9 @@ export const useAddWorker = ({
     }
     setCode(null)
     setCodeFailed(null)
+    // A code asked again and not yet answered is dropped with the dialog.
+    codeAsked.current++
+    setCodeAsking(false)
     onClose()
   }, [bridge, onClose, setup])
 
@@ -281,6 +416,9 @@ export const useAddWorker = ({
     setWay: (chosen) => {
       setWay(chosen)
       setCodeFailed(null)
+      // A code asked again and not yet answered is dropped: back on the code's way, the one asked then is the only one shown.
+      codeAsked.current++
+      setCodeAsking(false)
     },
     address,
     setAddress: (value) => {
@@ -302,7 +440,48 @@ export const useAddWorker = ({
     stop: () => {
       void bridge?.act({ kind: 'stop' })
     },
-    code: way === 'code' ? codeView(code, codeFailed, now) : null,
+    // Each shows it checking at once; main's word follows.
+    checkWorker: () => {
+      setSetup((was) => (was === null ? was : { ...was, checking: true }))
+      void bridge?.act({ kind: 'check' })
+    },
+    allow: () => {
+      setSetup((was) => (was === null ? was : { ...was, checking: true }))
+      void bridge?.act({ kind: 'sandbox' })
+    },
+    code:
+      way === 'code'
+        ? codeView(
+            code,
+            codeFailed ?? (releaseFailed && release === null ? text.releaseUnknown : null),
+            now,
+            // Outside Althar's own window, no release is asked: the line can't be given.
+            release?.kind === 'ready' ? release.base : null,
+          )
+        : null,
+    unavailable: unavailableOf(release),
+    checking: checking || codeAsking,
+    check: () => {
+      setChecking(true)
+      setChecks((count) => count + 1)
+      if (codeFailed === null) return
+      // The home's code is asked again too, where it couldn't make one: its error and Checking… stay until it answers.
+      const asked = ++codeAsked.current
+      setCodeAsking(true)
+      client.createWorkerCode('Worker').then(
+        (made) => {
+          if (codeAsked.current !== asked) return
+          setCode(made)
+          setCodeFailed(null)
+          setCodeAsking(false)
+        },
+        (error: unknown) => {
+          if (codeAsked.current !== asked) return
+          setCodeFailed(error instanceof Error ? error.message : text.codeFailed)
+          setCodeAsking(false)
+        },
+      )
+    },
     close,
     ssh: bridge !== undefined,
   }

@@ -580,3 +580,112 @@ describe('naming a model on a screen', () => {
     expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
   })
 })
+
+describe('a worker’s models (ADR-103)', () => {
+  it('offers only its agents, signed in there, and of each the models it offers there', async () => {
+    const { onWorker } = await import('../src/renderer/shared/models')
+    const known = [
+      {
+        agentId: 'claude-code',
+        models: [
+          { id: 'opus', name: 'Opus', description: null, efforts: [], effort: null },
+          { id: 'sonnet', name: 'Sonnet', description: null, efforts: [{ id: 'high', name: 'High' }], effort: null },
+        ],
+        model: 'opus',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+      {
+        agentId: 'codex',
+        models: [{ id: 'gpt', name: 'GPT', description: null, efforts: [], effort: null }],
+        model: 'gpt',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+    ]
+    const agents = [
+      { id: 'claude-code', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ] as never
+    const there = onWorker(known, agents, {
+      providers: ['claude-code', 'codex'],
+      signedIn: ['claude-code'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [
+          {
+            providerId: 'claude-code',
+            models: [
+              { id: 'sonnet', name: 'Sonnet' },
+              { id: 'haiku', name: 'Haiku' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(there.agents.map((agent) => agent.id)).toEqual(['claude-code'])
+    expect(there.known[0]?.models.map((model) => model.id)).toEqual(['sonnet', 'haiku'])
+    // What the home knows of a model it has too stays with it.
+    expect(there.known[0]?.models[0]?.efforts).toEqual([{ id: 'high', name: 'High' }])
+  })
+
+  it('offers what the worker said of an agent the home hasn’t read yet, and only an agent’s default where the worker hasn’t said', async () => {
+    const { onWorker } = await import('../src/renderer/shared/models')
+    const agents = [
+      { id: 'claude-code', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ] as never
+    const home = [
+      {
+        agentId: 'claude-code',
+        models: [{ id: 'opus', name: 'Opus', description: null, efforts: [], effort: null }],
+        model: 'opus',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+    ]
+    const there = onWorker(home, agents, {
+      providers: ['claude-code', 'codex'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [{ providerId: 'codex', models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }] }],
+      },
+    })
+    // Codex, which the home hasn't read: the worker's own list.
+    expect(there.known.find((one) => one.agentId === 'codex')).toMatchObject({
+      models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }],
+      model: 'gpt-6.2-sol',
+    })
+    // Claude Code, which the worker said nothing of: its own default only, never the home's Opus.
+    expect(there.known.find((one) => one.agentId === 'claude-code')).toMatchObject({ models: [], model: null })
+    // Where the worker offers the model the home is on, it stays on it, at its effort.
+    const same = onWorker([{ ...home[0]!, effort: 'high' }], agents, {
+      providers: ['claude-code'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [
+          {
+            providerId: 'claude-code',
+            models: [
+              { id: 'sonnet', name: 'Sonnet' },
+              { id: 'opus', name: 'Opus' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(same.known[0]).toMatchObject({ model: 'opus', effort: 'high' })
+  })
+})

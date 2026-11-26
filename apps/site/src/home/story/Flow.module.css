@@ -1,0 +1,135 @@
+/*
+ * The flow (Flow.tsx), on the page's paper: down the left its three acts, in the scene titles'
+ * type, each with the board's bars under it; the act being told open on its two features, their titles plain (the
+ * scene's heading keeps the serif); on the right each feature drawn large in a window, one taking over from the last.
+ * Under them the rest, drawn small.
+ */
+
+.flow { padding-bottom: 40px; }
+
+/* ---- pinned: the acts and the stage ---- */
+
+/* The heading holds over the acts while it's pinned: the scene's own, with less room over it. */
+.head { margin-top: 0; }
+.tour { position: relative; }
+.stick { display: grid; align-content: center; gap: clamp(20px, (100svh - 700px) * 0.25, 44px); min-height: calc(100svh - 76px); padding: 16px 0 24px; box-sizing: border-box; }
+/* Pinned, the heading reads a little smaller on a short window, so the stage keeps its room under it. */
+.stick .head h2 { font-size: clamp(34px, min(4vw, 6.4svh), 58px); }
+.stick .head p { font-size: clamp(17px, 2.5svh, 20px); }
+.grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 64px; align-items: center; }
+
+.acts { display: grid; margin: 0; padding: 0; list-style: none; }
+.act { padding: 20px 0 18px; border-top: 1px solid rgba(20, 20, 23, 0.1); }
+.act:last-child { border-bottom: 1px solid rgba(20, 20, 23, 0.1); }
+
+/* Each act's name: dim until it's told, then ink, its number cobalt. */
+.actName { display: flex; align-items: baseline; gap: 14px; margin: 0; font: 600 22px/1.2 var(--head); letter-spacing: -0.025em; color: var(--t-3); transition: color 320ms var(--ease); }
+.n { flex: none; width: 22px; font: 500 12px var(--mono); letter-spacing: 0.1em; color: var(--t-3); transition: color 320ms var(--ease); }
+.act[data-on] .actName { color: var(--t-1); }
+.act[data-on] .n { color: var(--cobalt); }
+
+/* The board's bars: one per feature, filling as its turn goes, cobalt while it's told and ink once it's done. */
+.bars { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 14px 0 0 36px; }
+.bars i { --seg: var(--t-1); height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--seg) calc(var(--fill) * 100%), rgba(20, 20, 23, 0.1) 0); }
+.bars i[data-on] { --seg: var(--cobalt); }
+
+/* The act being told opens on its two features; the one being told has its words. */
+.more { display: grid; grid-template-rows: 0fr; margin-left: 36px; transition: grid-template-rows 460ms var(--ease); }
+.act[data-on] .more { grid-template-rows: 1fr; }
+.more > div { min-height: 0; overflow: hidden; }
+.feature { padding-top: 18px; }
+.ft { margin: 0; font: 600 clamp(22px, 2.1vw, 29px) / 1.08 var(--head); letter-spacing: -0.035em; color: var(--t-3); transition: color 320ms var(--ease); }
+/* A feature's title is plain, its two beats in the one face (the scene's heading keeps the serif); where it breaks, it breaks between them. */
+.ft b { font-weight: inherit; white-space: nowrap; }
+.feature[data-on] .ft { color: var(--t-1); }
+.lw { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 420ms var(--ease); }
+.feature[data-on] .lw { grid-template-rows: 1fr; }
+.lw > p { min-height: 0; overflow: hidden; }
+.fl { margin: 0; padding-top: 10px; max-width: 30em; font-size: 16px; line-height: 1.5; letter-spacing: -0.006em; color: var(--t-2); text-wrap: pretty; }
+
+/* The stage: a window as large as the room allows, each feature's drawing whole in it, one over the last. */
+.stage {
+  position: relative;
+  justify-self: end;
+  width: min(100%, calc((100svh - 76px - 64px - var(--head-h, 170px)) * 1.6));
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 24px;
+  background: #f8f6f1;
+  box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.07), 0 50px 90px -50px rgba(40, 30, 10, 0.4), 0 16px 30px -18px rgba(40, 30, 10, 0.16);
+}
+.slide { position: absolute; inset: 0; transform: scale(calc(0.97 + 0.03 * var(--o, 1))); transform-origin: 50% 60%; }
+/* Out of its turn, out of the window too: a drawing plays only while it's in sight. */
+.slide[data-off] { visibility: hidden; transform: translateX(-140%); }
+.slide > * { width: 100%; height: 100%; }
+
+/*
+ * The drawings in their light tone, here: their shadows, glows and rims the paper's own warm grey and ink, never cobalt
+ * or violet. The cobalt stays in what is drawn (a bar filling, a dot, a word), not round it. Each drawing's root is
+ * its host's first child (Fragment.tsx); these win over its own light tone's colours.
+ */
+.stage :global([data-tone='light']) > :global([class*='s-d-']),
+.pic :global([data-tone='light']) > :global([class*='s-d-']) {
+  --under: radial-gradient(closest-side, rgba(64, 46, 24, 0.06), rgba(64, 46, 24, 0) 100%);
+  --lit: none;
+  --card-lit: none;
+  --edge-on: linear-gradient(180deg, rgba(20, 20, 28, 0.2), rgba(20, 20, 28, 0.14));
+  --edge-lit: linear-gradient(180deg, rgba(20, 20, 28, 0.2), rgba(20, 20, 28, 0.14));
+  --card-edge-on: linear-gradient(180deg, rgba(20, 20, 28, 0.2), rgba(20, 20, 28, 0.14));
+  --pill-edge-on: linear-gradient(180deg, rgba(20, 20, 28, 0.24), rgba(20, 20, 28, 0.16));
+  --node-edge: linear-gradient(180deg, rgba(20, 20, 28, 0.07), rgba(20, 20, 28, 0.14));
+  --node-ring: linear-gradient(180deg, rgba(20, 20, 28, 0.08), rgba(20, 20, 28, 0.16));
+  --use-dot-glow: none;
+  --work-glow: none;
+  --live-dot-sh: none;
+  --knob-sh-on: inset 0 0 0 1px rgba(20, 20, 28, 0.16), 0 0.08cqw 0.2cqw rgba(64, 46, 24, 0.08);
+  --sw-sh: inset 0 0 0 1px rgba(16, 20, 120, 0.18), 0 0.2cqw 0.6cqw rgba(64, 46, 24, 0.2);
+  --pip-run-sh: inset 0 0 0 1px rgba(16, 20, 120, 0.15);
+  --chip-sh: 0 0 0 1px rgba(20, 20, 28, 0.12), 0 0.4cqw 1.2cqw -0.2cqw rgba(64, 44, 20, 0.18);
+}
+
+/* ---- not pinned: each act in turn, each feature's drawing under its words ---- */
+
+.stack { display: grid; gap: 64px; margin-top: 48px; }
+.stackAct { display: grid; gap: 28px; }
+.stackAct > .actName { color: var(--t-1); }
+.stackAct > .actName .n { color: var(--cobalt); }
+.stackFeature .ft { color: var(--t-1); }
+.stackFeature .lw { grid-template-rows: 1fr; }
+.pic { margin-top: 18px; overflow: hidden; border-radius: 18px; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.06), 0 30px 60px -36px rgba(40, 30, 10, 0.45); }
+
+/* ---- the rest: drawn small, then words ---- */
+
+.rest { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px 28px; margin: 104px 0 0; padding: 0; list-style: none; }
+.thumb { overflow: hidden; border-radius: 16px; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.06), 0 24px 44px -30px rgba(40, 30, 10, 0.45); }
+.rt { margin: 18px 0 0; font: 600 21px/1.12 var(--head); letter-spacing: -0.03em; color: var(--t-1); }
+.rt b { font-weight: inherit; white-space: nowrap; }
+.rl { margin: 6px 0 0; max-width: 28em; font-size: 15px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; }
+
+.end { margin: 72px 0 0; text-align: center; }
+
+/* Each of the rest rises into place as it comes up the window, with the scroll, where the browser can tie it to the scroll. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rest > li, .end { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 70%; }
+    .rest > li:nth-child(3n + 2) { animation-range: entry 8% entry 78%; }
+    .rest > li:nth-child(3n + 3) { animation-range: entry 16% entry 86%; }
+  }
+}
+@keyframes rise {
+  from { opacity: 0; translate: 0 40px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@media (max-width: 900px) {
+  .rest { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 80px; }
+}
+@media (max-width: 560px) {
+  .rest { grid-template-columns: minmax(0, 1fr); }
+  .ft b, .rt b { white-space: normal; }
+  .actName { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .actName, .n, .more, .ft, .lw { transition: none; }
+}

@@ -1,4 +1,5 @@
 export * from './access'
+export { pushAnswer } from './probe'
 export { makeServiceApi, prepareApi, type ApiRequest, type ApiResponse, type ServiceApi } from './api'
 export { type CopyMerge, type CopyMerged, type MergeInCopy, mergeInCopy } from './branchCopy'
 export { makeBitbucketCloud } from './bitbucketCloud'

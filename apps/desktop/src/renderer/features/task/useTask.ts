@@ -13,6 +13,7 @@ import {
   type ReviewVerdict,
   type ShipRoute,
   type ShipUnderWay,
+  type TaskPlace,
   type ThreadItem,
   type ThreadSnapshot,
   type GoalControl,
@@ -37,6 +38,7 @@ import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, queueShown, releasedReadings, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { useUnstartedSend } from '../../shared/useUnstartedSend'
+import { unmovedWhy } from '../../shared/calls'
 import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
@@ -77,11 +79,6 @@ export const presses = {
   /** Any other: what it changes is read again, and nothing shows it as working. */
   act: 'act',
 } as const
-
-/** What the window says where the runtime answered a press but did nothing. */
-export const settleText = {
-  stillOpen: 'Something of it opened meanwhile, so it stays as it was.',
-}
 
 /** A task as its head says it. */
 type Task = ThreadSnapshot['task']
@@ -262,6 +259,11 @@ export interface TaskModel {
   readonly stopRunning: () => Promise<void>
   /** Puts the task on Scratch, or on the board with null (a task is a conversation plus parts). */
   readonly shelve: (shelf: 'scratch' | null) => Promise<void>
+  /**
+   * Moves it between the home and its workers (ADR-103): shown going there at once; there once its lead's turn ends, with
+   * its work, its lead on `lead`'s model where its own isn't offered there. Back where it runs calls off a move that waits.
+   */
+  readonly moveTo: (place: string, lead?: { readonly model?: string; readonly effort?: string }) => Promise<void>
   /** Saves the task's parts, team and the start of its brief as a preset, by name. */
   readonly savePreset: (name: string) => Promise<void>
   /** Stops a helper its lead started, by its id. */
@@ -862,10 +864,13 @@ export const useTask = (threadId: string): TaskModel => {
       async () => {
         if (snapshot === null) return
         await (how === 'done' ? client.markTaskDone(snapshot.task.id) : client.keepTaskForLater(snapshot.task.id))
-        // Something of it opened meanwhile, as an aside's Clear finds: read afresh after the answer, never what the cache holds.
+        // Not moved, as an aside's Clear finds: read afresh after the answer, never what the cache holds, and say why.
         const after = await client.getThread(threadId, { limit: 0 })
         if (after.task.phase !== (how === 'done' ? 'settled' : 'kept'))
-          throw new ApiError({ reason: 'Unchanged', message: settleText.stillOpen })
+          throw new ApiError({
+            reason: 'Unchanged',
+            message: unmovedWhy({ phase: after.task.phase ?? '', pullOpen: after.task.changes.some((one) => one.state === 'open') }),
+          })
       },
       which,
       { setting: 'phase', show: (task) => ({ ...task, phase: how === 'done' ? 'settled' : 'kept' }) },
@@ -1155,6 +1160,15 @@ export const useTask = (threadId: string): TaskModel => {
       onTask((taskId) => client.shelveTask(taskId, shelf), presses.act, {
         setting: 'shelf',
         show: (task) => ({ ...task, scratch: shelf === 'scratch' }),
+      }),
+    moveTo: (place, lead) =>
+      onTask((taskId) => client.moveTaskTo(taskId, place as TaskPlace, lead), presses.act, {
+        setting: 'place',
+        // Going there at once; the runtime's word says whether it is there or waits for its lead's turn.
+        show: (task) =>
+          place === (task.workerId ?? 'home')
+            ? (({ placing: _gone, ...rest }) => rest)(task)
+            : { ...task, placing: { to: place, why: '' } },
       }),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),

@@ -16,6 +16,8 @@ import {
   failedNote,
   heldNote,
   keptNote,
+  type MergeLeft,
+  mergesLeft,
   resumedNote,
   type SaidStep,
   stepNote,
@@ -216,6 +218,11 @@ export class Errands extends Context.Service<
     pause(access: ToolAccess, id: string, reason: string): Effect.Effect<string, ToolRefused>
     resume(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
     cancel(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
+    /**
+     * Says again, quietly and in the errand's own thread only, what a merge errand still has to merge: as a step for a task
+     * finds its pull request, so the thread's merging line follows it from the task's name to its number.
+     */
+    retell(errandId: string, note: StepNote): Effect.Effect<void>
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
     /**
      * Whether the person's word for an action still stands, as execute checks
@@ -297,18 +304,37 @@ export class Errands extends Context.Service<
           if (row === undefined || access.role === 'reviewer') return yield* refused('This errand does not belong to this thread.')
           return row
         })
-      const noteContent = (note: StepNote) => ({
+      const noteContent = (note: StepNote, errand?: { id: string; quiet: boolean; merges: ReadonlyArray<MergeLeft> }) => ({
         source: 'runtime',
         severity: 'info',
         title: note.title,
         description: null,
         ...(note.links.length === 0 ? {} : { links: note.links }),
         ...(note.details === undefined ? {} : { details: note.details }),
+        ...(errand === undefined ? {} : { errand }),
       })
-      const say = (row: ErrandRow, said: string | StepNote) =>
+      /**
+       * An errand's line, in its thread and its tasks'. In its own thread, one of an errand that only merges says what is left
+       * to merge, so the thread can fold it into its merging line; `quiet` where it only says the errand moved on, not what
+       * needs the person. Called off, nothing is left: the line stays, and the merging line lets go of it. Its tasks' threads,
+       * which hold no merge card of their own, get it as a plain line, so what became of the merge stays there to read.
+       */
+      const say = (row: ErrandRow, line: string | StepNote, quiet = false, tasksToo = true) =>
         Effect.gen(function* () {
-          const note: StepNote = typeof said === 'string' ? { title: said, links: [] } : said
-          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', noteContent(note))
+          const note: StepNote = typeof line === 'string' ? { title: line, links: [] } : line
+          const steps = yield* sql<StepRow & { taskTitle: string | null }>`SELECT s.*, t.title AS task_title FROM errand_steps s
+            LEFT JOIN tasks t ON t.id = s.task_id WHERE s.errand_id = ${row.id} ORDER BY s.position`
+          const [now] = yield* sql<{ state: ErrandRow['state'] }>`SELECT state FROM errands WHERE id = ${row.id}`
+          const merges = mergesLeft(
+            steps.map((step) => ({
+              step: said(step),
+              done: step.state === 'done' || now?.state === 'cancelled',
+              task: step.taskId === null ? null : { id: step.taskId, title: step.taskTitle },
+            })),
+          )
+          const content = noteContent(note, merges === null ? undefined : { id: row.id, quiet, merges })
+          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', content)
+          if (!tasksToo) return
           const tasks = yield* sql<{ taskId: string; threadId: string }>`SELECT DISTINCT s.task_id, t.id AS thread_id FROM errand_steps s
         JOIN threads t ON t.task_id = s.task_id AND t.kind = 'task' WHERE s.errand_id = ${row.id}`
           for (const task of tasks) {
@@ -443,7 +469,7 @@ export class Errands extends Context.Service<
               actorId: instance.systemId,
               payload: { messageId, steps },
             })
-            yield* say(row, keptNote(words, steps))
+            yield* say(row, keptNote(words, steps), true)
             return id
           }),
         )
@@ -533,11 +559,11 @@ export class Errands extends Context.Service<
                   if (errand !== undefined && step !== undefined) {
                     yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${errand.id} AND step_key = ${step.stepKey}`
                     const next = (yield* stepsOf(errand.id)).find((s) => s.state !== 'done')
-                    if (kept.saidAt === null) yield* say(errand, afterStep(note, next === undefined ? undefined : said(next)))
+                    if (kept.saidAt === null) yield* say(errand, afterStep(note, next === undefined ? undefined : said(next)), true)
                     if (errand.state !== 'done' && next === undefined) {
                       yield* set(errand, 'done', null)
                       // Its last step's note said so; where that was said before, the errand ending still gets its line.
-                      if (kept.saidAt !== null) yield* say(errand, 'Errand done')
+                      if (kept.saidAt !== null) yield* say(errand, 'Errand done', true)
                     }
                   } else if (kept.saidAt === null)
                     yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
@@ -688,7 +714,8 @@ export class Errands extends Context.Service<
                     yield* change('work_items', pending.workItemId, { state: 'uncertain', updatedAt: yield* timestamp })
                   }
                   const note = stepNote(tool, action.target, action.request, answer.answer)
-                  if (errand !== undefined) yield* say(errand, note)
+                  // The host took it and lands it later: the errand moving on, which its merging line shows.
+                  if (errand !== undefined) yield* say(errand, note, true)
                   else yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
                 }),
               )
@@ -712,6 +739,13 @@ export class Errands extends Context.Service<
           ),
         turn: (access) => provide(turn(access)),
         keep: (access, message, steps) => provide(keep(access, message, steps)),
+        retell: (errandId, note) =>
+          provide(
+            Effect.gen(function* () {
+              const [row] = yield* sql<ErrandRow>`SELECT * FROM errands WHERE id = ${errandId}`
+              if (row !== undefined) yield* say(row, note, true, false)
+            }),
+          ).pipe(Effect.orDie),
         pause: (access, id, reason) =>
           provide(
             Effect.gen(function* () {
@@ -747,7 +781,7 @@ export class Errands extends Context.Service<
                   actorId: instance.systemId,
                   payload: { messageId, words },
                 })
-                yield* say(row, resumedNote((yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)))
+                yield* say(row, resumedNote((yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)), true)
                 return 'Resumed the errand on the person’s word.'
               }),
             ),

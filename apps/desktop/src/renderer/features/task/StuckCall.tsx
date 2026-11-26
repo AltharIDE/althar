@@ -32,7 +32,7 @@ type Why = StuckStep['why']
 interface Ways {
   readonly ways: ReadonlyArray<StuckWay>
   readonly primary: StuckWay
-  readonly fix?: 'signIn' | 'install' | 'connect' | 'coordinator'
+  readonly fix?: 'signIn' | 'install' | 'connect' | 'coordinator' | 'hosts'
 }
 
 /** The lead's work went wrong: told what to do instead, first. */
@@ -75,13 +75,20 @@ export const waysOn: Record<Why, { readonly lead: Ways; readonly review: Ways }>
   // Something on this computer stops its agent, which no retry or other model helps (DEV-285): the coordinator puts it right,
   // first; or the person does, and tries again, or stops.
   local_cause: { lead: { ...localWays, fix: 'coordinator' }, review: { ...localWays, fix: 'coordinator' } },
+  // Only the pull request's own push is refused so (`publishWays`); a lead's step never is.
+  push_refused: { lead: againFirst, review: againFirst },
 }
 
-/** The pull request, which Althar opens itself: tried again as it was, or gone on without; its host connected first, where it isn't. */
+/**
+ * The pull request, which Althar opens itself: tried again as it was, or gone on without; its host connected first, where
+ * it isn't, and its connection changed first where the host refused its sign-in, as trying again before can't help.
+ */
 export const publishWays = (why: Why): Ways =>
   why === 'not_connected'
     ? { ways: ['again', 'abandon'], primary: 'again', fix: 'connect' }
-    : { ways: ['again', 'abandon'], primary: 'again' }
+    : why === 'push_refused'
+      ? { ways: ['again', 'abandon'], primary: 'again', fix: 'hosts' }
+      : { ways: ['again', 'abandon'], primary: 'again' }
 
 /** The ways on a stuck step's card offers. */
 export const waysFor = (stuck: StuckStep): Ways =>
@@ -126,6 +133,8 @@ export const text = {
         return stuck.detail ?? 'It needs your answer before it can go on.'
       case 'local_cause':
         return `${agent} can't start: ${stuck.detail ?? 'something on this computer is in its way.'}`
+      case 'push_refused':
+        return stuck.detail ?? "The code host refused Althar's sign-in for the push."
     }
   },
   /** What stops its agent on this computer, with the path in it as code (DEV-285). */
@@ -163,7 +172,13 @@ export const text = {
     restarted: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
   },
   /** What puts it right elsewhere: the agent's sign-in, or the repository's host, in Settings. */
-  fix: { signIn: 'Sign in again', install: 'Install', provider: (provider: string) => `Sign in to ${provider}`, connect: 'Connect' },
+  fix: {
+    signIn: 'Sign in again',
+    install: 'Install',
+    provider: (provider: string) => `Sign in to ${provider}`,
+    connect: 'Connect',
+    hosts: 'Open code hosts',
+  },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted' ? text.crashed : `Couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
@@ -206,7 +221,7 @@ interface StuckCallProps {
   onSignIn?: (agentId: string) => void
   /** Opens the agent's tab in Settings, where it is installed, for a step whose agent isn't: Install. */
   onInstall?: (agentId: string) => void
-  /** Opens the code hosts in Settings, for a pull request whose host isn't connected: Connect. */
+  /** Opens the code hosts in Settings, for a pull request whose host isn't connected (Connect), or refused its sign-in. */
   onConnect?: () => void
   /** Asks the coordinator to fix what stops its agent on this computer: Let the coordinator fix it. */
   onFixWithCoordinator?: (attentionId: string) => void | Promise<boolean>
@@ -373,7 +388,9 @@ function StuckCard({
                   },
                 },
               }
-            : {}
+            : fix === 'hosts' && onConnect !== undefined
+              ? { fix: { label: text.fix.hosts, onFix: onConnect } }
+              : {}
   const reporting = (step: string) => (onReport === undefined ? {} : { onReport: () => onReport(step) })
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')

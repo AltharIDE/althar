@@ -1,0 +1,306 @@
+/* The story under the first screen: paper, ink and cobalt, the measures of the first screen, and pictures that follow the scroll (scroll.ts writes each scene's --p). */
+
+.story { position: relative; background: var(--n-2); color: var(--t-1); }
+.wrap { position: relative; width: 100%; max-width: calc(var(--wrap) + 2 * var(--gut)); margin: 0 auto; padding: 0 var(--gut); }
+.scene { position: relative; padding-top: 80px; }
+/* A pinned picture holds under the nav; scroll.ts sets where and makes its scene tall enough. */
+.stick { position: sticky; top: 76px; }
+.under { position: absolute; inset: 0; pointer-events: none; }
+
+.label { font: 500 13px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
+.title { font-family: var(--head); font-size: clamp(34px, 4vw, 58px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
+/* A title's second beat, in the italic serif, in cobalt (pale on dark, white on cobalt). */
+.title b,
+.endLine b {
+  font-family: var(--beat);
+  font-size: 1.14em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 0.9;
+  letter-spacing: -0.015em;
+  color: var(--cobalt);
+  -webkit-text-stroke: 0.018em currentColor;
+}
+.review .title b { color: #b4bcff; }
+/* A quieter heading, set as the menu bar's is (EdgeTour): smaller, in the one face, its beat plain. */
+.title.quiet { font-size: clamp(28px, 2.6vw, 38px); line-height: 1.08; letter-spacing: -0.03em; }
+.title.quiet b { font: inherit; letter-spacing: inherit; color: inherit; -webkit-text-stroke: 0; white-space: nowrap; }
+.lead { max-width: 34em; font-size: 20px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); }
+.small { font-size: 15px; line-height: 1.5; color: var(--t-2); }
+.head { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 64px; align-items: end; margin-top: 32px; }
+.frame { overflow: hidden; border-radius: 22px; background: #fff; }
+.frame img { display: block; width: 100%; height: auto; }
+
+/* 01 The board: pinned, played by the scroll, poured cobalt by the pointer (waterfall.ts). */
+/* Room under the views once the scene lets go, as much as above the next scene's heading, in the cobalt when it is poured. */
+.board { padding-top: 0; padding-bottom: 80px; overflow: clip; }
+.board .stick { z-index: 1; padding-top: 20px; }
+.heads { position: relative; }
+/* One heading per view, all in the one place: the one for the view in front comes up as the last goes. */
+.viewHeads { display: grid; }
+.viewHeads > .head {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 240ms var(--ease), transform 240ms var(--ease), visibility 0s linear 240ms;
+}
+.viewHeads > .head[data-on] {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition: opacity 460ms var(--ease-out) 160ms, transform 560ms var(--ease-out) 160ms, visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .viewHeads > .head, .viewHeads > .head[data-on] { transition: none; transform: none; }
+}
+.white { position: absolute; inset: 0; pointer-events: none; user-select: none; clip-path: inset(0 0 100% 0); }
+.white .title, .white .title b { color: #fff; }
+.white .lead { color: rgba(255, 255, 255, 0.86); }
+/* The cobalt: a window tall and the scene's foot more, held in the pinned picture behind its content, its top where the window's is once pinned (waterfall.ts sets it); the scene clips it. */
+.fall { position: absolute; top: -76px; left: 0; right: 0; height: calc(100lvh + 80px); z-index: -1; overflow: hidden; pointer-events: none; }
+/* The cobalt's one canvas (waterfall.ts draws it). */
+.fall canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+/* Fixed to the window, so the scroll never carries it (waterfall.ts moves it). */
+.dot {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 350ms var(--ease),
+    width 300ms var(--ease-out),
+    height 300ms var(--ease-out),
+    margin 300ms var(--ease-out);
+}
+.dot[data-in] { opacity: 1; }
+.dot[data-swell] { width: 30px; height: 30px; margin: -15px 0 0 -15px; }
+/* Over the board's scene: under the pinned picture, with the cobalt, behind everything in it. */
+.dot[data-under] { z-index: 0; }
+
+/* 02 The community has its own (Community.module.css). */
+
+/* 03 The review: on its dark, pinned, played by the scroll; it grows by its width, so its text stays sharp. */
+/*
+ * Its own composited layer, its black that layer's background: scrolled fast, the browser fills what it hasn't drawn
+ * yet with a layer's own background, and the page's is paper, so on the page's layer the dark flashed light. On its
+ * own it fills with black, and the flash can't show.
+ */
+.review { margin-top: 88px; padding: 0 0 80px; background: #0b0a08; color: #f4efe7; will-change: transform; }
+.review .stick { padding-top: 80px; }
+.review .lead { color: rgba(244, 239, 231, 0.66); }
+/* Drawn as a patch (Patch.module.css): pinned on a desktop with a little room over its file's bar, less where the window is short; on a tablet or a phone, not pinned. */
+@media (min-width: 901px) and (prefers-reduced-motion: no-preference) {
+  .review .stick { padding-top: clamp(16px, (100svh - 720px) * 0.4, 48px); }
+}
+@media (max-width: 900px) {
+  .review .stick { position: static; padding-top: 48px; }
+}
+/* On a phone it is pinned again, the window's height under the nav (Patch.module.css lays it out), with room under it for the download as it lets go. */
+@media (max-width: 699px) and (prefers-reduced-motion: no-preference) {
+  .review { padding-bottom: 120px; }
+  .review .stick { position: sticky; box-sizing: border-box; height: calc(100svh - 88px); padding-top: 8px; }
+  .review .stick > .wrap { height: 100%; }
+}
+
+/* A row that runs sideways as the page scrolls (the screens). The flow has its own (Flow.module.css). */
+.track { position: relative; margin-top: 40px; }
+.track .stick { display: flex; align-items: center; height: calc(100svh - 76px); overflow: hidden; }
+.row { display: flex; gap: 24px; width: max-content; transform: translateX(var(--x, 0px)); will-change: transform; }
+.row > * { flex: none; width: min(560px, 78vw); }
+
+/* 05 Connections: on white, as the old home page laid it out: a console seamed by one hairline, the agents across its top
+   five to a row, then code, issues and everything else side by side; each name with its mark, lighting as the console
+   comes up the window. */
+.connect { margin-top: 88px; padding: 126px 0 96px; background: #fff; }
+.connect .head { margin-top: 0; }
+.groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 56px 0 0;
+  padding: 1px;
+  border-radius: 18px;
+  list-style: none;
+  background: rgba(20, 20, 23, 0.08);
+}
+.cell { display: grid; align-content: start; gap: 24px; min-width: 0; padding: 26px 30px 32px; background: #faf9f6; }
+.wide { grid-column: 1 / -1; border-radius: 17px 17px 0 0; }
+.cell:nth-child(2) { border-bottom-left-radius: 17px; }
+.cell:last-child { border-bottom-right-radius: 17px; }
+.plate { margin: 0; font: 500 12px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--t-3); }
+.plate b { margin-right: 8px; font-weight: 500; color: var(--cobalt); }
+.marks { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 0; padding: 0; list-style: none; }
+.wide .marks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px 24px; }
+.marks li {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 550;
+  letter-spacing: -0.012em;
+  color: var(--t-1);
+  white-space: nowrap;
+  opacity: 0.22;
+  transition: opacity 500ms var(--ease);
+}
+.marks li[data-on] { opacity: 1; }
+.marks svg { flex: none; }
+
+/* 06 The edge: the tour round the notch and the menu bar under it (EdgeTour), in the page's ink on its paper; the menu bar's
+   title plain, in the page's face (the scene's heading keeps the serif). */
+.edge {
+  --edge-words: var(--t-2);
+  --edge-title: var(--t-1);
+  --edge-path: var(--t-3);
+  --edge-faint: rgba(20, 20, 23, 0.3);
+  --menu-title: clamp(28px, 2.6vw, 38px);
+  --scene-frame: 0 0 0 1px rgba(20, 20, 23, 0.08), 0 40px 90px -40px rgba(40, 30, 10, 0.45);
+  --bezel-fall: 0 40px 100px -40px rgba(40, 30, 10, 0.5);
+}
+.edge h3 { font-family: var(--head); font-weight: 600; line-height: 1.08; letter-spacing: -0.03em; }
+.edge h3 b { font-weight: inherit; letter-spacing: inherit; }
+
+/* 07 Screens: the app's own, running sideways. */
+/* The gallery: its heading over the screens, held with them while they run sideways, as far over them as every scene's
+   heading is over what it shows; the screens as large as the room under the heading lets them be. */
+.gallery .track { margin-top: 0; }
+.gallery .track .stick { flex-direction: column; align-items: stretch; justify-content: center; gap: 56px; }
+.gallery .head { margin-top: 0; }
+/* The room under the heading, the heading's own gap (56px, as the board's and the connections' have) taken out. */
+.shots > * { width: min(640px, 80vw, calc((100svh - 76px - 370px) * 16 / 11)); }
+.shot { margin: 0; }
+.shot .frame { aspect-ratio: 16 / 11; }
+.shot .frame img { height: 100%; object-fit: cover; object-position: 0 0; }
+/* The canvas, drawn live, and the brand pack's picture of one for a phone: the live one is the whole window laid out at
+   its desktop size, which a phone's browser can run out of room drawing. Not drawn at all there, it costs nothing. */
+.live { display: contents; }
+.shot .frame .still { display: none; }
+@media (max-width: 699px) {
+  .live { display: none; }
+  .shot .frame .still { display: block; }
+}
+.shot figcaption { display: grid; gap: 4px; margin-top: 14px; }
+.shot figcaption b { font-size: 16px; letter-spacing: -0.015em; }
+.shot figcaption span { font-size: 14px; line-height: 1.45; color: var(--t-2); }
+
+/* The download, on cobalt, its light along the foot: the light rises as the scene comes in, and its blocks brighten in turn. */
+/* Its words and buttons in the middle of the cobalt: the room over the line a little less, for the room its line height leaves over the letters. */
+.end { position: relative; margin-top: 80px; padding: 89px 0 96px; overflow: hidden; background: var(--cobalt); color: #fff; text-align: center; }
+/* The light is a square picture, 1440px a side at least and as wide as the scene, standing on the scene's foot. It is
+   painted as a background on layers no larger than the scene (and the 140px it rises by), not as six pictures the
+   square's size: each of those is a layer of its own (the blocks move), 1440px a side whatever the screen, and a phone
+   ran out of memory drawing them as the scene came into sight. The blocks' masks are placed as the picture is. */
+.end { container-type: inline-size; }
+.aurora {
+  --side: max(1440px, 100cqw);
+  --tall: var(--side);
+  position: absolute;
+  inset: -140px 0 0;
+  transform: translateY(calc((1 - var(--p, 1)) * 140px));
+  pointer-events: none;
+}
+.aurora i { position: absolute; inset: 0; background: url('./aurora.webp') center bottom / var(--side) var(--tall) no-repeat; }
+.block {
+  --mask: radial-gradient(var(--mw) 22% at var(--mx) 100%, #000 0, rgba(0, 0, 0, 0.6) 45%, transparent 100%);
+  opacity: 0;
+  filter: saturate(2.4) brightness(1.06) contrast(1.08);
+  mask: var(--mask) center bottom / var(--side) var(--tall) no-repeat;
+  animation: brighten var(--md) cubic-bezier(0.35, 0.6, 0.3, 1) var(--dl) infinite;
+}
+.block[data-block='1'] { --mx: 8%; --mw: 20%; --md: 4.4s; --dl: -0.7s; }
+.block[data-block='2'] { --mx: 30%; --mw: 22%; --md: 5.4s; --dl: -2.8s; }
+.block[data-block='3'] { --mx: 50%; --mw: 26%; --md: 4.8s; --dl: -3.8s; }
+.block[data-block='4'] { --mx: 70%; --mw: 22%; --md: 6s; --dl: -1.5s; }
+.block[data-block='5'] { --mx: 92%; --mw: 20%; --md: 5.1s; --dl: -4.6s; }
+/* Pinch-zoomed in (lib/zoom.ts) the blocks aren't drawn: their pulse is stopped there, so they show nothing, and a
+   filtered, masked box is still drawn whole, off screen, at the zoom's sharpness; five of them the scene's size were
+   more than a phone's browser has, and it reloaded the page. The light under them stays. */
+:global(html[data-zoomed]) .block { display: none; }
+@keyframes brighten {
+  0% { opacity: 0; }
+  12% { opacity: 0.8; }
+  24% { opacity: 0.6; }
+  32% { opacity: 0.72; }
+  50%, 100% { opacity: 0; }
+}
+.endLine { position: relative; font-family: var(--head); font-size: clamp(38px, 4.4vw, 64px); font-weight: 600; line-height: 1.02; letter-spacing: -0.04em; }
+.end .endLine b { color: #fff; }
+.endCtas { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 44px; }
+.endGet,
+.endStar {
+  display: inline-flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 24px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.endGet { background: #fff; color: var(--t-1); }
+.endGet:hover { color: var(--cobalt); }
+.endStar { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.endStar:hover { box-shadow: inset 0 0 0 1px #fff; }
+
+.altitude {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 30;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--t-1);
+  font: 500 13px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease);
+}
+.altitude b { font-weight: 500; color: var(--cobalt); }
+.altitude[data-on] { opacity: 1; }
+
+@media (max-width: 900px) {
+  .head { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .altitude { right: 14px; bottom: 14px; padding: 7px 11px; font-size: 11px; }
+  /* The light as wide as the scene, so a phone sees all its colours, end to end, as a wide screen does; drawn taller
+     than wide, or the band of light along its foot would be a sliver. */
+  .aurora { --side: 100cqw; --tall: 900px; }
+}
+@media (max-width: 1099px) {
+  .groups { grid-template-columns: minmax(0, 1fr); }
+  .wide .marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cell:nth-child(2) { border-bottom-left-radius: 0; }
+  .cell:last-child { border-bottom-left-radius: 17px; }
+}
+@media (max-width: 700px) {
+  .groups { margin-top: 40px; border-radius: 14px; }
+  .cell { padding: 20px; }
+  .marks li { font-size: 15px; line-height: 1.25; white-space: normal; }
+  .wide .marks { column-gap: 16px; }
+}
+/* On a phone the board's heading sits closer and reads smaller, as the race's does, so its views have the window's room under it. */
+@media (max-width: 699px) {
+  .board .head { margin-top: 8px; gap: 14px; }
+  .board .lead { font-size: 16px; }
+}
+/* With reduced motion nothing is pinned or runs sideways: the rows wrap, the light holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .stick { position: static; }
+  .track .stick { height: auto; overflow: visible; }
+  .row { flex-wrap: wrap; width: auto; transform: none; }
+  .block { animation: none; }
+  .dot, .fall { display: none; }
+}

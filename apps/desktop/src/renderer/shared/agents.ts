@@ -144,6 +144,17 @@ const CAUTIONS: Readonly<Record<string, string>> = {
 
 export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS[agentId]
 
+/**
+ * The agents whose sign-in in the browser comes back as a code to paste (Claude Code's page shows one), rather than to a
+ * port on the computer the agent runs on: from a window on another computer's home, only theirs can finish in this one's
+ * browser. The rest sign in there by a one-time code, where they have one, or in a terminal on the home.
+ */
+const PASTES_BACK: ReadonlySet<string> = new Set(['claude-code'])
+
+/** The ways an agent signs in from this window: on another computer's home, a browser way only where it comes back as a code. */
+export const waysFrom = (agent: Pick<AgentStatus, 'id' | 'ways'>, remote: boolean): AgentStatus['ways'] =>
+  remote ? agent.ways.filter((way) => way !== 'browser' || PASTES_BACK.has(agent.id)) : agent.ways
+
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {
   'copilot-direct': 'Althar',

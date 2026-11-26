@@ -96,6 +96,57 @@ export const Bare: Story = {
   },
 }
 
+/**
+ * A fresh home, as runner-1 was: its agents signed out there, no code host connected, and nothing found on its disk. Each
+ * agent signs in, and GitHub or GitLab connects, in a press; this Mac's projects, whose code is on a host, have a door.
+ */
+export const SettingUp: Story = {
+  args: {
+    toured: true,
+    repositories: [],
+    found: [],
+    here: [
+      { id: 'proj_althar', ink: ProjectInk.Teal },
+      { id: 'proj_site', ink: ProjectInk.Clay },
+      { id: 'proj_mobile', ink: ProjectInk.Ochre },
+    ],
+    needs: [
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.Anthropic, state: 'signedOut', command: 'claude auth login' },
+      { id: 'codex', name: 'Codex', brand: Brand.OpenAI, state: 'signedOut', command: 'codex login' },
+      { id: 'github', name: 'GitHub', brand: Brand.GitHub, state: 'connect' },
+      { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, state: 'connect' },
+      { id: 'git', name: 'git', icon: 'branch', state: 'ready', note: '2.47.3' },
+    ],
+    onConnect: fn(),
+  },
+}
+
+/** The same, on what work there has: each that isn't ready with its press. */
+export const SettingUpWhatItHas: Story = {
+  args: { ...SettingUp.args, toured: false },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await userEvent.click(await page.findByRole('button', { name: 'Next' }))
+    await expect(await page.findByRole('button', { name: 'Connect GitHub on runner-1' })).toBeVisible()
+  },
+}
+
+/** A home that makes projects, on a release older than setting it up from here: its update, under what it has. */
+export const Behind: Story = {
+  args: {
+    toured: true,
+    needs: [
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.Anthropic, state: 'signedOut', command: 'claude auth login' },
+      { id: 'git', name: 'git', icon: 'branch', state: 'ready', note: '2.47.3' },
+    ],
+    onSignIn: undefined,
+    behind: {
+      command: 'sh "${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher" update --apply --wait',
+      run: { state: 'idle' },
+    },
+  },
+}
+
 /** Where it couldn't look on the home's disk: the folder door stays, saying so. */
 export const LookFailed: Story = { args: { toured: true, found: 'failed' } }
 
@@ -150,6 +201,34 @@ export const OlderFailed: Story = {
     // Opened as a pointer would, not a key: no focus ring left on it.
     await fireEvent.click(await page.findByRole('button', { name: 'Update it on runner-1 yourself' }))
     await expect(await page.findByRole('button', { name: 'Copy the update command' })).toBeVisible()
+  },
+}
+
+/** The newest release moves the home's data to a new format: asked once, in place, before anything runs. */
+export const OlderMovesData: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0' } } },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement)
+    await expect(await page.findByText('Update runner-1 to 0.2.0?')).toBeVisible()
+    await fireEvent.click(page.getByRole('button', { name: 'Update' }))
+    await expect(args.onUpdate).toHaveBeenCalledOnce()
+  },
+}
+
+/** The same, with tasks running there: one question says both. */
+export const OlderMovesDataBusy: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0', busy: 2 } } },
+}
+
+/** The newest release speaks an API this app doesn't: not run, and what to do instead. */
+export const OlderNewerApi: Story = {
+  args: {
+    ...OLDER,
+    update: {
+      command: UPDATE,
+      installed: 'known',
+      run: { state: 'failed', problem: 'Althar 0.3.0 for runner-1 needs a newer Althar app. Update this app first, then runner-1.' },
+    },
   },
 }
 

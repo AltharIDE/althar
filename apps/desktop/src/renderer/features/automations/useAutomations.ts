@@ -11,7 +11,7 @@ import type {
 } from '@althar/contracts'
 import { AUTOMATION_DEFAULTS } from '@althar/contracts'
 
-import { messageOf } from '../../data/client'
+import { canCall, messageOf } from '../../data/client'
 import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -51,7 +51,8 @@ export interface AutomationsModel {
 export const useAutomations = (projectId: string): AutomationsModel => {
   const { client, cache } = useServices()
   // A project not known yet has none to read.
-  const read = useQuery({ ...reads(client).automations(projectId), enabled: projectId !== '' })
+  // Not asked of a home that keeps them from this window: its room says so instead.
+  const read = useQuery({ ...reads(client).automations(projectId), enabled: projectId !== '' && canCall(client, 'GetAutomations') })
   const [error, setError] = useState<string | null>(null)
   // Those deleted here, gone from the press until a read without them lands.
   const gone = useGoneAtOnce(read.data?.automations, (one) => one.id)
@@ -115,7 +116,7 @@ export interface AutomationModel {
 
 export const useAutomation = (automationId: string): AutomationModel => {
   const { client, cache } = useServices()
-  const read = useQuery(reads(client).automation(automationId))
+  const read = useQuery({ ...reads(client).automation(automationId), enabled: canCall(client, 'GetAutomation') })
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   // Changes in the order they were made: only the latest failing reads again.

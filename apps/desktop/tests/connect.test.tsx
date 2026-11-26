@@ -467,7 +467,7 @@ describe('connecting Bitbucket', () => {
     expect(await heading('Your account can’t push there')).toBeTruthy()
     expect(within(panel).getByText('Your account there')).toBeTruthy()
     expect(within(panel).getByText('As Reader, your account can’t do this there.')).toBeTruthy()
-    expect(within(panel).getByText('Your account’s role there: its owners can change it.')).toBeTruthy()
+    expect(within(panel).getByText('Its owners can give your account write access there.')).toBeTruthy()
     await press('Connect as it is')
     expect(closed).toHaveBeenCalled()
   })
@@ -887,9 +887,45 @@ describe('connecting GitHub', () => {
       press: 'Check again',
     },
     {
+      // A token kept to reading, or made for another owner, as git's first question of a push was answered.
+      check: lacking('push', {
+        kind: 'no_push',
+        names: ['northwind/meridian-api'],
+        url: 'https://github.com/settings/personal-access-tokens',
+      }),
+      title: 'This token can’t push',
+      says: [
+        'It can read northwind/meridian-api but not push there.',
+        'Give it Contents: Read and write on northwind/meridian-api, with northwind as its resource owner, then Update.',
+      ],
+      press: 'Change it on GitHub',
+      opens: 'https://github.com/settings/personal-access-tokens',
+    },
+    {
       check: lacking('push', { kind: 'role', role: null }),
       title: 'Your account can’t push there',
       says: ['Your account can’t do this there.'],
+      press: 'Check again',
+    },
+    {
+      // A project cloned from someone else's repository: which, why, and a fork of your own a press away.
+      check: lacking('push', { kind: 'role', role: null, names: ['octocat/Hello-World'] }),
+      title: 'You can’t push to octocat/Hello-World',
+      says: [
+        'It’s octocat’s repository, and your account can only read it.',
+        'Fork it to work on your own copy, or ask octocat for write access. Connected as it is, Althar only reads it.',
+      ],
+      press: 'Fork it on GitHub',
+      opens: 'https://github.com/octocat/Hello-World/fork',
+    },
+    {
+      // Several of one owner's: each owner said once, and no single fork to offer.
+      check: lacking('push', { kind: 'role', role: null, names: ['octocat/Hello-World', 'octocat/Spoon-Knife'] }),
+      title: 'You can’t push to 2 of these repositories',
+      says: [
+        'Your account can only read octocat’s repositories.',
+        'Fork them to work on your own copy, or ask octocat for write access. Connected as it is, Althar only reads them.',
+      ],
       press: 'Check again',
     },
     {
@@ -930,6 +966,19 @@ describe('connecting GitHub', () => {
     for (const words of says) expect(within(panel).getByText(words)).toBeTruthy()
     await pressIt(press)
     if (opens !== undefined) expect(open).toHaveBeenLastCalledWith(opens, '_blank')
+  })
+
+  it('says a reason once where lines share it, and no step count on the answer', async () => {
+    const unsaid = { kind: 'unreadable' as const }
+    const check = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'changes' || line.need === 'issues' ? { ...line, state: 'unknown' as const, fact: null, reason: unsaid } : line,
+      ),
+    }
+    const { panel } = await toCheck(check)
+    expect(await within(panel).findAllByText('GitHub doesn’t say what this token may change.')).toHaveLength(1)
+    expect(within(panel).queryByText(/^Step \d of \d$/)).toBeNull()
   })
 
   it('makes a classic token where a fine-grained one can’t read check runs', async () => {

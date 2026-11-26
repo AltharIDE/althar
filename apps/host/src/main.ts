@@ -18,6 +18,7 @@ if (process.argv[2] === 'worker') {
     const updateLocked = process.env.ALTHAR_HOST_UPDATE_LOCKED
     const releaseSigningKey = options.command === 'package-release' ? process.env.ALTHAR_HOST_RELEASE_SIGNING_KEY : undefined
     const workerBinary = options.command === 'package-release' ? process.env.ALTHAR_WORKER_BINARY : undefined
+    const workerTools = options.command === 'package-release' ? process.env.ALTHAR_WORKER_TOOLS : undefined
     const controls = clearServiceEnvironment(process.env)
     const stop = new AbortController()
     const interrupted = () => stop.abort()
@@ -36,6 +37,7 @@ if (process.argv[2] === 'worker') {
           updateLocked,
           releaseSigningKey,
           workerBinary,
+          workerTools,
         }).pipe(Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatJson)]))),
         { signal: stop.signal },
       )

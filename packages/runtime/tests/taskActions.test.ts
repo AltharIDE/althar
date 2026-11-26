@@ -431,16 +431,16 @@ describe('settle_task', () => {
         yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'done' }),
         /^Nothing changed: .* is a change: it is done once its pull request merges/,
       )
-      // Commits of it held for Ship wait on Ship: nothing to keep.
+      // Commits of it held for Ship, waiting to be accepted: any kind keeps all the same, a change with no pull request open as a
+      // prototype ending on its branch, and its commits stay held, Ship there when it is opened.
       const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${change.taskId}`
-      assert.match(
-        yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'keep' }),
-        /has its pull request open, or commits waiting for Ship/,
-      )
-      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${change.taskId}`
-      // Any kind keeps, a change with no pull request open as a prototype ending on its branch: it waits in Kept once it finishes.
+      const at = new Date().toISOString()
+      yield* sql`UPDATE workspaces SET held_at = ${at} WHERE task_id = ${change.taskId}`
       assert.match(yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'keep' }), /^Kept .* for later/)
+      assert.isNotNull((yield* standing(change.taskId))?.keptAt)
+      const held = yield* sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${change.taskId}`
+      assert.isTrue(held.length > 0 && held.every((one) => one.heldAt === at))
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${change.taskId}`
       yield* until(standing(change.taskId), (row) => row?.run === 'running')
       assert.match(yield* callTool(c.access, 'hold_task', { task: change.slug }), /has started: there is no plan to hold/)
       assert.match(yield* callTool(c.access, 'restart_task', { task: change.slug }), /isn’t stopped, held or discarded/)

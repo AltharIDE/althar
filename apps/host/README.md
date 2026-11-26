@@ -21,7 +21,7 @@ node apps/host/dist/althar-host.js init --project /absolute/path/to/repository -
 node apps/host/dist/althar-host.js serve
 ```
 
-`init` registers a checkout that's already on the home machine. Pass `--project` again for each checkout you want to open. You can also leave it out and make projects from the desktop once it's connected: a home with none opens on its welcome. Keep the `homeId` and project IDs it prints. You can initialize again with the same profile to add projects while the service is stopped. The home keeps its identity and key.
+`init` registers a checkout that's already on the home machine. Pass `--project` again for each checkout you want to open. You can also leave it out and make projects from the desktop once it's connected: a home with none opens on its welcome, where its agents sign in, GitHub or GitLab connects on the home (with a token made on the host's page, or the home's own `gh` or `glab` sign-in), and a project clones from the home's code hosts or from one of your projects on the desktop. Keep the `homeId` and project IDs it prints. You can initialize again with the same profile to add projects while the service is stopped. The home keeps its identity and key.
 
 `serve` runs in the foreground. You can stop it with Ctrl-C. For a home that stays up on its own, install the service below.
 
@@ -362,7 +362,7 @@ sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait
 journalctl --user -u althar-host-update.service
 ```
 
-`configure-updates --automatic-updates` lets a compatible staged release activate at the next service start. Use `--manual-updates` to return to explicit application. Changes to the API or database format always need `--apply --allow-incompatible`. Check the clients and make a separate export first.
+`configure-updates --automatic-updates` lets a compatible staged release activate at the next service start. Use `--manual-updates` to return to explicit application. Changes to the API or database format always need `--apply --allow-incompatible`. Check the clients and make a separate export first. A desktop window that reaches the home over SSH does this itself for a release that only moves the data: it asks once, then applies it, and it never applies a release whose API version differs from its own.
 
 ### If an update stops partway through
 

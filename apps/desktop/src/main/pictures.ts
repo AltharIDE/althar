@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -12,7 +12,9 @@ import { pictureAsked } from './pictureAddress'
  * window never names a path. The bytes say what a picture is; anything the
  * window doesn't draw isn't served. Asked for a width, a smaller copy is
  * made once and kept beside the store, so a thread of large screenshots
- * decodes small pictures, and the full one only when it opens.
+ * decodes small pictures, and the full one only when it opens. A window
+ * paired with a home is served the same way, from a store of that home's
+ * own here, which fetches what it doesn't hold through the home's connection.
  */
 
 /** Makes a smaller copy of a picture, as wide as asked; null where it is no wider already, or can't be made. */
@@ -50,13 +52,34 @@ const keepCopy = async (folder: string, name: string, bytes: Buffer) => {
   }
 }
 
-/** The picture an address asks for, from the store at `root`, or 404 for anything else. */
+/**
+ * Where a picture the store doesn't hold comes from: a home's, asked through its connection, for a window paired with it.
+ * Null where it has none either.
+ */
+export type FetchPicture = (digest: string) => Promise<Buffer | null>
+
+/**
+ * A picture fetched from elsewhere, kept in the store as the runtime keeps one, so it is fetched once: only bytes whose
+ * digest is the one asked for, so another's bytes are never served under its name.
+ */
+const fetched = async (root: string, digest: string, fetch: FetchPicture) => {
+  const bytes = await fetch(digest).catch(() => null)
+  if (bytes === null || createHash('sha256').update(bytes).digest('hex') !== digest) return null
+  const path = artifactPath(root, digest)
+  await keepCopy(join(path, '..'), digest, bytes).catch(() => undefined)
+  return bytes
+}
+
+/**
+ * The picture an address asks for, from the store at `root`, or 404 for anything else. With `fetch`, one the store
+ * doesn't hold is fetched, as a window paired with a home has its pictures from the home, and kept there after.
+ */
 export const servePicture =
-  (root: string, resize: Resize) =>
+  (root: string, resize: Resize, fetch?: FetchPicture) =>
   async (request: Request): Promise<Response> => {
     const asked = pictureAsked(request.url)
     if (asked === null) return missing()
-    const bytes = await read(artifactPath(root, asked.digest))
+    const bytes = (await read(artifactPath(root, asked.digest))) ?? (fetch === undefined ? null : await fetched(root, asked.digest, fetch))
     if (bytes === null) return missing()
     const type = pictureType(bytes)
     if (type === null) return missing()

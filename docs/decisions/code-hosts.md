@@ -793,6 +793,16 @@ The decisions above are current. These parts of them aren't built on main:
 
 ## Changes
 
+- 26 Nov 2026: a connection's check asks each repository a project's work is
+  pushed to (a fork's own, never the one it came from) git's own first
+  question of a push (the receive-pack advertisement, which writes nothing),
+  and keeps each repository's own outcome, so a token that may only read
+  there, or was made for another owner, says so when the host is connected and
+  on that project's card, not on a task's last step. A push that opens a pull
+  request and is refused for its sign-in says whose sign-in, for which
+  repository, and what puts it right, claiming only what the host said (a
+  bare 403 is said as a refusal; the account's own read-only role as a role),
+  with the code hosts before Try again, never git's own line.
 - 20 Nov 2026: tasks can attach to and publish to a contributor's fork on
   GitHub and GitLab when the author allows maintainer edits (DEV-170).
 - 12 Nov 2026: the lead and coordinator gain complete discussion pages,

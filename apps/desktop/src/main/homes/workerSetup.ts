@@ -7,8 +7,9 @@ import { sshArguments } from '@althar/transport-node'
 
 import script from '../../../../host/bootstrap/ssh.sh?raw'
 import type { SshHomeTarget } from '../../homes'
-import type { WorkerAgent, WorkerSetup, WorkerSetupAction, WorkerSignInEvent } from '../../workers'
-import { ReleaseProblem, type HostRelease } from './release'
+import type { WorkerAgent, WorkerCheck, WorkerSetup, WorkerSetupAction, WorkerSignInEvent } from '../../workers'
+import type { Fields } from '../../logs/logFile'
+import { ReleaseProblem, type HostRelease, type WorkerRelease } from './release'
 import { loggedInWith, type SetupSystem } from './setup'
 
 /*
@@ -42,7 +43,64 @@ const lastWords = (stderr: string) =>
     .at(-1)
     ?.slice(0, 300)
 
-const STEP = { reach: 0, look: 1, get: 2, enroll: 3, start: 4 } as const
+const STEP = { reach: 0, look: 1, get: 2, enroll: 3, start: 4, check: 5 } as const
+const STEP_NAMES = ['reach', 'look', 'get', 'enroll', 'start', 'check', 'done']
+/** A field of an event as text: its string, else nothing. */
+const textOf = (value: unknown) => (typeof value === 'string' ? value : '')
+
+const ALLOWED = new Set(['NeedsAdministrator', 'SandboxStillFails', 'SandboxUnfixable'])
+
+/** The worker's check, from its `check done` event: kept to what the window shows. */
+export const checkOf = (event: Readonly<Record<string, unknown>> | undefined): WorkerCheck | undefined => {
+  if (event === undefined || typeof event.sandbox !== 'object' || event.sandbox === null) return undefined
+  const sandbox = event.sandbox as { starts?: unknown; problem?: unknown; fix?: unknown }
+  const agents = Array.isArray(event.agents) ? (event.agents as ReadonlyArray<Record<string, unknown>>) : []
+  return {
+    sandbox:
+      sandbox.starts === true
+        ? { starts: true }
+        : {
+            starts: false,
+            problem: typeof sandbox.problem === 'string' ? sandbox.problem : 'Failed',
+            ...(typeof sandbox.fix === 'string' && sandbox.fix.length <= 4_096 && !sandbox.fix.includes('\n') ? { fix: sandbox.fix } : {}),
+          },
+    agents: agents.flatMap((agent) =>
+      typeof agent.id === 'string' && typeof agent.name === 'string' && typeof agent.signedIn === 'boolean'
+        ? [
+            {
+              id: agent.id,
+              name: agent.name,
+              signedIn: agent.signedIn,
+              ...(typeof agent.started === 'boolean' ? { started: agent.started } : {}),
+              ...(typeof agent.message === 'string' ? { message: agent.message.slice(0, 300) } : {}),
+            },
+          ]
+        : [],
+    ),
+  }
+}
+
+/** Where it goes in main.log: Althar's own log, for what went wrong. */
+export interface WorkerLog {
+  readonly info: (message: string, fields?: Fields) => void
+  readonly warn: (message: string, fields?: Fields) => void
+  readonly error: (message: string, fields?: Fields) => void
+}
+
+/**
+ * What of a program's words may go to the log: never a one-time code, the home's grant or anything as long as a key or
+ * a token (base64 of 40 characters or more), and its last lines only.
+ */
+export const forTheLog = (text: string, lines = 20) =>
+  text
+    .replaceAll(/althar-worker1\.[A-Za-z0-9._-]+/g, 'althar-worker1.…')
+    .replaceAll(/[A-Za-z0-9+/_-]{40,}={0,2}/g, '…')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== '')
+    .slice(-lines)
+    .join('\n')
+    .slice(-4_000)
 
 class Stopped extends Error {
   constructor(
@@ -97,19 +155,34 @@ export const workerSetups = (
   interactive: (args: ReadonlyArray<string>) => ChildProcessWithoutNullStreams,
   changed: (setup: WorkerSetup | null) => void,
   said: (event: WorkerSignInEvent) => void,
+  {
+    log,
+    release,
+  }: {
+    readonly log: WorkerLog
+    /** Whether the newest host release can add a worker; `fresh` asks again rather than taking the last answer. */
+    readonly release: (fresh: boolean, signal: AbortSignal) => Promise<WorkerRelease>
+  },
 ) => {
   let setup: WorkerSetup | null = null
   let running: AbortController | undefined
   let here = false
   let pendingKey: { file: string; line: string } | undefined
   let found: HostRelease | undefined
+  // Try again asks afresh whether a release can add a worker.
+  let again = false
 
   const set = (change: Partial<WorkerSetup>) => {
     if (setup === null) return
+    if (change.at !== undefined && change.at !== setup.at)
+      log.info('Adding a worker: step', { worker: setup.name, step: STEP_NAMES[change.at] ?? String(change.at) })
     setup = { ...setup, ...change }
     changed(setup)
   }
-  const say = (line: string) => set({ log: [...(setup?.log ?? []), line].slice(-200) })
+  const say = (line: string) => {
+    log.info('Adding a worker', { worker: setup?.name, said: forTheLog(line, 1) })
+    set({ log: [...(setup?.log ?? []), line].slice(-200) })
+  }
 
   /** ssh.sh with one operation, piped to the machine's sh: its events as they come, and how it ended. */
   const bootstrap = async (
@@ -133,6 +206,18 @@ export const workerSetups = (
     })
     if (signal.aborted) throw signal.reason
     const events = eventsIn(ran.stdout)
+    const failedEvent = events.find((one) => one.state === 'failed')
+    if (ran.code !== 0 || failedEvent !== undefined)
+      // The operation by its name only: its arguments carry the release's envelope and the home's grant.
+      log.warn('Worker SSH call ended badly', {
+        operation,
+        target: sshAddressOf(target),
+        exit: ran.code,
+        failed: failedEvent === undefined ? undefined : `${failedEvent.step} ${textOf(failedEvent.code)}`.trim(),
+        message: typeof failedEvent?.message === 'string' ? forTheLog(failedEvent.message, 3) : undefined,
+        stderr: forTheLog(ran.stderr),
+      })
+    else log.info('Worker SSH call done', { operation, target: sshAddressOf(target) })
     if (ran.code === 255 && !events.some((one) => one.state === 'failed')) {
       const words = lastWords(ran.stderr)
       if (/HOST IDENTIFICATION HAS CHANGED/i.test(ran.stderr)) throw new Stopped('HostKeyChanged', STEP.reach, words)
@@ -245,7 +330,9 @@ export const workerSetups = (
       // As a home is, a worker runs as a user of its own, reached with the key that logged in.
       const key = await acceptedKey(target, probed.stderr, signal)
       say('useradd --create-home althar · your SSH key to ~althar/.ssh/authorized_keys · loginctl enable-linger althar')
-      await bootstrap(target, 'root-login', [key], signal)
+      const made = await bootstrap(target, 'root-login', [key], signal)
+      if (made.events.some((one) => one.step === 'setup' && one.state === 'done' && one.sandboxRule === true))
+        say('AppArmor: bubblewrap may make namespaces for the worker (/etc/apparmor.d/althar-worker-bwrap)')
       target = { ...target, target: `althar@${hostOf(target.target)}` }
       set({ target })
       say(`$ ssh ${target.target}`)
@@ -255,6 +342,7 @@ export const workerSetups = (
       found ??= await system.release(arch, signal)
     } catch (error) {
       if (signal.aborted) throw signal.reason
+      log.warn('Adding a worker: no release to install', { arch, error: error instanceof Error ? error.message : String(error) })
       throw new Stopped(error instanceof ReleaseProblem ? error.code : 'ReleaseRejected', STEP.get)
     }
     const release = found
@@ -306,7 +394,10 @@ export const workerSetups = (
         { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: 15 * 60_000 },
       )
       if (signal.aborted) throw signal.reason
-      if (sent.code !== 0) throw new Stopped('UploadFailed', STEP.get, lastWords(sent.stderr))
+      if (sent.code !== 0) {
+        log.warn('Worker sftp upload failed', { target: sshAddressOf(target), exit: sent.code, stderr: forTheLog(sent.stderr) })
+        throw new Stopped('UploadFailed', STEP.get, lastWords(sent.stderr))
+      }
     } finally {
       await scratch.remove().catch(() => undefined)
     }
@@ -323,6 +414,22 @@ export const workerSetups = (
         })
       : []
 
+  /** The check that ends adding it, or ran again: done, and at its step where it found the worker can't run a task yet. */
+  const checked = (events: ReadonlyArray<Event>) => {
+    const check = checkOf(events.findLast((one) => one.step === 'check' && one.state === 'done'))
+    const ready = check === undefined || (check.sandbox.starts && check.agents.every((agent) => agent.started !== false))
+    if (check !== undefined)
+      log.info('Adding a worker: checked', {
+        worker: setup!.name,
+        sandbox: check.sandbox.starts ? 'starts' : check.sandbox.problem,
+        agents: check.agents
+          .map((agent) => `${agent.id}:${agent.started === undefined ? 'signed out' : agent.started ? 'started' : 'failed'}`)
+          .join(' '),
+      })
+    if (check !== undefined && !check.sandbox.starts) say(`Sandbox: ${check.sandbox.problem}`)
+    set({ phase: 'done', at: ready ? STEP.check + 1 : STEP.check, checking: false, ...(check === undefined ? {} : { check }) })
+  }
+
   const go = (work: (signal: AbortSignal) => Promise<void>) => {
     running?.abort()
     const controller = new AbortController()
@@ -330,11 +437,25 @@ export const workerSetups = (
     void work(controller.signal).catch((error: unknown) => {
       if (controller.signal.aborted || setup === null) return
       if (error instanceof Unknown) {
+        log.info('Adding a worker: its host key is new here', {
+          worker: setup.name,
+          type: error.key.type,
+          fingerprint: error.key.fingerprint,
+        })
         pendingKey = { file: error.key.file, line: error.key.line }
         return set({ phase: 'trust', hostKey: { host: error.key.host, type: error.key.type, fingerprint: error.key.fingerprint } })
       }
       const stopped = error instanceof Stopped ? error : new Stopped('Failed', setup.at, error instanceof Error ? error.message : undefined)
-      if (stopped.said !== undefined) say(stopped.said)
+      log.error('Adding a worker stopped', {
+        worker: setup.name,
+        target: sshAddressOf(setup.target),
+        step: STEP_NAMES[stopped.step],
+        code: stopped.code,
+        said: stopped.said === undefined ? undefined : forTheLog(stopped.said, 5),
+        ...(error instanceof Stopped ? {} : { stack: forTheLog(error instanceof Error ? (error.stack ?? '') : String(error), 12) }),
+      })
+      // NoWorkerRelease's is the newest release's version, for the window's words: no line of What it ran.
+      if (stopped.said !== undefined && stopped.code !== 'NoWorkerRelease') say(stopped.said)
       set({
         phase: 'failed',
         at: stopped.step,
@@ -347,6 +468,20 @@ export const workerSetups = (
       const { problem: _problem, hostKey: _hostKey, ...rest } = setup!
       setup = { ...rest, phase: 'running', at: STEP.reach }
       changed(setup)
+      log.info('Adding a worker', { worker: setup.name, target: sshAddressOf(setup.target), here })
+      // Whether there's a release that can be a worker at all, before anything is done on the machine. Where it can't be
+      // found out (GitHub unreachable), the setup goes on, and stops at the release where it must.
+      const able = await release(again, signal).catch((error: unknown) => {
+        if (signal.aborted) throw signal.reason
+        log.warn('Adding a worker: couldn’t find out the newest host release', { error: String(error) })
+        return undefined
+      })
+      again = false
+      if (signal.aborted) throw signal.reason
+      if (able?.kind === 'none') {
+        log.error('Adding a worker: no release can add one', { newest: able.newest, why: able.why })
+        throw new Stopped('NoWorkerRelease', STEP.reach, able.newest ?? undefined)
+      }
       const publicKey = await prepare(signal)
       set({ phase: 'enroll', at: STEP.enroll, publicKey })
     })
@@ -381,15 +516,57 @@ export const workerSetups = (
           return go(async (signal) => {
             const grant = Buffer.from(JSON.stringify(action.grant)).toString('base64url')
             say(`Signed by the home as ${action.grant.workerId}: starting the worker’s service`)
-            const ran = await bootstrap(setup!.target, 'worker-enroll', [grant, here ? '1' : '0'], signal, { timeout: 120_000 })
+            const ran = await bootstrap(setup!.target, 'worker-enroll', [grant, here ? '1' : '0'], signal, {
+              timeout: 5 * 60_000,
+              event: (one) => {
+                if (one.step === 'start' && one.state === 'done') set({ at: STEP.check })
+              },
+            })
             const started = ran.events.find((one) => one.step === 'start' && one.state === 'done')
             if (started === undefined) throw new Stopped('NotStarted', STEP.start)
-            set({ phase: 'done', at: STEP.start + 1, workerId: action.grant.workerId, agents: agentsOf(started.agents) })
+            log.info('Adding a worker: started', { worker: setup!.name, workerId: action.grant.workerId })
+            set({ workerId: action.grant.workerId, agents: agentsOf(started.agents) })
+            checked(ran.events)
+          })
+        case 'check':
+        case 'sandbox':
+          if (setup.phase !== 'done' || setup.checking === true) return
+          set({ checking: true })
+          return go(async (signal) => {
+            let last: Readonly<Record<string, unknown>> | undefined
+            const keep = (one: Readonly<Record<string, unknown>> & { step: string; state: string }) => {
+              if (one.step === 'check' && one.state === 'done') last = one
+            }
+            try {
+              say(action.kind === 'sandbox' ? `$ sudo -n sh -c '…' on ${setup!.name}` : `Checking ${setup!.name} again`)
+              const ran = await bootstrap(setup!.target, action.kind === 'sandbox' ? 'worker-sandbox' : 'worker-check', [], signal, {
+                timeout: 5 * 60_000,
+                event: keep,
+              })
+              checked(ran.events)
+            } catch (error) {
+              // Allowing it couldn't: its check stands, with why, and the command stays for an administrator.
+              if (!(error instanceof Stopped) || !ALLOWED.has(error.code)) {
+                set({ checking: false })
+                throw error
+              }
+              const found = checkOf(last) ?? setup!.check
+              set({
+                checking: false,
+                ...(found === undefined ? {} : { check: { ...found, allowed: error.code as NonNullable<WorkerCheck['allowed']> } }),
+              })
+            }
           })
         case 'again':
-          if (setup.phase === 'failed') begin()
-          return
+          if (setup.phase !== 'failed') return
+          again = true
+          return begin()
+        case 'unsigned':
+          // The window's home refused the worker's key: its words, as the home said them, for the log.
+          log.error('Adding a worker: the home didn’t sign its key', { worker: setup.name, said: forTheLog(action.said ?? '', 5) })
+          return set({ phase: 'failed', problem: { code: 'WorkerNotAdded', ...(action.said === undefined ? {} : { said: action.said }) } })
         case 'stop':
+          log.info('Adding a worker: stopped by the person', { worker: setup.name, step: STEP_NAMES[setup.at] })
           running?.abort()
           return set({ phase: 'failed', problem: { code: 'Stopped' } })
         case 'dismiss':
@@ -401,7 +578,10 @@ export const workerSetups = (
     /** The worker's agents and their sign-ins, checked over SSH. */
     agents: async (ssh: string) => {
       const controller = new AbortController()
-      const ran = await bootstrap(sshTargetOf(ssh), 'worker-agents', [], controller.signal, { timeout: 60_000 })
+      const ran = await bootstrap(sshTargetOf(ssh), 'worker-agents', [], controller.signal, { timeout: 60_000 }).catch((error: unknown) => {
+        log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
+        throw error
+      })
       return agentsOf(ran.events.find((one) => one.step === 'agents' && one.state === 'done')?.agents)
     },
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => {
@@ -413,23 +593,46 @@ export const workerSetups = (
         `sh -c ${quote(script)} sh ${['worker-sign-in', agent, way].map(quote).join(' ')}`,
       ])
       controller.signal.addEventListener('abort', () => child.kill(), { once: true })
+      log.info('Worker sign-in started', { target: ssh, agent, way })
       let partial = ''
+      let stderr = ''
       child.stdout.setEncoding('utf8')
       child.stdout.on('data', (data: string) => {
         partial += data
         const lines = partial.split('\n')
         partial = lines.pop() ?? ''
         for (const one of eventsIn(lines.join('\n'))) {
-          if (one.step === 'sign-in' && typeof one.kind === 'string') said(one as unknown as WorkerSignInEvent)
-          else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
-          else if (one.state === 'failed')
+          if (one.step === 'sign-in' && typeof one.kind === 'string') {
+            // Its kind only: a device code, a link, who signed in and a refusal's words stay out of the log; a failure's
+            // words go in, cut as every line is.
+            if (one.kind === 'failed') log.warn('Worker sign-in failed', { target: ssh, agent, message: forTheLog(textOf(one.message), 3) })
+            else log.info('Worker sign-in', { target: ssh, agent, kind: one.kind })
+            said(one as unknown as WorkerSignInEvent)
+          } else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
+          else if (one.step === 'check' && one.state === 'done') {
+            const check = checkOf(one)
+            if (check !== undefined) said({ kind: 'checked', check })
+          } else if (one.state === 'failed') {
+            log.warn('Worker sign-in failed', {
+              target: ssh,
+              agent,
+              code: textOf(one.code),
+              message: forTheLog(textOf(one.message), 3),
+            })
             said({ kind: 'failed', message: typeof one.message === 'string' ? one.message : 'The sign-in stopped.' })
+          }
         }
       })
-      child.stderr.resume()
+      // What SSH said, kept short, for the log should the connection fail; a code pasted back goes in, never out.
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (data: string) => {
+        stderr = (stderr + data).slice(-8_000)
+      })
       child.stdin.on('error', () => undefined)
       child.on('exit', (code) => {
         if (signingIn?.controller === controller) signingIn = undefined
+        if (code === 255 && !controller.signal.aborted)
+          log.warn('Worker sign-in couldn’t reach the worker', { target: ssh, agent, exit: code, stderr: forTheLog(stderr) })
         if (code === 255 && !controller.signal.aborted) said({ kind: 'failed', message: 'The worker couldn’t be reached over SSH.' })
       })
       signingIn = { controller, write: (line) => child.stdin.write(`${line}\n`) }

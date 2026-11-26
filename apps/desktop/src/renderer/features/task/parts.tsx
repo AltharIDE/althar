@@ -162,6 +162,8 @@ export interface PartsActions {
   readonly move?: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => void
   /** Calls off a move that waits. */
   readonly dropMove?: () => void
+  /** Calls off a move between the home and a worker that waits for its lead's turn. */
+  readonly dropPlace?: () => void
   /** Points the running task at another branch to work toward. */
   readonly workToward?: (branch: string) => void
   /** Stops a helper its lead started. */
@@ -190,29 +192,33 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     const uncommitted = task.files.filter((file) => file.uncommitted).length
     const { move, dropMove } = act
     const moving = task.moving
+    // A move between the home and a worker that waits for its lead's turn: said, and called off, here.
+    const placing = task.placing
     const moves =
-      move === undefined || dropMove === undefined
-        ? []
-        : moving === undefined
-          ? [
-              {
-                label: task.local === true ? t.toWorktree : t.toLocal,
-                onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
-                variant: 'quiet' as const,
-              },
-            ]
-          : moving.seen === undefined
-            ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
-            : [
-                { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
-                { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+      placing !== undefined && placing.why !== '' && act.dropPlace !== undefined
+        ? [{ label: t.callOff, onClick: act.dropPlace, variant: 'quiet' as const }]
+        : move === undefined || dropMove === undefined
+          ? []
+          : moving === undefined
+            ? [
+                {
+                  label: task.local === true ? t.toWorktree : t.toLocal,
+                  onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
+                  variant: 'quiet' as const,
+                },
               ]
+            : moving.seen === undefined
+              ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
+              : [
+                  { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
+                  { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+                ]
     parts.push({
       id: 'worktree',
       icon: 'folder',
       name: task.local === true ? t.local : t.worktree,
       // A move that waits says why, in place of its files; one that asks waits on the person.
-      detail: moving?.why ?? t.files(task.files.length),
+      detail: moving?.why ?? (placing?.why === '' ? undefined : placing?.why) ?? t.files(task.files.length),
       ...(moving?.seen === undefined || move === undefined
         ? {}
         : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),

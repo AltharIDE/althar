@@ -72,6 +72,7 @@ export const WINDOW_ACTIONS = {
   answerCheckout: { person: 'lets a Local task take their own checkout' },
   move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
   dropMove: { person: 'calls off a move into or out of their own checkout' },
+  moveTo: { tool: 'change_part' },
   workToward: { tool: 'work_toward' },
   runIt: { person: 'says how far to trust a pull request’s code: a lead’s run_it only relays their word' },
   stopRunning: { person: 'takes back the trust they gave a pull request’s code: only they stop running it' },

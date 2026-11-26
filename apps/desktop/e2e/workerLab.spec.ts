@@ -137,7 +137,7 @@ test('adds a fresh Linux machine as a worker over SSH, picks its project and sig
     await main.getByRole('button', { name: 'Add a worker', exact: true }).click()
     const codeDialog = page.getByRole('dialog', { name: `Add a worker to ${THIS}` })
     await codeDialog.getByRole('radio', { name: 'With a code' }).click()
-    const line = codeDialog.getByText(/althar-worker\.sh \| sh -s -- join/)
+    const line = codeDialog.getByText(/althar-worker\.sh \| ALTHAR_RELEASE_BASE=\S+ sh -s -- join/)
     await expect(line).toBeVisible({ timeout: 60_000 })
     await shoot(page, '9-with-a-code', codeDialog)
     execFileSync(withCode, [(await line.textContent()) ?? ''], { stdio: 'inherit', timeout: 10 * 60_000 })

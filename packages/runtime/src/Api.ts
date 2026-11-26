@@ -17,7 +17,10 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  PICTURE_BYTES,
   SOCKET_CALLS,
+  SOCKET_CODE_HOSTS,
+  SOCKET_CODE_SERVICES,
   SocketAllowed,
   type MessageSender,
   type ClientIdentity,
@@ -52,6 +55,7 @@ import { SqlClient } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
+import { pictureType } from './artifactFiles'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
 import {
@@ -91,6 +95,7 @@ import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { checkoutNeeds, withNeeds } from './toolNeeds'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Terminals } from './Terminals'
@@ -353,11 +358,28 @@ export const handlers = apiLayer(
       identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
         ? effect
         : Effect.fail(
-            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+            new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
           )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
+    /**
+     * A socket sets its home's code hosts up, never its trackers, whose links to projects stay with the person's own window:
+     * a product it names, or a connection's own, must host code, and it follows and ends only the sign-ins it started.
+     */
+    const socketSetUp = identity.role === 'socket'
+    const signInsStarted = new Set<string>()
+    const notTrackers = () => new ApiError({ reason: 'PersonRequired', message: 'Connect or remove a tracker in the person’s own window.' })
+    const codeHostOnly = (product: string) => (socketSetUp && !SOCKET_CODE_HOSTS.has(product) ? Effect.fail(notTrackers()) : Effect.void)
+    const codeServiceOnly = (service: string) =>
+      socketSetUp && !SOCKET_CODE_SERVICES.has(service) ? Effect.fail(notTrackers()) : Effect.void
+    const codeHostConnection = (connectionId: string | undefined) =>
+      !socketSetUp || connectionId === undefined
+        ? Effect.void
+        : Effect.flatMap(Effect.orDie(sql<{ product: string }>`SELECT product FROM connections WHERE id = ${connectionId}`), ([row]) =>
+            row === undefined ? Effect.void : codeHostOnly(row.product),
+          )
+    const ownSignIn = (flowId: string) => (socketSetUp && !signInsStarted.has(flowId) ? Effect.fail(notTrackers()) : Effect.void)
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
     const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
@@ -1090,15 +1112,19 @@ export const handlers = apiLayer(
             return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
           }),
         ),
+      // A host that can't tell lists all it says it does.
+      ReadHostReach: ({ connectionId }) =>
+        api(Effect.flatMap(codeHostOf(connectionId), (host) => host.reach?.() ?? Effect.succeed({ limited: null }))),
       ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
-      CloneRepository: ({ commandId, grant, from }) =>
+      CloneRepository: ({ commandId, grant, from, folder }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
-              const path = yield* cloneRepository({ parent, ...source })
+              // A name of the window's, in place of the repository's: refused, as one taken is, where it is anything but a name.
+              const path = yield* cloneRepository({ parent, ...source, ...(folder === undefined ? {} : { folder }) })
               return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
@@ -1332,7 +1358,15 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
+      ListProjectWorkers: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const workers = config.workers?.list(projectId) ?? []
+            // What the project's files need that each lacks, for a worker that has checked itself.
+            if (workers.every((worker) => worker.readiness === undefined)) return workers
+            return withNeeds(workers, yield* checkoutNeeds(projectId).pipe(Effect.orElseSucceed(() => [])))
+          }).pipe(Effect.provideService(Instance, instance)),
+        ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       GetSearchDocuments: ({ after, search }) =>
         api(
@@ -2043,6 +2077,7 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      PlacePlan: ({ commandId, planId, workerId, chosenAt }) => once(commandId, api(plans.place(planId, workerId, actorId, chosenAt))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
         once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
@@ -2300,6 +2335,28 @@ export const handlers = apiLayer(
         once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
       DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.place', { taskId, to }, commandId), (said) =>
+              runs.place({
+                envelope: said,
+                taskId,
+                to,
+                ...(lead === undefined
+                  ? {}
+                  : {
+                      lead: {
+                        ...(lead.model === undefined ? {} : { model: lead.model }),
+                        ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                      },
+                    }),
+                ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
+              }),
+            ),
+          ),
+        ),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -2418,56 +2475,69 @@ export const handlers = apiLayer(
           }),
         ),
       StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            connections.startSignIn({
-              product,
-              actorId: actorId,
-              ...(webUrl === undefined ? {} : { webUrl }),
-              ...(connectionId === undefined ? {} : { connectionId }),
-            }),
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              connections
+                .startSignIn({
+                  product,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                })
+                .pipe(Effect.tap((started) => Effect.sync(() => signInsStarted.add(started.flowId)))),
+            ),
           ),
         ),
-      GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
-      CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
+      GetSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.signIn(flowId))),
+      CancelSignIn: ({ flowId }) => Effect.andThen(ownSignIn(flowId), api(connections.cancelSignIn(flowId))),
       ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectToken({
-                product,
-                token,
-                actorId: actorId,
-                ...(webUrl === undefined ? {} : { webUrl }),
-                ...(user === undefined ? {} : { user }),
-                ...(key === undefined ? {} : { key }),
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectToken({
+                  product,
+                  token,
+                  actorId: actorId,
+                  ...(webUrl === undefined ? {} : { webUrl }),
+                  ...(user === undefined ? {} : { user }),
+                  ...(key === undefined ? {} : { key }),
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      GetConnectGuide: ({ service }) => api(connections.guide(service)),
-      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      GetConnectGuide: ({ service }) => Effect.andThen(codeServiceOnly(service), api(connections.guide(service))),
+      FindServer: ({ service, webUrl }) => Effect.andThen(codeServiceOnly(service), api(connections.findServer(service, webUrl))),
       ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
-        once(
-          commandId,
-          api(
-            Effect.map(
-              connections.connectCli({
-                product,
-                webUrl,
-                actorId: actorId,
-                ...(connectionId === undefined ? {} : { connectionId }),
-              }),
-              connectionOf,
+        Effect.andThen(
+          Effect.andThen(codeHostOnly(product), codeHostConnection(connectionId)),
+          once(
+            commandId,
+            api(
+              Effect.map(
+                connections.connectCli({
+                  product,
+                  webUrl,
+                  actorId: actorId,
+                  ...(connectionId === undefined ? {} : { connectionId }),
+                }),
+                connectionOf,
+              ),
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
-      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, actorId))),
+      CheckConnection: ({ connectionId, project }) =>
+        Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId, project))),
+      Disconnect: ({ commandId, connectionId }) =>
+        Effect.andThen(codeHostConnection(connectionId), once(commandId, api(connections.remove(connectionId, actorId)))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
       PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
@@ -2957,6 +3027,17 @@ export const handlers = apiLayer(
       ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
       WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
       CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      // A picture a thread shows, by its digest, for a window on another computer or a phone: only what a window draws.
+      ReadPicture: ({ digest }) =>
+        api(
+          Effect.gen(function* () {
+            const bytes = yield* artifacts.read(digest)
+            const type = bytes === null ? null : pictureType(bytes)
+            if (bytes === null || type === null || bytes.byteLength > PICTURE_BYTES)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This picture isn’t kept here.' })
+            return { mediaType: type, bodyBase64: Buffer.from(bytes).toString('base64') }
+          }),
+        ),
       ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
         api(
           Effect.gen(function* () {
@@ -3122,7 +3203,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
                 return yield* new ApiError({
                   reason: 'PersonRequired',
-                  message: 'This call needs the person in the window or on a paired device.',
+                  message: 'This home doesn’t take that from this connection yet.',
                 })
               const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
               const prioritized = effect.pipe(

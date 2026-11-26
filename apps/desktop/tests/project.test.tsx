@@ -57,6 +57,14 @@ function Project({
   )
 }
 
+/** What a worker's own check found where it can take a task: its sandbox starts, it has git, and Claude Code started there. */
+const CHECKED = {
+  sandbox: { starts: true as const },
+  tools: [{ name: 'git', version: '2.43.0' }],
+  models: [],
+  agents: [{ providerId: 'claude-code', starts: true }],
+}
+
 const session = {
   id: 'sc',
   agentId: 'claude-code',
@@ -618,7 +626,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
       startPlan: vi
         .fn(async () => undefined)
         .mockRejectedValueOnce(new ApiError({ reason: 'Invalid', message: 'Linux worker aaaaaa is at work on another task.' })),
@@ -637,6 +645,134 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
+  it('offers where it runs as it counts down, keeping the countdown for a worker that can take it', async () => {
+    const free = 'wrk_' + 'f'.repeat(32)
+    const busy = 'wrk_' + '9'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [
+        { workerId: free, providers: ['claude-code'], busy: false, readiness: CHECKED },
+        { workerId: busy, providers: ['claude-code'], busy: true, readiness: CHECKED },
+      ]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
+    // Kept, so the countdown starts it there; it still counts down.
+    expect(client.placePlan).toHaveBeenCalledWith('pln1', free, expect.any(Number))
+    expect(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', free)
+  })
+
+  it('holds a countdown at once where the worker chosen can’t take it', async () => {
+    const workerId = 'wrk_' + '9'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        worksIn: 'worktree',
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    let changed: () => void = () => {}
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
+      changePlan: vi.fn(() => new Promise<void>((resolve) => (changed = resolve))),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker 999999' }))
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+    // Local can't go to a worker: the runtime holds it as it changes it, in the one request; shown held before it answers,
+    // saying why, with the way back to the home.
+    await userEvent.click(screen.getByRole('radio', { name: 'Local' }))
+    const [planId, , , where] = vi.mocked(client.changePlan).mock.calls.at(-1) ?? []
+    expect([planId, where]).toEqual(['pln1', 'checkout'])
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect((await screen.findByRole('alert')).textContent).toContain('Choose Worktree to run it on a worker.')
+    // Once the request is done, the runtime's copy says where it stands: here, still counting down.
+    await act(async () => changed())
+    expect(await screen.findByRole('button', { name: 'Start now' })).toBeTruthy()
+  })
+
+  it('goes back to where it ran when the runtime turns a choice down', async () => {
+    const workerId = 'wrk_' + 'f'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        runsOn: workerId,
+        runsOnChosenAt: 1,
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
+      placePlan: vi.fn(async () => {
+        throw new ApiError({ reason: 'Invalid', message: 'Linux worker ffffff is at work on another task.' })
+      }),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    // Placed on the worker before; the person moves it home, which the runtime turns down.
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: Linux worker ffffff' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
+    expect(client.placePlan).toHaveBeenCalledWith('pln1', null, expect.any(Number))
+    await screen.findByText('Linux worker ffffff is at work on another task.')
+    expect(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+  })
+
+  it('keeps the latest choice of where it runs while earlier ones are still on their way, and starts on the home by name', async () => {
+    const first = 'wrk_' + 'f'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const answers: Array<{ readonly placed: (placed: boolean) => void; readonly fail: (failure: unknown) => void }> = []
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId: first, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
+      placePlan: vi.fn(() => new Promise<boolean>((placed, fail) => answers.push({ placed, fail }))),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
+    expect(client.placePlan).toHaveBeenLastCalledWith('pln1', null, expect.any(Number))
+    // The first choice turned down after the second was made: the second stands.
+    await act(async () => answers[0]?.fail(new ApiError({ reason: 'Invalid', message: 'Linux worker ffffff is at work on another task.' })))
+    await screen.findByText('Linux worker ffffff is at work on another task.')
+    expect(screen.getByRole('button', { name: 'Runs on: This Mac' })).toBeTruthy()
+    // Started while the second is still on its way: on the home, by name, not wherever the plan was placed before.
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
+  })
+
   it('offers the best available worker while keeping This home selected by default', async () => {
     const plan = card().plan
     if (plan == null) throw new Error('The task card fixture needs a plan.')
@@ -652,6 +788,7 @@ describe('the Talk room', () => {
           providers: ['claude-code'],
           busy: false,
           capacity: { platform: 'linux' as const, architecture: 'arm64' as const, cpuCores: 6, freeMemoryMib: 4096, freeDiskMib: 8192 },
+          readiness: CHECKED,
         },
       ]),
     })
@@ -674,8 +811,8 @@ describe('the Talk room', () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
       listProjectWorkers: vi.fn(async () => [
-        { workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false },
-        { workerId: available, providers: ['claude-code'], multiRepoProviders: ['claude-code'], busy: false },
+        { workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false, readiness: CHECKED },
+        { workerId: available, providers: ['claude-code'], multiRepoProviders: ['claude-code'], busy: false, readiness: CHECKED },
       ]),
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -698,7 +835,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
     })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
@@ -710,7 +847,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Use This Mac' }))
     expect(screen.queryByRole('alert')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
   })
 
   it('names the home neutrally in a remote window until the window has read which home it is', async () => {
@@ -723,7 +860,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
     })
     // The workers are in, and the window's read of its home hasn't answered yet.
     let answer: (state: HomeState) => void = () => {}

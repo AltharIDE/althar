@@ -206,9 +206,10 @@ export const useTabs = (): TabsModel => {
     others: (projects ?? []).filter((project) => !open.includes(project.id)).map((project) => tabOf(project, yoursInProject(project.id))),
     current: onNew ? (draft?.id ?? null) : current,
     yours: (projects ?? []).reduce((sum, project) => sum + yoursInProject(project.id), 0),
-    // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs. A
-    // new project under way on a home with none, as its welcome opens one, has its tab, and Home goes back to the welcome.
-    none: (projects !== null && projects.length === 0 && !onNew) || welcoming,
+    // This computer's first screen, before there's a project or while the welcome is still on show over the one made on its
+    // way: the window is all page, with no tabs. Anywhere else it has its bar, settings and Althar's page included, so there's
+    // always a way back. A home on another computer always has it: its welcome sits under Home, with the gear and the home.
+    none: client.connection === undefined && where.kind === 'home' && ((projects !== null && projects.length === 0) || welcoming),
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
       if (id === null && kept?.home === false) store.change((was) => ({ ...was, home: true }))

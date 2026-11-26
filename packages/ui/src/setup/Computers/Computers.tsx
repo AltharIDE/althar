@@ -76,6 +76,11 @@ export interface ComputerWorker {
    * stopped, so it can't be taken out before then.
    */
   stranded?: boolean | undefined
+  /**
+   * What its own check found that stops a task there (ADR-103), in words: what, what to do, and the command an
+   * administrator runs there, to copy; none where it is ready, or hasn't checked.
+   */
+  unready?: { title: string; body?: string | undefined; command?: string | undefined } | undefined
 }
 
 /** The home's workers: whether it takes any (it listens for them), and each it enrolled. */
@@ -106,7 +111,7 @@ export interface ComputersText {
   memoryFree: string
   diskFree: string
   unknown: string
-  facts: { computer: string; agents: string; projects: string; id: string; memory: string; workers: string }
+  facts: { computer: string; agents: string; projects: string; id: string; memory: string; workers: string; ready: string }
   noAgents: string
   noProjects: string
   /** Over the projects to pick, while none is. */
@@ -168,7 +173,8 @@ export const computersText: ComputersText = {
       case 'working':
         return worker.task === null ? 'Running a task' : `${worker.task.title} · ${worker.task.project}`
       case 'free':
-        return 'Ready for a task'
+        // Free, but its check found what stops a task there: said below, on its Ready line.
+        return worker.unready === undefined ? 'Ready for a task' : 'Can’t take a task yet'
       case 'full':
         return 'Out of memory or disk space'
       case 'offline':
@@ -178,7 +184,15 @@ export const computersText: ComputersText = {
   memoryFree: 'Memory free',
   diskFree: 'Disk free',
   unknown: 'Not reported yet',
-  facts: { computer: 'Computer', agents: 'Agents', projects: 'Projects', id: 'Worker ID', memory: 'Memory', workers: 'Workers' },
+  facts: {
+    computer: 'Computer',
+    agents: 'Agents',
+    projects: 'Projects',
+    id: 'Worker ID',
+    memory: 'Memory',
+    workers: 'Workers',
+    ready: 'Ready',
+  },
   noAgents: 'None it has said',
   noProjects: 'None yet',
   pickProjects: 'Pick the projects it works on. It takes no tasks until one is picked.',
@@ -557,6 +571,22 @@ function WorkerSheet({
             </div>
             <div className={s.facts}>
               <SheetFact label={t.facts.computer}>{worker.kind ?? t.unknown}</SheetFact>
+              {worker.unready !== undefined && (
+                <SheetFact label={t.facts.ready}>
+                  <span className={s.stopped}>
+                    <Problem as="span" size="small">
+                      {worker.unready.title}
+                    </Problem>
+                    {worker.unready.body !== undefined && <span className={s.addressHint}>{worker.unready.body}</span>}
+                    {worker.unready.command !== undefined && (
+                      <span className={s.lineToRun}>
+                        <Code className={s.lineToRunText}>{worker.unready.command}</Code>
+                        <CopyButton value={worker.unready.command} ghost />
+                      </span>
+                    )}
+                  </span>
+                </SheetFact>
+              )}
               <SheetFact label={t.facts.agents}>
                 {worker.agents.length === 0 ? (
                   t.noAgents

@@ -117,12 +117,40 @@ describe('adding a worker', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('once started, waits for it to connect', () => {
-    dialog({ setup: running({ phase: 'done', at: 5, version: '0.11.0' }) })
+  it('once started and checked, waits for it to connect', () => {
+    dialog({ setup: running({ phase: 'done', at: 6, version: '0.11.0', checked: 'Its sandbox starts, and Codex started.' }) })
     expect(screen.getByText('0.11.0, signature checked')).toBeTruthy()
     expect(screen.getByText('Signed by This Mac')).toBeTruthy()
     expect(screen.getByText('Starts with the machine, updates itself')).toBeTruthy()
+    expect(screen.getByText('Its sandbox starts, and Codex started.')).toBeTruthy()
     expect(screen.getByText('Waiting for it to connect…')).toBeTruthy()
+  })
+
+  it('stops at its check where it found what stops a task, with what lets it, Check again and Allow with sudo', async () => {
+    const onAllow = vi.fn()
+    const onCheckWorker = vi.fn()
+    dialog({
+      setup: running({
+        phase: 'done',
+        at: 5,
+        canAllow: true,
+        problem: {
+          title: 'Its agents’ sandbox can’t start on box.',
+          body: 'Allow the worker’s once:',
+          command: 'sudo sh -c x',
+          retry: true,
+        },
+      }),
+      onAllow,
+      onCheckWorker,
+    })
+    expect(screen.getByText('Its agents’ sandbox can’t start on box.')).toBeTruthy()
+    expect(screen.getByText('sudo sh -c x')).toBeTruthy()
+    expect(screen.queryByText('Waiting for it to connect…')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Allow with sudo' }))
+    expect(onAllow).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(onCheckWorker).toHaveBeenCalled()
   })
 
   it('gives a code’s line, how long it works, and says when the home couldn’t make one', () => {

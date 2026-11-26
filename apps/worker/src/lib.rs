@@ -14,6 +14,8 @@ mod agent_managed;
 #[cfg(target_os = "linux")]
 mod agent_preview;
 #[cfg(target_os = "linux")]
+mod agent_readiness;
+#[cfg(target_os = "linux")]
 mod agent_reservation;
 #[cfg(target_os = "linux")]
 mod agent_setup;

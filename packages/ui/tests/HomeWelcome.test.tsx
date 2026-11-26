@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Brand } from '../src/foundations/brands/brands'
 import { ProjectInk } from '../src/foundations/ProjectMark/drawing'
-import { HomeWelcome, type HomeWelcomeProps, type WelcomeNeed } from '../src/screens/HomeWelcome/HomeWelcome'
+import { HomeWelcome, type HomeWelcomeProps, UpdateHome, type WelcomeNeed } from '../src/screens/HomeWelcome/HomeWelcome'
 
 /* runner-1's welcome, as a window on it shows it while it has no projects. */
 
@@ -241,6 +241,37 @@ describe('a home’s welcome, every time after', () => {
     expect(onSignIn).toHaveBeenCalledWith('codex')
   })
 
+  it('connects a code host it has none of from here, where it can, and offers none where it can’t', () => {
+    const github: WelcomeNeed = { id: 'github', name: 'GitHub', brand: Brand.GitHub, state: 'connect' }
+    const onConnect = vi.fn()
+    welcome({ toured: true, needs: [...NEEDS, github], onConnect })
+    const strip = screen.getByRole('list', { name: 'On runner-1' })
+    expect(within(strip).getByText('Not connected')).not.toBeNull()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Connect GitHub on runner-1' }))
+    expect(onConnect).toHaveBeenCalledWith('github')
+    cleanup()
+    welcome({ toured: true, needs: [...NEEDS, github] })
+    expect(within(screen.getByRole('list', { name: 'On runner-1' })).queryByText('GitHub')).toBeNull()
+  })
+
+  it('has a door for this computer’s projects whose code is on a host, and none where there are none', () => {
+    const at = welcome({ toured: true, here: [{ id: 'proj_site', ink: ProjectInk.Teal }] })
+    const doors = screen.getByRole('list', { name: 'Ways in' })
+    fireEvent.click(within(doors).getByRole('button', { name: /^From / }))
+    expect(at.onDoor).toHaveBeenCalledWith('here', expect.anything())
+    cleanup()
+    welcome({ toured: true })
+    expect(within(screen.getByRole('list', { name: 'Ways in' })).queryByRole('button', { name: /^From / })).toBeNull()
+  })
+
+  it('offers a home that makes projects, older than setting it up from here, its update under what it has, beside its ways in', () => {
+    const at = welcome({ toured: true, behind: { command: 'launcher update --apply --wait', run: { state: 'idle' } }, onUpdate: vi.fn() })
+    expect(screen.getByText('Update runner-1 to sign its agents in and connect GitHub or GitLab from here.')).not.toBeNull()
+    expect(screen.getByRole('list', { name: 'Ways in' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(at.onUpdate).toHaveBeenCalledOnce()
+  })
+
   it('takes a repository’s address pasted anywhere but a field', () => {
     const at = welcome({ toured: true })
     const pasted = (target: EventTarget, text: string) => {
@@ -256,5 +287,41 @@ describe('a home’s welcome, every time after', () => {
     expect(pasted(field, 'https://github.com/acme/api').defaultPrevented).toBe(false)
     expect(at.onPaste).toHaveBeenCalledOnce()
     field.remove()
+  })
+})
+
+describe('an older home’s update, as a strip in Settings', () => {
+  it('lies flat as a strip, says what the update brings, and checks again quietly where no release has it yet', () => {
+    const onCheckAgain = vi.fn()
+    render(
+      <UpdateHome
+        layout="strip"
+        name="runner-1"
+        update={{ command: 'launcher update', release: 'unreleased' }}
+        onCheckAgain={onCheckAgain}
+        copied={false}
+        onCopy={vi.fn()}
+        text={{ unreleased: { arrival: () => '', title: 'Signing in from here comes with its next update', line: () => 'Not yet.' } }}
+      />,
+    )
+    const strip = screen.getByRole('region', { name: 'Updating runner-1' })
+    expect(strip.dataset.layout).toBe('strip')
+    expect(within(strip).getByText('Signing in from here comes with its next update')).toBeTruthy()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Check again' }))
+    expect(onCheckAgain).toHaveBeenCalled()
+    cleanup()
+    const onUpdate = vi.fn()
+    render(
+      <UpdateHome
+        layout="strip"
+        name="runner-1"
+        update={{ command: 'launcher update', run: { state: 'idle' } }}
+        onUpdate={onUpdate}
+        copied={false}
+        onCopy={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(onUpdate).toHaveBeenCalled()
   })
 })

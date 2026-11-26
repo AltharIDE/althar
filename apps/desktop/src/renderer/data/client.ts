@@ -91,6 +91,7 @@ import {
   type Machine,
   type MadeRepository,
   type PreparedFolder,
+  type HostReach,
   type HostRepository,
   type RepositoryOwner,
   type ClonedRepository,
@@ -115,7 +116,9 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type PlaceOutcome,
   type ProjectWorker,
+  type TaskPlace,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -205,12 +208,16 @@ export interface Client {
   readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
   /** Every repository a code host's connection reaches, last pushed to first. */
   readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  readonly readHostReach: (connectionId: string) => Promise<HostReach>
   /** Where a code host's connection can make a repository. */
   readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
   /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
   readonly cloneRepository: (
     grant: string,
     from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string },
+    /** The folder's name, in place of the repository's own, as for two chosen of one name. */
+    folder?: string,
   ) => Promise<ClonedRepository>
   /** Puts a repository only on this computer on a code host: a project's, or one in a folder chosen, before its project is made. */
   readonly publishRepository: (input: {
@@ -623,11 +630,14 @@ export interface Client {
      */
     readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
+  /** Where a planned task runs once it starts: a worker, `auto`, or null for the home. Whether it was held, as one counting down is where that place can't take it. */
+  readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
@@ -693,7 +703,8 @@ export interface Client {
   /** Connects with gh's or glab's sign-in on this device. */
   readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
   /** What a connection can do, as its service says. */
-  readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
+  /** A connection's check; for one project, by its name, only where that project's work goes. */
+  readonly checkConnection: (connectionId: string, project?: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
@@ -925,6 +936,12 @@ export interface Client {
   }) => Promise<MoveOutcome>
   /** Calls off a move that waits. */
   readonly dropMove: (taskId: string) => Promise<void>
+  /** Moves a running task between the home and its workers (ADR-103): moved, waiting for its lead's turn, or already there. */
+  readonly moveTaskTo: (
+    taskId: string,
+    to: TaskPlace,
+    lead?: { readonly model?: string; readonly effort?: string },
+  ) => Promise<PlaceOutcome>
   /** Points a running task at another branch to work toward, or its default with null: what it did, in words. */
   readonly workToward: (taskId: string, toward: string | null) => Promise<ReadonlyArray<string>>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
@@ -1113,10 +1130,7 @@ export const connect = async (
           get(target, tag, receiver): unknown {
             // What the home says this connection may call, where it says; else what this app's own contracts allow a socket.
             if (typeof tag === 'string' && tag in target && !(connection?.calls?.includes(tag) ?? socketCanCall(tag)))
-              return () =>
-                Effect.fail(
-                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
-                )
+              return () => Effect.fail(refusedHere(tag))
             return Reflect.get(target, tag, receiver)
           },
         })
@@ -1135,8 +1149,10 @@ export const connect = async (
     prepareFolder: (grant, path) =>
       command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
     listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    readHostReach: (connectionId) => settle(api.ReadHostReach({ connectionId })),
     listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
-    cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
+    cloneRepository: (grant, from, folder) =>
+      command((commandId) => api.CloneRepository({ commandId, grant, from, ...(folder === undefined ? {} : { folder }) })),
     publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
@@ -1357,6 +1373,8 @@ export const connect = async (
       command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    placePlan: (planId, workerId, chosenAt) =>
+      command((commandId) => api.PlacePlan({ commandId, planId, workerId, ...(chosenAt === undefined ? {} : { chosenAt }) })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
@@ -1399,7 +1417,8 @@ export const connect = async (
     findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
     connectCli: (product, webUrl, connectionId) =>
       command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
-    checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
+    checkConnection: (connectionId, project) =>
+      settle(api.CheckConnection({ connectionId, ...(project === undefined ? {} : { project }) })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
     setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
@@ -1531,6 +1550,8 @@ export const connect = async (
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
+    moveTaskTo: (taskId, to, lead) =>
+      command((commandId) => api.MoveTaskTo({ commandId, taskId, to, ...(lead === undefined ? {} : { lead }) })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching, onReset) => {
@@ -1595,6 +1616,14 @@ export const receivePort = (
     target.addEventListener('message', onMessage)
     signal?.addEventListener('abort', aborted, { once: true })
   })
+
+/**
+ * A call the window's home doesn't take from it, refused before it goes: in plain words, and with a reason of its own,
+ * so a screen can say calmly what isn't shown here rather than an error.
+ */
+const HOME_KEEPS = 'HomeKeeps'
+export const refusedHere = (tag: string) =>
+  new ApiError({ reason: HOME_KEEPS, message: 'This home doesn’t take that from a window on another computer yet.', detail: tag })
 
 /**
  * Whether this window may make a call: any, on this computer's own runtime;

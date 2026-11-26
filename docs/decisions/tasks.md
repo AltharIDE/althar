@@ -549,9 +549,12 @@ change settles when its pull request merges, or when it is abandoned.
 
 **Keep for later is for every kind of task** that finished, not only one
 that isn't a change: a prototype or a chat planned from a preset ends on
-its branch, which makes it a change, and it keeps all the same. Only a
-task with its pull request open, or commits held for Ship, has no Keep:
-those wait on the person in their own ways, which a kept row doesn't show.
+its branch, which makes it a change, and it keeps all the same, and so
+does one whose commits wait for Ship: they stay held on its branch, and
+Accept or Ship are there when it is opened. Only a task with its pull
+request open has no Keep: it waits on the person on its host, which a kept
+row doesn't show, and Keep for later asked of it anyway is refused, saying
+so, its row back where it was.
 
 The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles
@@ -688,6 +691,15 @@ each agent for command output and normalizes what each one sends.
   a document it committed reads from the commit Althar kept. Pictures are
   served by the main process from the store, with a 1,120 px copy for the
   thread, and the window never names a path.
+- **A home's pictures reach every window on it through its own connection.**
+  The store is the home's, so a window paired with a home, or a phone, asks
+  for a picture by its digest (`ReadPicture`, a call a paired device may
+  make), and only a picture the window draws is given. The desktop answers
+  the same address in that home's own session, from a copy of the home's
+  pictures kept by digest, and fetches what it doesn't hold over a
+  connection to the home of their own, opened when a picture is first
+  wanted and closed with the home's last window. Bytes that aren't the
+  digest asked for are never kept or shown.
 
 **Not built yet:** sweeping the store. Files whose rows are gone, and old
 pictures and logs, stay until mark-and-sweep is built
@@ -765,3 +777,4 @@ optionally a model, an agent, an effort and the change.
 - 17 Nov 2026: a conversation brought in from another tool is an aside, its first brief the conversation so far.
 - 23 Nov 2026: `/goal` opens into the goal in the composer's commands, and each change the person makes to a goal is said in the thread as Althar's line ([Goals](#goals)).
 - 24 Nov 2026: a goal given to the coordinator is set on a task it plans, and a goal on a task whose plan hasn't started waits for it ([Goals](#goals)).
+- 26 Nov 2026: a home's pictures reach a window paired with it, and a phone, through the home's own connection (`ReadPicture`), for every picture a thread shows.

@@ -298,6 +298,74 @@ describe('the coordinator’s merge line', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  it.live('a merge errand’s lines say what it still has to merge, quietly, for the thread to fold into its merging line', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const access = yield* opened(working)
+      service.landLater()
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      checks.set(`head-${second}`, 'running')
+      const message = yield* turn(access, 'person')
+      for (const number of [first, second]) yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      service.mergeByHand(first)
+      yield* sweep(access)
+      yield* sweep(access)
+      const tagged = (yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${access.threadId} AND kind = 'notice' ORDER BY rowid`)
+        .map(
+          (row) =>
+            JSON.parse(row.content) as { title: string; errand?: { id: string; quiet: boolean; merges: ReadonlyArray<{ label: string }> } },
+        )
+        .filter((note) => note.errand !== undefined)
+      // Each kept merge says it moved on, quietly, naming what it waits to merge by its number.
+      const kept = tagged.filter((note) => note.title.startsWith('Kept your errand'))
+      assert.deepStrictEqual(
+        kept.map((note) => [note.errand?.quiet, note.errand?.merges.map((merge) => merge.label)]),
+        [
+          [true, [`#${first}`]],
+          [true, [`#${second}`]],
+        ],
+      )
+      // The host taking the first to land later is the errand moving on too: quiet, the card shows it.
+      const taken = tagged.find((note) => note.title.includes('lands it later'))
+      assert.strictEqual(taken?.errand?.id, kept[0]?.errand?.id)
+      assert.isTrue(tagged.every((note) => note.errand?.quiet === true))
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('calling off the last one on the card, before anything landed, takes it off the card', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      checks.set(`head-${number}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access))[0]?.rows.map((row) => [row.number, row.state]),
+        [[number, 'checks']],
+      )
+      const [errand] = yield* sql<{ id: string }>`SELECT id FROM errands WHERE thread_id = ${access.threadId}`
+      const fresh = yield* turn(access, 'person')
+      assert.match(yield* callTool(access, 'cancel_errand', { errand: errand!.id, message: fresh }), /^Called off the errand/)
+      yield* sweep(access)
+      // The same card, with nothing on its way: the thread's merging line has nothing of it to show.
+      const after = yield* cards(access)
+      assert.strictEqual(after.length, 1)
+      assert.deepStrictEqual(after[0]?.rows, [])
+      // And it stays so.
+      yield* sweep(access)
+      assert.deepStrictEqual((yield* cards(access))[0]?.rows, [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   it.live('a pull request whose checks failed is sent back on the card, with what to do', () => {
     const { service, checks, pull } = host()
     const { working } = hosted(['meridian', 'api'])

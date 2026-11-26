@@ -8,7 +8,7 @@ import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 import { locations as locationsOf } from './locations'
-import { NO_SETUP_ARG, type WindowHome } from '../homes'
+import { APP_VERSION_ARG, NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
 import { canSetUp } from './homes/setup'
 import { homePartition, localServicesUnavailable, remoteExternalUrl } from './homes/policy'
@@ -558,6 +558,7 @@ const homes = startHomeConnections({
     if (fresh === true) opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-new-project'))
   },
   log: (message) => logs.error(message),
+  logs,
   usage: recordUsage,
 })
 const mineLocal = (contents: WebContents) => mine(contents) && homes.state(contents.id).current.kind === 'local'
@@ -1029,7 +1030,29 @@ const framedNow = () => {
 
 const chromeArgs = () => {
   const chrome = chromeNow()
-  return [...(chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]), ...(canSetUp() ? [] : [NO_SETUP_ARG])]
+  return [
+    ...(chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]),
+    ...(canSetUp() ? [] : [NO_SETUP_ARG]),
+    APP_VERSION_ARG + app.getVersion(),
+  ]
+}
+
+/* The home sessions that serve pictures already: a scheme is handled once in a session. */
+const pictureSessions = new Set<string>()
+
+/**
+ * A window on a home draws the pictures its threads show by the same address a local one does; its session answers them
+ * from a store of that home's own here, fetching what it doesn't hold from the home (homes/pictures.ts).
+ */
+const servePicturesOf = (window: BrowserWindow, home: WindowHome) => {
+  const partition = homePartition(home)
+  if (partition === undefined || home.kind === 'local' || pictureSessions.has(partition)) return
+  pictureSessions.add(partition)
+  const homeId = home.home.homeId
+  window.webContents.session.protocol.handle(
+    PICTURE_SCHEME,
+    servePicture(join(locations().profile, 'home-pictures', homeId), resize, (digest) => homes.readPicture(homeId, digest)),
+  )
 }
 
 const openWindow = (home: WindowHome = { kind: 'local' }) => {
@@ -1061,6 +1084,7 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   }
   windows.add(window)
   homes.register(window, home)
+  servePicturesOf(window, home)
   window.on('focus', () => focusedLast(windows, window))
   window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).

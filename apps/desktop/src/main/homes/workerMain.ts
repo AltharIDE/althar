@@ -7,9 +7,10 @@ import { Schema } from 'effect'
 import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 
 import type { WorkerSetupAction } from '../../workers'
+import type { WorkerRelease } from './release'
 import { canSetUp, type SetupSystem } from './setup'
 import { homeTarget } from './store'
-import { workerSetups } from './workerSetup'
+import { workerSetups, type WorkerLog } from './workerSetup'
 
 /*
  * Adding a worker over SSH, from Settings › Computers (`workerSetup.ts`), for every window: its IPC, and what it tells
@@ -17,13 +18,27 @@ import { workerSetups } from './workerSetup'
  * the home's word for it, only what the home gave, to hand to the worker.
  */
 
+/** The answer, or the signal's reason once it's aborted, whichever comes first. */
+const abortable = <A>(promise: Promise<A>, signal: AbortSignal) =>
+  new Promise<A>((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    promise.then(resolve, reject)
+  })
+
 export const startWorkerSetups = ({
   system,
   tools,
   mine,
   reachesOwnHome,
+  log,
+  release,
 }: {
   readonly system: SetupSystem
+  /** main.log: each step, what SSH said where it failed, never a secret. */
+  readonly log: WorkerLog
+  /** Whether the newest host release can add a worker (`release.ts`, `workerRelease`). */
+  readonly release: (signal: AbortSignal) => Promise<WorkerRelease>
   /** Where OpenSSH's programs are, where not where the system keeps them. */
   readonly tools?: string | undefined
   readonly mine: (contents: WebContents) => boolean
@@ -33,6 +48,28 @@ export const startWorkerSetups = ({
   const tell = (channel: string, value: unknown) => {
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send(channel, value)
+  }
+  // Asked of GitHub a few minutes apart at most, and afresh on Try again or Check again; a failed look isn't kept.
+  const quitting = new AbortController()
+  let asked: { readonly at: number; readonly answer: Promise<WorkerRelease> } | undefined
+  const able = (fresh: boolean) => {
+    if (fresh || asked === undefined || Date.now() - asked.at > 10 * 60_000) {
+      const answer = release(AbortSignal.any([quitting.signal, AbortSignal.timeout(20_000)]))
+      asked = { at: Date.now(), answer }
+      answer.then(
+        (found) =>
+          log.info('Whether a release can add a worker', {
+            kind: found.kind,
+            version: found.kind === 'ready' ? found.version : (found.newest ?? undefined),
+            ...(found.kind === 'none' ? { why: found.why } : {}),
+          }),
+        (error: unknown) => {
+          log.warn('Couldn’t find out whether a release can add a worker', { error: String(error) })
+          if (asked?.answer === answer) asked = undefined
+        },
+      )
+    }
+    return asked.answer
   }
   const ssh = join(
     tools ?? (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH') : '/usr/bin'),
@@ -47,6 +84,7 @@ export const startWorkerSetups = ({
       if (event.kind === 'open' && event.url.startsWith('https://')) void shell.openExternal(event.url)
       tell('althar:worker-sign-in', event)
     },
+    { log, release: (fresh, signal) => abortable(able(fresh), signal) },
   )
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
@@ -62,6 +100,15 @@ export const startWorkerSetups = ({
       throw new Error('Give the worker’s SSH address.')
     return value
   }
+  ipcMain.handle('althar:workers-release', async (event, fresh: unknown) => {
+    owner(event)
+    try {
+      const found = await able(fresh === true)
+      return found.kind === 'ready' ? { kind: 'ready', version: found.version, base: found.base } : { kind: 'none', newest: found.newest }
+    } catch {
+      throw new Error('Couldn’t find out whether a release can add a worker.')
+    }
+  })
   ipcMain.handle('althar:workers-setup', (event) => {
     owner(event)
     return setups.current()
@@ -78,7 +125,12 @@ export const startWorkerSetups = ({
       const grant = Schema.decodeUnknownSync(WorkerGrant)((action as { grant?: unknown }).grant)
       return setups.act({ kind, grant })
     }
-    if (kind !== 'trust' && kind !== 'stop' && kind !== 'again' && kind !== 'dismiss') throw new Error('Choose what to do with the worker.')
+    if (kind === 'unsigned') {
+      const said = (action as { said?: unknown }).said
+      return setups.act({ kind, ...(typeof said === 'string' ? { said: said.slice(0, 2_000) } : {}) })
+    }
+    if (kind !== 'trust' && kind !== 'stop' && kind !== 'again' && kind !== 'dismiss' && kind !== 'check' && kind !== 'sandbox')
+      throw new Error('Choose what to do with the worker.')
     return setups.act({ kind } satisfies WorkerSetupAction)
   })
   ipcMain.handle('althar:workers-agents', (event, at: unknown) => {
@@ -102,5 +154,10 @@ export const startWorkerSetups = ({
       return setups.signInAct({ paste: action.paste })
     return setups.signInAct({ cancel: true })
   })
-  return { stop: () => setups.stop() }
+  return {
+    stop: () => {
+      quitting.abort()
+      setups.stop()
+    },
+  }
 }

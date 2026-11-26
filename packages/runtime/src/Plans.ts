@@ -1,4 +1,13 @@
-import { ApiError, automaticWorker, automaticWorkerUnavailable, workerPlanProblem, workerProblem } from '@althar/contracts'
+import {
+  ApiError,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerModelUnfit,
+  workerModelWords,
+  workerName,
+  workerPlanProblem,
+  workerProblem,
+} from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -104,12 +113,20 @@ export class Plans extends Context.Service<
      * null where it no longer stood to start. One accepted whose run was never
      * made, as when Althar stopped in between, runs now.
      */
-    start(planId: string, actorId: ActorId, workerId?: string): Effect.Effect<'running' | 'waiting' | null, unknown>
+    start(planId: string, actorId: ActorId, workerId?: string | null): Effect.Effect<'running' | 'waiting' | null, unknown>
     /**
      * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place or its
      * checkout, which leaves the line. Whether it was held; a plan under way isn't.
      */
     hold(planId: string, actorId: ActorId): Effect.Effect<boolean, unknown>
+    /**
+     * Where a plan not yet begun runs (ADR-103), chosen as it counts down or is held: a worker by its id, any free worker
+     * (`auto`), or null for the home. Its countdown starts it there, as Start does without a worker of its own. One counting
+     * down that the chosen place can't take now is held, so it waits for the person rather than failing as its time comes.
+     * Whether it was held. With `chosenAt`, when the person chose it, a choice older than the one the plan has changes nothing,
+     * so choices that reach it out of order leave the latest.
+     */
+    place(planId: string, runsOn: string | null, actorId: ActorId, chosenAt?: number): Effect.Effect<boolean, unknown>
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
@@ -152,8 +169,15 @@ export class Plans extends Context.Service<
       const load = (planId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [plan] = yield* sql<{ projectId: ProjectId; taskId: string; state: string; parameters: string; startsAt: string | null }>`
-            SELECT project_id, task_id, state, parameters, starts_at FROM task_plans
+          const [plan] = yield* sql<{
+            projectId: ProjectId
+            taskId: string
+            state: string
+            parameters: string
+            startsAt: string | null
+            revision: number
+          }>`
+            SELECT project_id, task_id, state, parameters, starts_at, revision FROM task_plans
             WHERE id = ${planId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return plan === undefined ? yield* new NotFound({ kind: 'plan', id: planId }) : plan
         })
@@ -207,6 +231,10 @@ export class Plans extends Context.Service<
           reviewAfterMerge?: boolean
           smallChange?: boolean
           workerId?: string
+          /** Where it runs, chosen before it starts (`place`): a worker's id or `auto`; absent for the home. */
+          runsOn?: string
+          /** When the person chose `runsOn`, as their window said (`place`). */
+          runsOnChosenAt?: number
         }
 
       /** Whether a plan still counts down. */
@@ -324,13 +352,16 @@ export class Plans extends Context.Service<
        * Starts a proposed plan: when the person says, or, `due`, when its countdown has ended, it isn't held, and nothing it
        * waits for is open (waits.ts). The person's own start doesn't wait.
        */
-      const placeOn = (workerId: string | undefined) => (plan: PlanRow) =>
+      const placeOn = (asked: string | null | undefined) => (plan: PlanRow) =>
         Effect.gen(function* () {
-          const parameters = parametersOf(plan)
+          const { runsOn, ...kept } = parametersOf(plan)
+          // A start that names no place runs where the person chose as it counted down or was held; one that names one keeps it.
+          const workerId = asked === null ? undefined : (asked ?? runsOn)
+          const parameters = workerId === undefined ? kept : { ...kept, runsOn: workerId }
           if (workerId === undefined) {
             // A plan brought back to Hold may still hold its previous acceptance's placement.
             const { workerId: previous, ...atHome } = parameters
-            return previous === undefined ? {} : { parameters: JSON.stringify(atHome) }
+            return previous === undefined && runsOn === undefined ? {} : { parameters: JSON.stringify(atHome) }
           }
           const requirements = yield* workerRequirementsOf(plan.taskId, {
             homeOnly: parameters.here === true,
@@ -348,10 +379,36 @@ export class Plans extends Context.Service<
               : workerProblem(worker, parameters.steps, requirements.repositoryCount))
           if (worker === undefined || message !== undefined)
             return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
+          // Its agent there doesn't offer the lead's model: the person picks one it does.
+          const model = workerModelUnfit(worker, parameters.steps)
+          if (model !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: workerModelWords(workerName(worker), model.model) })
           return { parameters: JSON.stringify({ ...parameters, workerId: worker.workerId }) }
         })
 
-      const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>
+      /**
+       * Holds a plan counting down whose place can no longer take it, as a change to it or the place chosen made it: unless it
+       * changed again since it was looked at, when the change after holds it or not. Whether it was held.
+       */
+      const holdIfUnfit = (planId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const plan = yield* load(planId)
+          if (!counting(plan) || parametersOf(plan).runsOn === undefined) return false
+          const fits = yield* placeOn(undefined)(plan).pipe(
+            Effect.as(true),
+            Effect.catch((error) => (error instanceof ApiError ? Effect.succeed(false) : Effect.fail(error))),
+          )
+          if (fits) return false
+          return yield* transition(
+            planId,
+            (now) => counting(now) && now.revision === plan.revision,
+            () => ({ startsAt: null }),
+            'task_plan.held',
+            actorId,
+          )
+        })
+
+      const start = (planId: string, actorId: ActorId, due = false, workerId?: string | null) =>
         Effect.gen(function* () {
           const at = yield* timestamp
           if (due) {
@@ -360,15 +417,39 @@ export class Plans extends Context.Service<
               SELECT p.id FROM task_plans p WHERE p.id = ${planId} AND ${sql.unsafe(blockedIn('p'))}`
             if (blocked !== undefined) return null
           }
-          const accepted = yield* transition(
+          // The plan as it was when its place turned it down, so only that version of it is held.
+          let tried: number | undefined
+          const accepting = transition(
             planId,
             (plan) => (due ? counting(plan) && plan.startsAt !== null && plan.startsAt <= at : plan.state === 'proposed'),
             () => ({ state: 'accepted', startsAt: null, decidedAt: at }),
             'task_plan.accepted',
             actorId,
-            placeOn(workerId),
+            (plan) => {
+              tried = plan.revision
+              return placeOn(workerId)(plan)
+            },
           )
-          if (!accepted && workerId !== undefined)
+          // Due on a worker that can't take it now, it is held for the person, its card saying why, rather than tried again.
+          const accepted = yield* due
+            ? accepting.pipe(
+                Effect.catch((error) =>
+                  error instanceof ApiError
+                    ? Effect.as(
+                        transition(
+                          planId,
+                          (now) => counting(now) && now.revision === tried,
+                          () => ({ startsAt: null }),
+                          'task_plan.held',
+                          actorId,
+                        ),
+                        false,
+                      )
+                    : Effect.fail(error),
+                ),
+              )
+            : accepting
+          if (!accepted && workerId != null)
             return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
@@ -433,6 +514,35 @@ export class Plans extends Context.Service<
           return true
         })
 
+      const place = (planId: string, runsOn: string | null, actorId: ActorId, chosenAt?: number) =>
+        Effect.gen(function* () {
+          const later = (plan: PlanRow) => {
+            const before = parametersOf(plan).runsOnChosenAt
+            return chosenAt === undefined || before === undefined || chosenAt > before
+          }
+          const placed = yield* transition(
+            planId,
+            (plan) => plan.state === 'proposed' && later(plan),
+            (plan) => {
+              const { runsOn: _was, runsOnChosenAt: _then, ...rest } = parametersOf(plan)
+              return {
+                parameters: JSON.stringify({
+                  ...rest,
+                  ...(runsOn === null ? {} : { runsOn }),
+                  ...(chosenAt === undefined ? {} : { runsOnChosenAt: chosenAt }),
+                }),
+              }
+            },
+            'task_plan.changed',
+            actorId,
+          )
+          // A choice made before the one it has, reaching it after: the later one stands.
+          if (!placed && (yield* load(planId)).state === 'proposed') return false
+          if (!placed)
+            return yield* new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
+          return yield* holdIfUnfit(planId, actorId)
+        })
+
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
       const tries = backoff()
 
@@ -486,6 +596,7 @@ export class Plans extends Context.Service<
         propose,
         start: (planId, actorId, workerId) => provide(start(planId, actorId, false, workerId)),
         hold: (planId, actorId) => provide(hold(planId, actorId)),
+        place: (planId, runsOn, actorId, chosenAt) => provide(place(planId, runsOn, actorId, chosenAt)),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
@@ -509,6 +620,8 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                   ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
                   ...(before.workerId === undefined ? {} : { workerId: before.workerId }),
+                  ...(before.runsOn === undefined ? {} : { runsOn: before.runsOn }),
+                  ...(before.runsOnChosenAt === undefined ? {} : { runsOnChosenAt: before.runsOnChosenAt }),
                   // The preset it was planned from: its card names it while its parts still have that preset's shape.
                   ...(before.preset === undefined ? {} : { preset: before.preset }),
                 })
@@ -605,6 +718,8 @@ export class Plans extends Context.Service<
               'task_plan.changed',
               actorId,
             )
+            // Changed so that the place chosen for it can't take it (Local, an agent the worker lacks), its countdown stops.
+            yield* holdIfUnfit(planId, actorId)
             return
           }
           // Started, it can still be changed while its first step waits for a place, nothing of it begun: its run with it.

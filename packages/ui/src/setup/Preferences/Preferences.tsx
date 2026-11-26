@@ -250,6 +250,8 @@ export interface AgentsAtOnceProps {
    * under it, the default only its mark. The sheet's padding is its own.
    */
   compact?: boolean
+  /** Shown as it stands, unchangeable: where the machine it's about doesn't take a change from here. Nothing moves or sends. */
+  disabled?: boolean
   text?: Partial<AgentsAtOnceText>
 }
 
@@ -262,7 +264,17 @@ export interface AgentsAtOnceProps {
  * says only that fewer may work for a while, and why, while that is so: the
  * number stays the person's, and Settings stays calm.
  */
-export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, fewer, compact = false, text }: AgentsAtOnceProps) {
+export function AgentsAtOnce({
+  count,
+  own: kept,
+  machine,
+  most = 16,
+  onChange,
+  fewer,
+  compact = false,
+  disabled = false,
+  text,
+}: AgentsAtOnceProps) {
   const t = { ...agentsAtOnceText, ...text }
   // While the thumb is held, the number it is on; it goes out once let go.
   const [held, setHeld] = useState<number | null>(null)
@@ -301,7 +313,7 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, f
       note={
         <>
           {now ?? (compact ? t.short : t.note(n, machine))}
-          {own && held === null && (
+          {own && held === null && !disabled && (
             <>
               {' '}
               <LinkButton
@@ -328,13 +340,15 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, f
             ref={track}
             className={s.track}
             role="slider"
-            tabIndex={0}
+            // Unchangeable, it takes no focus, press or key: it says what it is, and that it can't be changed.
+            {...(disabled ? { 'aria-disabled': true, 'data-disabled': '' } : { tabIndex: 0 })}
             aria-label={t.title}
             aria-valuemin={1}
             aria-valuemax={most}
             aria-valuenow={n}
             aria-valuetext={t.value(n, machine)}
             onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
+              if (disabled) return
               e.currentTarget.setPointerCapture?.(e.pointerId)
               hold(from(e.clientX))
             }}
@@ -348,6 +362,7 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, f
             }}
             onPointerCancel={() => setHeld(null)}
             onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              if (disabled) return
               const steps: Record<string, number> = {
                 ArrowRight: n + 1,
                 ArrowUp: n + 1,

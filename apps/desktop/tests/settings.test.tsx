@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -637,7 +637,7 @@ describe('the Settings tab', () => {
     // How many agents at once, and why: this Mac's memory and cores.
     const count = await within(page).findByRole('slider', { name: 'Agents at once' })
     expect(count.getAttribute('aria-valuenow')).toBe('4')
-    expect(within(page).getByText('Default for 16 GB and 10 cores')).toBeTruthy()
+    expect(within(page).getByText('Default for this Mac’s 16 GB and 10 cores')).toBeTruthy()
     expect(within(page).queryByText(/busy/)).toBeNull()
     expect(within(page).queryByRole('button', { name: 'Use the default' })).toBeNull()
     count.focus()
@@ -797,6 +797,141 @@ describe('the Settings tab', () => {
     expect(within(page).getByText('studio runs an older Althar: update it to remove its workers from here.')).toBeTruthy()
   })
 
+  it('on another computer’s home, offers its code hosts alone, and on an older one its update in place of signing in or connecting', async () => {
+    const studio = onLinuxHome('studio')
+    const current = fakeClient({ connection: studio.connection, listConnections: vi.fn(async () => connectionList) })
+    withServices(<Settings at="code-hosts" />, current.client, fakeHost({ homes: studio.homes }))
+    const page = screen.getByRole('main')
+    expect(await within(page).findByRole('button', { name: /Connect GitHub|^Connect$/ })).toBeTruthy()
+    expect(within(page).queryByText('Linear')).toBeNull()
+    cleanup()
+    const older = studio.connection.calls.filter((call) => call !== 'ConnectToken' && call !== 'StartAccountSignIn')
+    const old = fakeClient({ connection: { ...studio.connection, calls: older }, listConnections: vi.fn(async () => connectionList) })
+    withServices(<Settings at="code-hosts" />, old.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('Update studio to connect GitHub or GitLab there from here')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Connect/ })).toBeNull()
+    // Where the window doesn't run the update itself, its command, copied.
+    const copied = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
+    await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy the update command' }))
+    expect(copied).toHaveBeenCalledWith(expect.stringContaining('update'))
+    cleanup()
+    withServices(
+      <Settings at="agents" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to sign its agents in from here')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Sign in|Add an account/ })).toBeNull()
+    cleanup()
+    // A task's link to an agent's sign-in opens its tab with the update, and starts no sign-in the home would refuse.
+    function SignInLink() {
+      return <SettingsPage start={useStart({ recheck: true })} section="agents" onSection={() => undefined} signIn="codex" />
+    }
+    const linked = fakeClient({ connection: { ...studio.connection, calls: older } })
+    withServices(<SignInLink />, linked.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('Update studio to sign its agents in from here')).toBeTruthy()
+    await waitFor(() => expect(linked.client.status).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(screen.queryByRole('group', { name: /^Signing/ })).toBeNull()
+    expect(linked.client.addAccount).not.toHaveBeenCalled()
+    expect(linked.client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('on another computer’s home, puts its sections under its name and what it runs, and this computer’s under This Mac', async () => {
+    const studio = onLinuxHome('studio')
+    const { client } = fakeClient({
+      connection: studio.connection,
+      getMachine: vi.fn(async () => ({ system: 'Ubuntu 24.04.1 LTS', cores: 4, memory: 8 * 1024 ** 3, disk: null, git: '2.43.0' })),
+    })
+    withServices(<Settings at="mcp-servers" />, client, fakeHost({ homes: studio.homes }))
+    const nav = screen.getByRole('navigation', { name: 'Settings' })
+    const home = await within(nav).findByRole('list', { name: /^studio/ })
+    expect(await within(nav).findByText('Ubuntu 24.04.1 LTS')).toBeTruthy()
+    for (const name of ['Agents', 'MCP servers', 'Skills', 'Code hosts and trackers', 'Tasks', 'Pull requests', 'Computers'])
+      expect(within(home).getByRole('button', { name: new RegExp(`^${name}`) })).toBeTruthy()
+    const here = within(nav).getByRole('list', { name: 'This Mac' })
+    for (const name of ['Work on this Mac', 'Notifications', 'Appearance', 'Editor and browser'])
+      expect(within(here).getByRole('button', { name })).toBeTruthy()
+    // The home's own servers, as it has them; where they can't be read, why, in the home's words.
+    const page = screen.getByRole('main')
+    expect(within(page).queryByText(/couldn’t be read/)).toBeNull()
+    cleanup()
+    const failing = fakeClient({
+      connection: studio.connection,
+      getAgentTools: vi.fn(async () => {
+        throw new ApiError({ reason: 'Unavailable', message: 'The agents’ settings folder isn’t there.' })
+      }),
+    })
+    withServices(<Settings at="mcp-servers" />, failing.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('studio’s MCP servers couldn’t be read: The agents’ settings folder isn’t there.')).toBeTruthy()
+    cleanup()
+    // An older home, which doesn't show its window its servers: its update, calmly, not an error.
+    const older = studio.connection.calls.filter((call) => call !== 'GetAgentTools' && call !== 'ListSkills')
+    withServices(
+      <Settings at="skills" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to show its skills here')).toBeTruthy()
+    cleanup()
+    withServices(
+      <Settings at="mcp-servers" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to show its MCP servers here')).toBeTruthy()
+    expect(screen.queryByText(/couldn’t be read/)).toBeNull()
+    cleanup()
+    // Work on this Mac holds only this Mac's: the home's agents at once and automations are the home's.
+    withServices(<Settings at="this-mac" />, fakeClient({ connection: studio.connection }).client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByRole('switch', { name: 'Show how hard studio works' })).toBeTruthy()
+    expect(screen.queryByText('Agents at once')).toBeNull()
+    expect(screen.queryByRole('switch', { name: /Pause all automations/ })).toBeNull()
+  })
+
+  it('on an older home, shows its own settings as they stand under one strip with its update', async () => {
+    const studio = onLinuxHome('studio')
+    const older = studio.connection.calls.filter((call) => call !== 'SetPlansAndReviews' && call !== 'SetPostTeamReviews')
+    withServices(
+      <Settings at="pull-requests" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findAllByText('Update studio to change these from here')).toHaveLength(1)
+    const held = screen.getByRole('main').querySelector('fieldset')
+    expect(held?.disabled).toBe(true)
+    cleanup()
+    // Its agents at once, as it has them: no focus, key or press sends a number it would refuse; nor from the quick settings.
+    const before = studio.connection.calls.filter((call) => !['SetPlansAndReviews', 'SetAgentsAtOnce', 'GetTaskFolders'].includes(call))
+    const old = fakeClient({ connection: { ...studio.connection, calls: before } })
+    withServices(<Settings at="computers" />, old.client, fakeHost({ homes: studio.homes }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^studio/ }))
+    const slider = await screen.findByRole('slider', { name: 'Agents at once' })
+    expect(slider.getAttribute('aria-disabled')).toBe('true')
+    expect(slider.hasAttribute('tabindex')).toBe(false)
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    expect(old.client.setAgentsAtOnce).not.toHaveBeenCalled()
+    // Its folders it doesn't list: when they go, as it keeps it, and nothing it would refuse to read or remove.
+    expect(screen.getByText('Remove finished tasks’ folders')).toBeTruthy()
+    expect(old.client.getTaskFolders).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Clean up' })).toBeNull()
+  })
+
+  it('on another computer’s home, leaves trusting outside code and removing folders to the person', async () => {
+    const studio = onLinuxHome('studio')
+    const { client } = fakeClient({ connection: studio.connection })
+    withServices(<Settings at="pull-requests" />, client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByRole('switch', { name: /Post reviews of my team/ })).toBeTruthy()
+    expect(screen.queryByText('When I say Run it on code from outside the team')).toBeNull()
+    // About is this Mac's, under its heading; its storage is measured by this Mac's own runtime, which this window doesn't reach.
+    const here = within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('list', { name: 'This Mac' })
+    await userEvent.click(within(here).getByRole('button', { name: 'About Althar' }))
+    expect(await screen.findByRole('heading', { name: 'About Althar', level: 1 })).toBeTruthy()
+    expect(client.getStorageSize).not.toHaveBeenCalled()
+  })
+
   it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {
     const studio = onLinuxHome('studio')
     const paired = {
@@ -829,6 +964,7 @@ describe('the Settings tab', () => {
       fakeHost({
         homes: paired as never,
         workers: {
+          release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid' })),
           setup: vi.fn(async () => null),
           setUp: vi.fn(async () => undefined),
           act: vi.fn(async () => undefined),
@@ -882,6 +1018,7 @@ describe('the Settings tab', () => {
     }
     let listening: ((setup: WorkerSetup | null) => void) | undefined
     const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
       setup: vi.fn(async () => null),
       setUp: vi.fn(async () => undefined),
       act: vi.fn(async () => undefined),
@@ -934,13 +1071,193 @@ describe('the Settings tab', () => {
         task: null,
       },
     ]
-    act(() => listening?.({ ...base, phase: 'done', at: 5, workerId }))
+    // Connected while its check still runs: the dialog stays until the check is in.
+    act(() => listening?.({ ...base, phase: 'running', at: 5, workerId }))
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
+    act(() =>
+      listening?.({
+        ...base,
+        phase: 'done',
+        at: 6,
+        workerId,
+        check: { sandbox: { starts: true }, agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: true }] },
+      }),
+    )
     expect(await within(page).findByRole('heading', { name: 'box' })).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'Add a worker to This Mac' })).toBeNull()
     expect(bridge.act).toHaveBeenCalledWith({ kind: 'dismiss' })
     await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))
     expect(client.setWorkerProjects).toHaveBeenCalledWith(workerId, ['proj_m'])
     expect(within(page).getByText('Signed in')).toBeTruthy()
+  })
+
+  it('keeps a worker whose check found its sandbox can’t start, with the command that lets it, and allows it with sudo in one press', async () => {
+    let listening: ((setup: WorkerSetup | null) => void) | undefined
+    const fix = "sudo sh -c 'printf x > /etc/apparmor.d/althar-worker-bwrap && apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+    const added: WorkerSetup = {
+      target: { target: 'althar@box' },
+      name: 'box',
+      log: [],
+      phase: 'done',
+      at: 5,
+      workerId: `wrk_${'5'.repeat(32)}`,
+      check: { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] },
+    }
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://example.com' })),
+      setup: vi.fn(async () => added),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn((listener: (setup: WorkerSetup | null) => void) => {
+        listening = listener
+        return () => undefined
+      }),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const workers: HomeWorker[] = [
+      {
+        workerId: added.workerId!,
+        name: 'box',
+        anyProject: true,
+        signedIn: [],
+        connected: true,
+        busy: false,
+        providers: ['codex'],
+        projects: [],
+        task: null,
+      },
+    ]
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^Add a worker/ }))
+    const adding = await screen.findByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('Its agents’ sandbox can’t start on box.')).toBeTruthy()
+    expect(within(adding).getByText(fix)).toBeTruthy()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Allow with sudo' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'sandbox' })
+    // It shows it checking at once.
+    expect(within(adding).getByRole('button', { name: 'Checking…' })).toBeTruthy()
+    // The login can't use sudo without a password: the command stays, for its administrator.
+    act(() => listening?.({ ...added, check: { ...added.check!, allowed: 'NeedsAdministrator' } }))
+    expect(await within(adding).findByText(/Its login can’t use sudo without a password/u)).toBeTruthy()
+    expect(within(adding).queryByRole('button', { name: 'Allow with sudo' })).toBeNull()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'check' })
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
+  })
+
+  it('says plainly, before anything is pressed, that no release can add a worker yet, and checks again', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'none' as const, newest: '0.1.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('There’s no Althar release with workers yet.')).toBeTruthy()
+    expect(within(adding).getByText(/The newest host release, 0\.1\.0, came before workers/)).toBeTruthy()
+    // Neither way is offered: no address to give, no code's line that couldn't work.
+    expect(within(adding).queryByLabelText('SSH address')).toBeNull()
+    expect(bridge.setUp).not.toHaveBeenCalled()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(bridge.release).toHaveBeenLastCalledWith(true))
+  })
+
+  it('asks the home for a code again on Check again, its error and Checking… shown until it answers', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    let answer: (made: { code: string; expiresAt: number }) => void = () => undefined
+    // Busy until Check again is pressed; then it answers once the test says.
+    let busy = true
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => (answer = resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    // The dialog as it is each time: it's drawn again as its way changes.
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    const before = createWorkerCode.mock.calls.length
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    // Asked again: what it said stays, and the button says it's checking, until the home answers.
+    expect(within(adding()).getByText('The home is busy.')).toBeTruthy()
+    expect((within(adding()).getByRole('button', { name: 'Checking…' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(createWorkerCode.mock.calls.length).toBe(before + 1))
+    act(() => answer({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 }))
+    expect(
+      await within(adding()).findByText(
+        /ALTHAR_RELEASE_BASE=https:\/\/example\.invalid\/host-v0\.2\.0 sh -s -- join 'althar-worker1\.e30'/,
+      ),
+    ).toBeTruthy()
+    expect(within(adding()).queryByText('The home is busy.')).toBeNull()
+  })
+
+  it('drops a code asked again on Check again once the way changes, so only the one asked on coming back shows', async () => {
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setup: vi.fn(async () => null),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    // Busy at first; then each request waits until the test answers it, the last asked first.
+    let busy = true
+    const answers: Array<(made: { code: string; expiresAt: number }) => void> = []
+    const createWorkerCode = vi.fn(() =>
+      busy
+        ? Promise.reject(new Error('The home is busy.'))
+        : new Promise<{ code: string; expiresAt: number }>((resolve) => answers.push(resolve)),
+    )
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers: [] })), createWorkerCode })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^Add a worker/ }))
+    const adding = () => screen.getByRole('dialog', { name: 'Add a worker to This Mac' })
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    expect(await within(adding()).findByText('The home is busy.')).toBeTruthy()
+    busy = false
+    await userEvent.click(within(adding()).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'Over SSH' }))
+    await userEvent.click(within(adding()).getByRole('radio', { name: 'With a code' }))
+    await waitFor(() => expect(answers.length).toBeGreaterThanOrEqual(2))
+    const expiresAt = Date.now() + 600_000
+    act(() => answers.at(-1)!({ code: 'althar-worker1.fresh', expiresAt }))
+    expect(await within(adding()).findByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    // The retry dropped when the way changed answers late: it changes nothing.
+    act(() => answers[0]!({ code: 'althar-worker1.stale', expiresAt }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(within(adding()).getByText(/join 'althar-worker1\.fresh'/)).toBeTruthy()
+    expect(within(adding()).queryByText(/althar-worker1\.stale/)).toBeNull()
   })
 
   it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {

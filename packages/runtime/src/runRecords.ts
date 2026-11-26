@@ -535,6 +535,8 @@ export type StuckWhy =
   | 'waiting_on_person'
   /** Its agent can't start for a reason on this computer (DEV-285): retrying can't help; the coordinator can fix it. */
   | 'local_cause'
+  /** The code host refused the push that opens the pull request, for its sign-in: changing that sign-in, then trying again. */
+  | 'push_refused'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {

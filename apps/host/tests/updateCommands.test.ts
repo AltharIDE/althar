@@ -13,7 +13,7 @@ import { initializeHome } from '../src/home'
 import { reserveDatabase } from '../src/updates/reservation'
 import { recoverBeforeStart, runUpdateQueue } from '../src/updates/controller'
 import { loadInstallation, processStamp, readState, saveState, writeJSON, type Transaction } from '../src/updates/store'
-import { fixtureFiles, updateFixture } from './updateFixture'
+import { fixtureFiles, updateFixture, NEXT_VERSION } from './updateFixture'
 
 const ioFor = (root: string) => {
   const output: string[] = []
@@ -178,12 +178,12 @@ describe('operator update commands', () => {
     const commands = { ...io, updates: { ...at.dependencies, services } }
     const parse = (args: string[]) => parseOptions([...args, '--installation', at.root, '--json'], {}, at.directory)
     await Effect.runPromise(runCommand(parse(['update', '--wait']), commands))
-    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ state: 'staged', version: '0.1.1' })
+    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ state: 'staged', version: NEXT_VERSION })
     expect(at.calls).toEqual([])
     await Effect.runPromise(runCommand(parse(['update', '--apply', '--wait']), commands))
-    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ state: 'applied', version: '0.1.1' })
+    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ state: 'applied', version: NEXT_VERSION })
     await Effect.runPromise(runCommand(parse(['update-status']), commands))
-    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ version: '0.1.1', automatic: 'manual', lastResult: { state: 'applied' } })
+    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ version: NEXT_VERSION, automatic: 'manual', lastResult: { state: 'applied' } })
     await Effect.runPromise(runCommand(parse(['update']), { ...commands, updates: { ...at.dependencies, services: at.services } }))
     expect(JSON.parse(output.pop() ?? '')).toMatchObject({ state: 'queued' })
   })

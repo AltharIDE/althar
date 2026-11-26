@@ -1151,6 +1151,23 @@ export const HostRepository = Schema.Struct({
 })
 export type HostRepository = typeof HostRepository.Type
 
+/**
+ * Whether a code host's connection lists every repository its account has,
+ * or fewer, as it was let reach them: a token made for some, an app
+ * installed on some. `url` is where it is let reach more, where known.
+ */
+export const HostReach = Schema.Struct({
+  limited: Schema.NullOr(
+    Schema.Struct({
+      by: Schema.Literals(['token', 'app']),
+      url: Schema.NullOr(Schema.String),
+      /** The one owner a token is for, whose repositories it was given some or all of; null where it isn't one owner's, or unknown. */
+      owner: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type HostReach = typeof HostReach.Type
+
 /** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
 export const RepositoryOwner = Schema.Struct({
   id: Schema.String,
@@ -1609,8 +1626,10 @@ export const AccessReason = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('refused') }),
   Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
-  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  /** `names`: the repositories (owner/name) the account's role there keeps it from, where the service says which. */
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String), names: Schema.optional(Schema.Array(Schema.String)) }),
   Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('no_push'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
@@ -1628,6 +1647,18 @@ export const AccessLine = Schema.Struct({
   /** How many, where the fact is a count: boards, teams, projects. */
   count: Schema.NullOr(Schema.Number),
   reason: Schema.NullOr(AccessReason),
+  /** Each repository it asked on its own, with its outcome and why: what a project's card says of its own repositories. */
+  repositories: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        state: Schema.Literals(['ok', 'no', 'unknown']),
+        reason: Schema.NullOr(AccessReason),
+        /** Whether the service said the account itself may push there; null where it didn't say. */
+        accountPush: Schema.optional(Schema.NullOr(Schema.Boolean)),
+      }),
+    ),
+  ),
 })
 export type AccessLine = typeof AccessLine.Type
 
@@ -1977,6 +2008,16 @@ export const Picture = Schema.Struct({
 })
 export type Picture = typeof Picture.Type
 
+/** The most a picture's bytes can be: what the runtime keeps of one (`PICTURE_KEPT`). */
+export const PICTURE_BYTES = 20 * 1024 * 1024
+
+/** A kept picture's bytes, read by its digest (`ReadPicture`): what kind it is, and the bytes in base64. */
+export const PictureBytes = Schema.Struct({
+  mediaType: Schema.Literals(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+  bodyBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(PICTURE_BYTES / 3) * 4)),
+})
+export type PictureBytes = typeof PictureBytes.Type
+
 /**
  * An image the person sends with a message: its bytes, in base64, as the
  * window read them; or one Althar keeps already, by its digest, as when a
@@ -2289,6 +2330,29 @@ export const NoticeItem = Schema.Struct({
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
+     * For a line about an errand that merges, in its own thread: the errand, what of it is still to merge as the line is
+     * said (each by its pull request, #1224, or its task's name while it has none, and what it waits for; nothing once it is
+     * done or called off), and whether the line only says it
+     * moved on (kept, a step done, resumed, done). Those fold into the merging line at the thread's foot; one that needs the
+     * person (held, called off, failed) stays a line of its own.
+     */
+    errand: Schema.optional(
+      Schema.Struct({
+        id: Schema.String,
+        quiet: Schema.Boolean,
+        merges: Schema.Array(
+          Schema.Struct({
+            label: Schema.String,
+            /** Its pull request, which tells it apart across repositories; null while it has none. */
+            url: Schema.NullOr(Schema.String),
+            /** Its task's id, where it has one. */
+            task: Schema.NullOr(Schema.String),
+            once: Schema.String,
+          }),
+        ),
+      }),
+    ),
+    /**
      * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
      * change started, by its name and branch, and what it works toward where that isn't the task's.
      */
@@ -2542,6 +2606,52 @@ export const WorkerCapacity = Schema.Struct({
 
 export const WorkerSelection = Schema.Union([Schema.Literal('auto'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
 
+/** Where a running task moves to run: the home, or one of its workers. */
+export const TaskPlace = Schema.Union([Schema.Literal('home'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+export type TaskPlace = typeof TaskPlace.Type
+
+/** What became of a move between the home and a worker: done, with what the thread says; waiting for the turn; already there. */
+export const PlaceOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('placed'), said: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('same') }),
+])
+export type PlaceOutcome = typeof PlaceOutcome.Type
+
+/**
+ * What a worker's own check found (its setup's last step, after each sign-in, and hourly): whether its agents' sandbox
+ * starts there, and where not why (NoUserNamespaces, NoBubblewrap, NoSocat, Failed) with the one command an
+ * administrator runs to let it; the tools on its PATH; and the models each of its signed-in agents offers there.
+ */
+export const WorkerReadiness = Schema.Struct({
+  sandbox: Schema.Union([
+    Schema.Struct({ starts: Schema.Literal(true) }),
+    Schema.Struct({ starts: Schema.Literal(false), problem: Schema.String, fix: Schema.optionalKey(Schema.String) }),
+  ]),
+  tools: Schema.Array(Schema.Struct({ name: Schema.String, version: Schema.String })),
+  models: Schema.Array(
+    Schema.Struct({ providerId: Schema.String, models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) }),
+  ),
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why in its own words. */
+  agents: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ providerId: Schema.String, starts: Schema.Boolean, problem: Schema.optionalKey(Schema.String) })),
+  ),
+})
+export type WorkerReadiness = typeof WorkerReadiness.Type
+
+/**
+ * A tool a project's files say it needs (`bun.lock` Bun, `.nvmrc` a Node, uv in `pyproject.toml` uv), at the version they
+ * pin where they do, with the file that says so; for a worker, those it lacks. A worker installs Bun, Node, pnpm and uv
+ * itself, into its own folder, before the task's setup (`installs`); the rest its task's lead sets up there and records.
+ */
+export const ToolNeed = Schema.Struct({
+  name: Schema.String,
+  version: Schema.optionalKey(Schema.String),
+  why: Schema.String,
+  installs: Schema.Boolean,
+})
+export type ToolNeed = typeof ToolNeed.Type
+
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
@@ -2551,6 +2661,12 @@ export const ProjectWorker = Schema.Struct({
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
   capacity: Schema.optionalKey(WorkerCapacity),
+  /** Of `providers`, those signed in on it, where it says. */
+  signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** What its own check found, where it has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
+  /** What the project's files need that it lacks, where they need anything it lacks. */
+  needs: Schema.optionalKey(Schema.Array(ToolNeed)),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
 export type WorkerCapacity = typeof WorkerCapacity.Type
@@ -2581,6 +2697,8 @@ export const HomeWorker = Schema.Struct({
   signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The Althar release it runs, where it says. */
   release: Schema.optionalKey(Schema.String),
+  /** What its own check found, while it is connected and has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
   /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
   anyProject: Schema.optionalKey(Schema.Boolean),
   projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
@@ -3031,6 +3149,10 @@ export const TaskCard = Schema.Struct({
       worksIn: Schema.optional(WorksIn),
       /** Facts the home reads before offering a worker for the lead. Absent on earlier homes. */
       workerRequirements: Schema.optional(WorkerPlanRequirements),
+      /** Where it runs once it starts, as chosen before (PlacePlan): a worker or any free one; absent for the home. */
+      runsOn: Schema.optional(Schema.String),
+      /** When that choice was made, as PlacePlan's `chosenAt` said: a window's own choice is through once this reaches it. */
+      runsOnChosenAt: Schema.optional(Schema.Number),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
       /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
@@ -3187,7 +3309,10 @@ export const TaskCard = Schema.Struct({
    * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
    */
   conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
-  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  /**
+   * When the person kept it for later, as the store has it, whatever phase it reads in (one kept whose pull request opened
+   * since reads ready): its kept row says when, and a saved card is checked by it. Null or absent where it isn't kept.
+   */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
@@ -4075,6 +4200,9 @@ export const StuckStep = Schema.Struct({
     // Its agent can't start for a reason on this computer, such as a file where it reads a folder (DEV-285): the detail
     // says it, the coordinator can be asked to fix it, and it is tried again once the cause is gone.
     'local_cause',
+    // The code host refused the push that opens the pull request: its detail says whose sign-in, for which repository, and what
+    // puts it right; the host's connection is changed in Settings, then it is tried again.
+    'push_refused',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -4568,6 +4696,8 @@ export const ThreadSnapshot = Schema.Struct({
     planId: Schema.NullOr(Schema.String),
     /** The worker assigned to this task's accepted plan. */
     workerId: Schema.optional(Schema.NullOr(Schema.String)),
+    /** A move between the home and its workers that waits for its lead's turn to end: where to (`home` or a worker), and why, in words. */
+    placing: Schema.optional(Schema.Struct({ to: Schema.String, why: Schema.String })),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
@@ -5302,6 +5432,7 @@ const socketCalls = new Set<string>([
   'StartTask',
   'StartPlan',
   'HoldPlan',
+  'PlacePlan',
   'CreateTask',
   'StopTask',
   'ResumeTask',
@@ -5322,12 +5453,15 @@ const socketCalls = new Set<string>([
   'ReadWorkerSnapshotChunk',
   'ReleaseWorkerSnapshot',
   'ReadWorkerFile',
+  // A picture a thread shows, by its digest: what a window on another computer, or a phone, draws it from (PictureApi).
+  'ReadPicture',
   // Making a project on the home the window is on: where its code comes from (a clone, a folder the home found, a new
   // repository there), by grants the home made, never a path the window names. An agent's task can do as much there.
   'FindHomeFolders',
   'GetMachine',
   'ListConnections',
   'ListHostRepositories',
+  'ReadHostReach',
   'GetRepositories',
   'ReadFolder',
   'PlaceRepository',
@@ -5335,7 +5469,80 @@ const socketCalls = new Set<string>([
   'PrepareFolder',
   'CloneRepository',
   'OpenProject',
+  // Setting the home up from the window: the code hosts it works with, connected there (a token made on the host's page and
+  // pasted, the home's own gh or glab sign-in, or the host's device sign-in where the home has Althar's app for it), and its
+  // agents' accounts signed in there (the agent's page opened in the window's browser and its code pasted back, or a device
+  // code). Each keeps its credential on the home, sealed out of its agents' reach, as one made on the home itself would.
+  'GetConnectGuide',
+  'FindServer',
+  'StartSignIn',
+  'GetSignIn',
+  'CancelSignIn',
+  'ConnectToken',
+  'ConnectCli',
+  'CheckConnection',
+  'Disconnect',
+  'AddAccount',
+  'RenameAccount',
+  'RemoveAccount',
+  'SignOutAccount',
+  'OrderAccounts',
+  'FindAccounts',
+  'SignInAccount',
+  'StartAccountSignIn',
+  'GetAccountSignIn',
+  'PasteAccountSignInCode',
+  'CancelAccountSignIn',
+  // The home's own settings, changed from its window as Settings shows them under the home's name: how its tasks go, its
+  // pull requests, its presets, how many agents work there at once, its automations and its finished tasks' folders.
+  // What a project's rules give stays with the project's own settings, and what only the person decides with the person:
+  // trusting outside code fully (SetRunOutside), removing finished tasks' folders and what they hold (CleanUpFolders,
+  // RemoveTaskFolder), and removing a preset of their own (RemovePreset).
+  'SetPlansAndReviews',
+  'SetSendMidTurn',
+  'SetNewProjectDefaults',
+  'SetAutomationsPaused',
+  'ListPresets',
+  'EditPreset',
+  'TunePreset',
+  'ResetPreset',
+  'SetPostTeamReviews',
+  'SetCoAuthor',
+  'SetReviewSeal',
+  'SetReviewSealStyle',
+  'SetShipRoute',
+  'SetAgentsAtOnce',
+  'GetTaskFolders',
+  'SetFolderWait',
+  // The home's MCP servers and skills, its agents' own (ADR-097): read, given to roles and projects, synced, added and
+  // removed from its window. A server's sign-in runs the agent's own command where it is, opening a browser on the home,
+  // so it stays with a window on that computer.
+  'GetAgentTools',
+  'GetServerDetail',
+  'CheckServers',
+  'SetToolRoles',
+  'SetToolInProject',
+  'SetToolSync',
+  'SetToolKeptOut',
+  'PickToolWay',
+  'UndoToolSync',
+  'AddServer',
+  'RemoveServer',
+  'ListSkills',
+  'FindSkills',
+  'StageSkill',
+  'ApproveSkill',
+  'CheckSkillUpdates',
+  'RollBackSkill',
+  'UninstallSkill',
 ])
+
+/**
+ * The code hosts a socket sets its home up with, by product and by service: connected, checked or removed there. A
+ * tracker's connection, like a project's tracker, stays with the person's own window.
+ */
+export const SOCKET_CODE_HOSTS: ReadonlySet<string> = new Set<Product>(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'])
+export const SOCKET_CODE_SERVICES: ReadonlySet<string> = new Set<Service>(['github', 'gitlab', 'bitbucket'])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 /** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */
@@ -5443,6 +5650,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  call('ReadHostReach', { connectionId: Schema.String }, HostReach),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
   call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
   /**
@@ -5450,7 +5659,9 @@ const ProjectApi = RpcGroup.make(
    * chose (`grant`): one on a connection's host, by its path there; or one by
    * its URL, signed in through the connection whose host it is on, else with
    * the person's own git sign-in. Refused where that folder has something in
-   * it already; what a failed clone made is taken away.
+   * it already; what a failed clone made is taken away. `folder` names it in
+   * place of the repository's own name, as for two of one name cloned into
+   * one place; a single name, never a path.
    */
   command(
     'CloneRepository',
@@ -5460,6 +5671,7 @@ const ProjectApi = RpcGroup.make(
         Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
         Schema.Struct({ url: Schema.String }),
       ]),
+      folder: Schema.optional(Schema.String),
     },
     ClonedRepository,
   ),
@@ -5769,11 +5981,33 @@ const ProjectApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
+  command(
+    'StartPlan',
+    {
+      planId: Schema.String,
+      /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started (PlacePlan). */
+      workerId: Schema.optional(Schema.NullOr(WorkerSelection)),
+    },
+    Schema.Void,
+  ),
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
   command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
+  /**
+   * Where a planned task runs once it starts (ADR-103), chosen as it counts down or is held: a worker, any free worker, or null
+   * for the home. Its countdown starts it there. Whether it was held: one counting down that the place can't take now is.
+   */
+  command(
+    'PlacePlan',
+    {
+      planId: Schema.String,
+      workerId: Schema.NullOr(WorkerSelection),
+      /** When the person chose it, in milliseconds: one chosen before the plan's last choice reaches it late and changes nothing. */
+      chosenAt: Schema.optional(Schema.Number),
+    },
+    Schema.Boolean,
+  ),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
   command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
@@ -6315,6 +6549,22 @@ const WorkApi = RpcGroup.make(
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
   /**
+   * Moves a running task between the home and its workers, or between workers (ADR-103), from its ⋯ menu: between its
+   * lead's turns, with its work; its lead starts afresh there, on `lead`'s model where its own isn't offered there. Moved,
+   * waiting for the turn under way, or already there; refused, with words, where it can't go.
+   */
+  command(
+    'MoveTaskTo',
+    {
+      taskId: Schema.String,
+      to: TaskPlace,
+      lead: Schema.optional(Schema.Struct({ model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) })),
+      /** Where the worker it runs on can't bring its work home now: move from what its last turn brought home. */
+      fromLastTurn: Schema.optional(Schema.Boolean),
+    },
+    PlaceOutcome,
+  ),
+  /**
    * Keep them together: carries one change's commits onto another of the task's, before either ships, and its folder goes;
    * its branch stays (a task is a conversation plus parts). Into the task's first change unless `into` names one.
    */
@@ -6407,7 +6657,8 @@ const WorkApi = RpcGroup.make(
   /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
   command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
   /** Asks the service what a connection can do. */
-  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
+  /** A connection's check; for one project, by its name, only that project's repositories, and where its work is pushed. */
+  call('CheckConnection', { connectionId: Schema.String, project: Schema.optional(Schema.String) }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),
@@ -6885,7 +7136,16 @@ export const WorkerSnapshotApi = RpcGroup.make(
   call('ReleaseWorkerSnapshot', { id: WorkerSnapshotId }, Schema.Void),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi)
+/**
+ * A picture a thread shows (a lead's report, show_pictures, a check's or review's shots, a canvas's picture), by its digest in
+ * the home's artifact store: how a window on another computer and a phone draw what the home keeps, through the home's own
+ * connection. Only what a window draws is given (PNG, JPEG, GIF, WebP), whole: a smaller copy is made where it is shown.
+ */
+export const PictureApi = RpcGroup.make(
+  call('ReadPicture', { digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)) }, PictureBytes),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi, WorkerPreviewApi, WorkerSnapshotApi, PictureApi)
 export type Api = typeof Api
 
 /** The calls a socket connection may make, as `GetConnectionInfo` tells it: what its window offers follows from them. */
@@ -6911,6 +7171,7 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         WorkerSnapshotApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkerSnapshotApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(
           handlers,
         ),
+        PictureApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof PictureApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
       ),
     ),
   )

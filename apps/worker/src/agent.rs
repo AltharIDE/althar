@@ -30,8 +30,12 @@ use crate::{
     agent_capacity::worker_capacity,
     agent_files::send_file,
     agent_managed::ManagedCommands,
+    agent_readiness::readiness_from,
     agent_reservation::{agent_service, reserve},
-    agent_setup::{DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, WorkspaceSetup, worker_environment},
+    agent_setup::{
+        DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, TOOLS_VARIABLE, WorkspaceSetup, tools_of,
+        worker_environment,
+    },
     agent_skills::{MAX_BYTES as MAX_SKILL_BYTES, SkillDirectory},
     agent_tools::forward_tools,
     agent_workspace::{WorkspaceTransfer, workspace_patch},
@@ -45,9 +49,9 @@ use crate::{
         AgentHomeFrame, AgentRunAccepted, AgentRunBytes, AgentRunExit, AgentRunOutcome,
         AgentRunReady, AgentRunStart, AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest,
         AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat,
-        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
-        AgentWorkspaceSetupSource, agent_home_frame::Payload as HomeMessage,
-        agent_worker_frame::Payload as WorkerMessage,
+        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkerReadiness, AgentWorkspaceSetup,
+        AgentWorkspaceSetupResult, AgentWorkspaceSetupSource,
+        agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
@@ -226,6 +230,17 @@ impl AgentConfig {
         self.providers
             .iter()
             .any(|provider| provider.capability.project_id == ANY_PROJECT)
+    }
+
+    /// What the worker's own check found, kept beside `signed-in`; none where it hasn't checked.
+    fn readiness(&self) -> Option<AgentWorkerReadiness> {
+        let path = self.signed_in.as_ref()?.with_file_name("readiness");
+        let providers: Vec<String> = self
+            .providers
+            .iter()
+            .map(|provider| provider.capability.provider_id.clone())
+            .collect();
+        readiness_from(&path, &providers)
     }
 
     /// The configured agents signed in now, as the file the setup keeps says; none where it can't be read.
@@ -513,6 +528,12 @@ impl Slot {
                         }
                         _ => Vec::new(),
                     },
+                    readiness: match &self.sign_ins {
+                        Some((path, providers)) if self.sequence.is_multiple_of(4) => {
+                            readiness_from(&path.with_file_name("readiness"), providers)
+                        }
+                        _ => None,
+                    },
                 }),
             ),
         )
@@ -562,11 +583,12 @@ impl AgentUnit {
         cwd: &Path,
         journal: &DiagnosticJournal,
         setup: Option<&SetupPlan>,
+        tools: &[String],
     ) -> Result<Self, Failure> {
         let mut args = setup.map_or_else(|| vec!["--agent-unit".into()], SetupPlan::guardian_args);
         args.push(provider.executable.clone().into_os_string());
         args.extend(provider.args.iter().map(OsString::from));
-        let unit = Self::open(agent_service(&run.run_id), cwd, &args, None).await?;
+        let unit = Self::open_with(agent_service(&run.run_id), cwd, &args, None, tools).await?;
         let recorded = unit
             .group
             .strip_prefix("/sys/fs/cgroup")
@@ -582,6 +604,17 @@ impl AgentUnit {
         cwd: &Path,
         args: &[OsString],
         parent: Option<&str>,
+    ) -> Result<Self, Failure> {
+        Self::open_with(name, cwd, args, parent, &[]).await
+    }
+
+    /// A unit whose guardian installs `tools` (`name@version`) before its setup runs.
+    async fn open_with(
+        name: String,
+        cwd: &Path,
+        args: &[OsString],
+        parent: Option<&str>,
+        tools: &[String],
     ) -> Result<Self, Failure> {
         let mut command = Command::new("/usr/bin/systemd-run");
         command.args([
@@ -600,6 +633,9 @@ impl AgentUnit {
             "--property=NoNewPrivileges=yes",
             "--property=UMask=0077",
         ]);
+        if !tools.is_empty() {
+            command.arg(format!("--setenv={TOOLS_VARIABLE}={}", tools.join(" ")));
+        }
         if let Some(parent) = parent {
             command.arg(format!("--property=Requisite={parent}"));
             command.arg(format!("--property=PartOf={parent}"));
@@ -993,6 +1029,7 @@ pub async fn watch_agent_slot(
                 reports_sign_in: config.signed_in.is_some(),
                 signed_in: config.signed_in(),
                 release: config.release.clone(),
+                readiness: config.readiness(),
             }),
         )
         .await?;
@@ -1240,14 +1277,29 @@ async fn execute(
         .map(SkillDirectory::as_str)
         .transpose()?
         .unwrap_or_default();
-    let mut unit =
-        match AgentUnit::start(run, provider, &workspace.root, journal, setup.as_ref()).await {
-            Ok(unit) => unit,
-            Err(error) => {
-                eprintln!("Could not prepare the agent unit: {error}");
-                return Ok((AgentRunOutcome::StartFailed, None));
-            }
-        };
+    // Checked with the plan above: a setup asking for a tool it doesn't install never got here.
+    let tools = descriptor
+        .as_ref()
+        .map(tools_of)
+        .transpose()
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut unit = match AgentUnit::start(
+        run,
+        provider,
+        &workspace.root,
+        journal,
+        setup.as_ref(),
+        &tools,
+    )
+    .await
+    {
+        Ok(unit) => unit,
+        Err(error) => {
+            eprintln!("Could not prepare the agent unit: {error}");
+            return Ok((AgentRunOutcome::StartFailed, None));
+        }
+    };
     let result = match run.tools {
         true => {
             // The listener stays on worker loopback. The home checks both
