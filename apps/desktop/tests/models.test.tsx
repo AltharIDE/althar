@@ -669,5 +669,23 @@ describe('a worker’s models (ADR-103)', () => {
     })
     // Claude Code, which the worker said nothing of: its own default only, never the home's Opus.
     expect(there.known.find((one) => one.agentId === 'claude-code')).toMatchObject({ models: [], model: null })
+    // Where the worker offers the model the home is on, it stays on it, at its effort.
+    const same = onWorker([{ ...home[0]!, effort: 'high' }], agents, {
+      providers: ['claude-code'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [
+          {
+            providerId: 'claude-code',
+            models: [
+              { id: 'sonnet', name: 'Sonnet' },
+              { id: 'opus', name: 'Opus' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(same.known[0]).toMatchObject({ model: 'opus', effort: 'high' })
   })
 })

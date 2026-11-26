@@ -2238,6 +2238,38 @@ describe('a task', () => {
     await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', runner.workerId, { model: 'sonnet' }))
   })
 
+  it('moves a worker’s task home where this home offers its lead’s model, with no question (ADR-103)', async () => {
+    const runner = {
+      workerId: `wrk_${'a'.repeat(32)}`,
+      name: 'runner-1',
+      providers: ['claude-code'],
+      signedIn: ['claude-code'],
+      busy: true,
+      readiness: {
+        sandbox: { starts: true as const },
+        tools: [{ name: 'git', version: '2.43.0' }],
+        agents: [{ providerId: 'claude-code', starts: true }],
+        models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Claude Opus' }] }],
+      },
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, workerId: runner.workerId } })),
+      listProjectWorkers: vi.fn(async () => [runner]),
+      moveTaskTo: vi.fn(async () => ({ kind: 'placed' as const, said: 'Moved to This Mac: its lead carries on there.' })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const menu = await screen.findByRole('menu', { name: 'This task' })
+    // Where it runs, at work on it, is where it is: not a reason it can't be there.
+    const there = within(menu).getByRole('menuitemradio', { name: /runner-1/ })
+    expect(there.getAttribute('aria-checked')).toBe('true')
+    expect(there.getAttribute('aria-disabled')).not.toBe('true')
+    // This home offers the lead's Claude Opus: it moves with no question.
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: /This Mac/ }))
+    await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', 'home', undefined))
+    expect(screen.queryByRole('dialog', { name: /^Move to/u })).toBeNull()
+  })
+
   it('offers a worker task only what its worker said, and only its agent’s default while that worker isn’t listed (ADR-103)', async () => {
     const workerId = `wrk_${'c'.repeat(32)}`
     const { client } = fakeClient({
@@ -2251,6 +2283,11 @@ describe('a task', () => {
     expect(await screen.findAllByRole('radio')).not.toHaveLength(0)
     expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/u })).toBeNull()
     expect(screen.queryByRole('radio', { name: /Claude Sonnet/u })).toBeNull()
+    // Nor among all its models.
+    await userEvent.click(screen.getByRole('button', { name: /All models/u }))
+    const browser = await screen.findByRole('dialog')
+    expect(within(browser).queryByRole('button', { name: 'Use gpt-5.2' })).toBeNull()
+    expect(within(browser).queryByRole('button', { name: 'Use Claude Sonnet' })).toBeNull()
     await userEvent.keyboard('{Escape}')
   })
 

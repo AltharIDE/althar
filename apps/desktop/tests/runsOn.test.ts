@@ -123,6 +123,22 @@ describe('a worker’s own check, in Runs on (ADR-103)', () => {
     )
   })
 
+  it('says a worker that hasn’t checked itself yet, and an agent that won’t start or wasn’t tried there', () => {
+    const workers: ReadonlyArray<ProjectWorker> = [
+      checked({ readiness: undefined }),
+      checked({
+        workerId: id('b'),
+        readiness: { ...ready, agents: [{ providerId: 'claude-code', starts: false, problem: 'Not signed in.' }] },
+      }),
+      checked({ workerId: id('c'), readiness: { ...ready, agents: [] } }),
+    ]
+    expect(hints(placementOf({ ...base, workers })).slice(2)).toEqual([
+      ['Linux worker aaaaaa', 'Not checked yet', true],
+      ['Linux worker bbbbbb', 'Claude Code won’t start', true],
+      ['Linux worker cccccc', 'Claude Code not tried yet', true],
+    ])
+  })
+
   it('says what a ready worker installs first for the project, or leaves to its lead', () => {
     const needs = [
       { name: 'bun', version: '1.3.5', why: 'bun.lock', installs: true },
