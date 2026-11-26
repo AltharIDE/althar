@@ -6,7 +6,7 @@ import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { taskWorker } from './workerExecution'
 import { workerRequirementFields } from './workerRequirements'
-import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
+import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
 
@@ -23,7 +23,6 @@ import {
   type ChangeSummary,
   CheckLogShown,
   checkFailuresOf,
-  ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
   type HomeSnapshot,
@@ -108,7 +107,8 @@ import { reviewOfferOf } from './reviewOffer'
 import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { ASKED_MS, BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
-import { mergeNeedsOf, withPushed } from './mergeNeeds'
+import { changeOf, field, number, parse, PRODUCTS, text } from './changeSnapshot'
+import { withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode, readCodeImage } from './code'
 import type { Artifacts } from './Artifacts'
@@ -295,23 +295,6 @@ const keeper = <A>(owners: Map<string, Owner>) => {
       }),
     drop: (path: string) => kept.delete(path),
   }
-}
-
-export const parse = (json: string | null): unknown => {
-  if (json === null) return null
-  try {
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-export const field = (value: unknown, key: string): unknown =>
-  typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
-
-export const text = (value: unknown, key: string): string => {
-  const found = field(value, key)
-  return typeof found === 'string' ? found : ''
 }
 
 /** A tool call's skills, as `threads.ts` keeps them. */
@@ -501,11 +484,6 @@ export const stuckOf = (payload: unknown): StuckStep => {
   }
 }
 
-const number = (value: unknown, key: string): number | null => {
-  const found = field(value, key)
-  return typeof found === 'number' ? found : null
-}
-
 /** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
 const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
   Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
@@ -584,67 +562,6 @@ const callOf = (request: {
   }
 }
 
-/** A pull request as Althar last saw it (its external link's snapshot), in the contract's shape. */
-export const changeOf = (value: unknown, product: string, listening: boolean): ChangeSummary | null => {
-  const state = text(value, 'state')
-  const words = field(value, 'words')
-  const repository = field(value, 'repository')
-  const checks = field(value, 'checks')
-  const productIs = PRODUCTS.find((candidate) => candidate === product)
-  const n = number(value, 'number')
-  if (n === null || productIs === undefined || (state !== 'open' && state !== 'merged' && state !== 'closed')) return null
-  const outcome = text(checks, 'outcome')
-  const failing = field(checks, 'failing')
-  // Where the host said whether it conflicts, and which branch it merges into: absent from a snapshot kept before them.
-  const conflicts = field(value, 'conflicts')
-  const target = text(value, 'target')
-  const seen: ChangeSummary = {
-    product: productIs,
-    number: n,
-    title: text(value, 'title'),
-    url: text(value, 'url'),
-    state,
-    draft: field(value, 'draft') === true,
-    noun: text(words, 'noun') || 'pull request',
-    short: text(words, 'short') || 'PR',
-    prefix: text(words, 'prefix') || '#',
-    repository: Array.isArray(repository) ? repository.filter((part) => typeof part === 'string').join('/') : '',
-    slug: null,
-    additions: number(value, 'additions'),
-    deletions: number(value, 'deletions'),
-    changedFiles: number(value, 'changedFiles'),
-    checks:
-      checks === null || checks === undefined
-        ? null
-        : {
-            outcome: outcome === 'running' || outcome === 'passed' || outcome === 'failed' ? outcome : 'none',
-            passed: number(checks, 'passed') ?? 0,
-            failed: number(checks, 'failed') ?? 0,
-            running: number(checks, 'running') ?? 0,
-            total: number(checks, 'total') ?? 0,
-            failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
-            list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
-          },
-    ...(target === '' ? {} : { target }),
-    ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
-    ...(field(value, 'queued') === true ? { queued: true } : {}),
-    head: text(value, 'headSha') || null,
-    listening,
-    localHead: null,
-    ...(field(value, 'maintainerEdit') === true ? { maintainerEdit: true } : {}),
-    unpushed: 0,
-    diverged: null,
-  }
-  // What merging it needs, as its host last said, with what Althar knows of it (DEV-204); what is left to push is counted later.
-  const rules = Option.getOrNull(decodeRules(field(value, 'rules')))
-  const needs = mergeNeedsOf(seen, rules)
-  return {
-    ...seen,
-    ...(needs === undefined ? {} : { needs }),
-    ...(state === 'open' && rules?.canBypassQueue !== undefined ? { canBypassQueue: rules.canBypassQueue } : {}),
-  }
-}
-
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeAttached = Schema.decodeUnknownOption(Schema.Array(AttachedFile))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
@@ -662,10 +579,6 @@ const decodeNoticeTask = Schema.decodeUnknownOption(
 )
 /** What a notice offers: parts kept as a preset, or a review a lead or the coordinator offered a task, which its buttons answer. */
 const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.fields.offer)
-const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
-const decodeRules = Schema.decodeUnknownOption(MergeRules)
-
-const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const
 
 /**
  * A stored item as the contract has it: each kind with its own content. A
@@ -1134,6 +1047,8 @@ const ReadAt = Context.Reference<{
  * How long a kept card is given out at most before it is worked out again whatever else holds: what moves it with nothing
  * that says so (Althar's own state no change followed, a write that told no one) shows within this, unless a test says.
  */
+export { changeOf, field, parse, text } from './changeSnapshot'
+
 export const KEPT_FOR = Duration.seconds(10)
 
 /** How many tasks' cards are kept: more than any screen shows. */
