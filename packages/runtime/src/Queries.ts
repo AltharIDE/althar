@@ -85,6 +85,7 @@ import { unstartedIn } from './waits'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
+import { placedOn } from './placedOn'
 import { beforeFirstStep, checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
 import { planTowardChoices } from './towards'
@@ -3045,10 +3046,7 @@ export class Queries extends Context.Service<
                     ...(task.planState === 'proposed' && config.workers !== undefined
                       ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
                       : {}),
-                    ...(task.planState === 'proposed' && text(parameters, 'runsOn') !== '' ? { runsOn: text(parameters, 'runsOn') } : {}),
-                    ...(task.planState === 'proposed' && typeof field(parameters, 'runsOnChosenAt') === 'number'
-                      ? { runsOnChosenAt: field(parameters, 'runsOnChosenAt') as number }
-                      : {}),
+                    ...(task.planState === 'proposed' ? placedOn(parameters) : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }

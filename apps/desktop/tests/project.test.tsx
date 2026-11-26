@@ -688,10 +688,11 @@ describe('the Talk room', () => {
         workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
       },
     })
+    let changed: () => void = () => {}
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
       listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
-      changePlan: vi.fn(() => new Promise<void>(() => {})),
+      changePlan: vi.fn(() => new Promise<void>((resolve) => (changed = resolve))),
     })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
@@ -700,11 +701,44 @@ describe('the Talk room', () => {
     // Local can't go to a worker: the runtime holds it as it changes it, in the one request; shown held before it answers,
     // saying why, with the way back to the home.
     await userEvent.click(screen.getByRole('radio', { name: 'Local' }))
-    const [changed, , , where] = vi.mocked(client.changePlan).mock.calls.at(-1) ?? []
-    expect([changed, where]).toEqual(['pln1', 'checkout'])
+    const [planId, , , where] = vi.mocked(client.changePlan).mock.calls.at(-1) ?? []
+    expect([planId, where]).toEqual(['pln1', 'checkout'])
     expect(client.holdPlan).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     expect((await screen.findByRole('alert')).textContent).toContain('Choose Worktree to run it on a worker.')
+    // Once the request is done, the runtime's copy says where it stands: here, still counting down.
+    await act(async () => changed())
+    expect(await screen.findByRole('button', { name: 'Start now' })).toBeTruthy()
+  })
+
+  it('goes back to where it ran when the runtime turns a choice down', async () => {
+    const workerId = 'wrk_' + 'f'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const counting = card({
+      plan: {
+        ...plan,
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        runsOn: workerId,
+        runsOnChosenAt: 1,
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
+      placePlan: vi.fn(async () => {
+        throw new ApiError({ reason: 'Invalid', message: 'Linux worker ffffff is at work on another task.' })
+      }),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    // Placed on the worker before; the person moves it home, which the runtime turns down.
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: Linux worker ffffff' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
+    expect(client.placePlan).toHaveBeenCalledWith('pln1', null, expect.any(Number))
+    await screen.findByText('Linux worker ffffff is at work on another task.')
+    expect(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
   })
 
   it('keeps the latest choice of where it runs while earlier ones are still on their way, and starts on the home by name', async () => {
@@ -718,11 +752,11 @@ describe('the Talk room', () => {
         workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
       },
     })
-    const answers: Array<(placed: boolean) => void> = []
+    const answers: Array<{ readonly placed: (placed: boolean) => void; readonly fail: (failure: unknown) => void }> = []
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
       listProjectWorkers: vi.fn(async () => [{ workerId: first, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
-      placePlan: vi.fn(() => new Promise<boolean>((resolve) => answers.push(resolve))),
+      placePlan: vi.fn(() => new Promise<boolean>((placed, fail) => answers.push({ placed, fail }))),
     })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
@@ -731,7 +765,8 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
     expect(client.placePlan).toHaveBeenLastCalledWith('pln1', null, expect.any(Number))
     // The first choice turned down after the second was made: the second stands.
-    await act(async () => answers[0]?.(false))
+    await act(async () => answers[0]?.fail(new ApiError({ reason: 'Invalid', message: 'Linux worker ffffff is at work on another task.' })))
+    await screen.findByText('Linux worker ffffff is at work on another task.')
     expect(screen.getByRole('button', { name: 'Runs on: This Mac' })).toBeTruthy()
     // Started while the second is still on its way: on the home, by name, not wherever the plan was placed before.
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
