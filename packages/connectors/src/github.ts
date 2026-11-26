@@ -2356,8 +2356,9 @@ export const accessGitHub: Access = (input: AccessInput) =>
     if (reached.length > 0) lines.push(reachLine(reached, owners === '' ? null : owners))
     const [first] = seen
 
-    // Where GitHub says the account itself may not push, no token of it may.
-    if (seen.some((found) => found.push === false)) lines.push(line('push', 'no', { reason: { kind: 'role', role: null } }))
+    // Where GitHub says the account itself may not push, no token of it may: which repositories, by their owner and name.
+    const readOnly = seen.filter((found) => found.push === false).map((found) => found.path.join('/'))
+    if (readOnly.length > 0) lines.push(line('push', 'no', { reason: { kind: 'role', role: null, names: readOnly } }))
     else if (kind === 'classic') lines.push(byScope('push'))
     else lines.push(kind === 'app' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID }))
 
