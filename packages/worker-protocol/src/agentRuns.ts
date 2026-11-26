@@ -114,6 +114,8 @@ export interface WorkerReadiness {
     readonly providerId: string
     readonly models: ReadonlyArray<{ readonly id: string; readonly name: string }>
   }>
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why. */
+  readonly agents: ReadonlyArray<{ readonly providerId: string; readonly starts: boolean; readonly problem?: string }>
 }
 
 const SANDBOX_PROBLEMS = new Set(['NoUserNamespaces', 'NoBubblewrap', 'NoSocat', 'Failed'])
@@ -121,6 +123,8 @@ const TOOL_NAME = /^[a-z0-9][a-z0-9._+-]{0,47}$/u
 const TOOL_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u
 // eslint-disable-next-line no-control-regex -- A name a worker reports is shown: no control characters.
 const SHOWN = /^[^\x00-\x1f\x7f]{1,200}$/u
+// eslint-disable-next-line no-control-regex -- Why an agent couldn't start is shown, on one line.
+const SHOWN_LONG = /^[^\x00-\x1f\x7f]{1,400}$/u
 // eslint-disable-next-line no-control-regex -- The command is shown to copy, on one line.
 const FIX = /^[^\x00-\x1f\x7f]{1,4096}$/u
 
@@ -143,6 +147,14 @@ export const readinessOf = (reported: AgentWorkerReadiness): WorkerReadiness => 
           .filter((model) => SHOWN.test(model.id) && SHOWN.test(model.name))
           .slice(0, 96)
           .map(({ id, name }) => ({ id, name })),
+      })),
+    agents: reported.agents
+      .filter((agent) => PROVIDER_ID.test(agent.providerId))
+      .slice(0, MAX_CAPABILITIES)
+      .map(({ providerId, starts, problem }) => ({
+        providerId,
+        starts,
+        ...(starts || !SHOWN_LONG.test(problem) ? {} : { problem }),
       })),
   }
 }

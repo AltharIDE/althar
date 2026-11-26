@@ -2189,7 +2189,11 @@ describe('a task', () => {
   })
 
   it('moves between this home and its workers from its menu, asking for a model where the lead’s isn’t offered (ADR-103)', async () => {
-    const ready = { sandbox: { starts: true as const }, tools: [{ name: 'git', version: '2.43.0' }] }
+    const ready = {
+      sandbox: { starts: true as const },
+      tools: [{ name: 'git', version: '2.43.0' }],
+      agents: [{ providerId: 'claude-code', starts: true }],
+    }
     const capacity = { platform: 'linux' as const, architecture: 'x64' as const, cpuCores: 8, freeMemoryMib: 12_288, freeDiskMib: 81_920 }
     const runner = {
       workerId: `wrk_${'a'.repeat(32)}`,
@@ -2228,10 +2232,8 @@ describe('a task', () => {
     await userEvent.click(await within(menu).findByRole('menuitemradio', { name: /runner-1/ }))
     const asking = await screen.findByRole('dialog', { name: 'Move to runner-1' })
     expect(within(asking).getByText(/runner-1 doesn’t offer Claude Opus/u)).toBeTruthy()
-    expect(within(asking).getByRole('button', { name: 'Move' }).hasAttribute('disabled')).toBe(true)
-    await userEvent.click(within(asking).getByRole('button', { name: /^Lead:/u }))
-    await userEvent.click(await screen.findByRole('radio', { name: /Claude Sonnet/u }))
-    await userEvent.keyboard('{Escape}')
+    // It starts on the model runner-1 offers, which the person may change.
+    expect(within(asking).getByRole('button', { name: /^Lead: Claude Sonnet/u })).toBeTruthy()
     await userEvent.click(within(asking).getByRole('button', { name: 'Move' }))
     await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', runner.workerId, { model: 'sonnet' }))
   })

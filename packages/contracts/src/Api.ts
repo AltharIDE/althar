@@ -2568,6 +2568,10 @@ export const WorkerReadiness = Schema.Struct({
   models: Schema.Array(
     Schema.Struct({ providerId: Schema.String, models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) }),
   ),
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why in its own words. */
+  agents: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ providerId: Schema.String, starts: Schema.Boolean, problem: Schema.optionalKey(Schema.String) })),
+  ),
 })
 export type WorkerReadiness = typeof WorkerReadiness.Type
 
@@ -6362,6 +6366,8 @@ const WorkApi = RpcGroup.make(
       taskId: Schema.String,
       to: TaskPlace,
       lead: Schema.optional(Schema.Struct({ model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) })),
+      /** Where the worker it runs on can't bring its work home now: move from what its last turn brought home. */
+      fromLastTurn: Schema.optional(Schema.Boolean),
     },
     PlaceOutcome,
   ),

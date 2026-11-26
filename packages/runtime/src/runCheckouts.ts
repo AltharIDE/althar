@@ -278,6 +278,8 @@ export const makeRunCheckouts = (dependencies: RunCheckoutsDependencies) =>
             taskId: one.taskId,
             to: one.movingTo.to,
             ...(one.movingTo.lead === undefined ? {} : { lead: one.movingTo.lead }),
+            ...(one.movingTo.fromLastTurn === true ? { fromLastTurn: true } : {}),
+            retry: true,
             actorId: instance.systemId,
           })
           .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task between the home and a worker', cause)))

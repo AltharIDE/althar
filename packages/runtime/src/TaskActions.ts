@@ -986,6 +986,7 @@ export class TaskActions extends Context.Service<
         /* Where it runs: the home, or one of its workers by name or id; and the model its lead starts on there. */
         runs_on: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
+        from_last_turn: Schema.optional(Schema.Boolean),
         toward: Schema.optional(Schema.NullOr(Schema.String)),
         shelf: Schema.optional(Schema.Literals(['scratch', 'board'])),
         /* Checked by, or the preset's reviewer override: null for none; otherwise the model and effort requested. */
@@ -1629,7 +1630,8 @@ export class TaskActions extends Context.Service<
         access: ToolAccess,
         task: { readonly id: string; readonly slug: string; readonly projectId: string },
         where: string,
-        model?: string,
+        model: string | undefined,
+        fromLastTurn: boolean,
       ) =>
         Effect.gen(function* () {
           const workers = runtimeConfig.workers?.list(task.projectId) ?? []
@@ -1647,6 +1649,7 @@ export class TaskActions extends Context.Service<
               taskId: task.id,
               to,
               ...(model === undefined ? {} : { lead: { model } }),
+              ...(fromLastTurn ? { fromLastTurn: true } : {}),
             }),
             task.slug,
           )
@@ -1664,7 +1667,7 @@ export class TaskActions extends Context.Service<
           switch (asked.part) {
             case 'workspace': {
               if (asked.toward !== undefined) return yield* workToward(access, { task: asked.task, toward: asked.toward })
-              if (asked.runs_on !== undefined) return yield* runsOn(access, task, asked.runs_on, asked.model)
+              if (asked.runs_on !== undefined) return yield* runsOn(access, task, asked.runs_on, asked.model, asked.from_last_turn === true)
               if (asked.to === undefined)
                 return yield* new ToolRefused({
                   message:
@@ -2265,6 +2268,11 @@ export class TaskActions extends Context.Service<
               to: { type: 'string', enum: ['worktree', 'checkout'] },
               runs_on: { type: 'string', description: 'For workspace: the home, or one of its workers by name.' },
               model: { type: 'string', description: 'With runs_on: the model its lead starts on there, where its own isn’t offered.' },
+              from_last_turn: {
+                type: 'boolean',
+                description:
+                  'With runs_on, on the person’s word: move from what its last turn brought home, where the worker it runs on can’t bring the rest.',
+              },
               toward: { type: ['string', 'null'] },
               shelf: { type: 'string', enum: ['scratch', 'board'] },
             },

@@ -7,7 +7,14 @@ import { ANY, HOME, placementOf, runsOnText } from '../src/renderer/features/pro
 const id = (tail: string) => 'wrk_' + tail.repeat(32 / tail.length)
 const lead: PlanStep = { key: 'implement', agentId: 'claude-code', model: null, skipped: false }
 const capacity = { platform: 'linux', architecture: 'x64', cpuCores: 8, freeMemoryMib: 12_288, freeDiskMib: 81_920 } as const
-const free: ProjectWorker = { workerId: id('a'), providers: ['claude-code'], busy: false, capacity }
+/** What a worker's own check found where it can take a task: its sandbox starts, it has git, and Claude Code started there. */
+const passed = {
+  sandbox: { starts: true as const },
+  tools: [{ name: 'git', version: '2.43.0' }],
+  models: [],
+  agents: [{ providerId: 'claude-code', starts: true }],
+}
+const free: ProjectWorker = { workerId: id('a'), providers: ['claude-code'], busy: false, capacity, readiness: passed }
 const requirements = { repositoryCount: 1, homeOnly: false, readOnly: false }
 const base = {
   workers: [free],
@@ -25,10 +32,10 @@ describe('where a held plan runs', () => {
   it('offers the home, any free worker and each worker with how it stands', () => {
     const workers: ReadonlyArray<ProjectWorker> = [
       free,
-      { workerId: id('b'), providers: ['claude-code'], busy: true },
-      { workerId: id('c'), providers: ['claude-code'], busy: false, capacity: { ...capacity, freeDiskMib: 0 } },
-      { workerId: id('d'), providers: ['codex'], busy: false, capacity: { ...capacity, freeMemoryMib: 512 } },
-      { workerId: id('e'), providers: ['claude-code'], busy: false },
+      { workerId: id('b'), providers: ['claude-code'], busy: true, readiness: passed },
+      { workerId: id('c'), providers: ['claude-code'], busy: false, capacity: { ...capacity, freeDiskMib: 0 }, readiness: passed },
+      { workerId: id('d'), providers: ['codex'], busy: false, capacity: { ...capacity, freeMemoryMib: 512 }, readiness: passed },
+      { workerId: id('e'), providers: ['claude-code'], busy: false, readiness: passed },
     ]
     const placement = placementOf({ ...base, workers, requirements: { ...requirements, repositoryCount: 2 } })
     expect(placement.shown).toBe(true)
@@ -90,7 +97,7 @@ describe('where a held plan runs', () => {
 })
 
 describe('a worker’s own check, in Runs on (ADR-103)', () => {
-  const ready = { sandbox: { starts: true as const }, tools: [{ name: 'git', version: '2.43.0' }], models: [] }
+  const ready = passed
   const checked = (change: Partial<ProjectWorker> = {}): ProjectWorker => ({
     ...free,
     signedIn: ['claude-code'],

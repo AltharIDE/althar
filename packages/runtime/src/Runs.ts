@@ -330,6 +330,7 @@ export class Runs extends Context.Service<
       readonly taskId: string
       readonly to: PlaceTo
       readonly lead?: { readonly model?: string; readonly effort?: string }
+      readonly fromLastTurn?: boolean
     }): Effect.Effect<TaskPlaced, unknown>
     /**
      * Points a running task at another branch to work toward (a task is a conversation plus parts, "Changing the branch a
@@ -3114,6 +3115,7 @@ export class Runs extends Context.Service<
               taskId: input.taskId,
               to: input.to,
               ...(input.lead === undefined ? {} : { lead: input.lead }),
+              ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
               actorId: input.envelope.actorId,
             }),
           ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),

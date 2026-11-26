@@ -635,4 +635,39 @@ describe('a worker’s models (ADR-103)', () => {
     // What the home knows of a model it has too stays with it.
     expect(there.known[0]?.models[0]?.efforts).toEqual([{ id: 'high', name: 'High' }])
   })
+
+  it('offers what the worker said of an agent the home hasn’t read yet, and only an agent’s default where the worker hasn’t said', async () => {
+    const { onWorker } = await import('../src/renderer/shared/models')
+    const agents = [
+      { id: 'claude-code', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ] as never
+    const home = [
+      {
+        agentId: 'claude-code',
+        models: [{ id: 'opus', name: 'Opus', description: null, efforts: [], effort: null }],
+        model: 'opus',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+    ]
+    const there = onWorker(home, agents, {
+      providers: ['claude-code', 'codex'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [{ providerId: 'codex', models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }] }],
+      },
+    })
+    // Codex, which the home hasn't read: the worker's own list.
+    expect(there.known.find((one) => one.agentId === 'codex')).toMatchObject({
+      models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }],
+      model: 'gpt-6.2-sol',
+    })
+    // Claude Code, which the worker said nothing of: its own default only, never the home's Opus.
+    expect(there.known.find((one) => one.agentId === 'claude-code')).toMatchObject({ models: [], model: null })
+  })
 })

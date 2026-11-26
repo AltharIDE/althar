@@ -1,6 +1,9 @@
 use std::{fs, path::Path};
 
-use crate::wire::{AgentWorkerModel, AgentWorkerModels, AgentWorkerReadiness, AgentWorkerTool};
+use crate::wire::{
+    AgentWorkerAgentStart, AgentWorkerModel, AgentWorkerModels, AgentWorkerReadiness,
+    AgentWorkerTool,
+};
 
 /*
  * What the worker's own check found (`althar-host worker check`, run as its setup ends, after each sign-in and with its
@@ -11,6 +14,8 @@ use crate::wire::{AgentWorkerModel, AgentWorkerModels, AgentWorkerReadiness, Age
  *   fix      <the command an administrator runs to let it start>
  *   tool     <name>  <version>
  *   model    <provider>  <id>  <name>
+ *   agent    <provider>  starts
+ *   agent    <provider>  fails   <why, in its own words>
  *
  * Read again at each hello and every fourth heartbeat, as `signed-in` is, so the home hears within seconds what changed.
  */
@@ -60,6 +65,15 @@ pub(crate) fn readiness_from(path: &Path, providers: &[String]) -> Option<AgentW
                     readiness.tools.push(AgentWorkerTool { name, version });
                 }
             }
+            ["agent", provider, "starts"] if providers.iter().any(|known| known == provider) => {
+                started(&mut readiness, provider, true, String::new());
+            }
+            ["agent", provider, "fails", problem]
+                if providers.iter().any(|known| known == provider) =>
+            {
+                let problem = field(problem, FIELD * 2).unwrap_or_default();
+                started(&mut readiness, provider, false, problem);
+            }
             ["model", provider, id, name] if providers.iter().any(|known| known == provider) => {
                 let (Some(id), Some(name)) = (field(id, FIELD), field(name, FIELD)) else {
                     continue;
@@ -89,6 +103,18 @@ pub(crate) fn readiness_from(path: &Path, providers: &[String]) -> Option<AgentW
     checked.then_some(readiness)
 }
 
+/// Whether an agent started once as a run starts it, kept once for each agent: the last line for it stands.
+fn started(readiness: &mut AgentWorkerReadiness, provider: &str, starts: bool, problem: String) {
+    readiness
+        .agents
+        .retain(|agent| agent.provider_id != provider);
+    readiness.agents.push(AgentWorkerAgentStart {
+        provider_id: provider.to_owned(),
+        starts,
+        problem,
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,7 +129,8 @@ mod tests {
             &path,
             "sandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c 'apparmor_parser -r x'\ntool\tbun\t1.3.5\ntool\tbun\t1.0.0\n\
              tool\tgit\t2.43.0\nmodel\tclaude-code\topus\tClaude Opus 5.5\nmodel\tclaude-code\topus\tAgain\n\
-             model\tunknown\tm\tM\nmodel\tclaude-code\tbad\x07\tBell\nnonsense line\n",
+             model\tunknown\tm\tM\nmodel\tclaude-code\tbad\x07\tBell\nnonsense line\n\
+             agent\tclaude-code\tfails\tSandbox required but unavailable\nagent\tunknown\tstarts\n",
         )?;
         let read = readiness_from(&path, &["claude-code".into()]).expect("a check");
         assert!(!read.sandbox_starts);
@@ -119,6 +146,9 @@ mod tests {
         assert_eq!(read.models.len(), 1);
         assert_eq!(read.models[0].models.len(), 1);
         assert_eq!(read.models[0].models[0].name, "Claude Opus 5.5");
+        assert_eq!(read.agents.len(), 1, "only the agents it has");
+        assert!(!read.agents[0].starts);
+        assert_eq!(read.agents[0].problem, "Sandbox required but unavailable");
         fs::write(&path, "tool\tbun\t1.3.5\n")?;
         assert!(
             readiness_from(&path, &[]).is_none(),

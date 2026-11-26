@@ -231,6 +231,12 @@ export const readinessLines = (check: WorkerCheck) =>
     ...(!check.sandbox.starts && check.sandbox.fix !== undefined ? [`fix\t${field(check.sandbox.fix)}`] : []),
     ...check.tools.map((tool) => `tool\t${field(tool.name)}\t${field(tool.version)}`),
     ...check.agents.flatMap((agent) => agent.models.map((model) => `model\t${agent.id}\t${field(model.id)}\t${field(model.name)}`)),
+    // Each agent it started, and whether it did: one that couldn't takes no task there.
+    ...check.agents.flatMap((agent) =>
+      agent.started === undefined
+        ? []
+        : [agent.started ? `agent\t${agent.id}\tstarts` : `agent\t${agent.id}\tfails\t${field(agent.message ?? 'It couldn’t start.')}`],
+    ),
   ]
     .map((line) => `${line}\n`)
     .join('')

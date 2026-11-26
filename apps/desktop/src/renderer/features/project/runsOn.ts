@@ -50,6 +50,10 @@ export const runsOnText = {
         return `No ${agentName(unfit.agentId)}`
       case 'signedOut':
         return `${agentName(unfit.agentId)} signed out`
+      case 'unchecked':
+        return 'Not checked yet'
+      case 'agentStarts':
+        return unfit.problem === undefined ? `${agentName(unfit.agentId)} not tried yet` : `${agentName(unfit.agentId)} won’t start`
       case 'sandbox':
         return 'Sandbox can’t start'
       case 'disk':

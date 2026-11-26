@@ -107,6 +107,14 @@ export const needsIn = (folder: string) =>
     }
   })
 
+/** What several folders' files need, each tool once, as the first folder that names it says: a task's repositories, each in its folder. */
+export const needsInAll = async (folders: ReadonlyArray<string>): Promise<ReadonlyArray<Need>> => {
+  const all: Need[] = []
+  for (const needs of await Promise.all(folders.map(needsIn)))
+    for (const need of needs) if (!all.some((one) => one.name === need.name)) all.push(need)
+  return all
+}
+
 /** Whether a version a worker has is the one asked: the same, or of the same major or minor. */
 const meets = (asked: string | undefined, have: string) =>
   asked === undefined || asked === 'lts' || have === asked || have.startsWith(`${asked}.`)
@@ -140,7 +148,7 @@ export const toolsToInstall = (lacking: ReadonlyArray<ToolNeed> | undefined) =>
 const read = new Map<string, { readonly at: number; readonly needs: ReadonlyArray<Need> }>()
 const READ_AGAIN = 30_000
 
-/** A project's needs, from its first repository's checkout on this computer (its folder within, where it has one). */
+/** A project's needs, from each of its repositories' checkouts on this computer (each in its folder within, where it has one). */
 export const checkoutNeeds = (projectId: string) =>
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
@@ -148,12 +156,12 @@ export const checkoutNeeds = (projectId: string) =>
     if (kept !== undefined && now - kept.at < READ_AGAIN) return kept.needs
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
-    const [found] = yield* sql<{ path: string; folder: string | null }>`
+    // Every repository's, each in its folder, as its setup runs there.
+    const found = yield* sql<{ path: string; folder: string | null }>`
       SELECT l.path, b.folder FROM repository_bindings b
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-      WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid LIMIT 1`
-    const needs =
-      found === undefined ? [] : yield* Effect.promise(() => needsIn(found.folder === null ? found.path : join(found.path, found.folder)))
+      WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+    const needs = yield* Effect.promise(() => needsInAll(found.map((one) => (one.folder === null ? one.path : join(one.path, one.folder)))))
     read.set(projectId, { at: now, needs })
     return needs
   })

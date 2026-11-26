@@ -2289,7 +2289,7 @@ export const handlers = apiLayer(
         once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
       DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
-      MoveTaskTo: ({ commandId, taskId, to, lead }) =>
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
         once(
           commandId,
           api(
@@ -2306,6 +2306,7 @@ export const handlers = apiLayer(
                         ...(lead.effort === undefined ? {} : { effort: lead.effort }),
                       },
                     }),
+                ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
               }),
             ),
           ),

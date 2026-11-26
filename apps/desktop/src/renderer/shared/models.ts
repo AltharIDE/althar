@@ -538,29 +538,44 @@ export const moveTo = async (client: Client, threadId: string, current: Choice, 
 export type PickOn = Pick<ProjectWorker, 'providers' | 'signedIn' | 'readiness'>
 
 /**
- * What a worker offers of the home's agents and models (ADR-103): only its agents, signed in there where it says, and of
- * each only the models its check found it offers there, in the home's order and with what the home knows of them, then
- * any the home hasn't heard of. An agent it hasn't said its models for keeps the home's list.
+ * What a worker offers (ADR-103), from what its own check said: of the home's agents, those it has, signed in there where it
+ * says, each with the models it offers there, in its order, with what the home knows of the same model (its efforts, its
+ * description) where it knows it. An agent whose models the worker hasn't said offers only its own default, which is what
+ * a run there starts on: never the home's list, which the worker may not have.
  */
 export const onWorker = (
   known: ReadonlyArray<AgentModels>,
   agents: ReadonlyArray<AgentStatus>,
   worker: PickOn,
 ): { readonly known: ReadonlyArray<AgentModels>; readonly agents: ReadonlyArray<AgentStatus> } => {
-  const there = new Map(
-    (worker.readiness?.models ?? []).filter((entry) => entry.models.length > 0).map((entry) => [entry.providerId, entry.models]),
-  )
+  const there = new Map((worker.readiness?.models ?? []).map((entry) => [entry.providerId, entry.models]))
+  const offering = agents.filter((agent) => worker.providers.includes(agent.id) && (worker.signedIn?.includes(agent.id) ?? true))
   return {
-    agents: agents.filter((agent) => worker.providers.includes(agent.id) && (worker.signedIn?.includes(agent.id) ?? true)),
-    known: known.map((offered) => {
-      const models = there.get(offered.agentId)
-      if (models === undefined) return offered
-      const ids = new Set(models.map((model) => model.id))
-      const kept = offered.models.filter((model) => ids.has(model.id))
-      const more = models
-        .filter((model) => !offered.models.some((home) => home.id === model.id))
-        .map((model) => ({ id: model.id, name: model.name, description: null, efforts: [], effort: null }))
-      return { ...offered, models: [...kept, ...more] }
+    agents: offering,
+    known: offering.map((agent): AgentModels => {
+      const home = known.find((offered) => offered.agentId === agent.id)
+      const said = there.get(agent.id) ?? []
+      const models = said.map(
+        (model) =>
+          home?.models.find((one) => one.id === model.id) ?? {
+            id: model.id,
+            name: model.name,
+            description: null,
+            efforts: [],
+            effort: null,
+          },
+      )
+      const on = home?.model != null && said.some((model) => model.id === home.model) ? home.model : (said[0]?.id ?? null)
+      return {
+        agentId: agent.id,
+        models,
+        model: on,
+        effort: on !== null && on === home?.model ? home.effort : null,
+        defaults: home?.defaults ?? [],
+        blocked: home?.blocked ?? [],
+        probing: false,
+        images: home?.images ?? null,
+      }
     }),
   }
 }

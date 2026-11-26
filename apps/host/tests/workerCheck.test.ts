@@ -200,7 +200,10 @@ describe('its agents, started once', () => {
       { id: 'codex', name: 'Codex', signedIn: true, started: false, message: 'Not signed in.', models: [] },
       { id: 'opencode', name: 'OpenCode', signedIn: false, models: [] },
     ])
-    expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe('sandbox\tstarts\nmodel\tclaude-code\topus\tClaude Opus 5.5\n')
+    // An agent that couldn't start is said too: the home keeps work from it there, with why.
+    expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
+      'sandbox\tstarts\nmodel\tclaude-code\topus\tClaude Opus 5.5\nagent\tclaude-code\tstarts\nagent\tcodex\tfails\tNot signed in.\n',
+    )
   })
 
   it('keeps tabs and new lines out of what it writes', () => {
@@ -210,6 +213,6 @@ describe('its agents, started once', () => {
         tools: [{ name: 'node', version: '24.11.0' }],
         agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: true, models: [{ id: 'a\tb', name: 'A\nB' }] }],
       }),
-    ).toBe('sandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c "x"\ntool\tnode\t24.11.0\nmodel\tcodex\ta b\tA B\n')
+    ).toBe('sandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c "x"\ntool\tnode\t24.11.0\nmodel\tcodex\ta b\tA B\nagent\tcodex\tstarts\n')
   })
 })

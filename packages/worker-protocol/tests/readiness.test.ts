@@ -19,6 +19,10 @@ describe('a worker’s check, as its home keeps it', () => {
             { name: 'node', version: '24.11.0' },
           ],
           models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Claude Opus 5.5' }] }],
+          agents: [
+            { providerId: 'claude-code', starts: true, problem: '' },
+            { providerId: 'codex', starts: false, problem: 'Not signed in.' },
+          ],
         }),
       ),
     ).toEqual({
@@ -28,6 +32,10 @@ describe('a worker’s check, as its home keeps it', () => {
         { name: 'node', version: '24.11.0' },
       ],
       models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Claude Opus 5.5' }] }],
+      agents: [
+        { providerId: 'claude-code', starts: true },
+        { providerId: 'codex', starts: false, problem: 'Not signed in.' },
+      ],
     })
   })
 
@@ -58,6 +66,7 @@ describe('a worker’s check, as its home keeps it', () => {
       sandbox: { starts: false, problem: 'Failed' },
       tools: [],
       models: [{ providerId: 'codex', models: [{ id: 'gpt', name: 'GPT' }] }],
+      agents: [],
     })
     expect(readinessOf(create(AgentWorkerReadinessSchema, { sandboxStarts: true, sandboxProblem: 'Failed' })).sandbox).toEqual({
       starts: true,

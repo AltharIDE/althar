@@ -42,6 +42,8 @@ export type TaskPlaced =
 export interface MovingTo {
   readonly to: PlaceTo
   readonly lead?: { readonly model?: string; readonly effort?: string }
+  /** Moving from what its last turn brought home, where the worker can't bring the rest. */
+  readonly fromLastTurn?: boolean
   /** What the task says of it meanwhile. */
   readonly why?: string
 }
@@ -113,7 +115,16 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
    * Moves a task where the person asked: at once between its lead's turns, else once the one under way ends. Refused,
    * with words, where it can't go: a worker that isn't ready for it, or a lead whose model isn't offered there.
    */
-  const place = (input: { readonly taskId: string; readonly to: PlaceTo; readonly lead?: MovingTo['lead']; readonly actorId: ActorId }) =>
+  const place = (input: {
+    readonly taskId: string
+    readonly to: PlaceTo
+    readonly lead?: MovingTo['lead']
+    /** Where the worker it runs on can't bring its work home now: move from what its last turn brought home, as asked. */
+    readonly fromLastTurn?: boolean
+    /** Tried again as the lead's turn ended, rather than asked now: what refuses it then is said in the thread, and the move dropped. */
+    readonly retry?: boolean
+    readonly actorId: ActorId
+  }) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const config = yield* RuntimeConfig
@@ -149,33 +160,65 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
           yield* sql.withTransaction(rewrite(input.taskId, ({ movingTo: _gone, ...rest }) => rest, input.actorId))
         return { kind: 'same' } as TaskPlaced
       }
+      // Refused: asked now, the caller hears why; tried again as a turn ended, the thread says so, and the move goes.
+      const refuse = (message: string) =>
+        Effect.gen(function* () {
+          if (input.retry === true) {
+            yield* sql.withTransaction(rewrite(input.taskId, ({ movingTo: _dropped, ...rest }) => rest, input.actorId))
+            yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `Didn’t move to ${nameOf(input.to)}: ${message}`,
+            })
+            yield* touchCard(input.taskId)
+          }
+          return yield* invalid(message)
+        })
+      // The lead that will open where it goes: the agent its session is on, on the model picked for there, else the one picked
+      // for its next turn, else the one its session is on, as its handover starts it (Sessions.ts), else its plan's.
+      const lead = yield* sessions.running(task.threadId)
+      const [latest] = yield* sql<{ agentId: string; model: string | null }>`
+        SELECT agent_id, model FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      const planned = parameters.steps.find((step) => step.key === 'implement')
+      const agentId = Option.isSome(lead) ? lead.value.agentId : (latest?.agentId ?? planned?.agentId)
+      const next = Option.isSome(lead) && lead.value.nextLead?.agentId === agentId ? lead.value.nextLead : undefined
+      const model =
+        input.lead?.model ?? next?.model ?? (latest !== undefined && latest.agentId === agentId ? latest.model : (planned?.model ?? null))
       const steps =
-        input.lead?.model === undefined
+        agentId === undefined
           ? parameters.steps
-          : parameters.steps.map((step) => (step.key === 'implement' ? { ...step, model: input.lead?.model ?? step.model } : step))
+          : parameters.steps.map((step) => (step.key === 'implement' ? { ...step, agentId, model } : step))
       if (input.to !== 'home') {
         const requirements = yield* workerRequirementsOf(input.taskId, {
           homeOnly: parameters.here === true,
           readOnly: parameters.reads === true,
         })
         const kept = workerPlanUnfit(requirements, parameters.worksIn, steps)
-        if (kept !== undefined) return yield* invalid(planUnfitWords(kept))
+        if (kept !== undefined) return yield* refuse(planUnfitWords(kept))
         const worker = workers.find((one) => one.workerId === input.to)
         const unfit = workerUnfit(worker, steps, requirements.repositoryCount)
-        if (unfit !== undefined) return yield* invalid(workerUnfitWords(unfit, nameOf(input.to)))
-        const model = workerModelUnfit(worker, steps)
-        if (model !== undefined) return yield* invalid(workerModelWords(nameOf(input.to), model.model))
+        if (unfit !== undefined) return yield* refuse(workerUnfitWords(unfit, nameOf(input.to)))
+        const offered = workerModelUnfit(worker, steps)
+        if (offered !== undefined) return yield* refuse(workerModelWords(nameOf(input.to), offered.model))
       }
-      // Between its lead's turns: one under way ends first, and the move is tried again as it does.
-      const lead = yield* sessions.running(task.threadId)
-      if (Option.isSome(lead) && lead.value.turnRunning) {
+      // Between its lead's turns: one under way ends first, as does a fresh session taking it over, and the move is tried again
+      // as they do. A move then would mark the session going out, and the one coming in would carry on where it was.
+      const handing = yield* sessions.handingOver(task.threadId)
+      if ((Option.isSome(lead) && lead.value.turnRunning) || Option.isSome(handing)) {
         const why = `Moves to ${nameOf(input.to)} once its lead’s turn ends.`
-        const movingTo: MovingTo = { to: input.to, why, ...(input.lead === undefined ? {} : { lead: input.lead }) }
+        const movingTo: MovingTo = {
+          to: input.to,
+          why,
+          ...(input.lead === undefined ? {} : { lead: input.lead }),
+          ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
+        }
         yield* sql.withTransaction(rewrite(input.taskId, (now) => ({ ...now, movingTo }), input.actorId))
         yield* touchCard(input.taskId)
         return { kind: 'waits', why } as TaskPlaced
       }
-      // Its work comes along: from a worker, brought home once more, where every turn's end has brought it already.
+      // Its work comes along: from a worker, brought home and checked against what the home has (workerWorkspace.ts) before
+      // anything moves. Where it can't be, the task stays where it runs, unless the person said to move from what its last
+      // turn brought home.
       let behind = false
       if (from !== 'home') {
         const checkpoint = config.workers?.checkpointWorktree
@@ -187,6 +230,10 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
               : yield* Effect.exit(checkpoint({ workerId: from, projectId: task.projectId, worktree: folder.path }))
           if (saved === undefined || saved._tag === 'Failure') behind = true
         }
+        if (behind && input.fromLastTurn !== true)
+          return yield* refuse(
+            `${nameOf(from)} couldn’t bring its work home just now, so it stays there. Reconnect it and move it again, or move it from what its last turn brought home.`,
+          )
       }
       yield* sql.withTransaction(
         rewrite(
@@ -211,7 +258,7 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
       yield* sessions.moved(task.threadId, input.lead)
       const said =
         `Moved to ${nameOf(input.to)}: its lead carries on there.` +
-        (behind ? ` Its work came along as of its lead’s last turn on ${nameOf(from)}, which didn’t answer just now.` : '')
+        (behind ? ` Its work came along as its last turn on ${nameOf(from)} brought it home, as asked.` : '')
       yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
         source: 'runtime',
         severity: behind ? 'warning' : 'info',

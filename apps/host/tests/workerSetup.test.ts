@@ -180,7 +180,7 @@ describe('enrolling a worker with what its home gave', () => {
       ],
     })
     expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
-      'sandbox\tstarts\ntool\tgit\t2.43.0\nmodel\tcodex\tgpt-6.2-sol\tGPT-6.2 Sol\n',
+      'sandbox\tstarts\ntool\tgit\t2.43.0\nmodel\tcodex\tgpt-6.2-sol\tGPT-6.2 Sol\nagent\tcodex\tstarts\n',
     )
   })
 

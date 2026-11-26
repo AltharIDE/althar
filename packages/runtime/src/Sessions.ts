@@ -2980,7 +2980,11 @@ export class Sessions extends Context.Service<
             const running = threads.get(threadId)
             if (running === undefined) return
             running.moved = true
-            if (lead !== undefined) running.movedLead = lead
+            // A model picked for where it went is the fresh session's: a pick for its next turn here goes with it.
+            if (lead !== undefined) {
+              running.movedLead = lead
+              if (running.nextLead?.agentId === running.entry.definition.id) running.nextLead = undefined
+            }
           }),
         interrupt: (threadId, by, background = false) =>
           Effect.suspend(() => {

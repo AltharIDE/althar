@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { Duplex, PassThrough, Readable, Writable } from 'node:stream'
@@ -97,6 +97,17 @@ const connected = (
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
   thread.session !== null && !thread.session.turnRunning && thread.session.turnEndedAt !== null
+
+/** What a worker's own check found where it can take a task: its sandbox starts, it has git, and its agents started there. */
+const READY = {
+  sandbox: { starts: true as const },
+  tools: [{ name: 'git', version: '2.43.0' }],
+  models: [],
+  agents: [
+    { providerId: 'codex', starts: true },
+    { providerId: 'claude-code', starts: true },
+  ],
+}
 
 const openFakeWorker = (cwd: string) =>
   Effect.gen(function* () {
@@ -310,7 +321,7 @@ describe('a normal task assigned to a worker', () => {
         let openings = 0
         const { client, grant, helpers } = yield* connected({
           workers: {
-            list: () => [{ workerId, providers: ['codex'], busy: false, multiRepoProviders: ['codex'] }],
+            list: () => [{ workerId, providers: ['codex'], busy: false, multiRepoProviders: ['codex'], readiness: READY }],
             open: (request) =>
               Effect.gen(function* () {
                 assert.strictEqual(request.workerId, workerId)
@@ -321,8 +332,10 @@ describe('a normal task assigned to a worker', () => {
                   assert.strictEqual(dirname(repository.worktree), dirname(request.worktree))
                 }
                 const api = bound.find((repository) => repository.directory === 'api') ?? assert.fail('The API worktree is missing.')
+                // The API's bun.lock says Bun, which the worker hasn't: it installs it before the setup runs.
                 assert.deepStrictEqual(request.setup, {
                   repositories: [{ workspaceId: api.workspaceId, directory: '', commands: ['bun install --frozen-lockfile'] }],
+                  tools: [{ name: 'bun', version: 'latest' }],
                 })
                 assert.strictEqual(bound.find((repository) => repository.worktree === request.worktree)?.workspaceId, request.workspaceId)
                 openings += 1
@@ -387,7 +400,7 @@ describe('a normal task assigned to a worker', () => {
         const revoked: string[] = []
         const { client, grant } = yield* connected({
           workers: {
-            list: () => [{ workerId, providers: ['codex'], busy }],
+            list: () => [{ workerId, providers: ['codex'], busy, readiness: READY }],
             enrolled: () => [
               { workerId, connected: true, busy, capacity, providers: ['codex'], projectIds: [projectId] },
               { workerId: away, connected: false, busy: false, providers: [], projectIds: [projectId, 'proj_' + '0'.repeat(32)] },
@@ -454,7 +467,7 @@ describe('a normal task assigned to a worker', () => {
         let online = true
         const { client, grant } = yield* connected({
           workers: {
-            list: () => [{ workerId, providers: ['codex'], busy: false }],
+            list: () => [{ workerId, providers: ['codex'], busy: false, readiness: READY }],
             enrolled: () => [
               {
                 workerId,
@@ -604,7 +617,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.minutes(5),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true, readiness: READY }],
             open: () => Effect.die('A busy worker must not start again'),
           },
         })
@@ -640,7 +653,7 @@ describe('a normal task assigned to a worker', () => {
         let opened = 0
         const { client, grant } = yield* connected({
           workers: {
-            list: () => [{ workerId, providers: ['codex'], busy: false }],
+            list: () => [{ workerId, providers: ['codex'], busy: false, readiness: READY }],
             open: () => Effect.sync(() => ++opened).pipe(Effect.andThen(Effect.die('A refused task must not open a worker'))),
           },
         })
@@ -671,9 +684,21 @@ describe('a normal task assigned to a worker', () => {
         const workerId = 'wrk_' + '4'.repeat(32)
         const capacity = { platform: 'linux' as const, architecture: 'x64' as const, cpuCores: 4, freeMemoryMib: 8192, freeDiskMib: 16384 }
         const candidates = [
-          { workerId: 'wrk_' + '1'.repeat(32), providers: ['codex'], busy: false, capacity: { ...capacity, freeMemoryMib: 1024 } },
-          { workerId: 'wrk_' + '2'.repeat(32), providers: ['codex'], busy: true, capacity: { ...capacity, freeMemoryMib: 32768 } },
-          { workerId, providers: ['codex'], busy: false, capacity },
+          {
+            workerId: 'wrk_' + '1'.repeat(32),
+            providers: ['codex'],
+            busy: false,
+            capacity: { ...capacity, freeMemoryMib: 1024 },
+            readiness: READY,
+          },
+          {
+            workerId: 'wrk_' + '2'.repeat(32),
+            providers: ['codex'],
+            busy: true,
+            capacity: { ...capacity, freeMemoryMib: 32768 },
+            readiness: READY,
+          },
+          { workerId, providers: ['codex'], busy: false, capacity, readiness: READY },
         ]
         const homePath = repository()
         writeFileSync(join(homePath, 'package.json'), JSON.stringify({ name: 'worker-task', dependencies: { fixture: 'file:./fixture' } }))
@@ -794,7 +819,12 @@ describe('a normal task assigned to a worker', () => {
               Effect.gen(function* () {
                 assert.strictEqual(request.workerId, workerId)
                 placed.push({ workspace: request.workspaceId, site: request.worktree })
-                assert.deepStrictEqual(request.setup, { directory: '', commands: ['bun install --frozen-lockfile'] })
+                // Its bun.lock says Bun, which the worker hasn't: it installs it before the setup runs.
+                assert.deepStrictEqual(request.setup, {
+                  directory: '',
+                  commands: ['bun install --frozen-lockfile'],
+                  tools: [{ name: 'bun', version: 'latest' }],
+                })
                 writeFileSync(join(workerPath, 'staged'), 'from the worker setup')
                 return {
                   transport: yield* openFakeWorker(workerPath),
@@ -818,7 +848,13 @@ describe('a normal task assigned to a worker', () => {
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
         expectedProject = project.id
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
-        assert.deepStrictEqual(yield* client.ListProjectWorkers({ projectId: project.id }), candidates)
+        // Each as it said, with what the project's files need that it lacks, by its own check.
+        const listed = yield* client.ListProjectWorkers({ projectId: project.id })
+        assert.deepStrictEqual(
+          listed.map(({ needs: _needs, ...worker }) => worker),
+          candidates,
+        )
+        assert.isTrue(listed.every((worker) => worker.needs === undefined || worker.needs.every((need) => need.why !== '')))
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,
@@ -999,101 +1035,157 @@ describe('a normal task assigned to a worker', () => {
 })
 
 describe('a task moving between the home and its workers (ADR-103)', () => {
-  it.live('moves to a worker and back between its lead’s turns, its work coming home first, and refuses a worker not ready for it', () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const workerId = 'wrk_' + '5'.repeat(32)
-        const unready = 'wrk_' + '6'.repeat(32)
-        const homePath = repository()
-        const workerPath = repository()
-        const capacity = { platform: 'linux', architecture: 'x64', cpuCores: 8, freeMemoryMib: 16_000, freeDiskMib: 80_000 } as const
-        const ready = { sandbox: { starts: true as const }, tools: [{ name: 'git', version: '2.43.0' }] }
-        let openings = 0
-        let checkpoints = 0
-        const { client, grant } = yield* connected({
-          workers: {
-            list: () => [
-              {
-                workerId,
-                name: 'runner-1',
-                providers: ['codex'],
-                signedIn: ['codex'],
-                busy: false,
-                capacity,
-                readiness: { ...ready, models: [{ providerId: 'codex', models: [{ id: 'gpt-5.2', name: 'GPT-5.2' }] }] },
-              },
-              {
-                workerId: unready,
-                name: 'runner-2',
-                providers: ['codex'],
-                signedIn: ['codex'],
-                busy: false,
-                capacity,
-                readiness: { ...ready, sandbox: { starts: false as const, problem: 'NoUserNamespaces' }, models: [] },
-              },
-            ],
-            checkpointWorktree: () =>
-              Effect.sync(() => {
-                checkpoints += 1
-              }),
-            open: (request) =>
-              Effect.gen(function* () {
-                assert.strictEqual(request.workerId, workerId)
-                openings += 1
-                return {
-                  path: workerPath,
-                  toolPort: request.toolPort,
-                  transport: yield* openFakeWorker(workerPath),
-                  checkpoint: Effect.void,
-                }
-              }),
-          },
-        })
-        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
-        const task = yield* client.StartTask({
-          commandId: commandId(),
-          projectId: project.id,
-          title: 'Carry on wherever it runs',
-          description: '[lead:finish]',
-          end: 'ready',
-          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-        })
-        yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
-          thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
-        )
-        // A worker whose sandbox can't start takes none, and says why.
-        const refused = yield* Effect.flip(client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: unready }))
-        assert.include(refused.message, 'runner-2 can’t start its agents’ sandbox')
-        // To runner-1: between turns, at once; the thread says so, and its lead's next turn starts there.
-        // Its turn may still be ending: the move waits for it, says so meanwhile, and goes once it has.
-        const said = 'Moved to runner-1: its lead carries on there.'
-        const moving = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: workerId })
-        if (moving.kind === 'waits') assert.strictEqual(moving.why, 'Moves to runner-1 once its lead’s turn ends.')
-        else assert.deepStrictEqual(moving, { kind: 'placed', said })
-        const there = yield* until(
-          client.GetThread({ threadId: task.threadId, fresh: true }),
-          (thread) => thread.task.workerId === workerId,
-        )
-        assert.isUndefined(there.task.placing)
-        assert.strictEqual(checkpoints, 0)
-        yield* client.Send({
-          commandId: commandId(),
-          threadId: task.threadId,
-          body: 'Carry on there. [lead:finish]',
-          disposition: 'after_current',
-        })
-        yield* until(
-          Effect.sync(() => openings),
-          (count) => count === 1,
-        )
-        // Back home: its work brought home from the worker first.
-        yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => thread.session?.turnRunning !== true)
-        const home = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: 'home' })
-        assert.strictEqual(home.kind === 'placed' ? home.said : home.kind, 'Moved to this home: its lead carries on there.')
-        assert.isAtLeast(checkpoints, 1)
-        assert.isNull((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.workerId ?? null)
-        assert.deepStrictEqual(yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: 'home' }), { kind: 'same' })
-      }),
-    ),
+  it.live(
+    'moves between the home and workers with its work, by the lead it has now, and stays where a worker can’t bring its work home',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runner1 = 'wrk_' + '5'.repeat(32)
+          const runner2 = 'wrk_' + '6'.repeat(32)
+          const unready = 'wrk_' + '8'.repeat(32)
+          const homePath = repository()
+          const capacity = { platform: 'linux', architecture: 'x64', cpuCores: 8, freeMemoryMib: 16_000, freeDiskMib: 80_000 } as const
+          const checked = (models: ReadonlyArray<string>) => ({
+            sandbox: { starts: true as const },
+            tools: [{ name: 'git', version: '2.43.0' }],
+            models: [{ providerId: 'codex', models: models.map((id) => ({ id, name: id })) }],
+            agents: [{ providerId: 'codex', starts: true }],
+          })
+          const listed = (
+            workerId: string,
+            name: string,
+            readiness:
+              | ReturnType<typeof checked>
+              | (Omit<ReturnType<typeof checked>, 'sandbox'> & { sandbox: { starts: false; problem: string } }),
+          ) => ({
+            workerId,
+            name,
+            providers: ['codex'],
+            signedIn: ['codex'],
+            busy: false,
+            capacity,
+            readiness,
+          })
+          // What each worker has of the task's work, as its checkout came: the files in the home's worktree as it opened there.
+          const opened: Array<{ workerId: string; files: ReadonlyArray<string> }> = []
+          // A checkpoint brings what the worker changed home, as the real one lands its patch (workerWorkspace.ts); one may fail.
+          let checkpointFails = false
+          const changedOn = new Map<string, string>()
+          const { client, grant } = yield* connected({
+            workers: {
+              list: () => [
+                listed(runner1, 'runner-1', checked(['small', 'large'])),
+                listed(runner2, 'runner-2', checked(['small'])),
+                listed(unready, 'runner-3', { ...checked([]), sandbox: { starts: false, problem: 'NoUserNamespaces' } }),
+              ],
+              checkpointWorktree: (input) =>
+                checkpointFails
+                  ? Effect.fail(
+                      new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: 'The worker is gone.' }),
+                    )
+                  : Effect.sync(() => {
+                      const file = changedOn.get(input.workerId)
+                      if (file !== undefined) writeFileSync(join(input.worktree, file), `written on ${input.workerId}\n`)
+                    }),
+              open: (request) =>
+                Effect.gen(function* () {
+                  opened.push({ workerId: request.workerId, files: readdirSync(request.worktree).filter((file) => !file.startsWith('.')) })
+                  const workerPath = repository()
+                  return {
+                    path: workerPath,
+                    toolPort: request.toolPort,
+                    transport: yield* openFakeWorker(workerPath),
+                    checkpoint: Effect.void,
+                  }
+                }),
+            },
+          })
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
+          const task = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: 'Carry on wherever it runs',
+            description: '[lead:finish]',
+            end: 'ready',
+            steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          })
+          yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
+            thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+          )
+          // Its lead moved to the large model since it started: where it goes is judged by that, not its plan's.
+          yield* client.SetModel({ commandId: commandId(), threadId: task.threadId, model: 'large' })
+          const home = yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (view) => view.session?.model === 'large')
+          const worktree = home.task.worktree ?? assert.fail('The task has no worktree.')
+          writeFileSync(join(worktree, 'made-at-home.txt'), 'home\n')
+          const move = (to: string, more: { readonly lead?: { readonly model: string }; readonly fromLastTurn?: boolean } = {}) =>
+            client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to, ...more })
+          const placedOn = (workerId: string | null) =>
+            until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => (thread.task.workerId ?? null) === workerId)
+          const said = (place: string) => `Moved to ${place}: its lead carries on there.`
+          // A message taken up and its turn over: what the lead was told reached it, and it answered.
+          const answered = (text: string) =>
+            until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => {
+              const at = thread.items.findIndex((item) => item.kind === 'user_message' && item.content.text.startsWith(text))
+              return (
+                at !== -1 &&
+                thread.items.slice(at + 1).some((item) => item.kind === 'agent_message') &&
+                thread.session?.turnRunning !== true
+              )
+            })
+          // runner-3's sandbox can't start, and runner-2 doesn't offer the large model its lead is on.
+          assert.include((yield* Effect.flip(move(unready))).message, 'runner-3 can’t start its agents’ sandbox')
+          assert.strictEqual((yield* Effect.flip(move(runner2))).message, 'runner-2 doesn’t offer large. Pick a model it has.')
+          // To runner-1, which does: once its turn has ended, with what the home's worktree has.
+          const first = yield* move(runner1)
+          if (first.kind === 'waits') assert.strictEqual(first.why, 'Moves to runner-1 once its lead’s turn ends.')
+          else assert.deepStrictEqual(first, { kind: 'placed', said: said('runner-1') })
+          assert.isUndefined((yield* placedOn(runner1)).task.placing)
+          yield* client.Send({
+            commandId: commandId(),
+            threadId: task.threadId,
+            body: 'On runner-1 now. [lead:finish]',
+            disposition: 'after_current',
+          })
+          yield* until(
+            Effect.sync(() => opened.length),
+            (count) => count === 1,
+          )
+          assert.deepStrictEqual(opened[0]?.workerId, runner1)
+          assert.include(opened[0]?.files ?? [], 'made-at-home.txt')
+          yield* answered('On runner-1 now.')
+          // Worker to worker, on the small model runner-2 offers: what runner-1 changed comes home first, then goes on to runner-2.
+          changedOn.set(runner1, 'made-on-runner-1.txt')
+          assert.deepStrictEqual(yield* move(runner2, { lead: { model: 'small' } }), { kind: 'placed', said: said('runner-2') })
+          assert.strictEqual(readFileSync(join(worktree, 'made-on-runner-1.txt'), 'utf8'), `written on ${runner1}\n`)
+          yield* placedOn(runner2)
+          yield* client.Send({
+            commandId: commandId(),
+            threadId: task.threadId,
+            body: 'On runner-2 now. [lead:finish]',
+            disposition: 'after_current',
+          })
+          yield* until(
+            Effect.sync(() => opened.length),
+            (count) => count === 2,
+          )
+          assert.strictEqual(opened[1]?.workerId, runner2)
+          assert.includeMembers([...(opened[1]?.files ?? [])], ['made-at-home.txt', 'made-on-runner-1.txt'])
+          // On the small model picked for runner-2, as its handover started it.
+          assert.strictEqual((yield* answered('On runner-2 now.')).session?.model, 'small')
+          // runner-2 can't bring its work home: the task stays on it, unless the person says to move from its last turn's copy.
+          checkpointFails = true
+          assert.include((yield* Effect.flip(move('home'))).message, 'runner-2 couldn’t bring its work home just now, so it stays there.')
+          assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.workerId, runner2)
+          const back = yield* move('home', { fromLastTurn: true })
+          assert.strictEqual(
+            back.kind === 'placed' ? back.said : back.kind,
+            `${said('this home')} Its work came along as its last turn on runner-2 brought it home, as asked.`,
+          )
+          yield* placedOn(null)
+          // The work from both workers is in the home's worktree.
+          assert.includeMembers(readdirSync(worktree), ['made-at-home.txt', 'made-on-runner-1.txt'])
+          assert.deepStrictEqual(yield* move('home'), { kind: 'same' })
+        }),
+      ),
   )
 })

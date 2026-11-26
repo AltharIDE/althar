@@ -39,6 +39,8 @@ export type WorkerUnfit =
   | { readonly kind: 'busy' }
   /** Out of workspace disk or memory. */
   | { readonly kind: 'full' }
+  /** It hasn't said what its own check found: an older worker, or one whose check hasn't finished. */
+  | { readonly kind: 'unchecked' }
   /** Its own check found its agents' sandbox can't start there: why, and what lets it where something would. */
   | { readonly kind: 'sandbox'; readonly problem: string; readonly fix?: string }
   /** Too little disk left for a task's checkout and its setup. */
@@ -50,6 +52,8 @@ export type WorkerUnfit =
   | { readonly kind: 'agent'; readonly agentId: string }
   /** It has the lead's agent, not signed in there. */
   | { readonly kind: 'signedOut'; readonly agentId: string }
+  /** Its check hasn't started the lead's agent once yet, or it couldn't: why, in the agent's own words. */
+  | { readonly kind: 'agentStarts'; readonly agentId: string; readonly problem?: string }
   | { readonly kind: 'repositories'; readonly count: number; readonly limit: number }
 
 /** Less free disk than this, and a task's checkout and setup may not fit. */
@@ -74,17 +78,22 @@ export const workerUnfit = (worker: ProjectWorker | undefined, steps: ReadonlyAr
   if (worker === undefined) return { kind: 'gone' }
   if (worker.busy) return { kind: 'busy' }
   if (worker.capacity?.freeDiskMib === 0 || worker.capacity?.freeMemoryMib === 0) return { kind: 'full' }
-  // What its own check found; a worker from before it checked itself says nothing, and is taken at its word.
-  const sandbox = worker.readiness?.sandbox
-  if (sandbox !== undefined && !sandbox.starts)
-    return { kind: 'sandbox', problem: sandbox.problem, ...(sandbox.fix === undefined ? {} : { fix: sandbox.fix }) }
+  // What its own check found: work goes only where it found the sandbox starts, which every agent there runs in.
+  const readiness = worker.readiness
+  if (readiness === undefined) return { kind: 'unchecked' }
+  const { sandbox } = readiness
+  if (!sandbox.starts) return { kind: 'sandbox', problem: sandbox.problem, ...(sandbox.fix === undefined ? {} : { fix: sandbox.fix }) }
   if (worker.capacity !== undefined && worker.capacity.freeDiskMib < WORKER_DISK_MIB)
     return { kind: 'disk', freeMib: worker.capacity.freeDiskMib }
-  if (worker.readiness !== undefined && !worker.readiness.tools.some((tool) => tool.name === 'git')) return { kind: 'git' }
+  if (!readiness.tools.some((tool) => tool.name === 'git')) return { kind: 'git' }
   const lead = workerLead(steps)
   if (lead === undefined) return { kind: 'lead' }
   if (!worker.providers.includes(lead.agentId)) return { kind: 'agent', agentId: lead.agentId }
   if (worker.signedIn !== undefined && !worker.signedIn.includes(lead.agentId)) return { kind: 'signedOut', agentId: lead.agentId }
+  // And only where its check started the lead's agent once, as a run starts it.
+  const started = readiness.agents?.find((agent) => agent.providerId === lead.agentId)
+  if (started?.starts !== true)
+    return { kind: 'agentStarts', agentId: lead.agentId, ...(started?.problem === undefined ? {} : { problem: started.problem }) }
   return repositoriesUnfit(repositories, workerRepositoryLimit(worker, steps))
 }
 
@@ -176,6 +185,12 @@ export const workerUnfitWords = (unfit: WorkerUnfit, name: string): string => {
       return `${name} doesn’t have the lead’s agent.`
     case 'signedOut':
       return `The lead’s agent isn’t signed in on ${name}. Sign it in from its sheet in Settings › Computers.`
+    case 'unchecked':
+      return `${name} hasn’t checked it can run a task yet. A worker checks itself as it starts, and an older one updates itself within the hour.`
+    case 'agentStarts':
+      return unfit.problem === undefined
+        ? `${name} hasn’t started the lead’s agent once yet: it does as the agent signs in there.`
+        : `The lead’s agent couldn’t start on ${name}: ${unfit.problem}`
     case 'sandbox':
       return unfit.problem === 'NoUserNamespaces'
         ? `${name} can’t start its agents’ sandbox until its administrator allows it once: Settings › Computers has the command.`

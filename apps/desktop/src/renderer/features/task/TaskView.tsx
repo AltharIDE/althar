@@ -25,6 +25,7 @@ import {
   type TaskAction,
   type ThreadItem,
   type ThreadSnapshot,
+  workerModels,
   workerName,
   workerOffersModel,
   workerUnfit,
@@ -2223,7 +2224,16 @@ export function TaskView({
               place={movingTo.name}
               model={movingTo.model}
               agents={model.agents}
-              start={{ agentId: choice.agentId, model: null, effort: null }}
+              // The first model the lead's agent offers there, to start from; the person picks another as they like.
+              start={{
+                agentId: choice.agentId,
+                model:
+                  workerModels(
+                    workers.find((one) => one.workerId === movingTo.place),
+                    choice.agentId,
+                  )?.[0]?.id ?? null,
+                effort: null,
+              }}
               worker={workers.find((one) => one.workerId === movingTo.place)}
               projectId={snapshot.project.id}
               onMove={(picked) => {

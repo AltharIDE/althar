@@ -17,7 +17,7 @@ export interface MovePickProps {
   readonly model: string
   /** The home's agents: the lead's own is the one offered. */
   readonly agents: ReadonlyArray<AgentStatus>
-  /** The lead's agent, with no model picked yet. */
+  /** The lead's agent, on the first model the place offers, where it said; none picked where it didn't. */
   readonly start: Choice
   /** The worker it moves to; none for the home, whose models the picker offers as they are. */
   readonly worker?: PickOn | undefined
@@ -32,7 +32,7 @@ export function MovePick({ place, model, agents, start, worker, projectId, onMov
     <MoveTaskDialog
       place={place}
       model={model}
-      canMove={pick.model !== null && pick.model !== start.model}
+      canMove={pick.model !== null}
       onMove={() => onMove(pick)}
       onClose={onClose}
       picker={
