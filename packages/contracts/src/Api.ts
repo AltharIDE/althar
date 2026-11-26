@@ -3028,6 +3028,8 @@ export const TaskCard = Schema.Struct({
       workerRequirements: Schema.optional(WorkerPlanRequirements),
       /** Where it runs once it starts, as chosen before (PlacePlan): a worker or any free one; absent for the home. */
       runsOn: Schema.optional(Schema.String),
+      /** When that choice was made, as PlacePlan's `chosenAt` said: a window's own choice is through once this reaches it. */
+      runsOnChosenAt: Schema.optional(Schema.Number),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
       /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
@@ -5779,7 +5781,16 @@ const ProjectApi = RpcGroup.make(
    * Where a planned task runs once it starts (ADR-103), chosen as it counts down or is held: a worker, any free worker, or null
    * for the home. Its countdown starts it there. Whether it was held: one counting down that the place can't take now is.
    */
-  command('PlacePlan', { planId: Schema.String, workerId: Schema.NullOr(WorkerSelection) }, Schema.Boolean),
+  command(
+    'PlacePlan',
+    {
+      planId: Schema.String,
+      workerId: Schema.NullOr(WorkerSelection),
+      /** When the person chose it, in milliseconds: one chosen before the plan's last choice reaches it late and changes nothing. */
+      chosenAt: Schema.optional(Schema.Number),
+    },
+    Schema.Boolean,
+  ),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
   command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */

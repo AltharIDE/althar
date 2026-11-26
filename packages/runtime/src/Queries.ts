@@ -3045,6 +3045,9 @@ export class Queries extends Context.Service<
                       ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
                       : {}),
                     ...(task.planState === 'proposed' && text(parameters, 'runsOn') !== '' ? { runsOn: text(parameters, 'runsOn') } : {}),
+                    ...(task.planState === 'proposed' && typeof field(parameters, 'runsOnChosenAt') === 'number'
+                      ? { runsOnChosenAt: field(parameters, 'runsOnChosenAt') as number }
+                      : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }

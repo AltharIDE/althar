@@ -531,7 +531,7 @@ describe('the Talk room', () => {
     // Held for the reset, it is paused, as on the board, not running.
     expect(screen.getByText('Paused')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln5', null)
+    expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
 
   it('files, changes and discards an issue the coordinator drafted, and shows it filed or why it wasn’t', async () => {
@@ -660,7 +660,7 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
     // Kept, so the countdown starts it there; it still counts down.
-    expect(client.placePlan).toHaveBeenCalledWith('pln1', free)
+    expect(client.placePlan).toHaveBeenCalledWith('pln1', free, expect.any(Number))
     expect(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
     expect(client.holdPlan).not.toHaveBeenCalled()
@@ -721,7 +721,7 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker ffffff' }))
     await userEvent.click(screen.getByRole('button', { name: 'Runs on: Linux worker ffffff' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'This Mac' }))
-    expect(client.placePlan).toHaveBeenLastCalledWith('pln1', null)
+    expect(client.placePlan).toHaveBeenLastCalledWith('pln1', null, expect.any(Number))
     // The first choice turned down after the second was made: the second stands.
     await act(async () => answers[0]?.(false))
     expect(screen.getByRole('button', { name: 'Runs on: This Mac' })).toBeTruthy()
@@ -840,7 +840,7 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Runs on: studio' })).toBeTruthy()
     // Start still sends it to the home the window is on.
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
   it('holds, changes and starts a plan before it starts on its own', async () => {
@@ -885,7 +885,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
   it('plans a review of someone else’s pull request with its one lead, offering every agent', async () => {
@@ -938,7 +938,7 @@ describe('the Talk room', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
-    expect(client.startPlan).toHaveBeenCalledWith('pln1', null)
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
   it('points a plan at another branch from its last row, or at one it makes from the default branch (ADR-093)', async () => {

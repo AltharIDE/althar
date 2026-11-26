@@ -709,6 +709,47 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
+  it.live('keeps the latest choice of where a plan runs when an earlier one reaches it after', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '7'.repeat(32)
+        const { client, grant } = yield* connected({
+          countdown: Duration.minutes(5),
+          workers: {
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            open: () => Effect.die('Nothing starts here'),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const thread = client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: (yield* thread).threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(thread, (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
+        )
+        const item = planned.items.find((one) => one.kind === 'task')
+        const planId = item?.kind === 'task' ? (item.content.plan?.id ?? '') : ''
+        const plan = Effect.map(thread, (snapshot) => {
+          const one = snapshot.items.find((each) => each.kind === 'task')
+          return one?.kind === 'task' ? one.content.plan : null
+        })
+        // The home chosen second reaches it first; the worker chosen first, after: the home stands.
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId: null, chosenAt: 2000 }))
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId, chosenAt: 1000 }))
+        assert.isUndefined((yield* plan)?.runsOn)
+        assert.strictEqual((yield* plan)?.runsOnChosenAt, 2000)
+        // A later one changes it.
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId, chosenAt: 3000 }))
+        assert.strictEqual((yield* plan)?.runsOn, workerId)
+        assert.strictEqual((yield* plan)?.runsOnChosenAt, 3000)
+      }),
+    ),
+  )
+
   it.live('holds a countdown as a change makes the worker chosen unable to take it', () =>
     Effect.scoped(
       Effect.gen(function* () {

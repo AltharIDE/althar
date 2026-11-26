@@ -656,7 +656,7 @@ export function ProjectView({
     workers: model.workers,
     onStart: (planId, workerId) => model.startPlan(planId, workerId),
     onHold: (planId) => void model.holdPlan(planId),
-    onPlace: (planId, workerId) => model.placePlan(planId, workerId),
+    onPlace: (planId, workerId, chosenAt) => model.placePlan(planId, workerId, chosenAt),
     onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
     onReopen: (taskId) => void model.reopenTask(taskId),
     onChange: (planId, steps, end, worksIn, toward) => model.changePlan(planId, steps, end, worksIn, toward),

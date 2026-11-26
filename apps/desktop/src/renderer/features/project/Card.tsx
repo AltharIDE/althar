@@ -88,7 +88,7 @@ export interface CardActions {
    * Where a plan runs once it starts, chosen as it counts down or is held: a worker, any free one, or null for the home. Its
    * countdown starts it there; one counting down that the place can't take is held. Whether it went through.
    */
-  readonly onPlace?: (planId: string, workerId: string | null) => Promise<boolean>
+  readonly onPlace?: (planId: string, workerId: string | null, chosenAt: number) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
   readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
   /** Reopens a task a plan waits for, once abandoned. */
@@ -264,16 +264,13 @@ function PlanCard({
   const here = useHomeState(homes)
   // The home by the window's name for it: This Mac, or the remote home's own; until the window has read which, neither.
   const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : here === null ? null : here.current.home.name
-  // The person's choice shows at once, kept by the request that sends it until a read of the plan has it, or that request is
-  // turned down; a read that lands before it went through doesn't undo it.
+  // The person's choice shows at once, kept until the plan's copy has it or a later choice (`runsOnChosenAt`), or the runtime
+  // turned it down; a read that lands before then doesn't undo it. Each is stamped when it was made, later than the last, so the
+  // runtime keeps the latest whatever order they reach it in.
   const requests = useRef(0)
-  const [place, setPlace] = useState<{
-    readonly planId: string
-    readonly workerId: string
-    readonly request: number
-    readonly through: boolean
-  } | null>(null)
-  if (place !== null && place.through && place.planId === plan.id && (plan.runsOn ?? HOME) === place.workerId) setPlace(null)
+  const lastChosen = useRef(0)
+  const [place, setPlace] = useState<{ readonly planId: string; readonly workerId: string; readonly chosenAt: number } | null>(null)
+  if (place !== null && place.planId === plan.id && (plan.runsOnChosenAt ?? -1) >= place.chosenAt) setPlace(null)
   // A countdown the chosen place can't take shows held at once, as the runtime holds it, until the request that holds it is done.
   const [holding, setHolding] = useState<{ readonly planId: string; readonly request: number } | null>(null)
   const counting = card.phase === 'planned' && plan.startsAt !== null
@@ -302,12 +299,12 @@ function PlanCard({
   }
   const placeOn = (workerId: string) => {
     const request = ++requests.current
-    setPlace({ planId: plan.id, workerId, request, through: false })
-    const sent = actions.onPlace === undefined ? undefined : actions.onPlace(plan.id, workerId === HOME ? null : workerId)
+    const chosenAt = (lastChosen.current = Math.max(Date.now(), lastChosen.current + 1))
+    setPlace({ planId: plan.id, workerId, chosenAt })
+    const sent = actions.onPlace === undefined ? undefined : actions.onPlace(plan.id, workerId === HOME ? null : workerId, chosenAt)
     holdWhile(counting && placementAt(workerId).problem !== undefined, sent, request)
-    // Turned down: as it was, the line saying why; through, until the plan's copy says so.
-    if (sent !== undefined)
-      void sent.then((placed) => setPlace((was) => (was?.request !== request ? was : placed ? { ...was, through: true } : null)))
+    // Turned down: as it was, the line saying why.
+    if (sent !== undefined) void sent.then((placed) => (placed ? undefined : setPlace((was) => (was?.chosenAt === chosenAt ? null : was))))
   }
   const from = fromOf(card)
   return (
@@ -402,8 +399,11 @@ function PlanCard({
             },
           })}
       {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
-      // The home by name, so a place chosen before and still being changed can't take its place.
-      onStart={() => actions.onStart(plan.id, selected === HOME ? null : selected)}
+      // The home by name where a place was chosen, so one chosen before and still being changed can't take its place; left out
+      // where none ever was, as homes from before placement can read.
+      onStart={() =>
+        actions.onStart(plan.id, selected !== HOME ? selected : plan.runsOn !== undefined || place !== null ? null : undefined)
+      }
       startDisabled={startProblem !== undefined}
     />
   )
