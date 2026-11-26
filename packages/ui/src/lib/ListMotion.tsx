@@ -289,6 +289,17 @@ const translated = (el: Element) => {
   return { x, y }
 }
 const shift = (r: DOMRect, x: number, y: number) => new DOMRect(r.left + x, r.top + y, r.width, r.height)
+/**
+ * How much bigger it shows than it is laid out, across and down: what is
+ * read of the page is in the window's px, a `translate` of ours in its own.
+ * Within the app, 1; drawn smaller as a picture of the app (a page shows the
+ * screen scaled down), a move read on the page is that much shorter in its
+ * own px, and slid by the page's px it would overshoot and jump back.
+ */
+const scaleOf = (el: HTMLElement, r: DOMRect) => ({
+  x: el.offsetWidth > 0 ? r.width / el.offsetWidth : 1,
+  y: el.offsetHeight > 0 ? r.height / el.offsetHeight : 1,
+})
 
 /* ——— Where copies are drawn: above the page, below its dialogs, to the eye alone ——— */
 
@@ -363,7 +374,11 @@ const slide = (own: Own, el: HTMLElement, from: DOMRect, to: DOMRect, above: boo
   if (clear(getComputedStyle(el).backgroundColor)) el.style.background = backdrop(el)
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative'
   el.style.zIndex = above ? '2' : '1'
-  const one = el.animate([{ translate: `${from.left - to.left}px ${from.top - to.top}px` }, { translate: '0px 0px' }], MOTION.move)
+  const k = scaleOf(el, to)
+  const one = el.animate(
+    [{ translate: `${(from.left - to.left) / k.x}px ${(from.top - to.top) / k.y}px` }, { translate: '0px 0px' }],
+    MOTION.move,
+  )
   journey(
     own,
     el,
@@ -373,7 +388,9 @@ const slide = (own: Own, el: HTMLElement, from: DOMRect, to: DOMRect, above: boo
       shown: () => el.getBoundingClientRect(),
       place: () => {
         const by = translated(el)
-        return shift(el.getBoundingClientRect(), -by.x, -by.y)
+        const shown = el.getBoundingClientRect()
+        const at = scaleOf(el, shown)
+        return shift(shown, -by.x * at.x, -by.y * at.y)
       },
     },
     () => Object.assign(el.style, was),
