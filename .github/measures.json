@@ -22,7 +22,7 @@
     },
     "runtime-code-host-names": {
       "what": "Comparisons of a code host's product name in packages/runtime/src: 'github', 'gitlab' or 'bitbucket' beside ===, !==, == or !=, on either side, or as a case. A feature for every host reads its adapter's capabilities instead (foundations.md, A feature ships for every service that can have it). A comparison through a constant or a set isn't seen.",
-      "baseline": 62
+      "baseline": 63
     },
     "runtime-agent-ids": {
       "what": "Comparisons of an agent's id in packages/runtime/src, as for runtime-code-host-names: the agent registry's ids (claude-code, codex, opencode, copilot, junie, grok, kimi, mistral-vibe, qwen-code, antigravity) and claude, the runtime's name for Claude Code.",
@@ -32,7 +32,7 @@
       "what": "Runtime tests on the real clock that sleep: an `it.live` in packages/runtime/tests whose body, up to the next `it.live` or `it.effect`, calls Effect.sleep, sleep( or setTimeout(. What waits for time to pass belongs on the test's clock (`it.effect` with onTestClock). Not every `it.live`: a test of real processes and git needs the real clock, and a new one would raise it. detail counts each kind of test.",
       "baseline": 166,
       "detail": {
-        "it.live": 2648,
+        "it.live": 2671,
         "it.effect": 466
       }
     },
