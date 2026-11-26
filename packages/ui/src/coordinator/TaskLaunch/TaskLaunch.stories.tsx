@@ -188,6 +188,51 @@ export const WorkersOpen: Story = {
   },
 }
 
+const CHECKED: readonly LaunchPlace[] = [
+  { value: 'home', label: 'This Mac', kind: 'home' },
+  { value: 'auto', label: 'Any free worker', kind: 'any' },
+  { value: 'wrk_runner1', label: 'runner-1', kind: 'worker', hint: '12 GB free · Installs Bun first' },
+  { value: 'wrk_runner2', label: 'runner-2', kind: 'worker', hint: 'Sandbox can’t start', disabled: true },
+  { value: 'wrk_runner3', label: 'runner-3', kind: 'worker', hint: 'Claude Code signed out', disabled: true },
+]
+
+/** Workers as their own checks found them: one ready, installing Bun first for this project; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
+export const WorkersChecked: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: CHECKED, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await expect(await within(document.body).findByRole('menuitemradio', { name: 'runner-2' })).toHaveAttribute('aria-disabled', 'true')
+  },
+}
+
+/** Set to run on a worker whose agent doesn't offer the lead's model: Start waits until the picker has one it does. */
+export const ModelNotOnTheWorker: Story = {
+  render: () => (
+    <Launch
+      held
+      estimate={undefined}
+      worksIn={WorksIn.Worktree}
+      runsOn={{
+        value: 'wrk_runner1',
+        places: CHECKED,
+        onChange: fn(),
+        problem: 'runner-1 doesn’t offer Claude Opus 5. Pick a model it has.',
+      }}
+      startDisabled
+    />
+  ),
+}
+
 /** Set to run on any free worker. */
 export const OnAnyFreeWorker: Story = {
   ...HeldWithWorkers,
@@ -224,6 +269,31 @@ export const WorkerTaken: Story = {
     await expect(c.getByRole('button', { name: 'Start' })).toBeEnabled()
   },
 }
+
+/** Counting down, where the home has workers: a worker chosen now is where the countdown starts it, and the clock goes on. */
+export const CountingDownWithWorkers: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        wait={60}
+        startsAt={Date.now() + 60_000}
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: PLACES, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Linux worker 3f9a2c' }))
+    await expect(c.getByRole('button', { name: 'Runs on: Linux worker 3f9a2c' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start now' })).toBeEnabled()
+  },
+}
+
+export const CountingDownWithWorkersDark: Story = { ...CountingDownWithWorkers, globals: { theme: 'dark' } }
 
 const started = fn()
 

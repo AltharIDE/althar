@@ -563,6 +563,9 @@ describe('the API', () => {
                   workers: [{ workerId: 'wrk_' + '1'.repeat(32), connected: false, busy: false, providers: [], projects: [], task: null }],
                 }),
               RemoveWorker: () => Effect.void,
+              AddWorker: () => Effect.die('unused'),
+              CreateWorkerCode: () => Effect.die('unused'),
+              SetWorkerProjects: () => Effect.void,
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
               DismissSignInEnding: () => Effect.void,
               GetModelRooms: () => Effect.succeed([]),
@@ -608,6 +611,7 @@ describe('the API', () => {
               AnswerCheckout: () => Effect.die('unused'),
               MoveTask: () => Effect.die('unused'),
               DropMove: () => Effect.die('unused'),
+              MoveTaskTo: () => Effect.die('unused'),
               WorkToward: () => Effect.die('unused'),
               ShelveTask: () => Effect.die('unused'),
               StopHelper: () => Effect.die('unused'),
@@ -661,6 +665,7 @@ describe('the API', () => {
               StartPlan: () => Effect.void,
               StopWaiting: () => Effect.void,
               HoldPlan: () => Effect.succeed(true),
+              PlacePlan: () => Effect.succeed(false),
               HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
@@ -767,6 +772,7 @@ describe('the API', () => {
               SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
               RemoveAccount: () => Effect.void,
+              SignOutAccount: () => Effect.die('unused'),
               OrderAccounts: () => Effect.void,
               AddAccount: () => Effect.die('unused'),
               FindAccounts: () => Effect.succeed({ found: [] }),
@@ -937,5 +943,7 @@ describe('the calls a socket may make', () => {
     // Putting a repository on a host, a project's tracker, and the person's word stay with the person's own window.
     for (const tag of ['PublishRepository', 'ListRepositoryOwners', 'SetProjectTracker', 'ListContainers', 'Answer'])
       assert.notInclude(SOCKET_CALLS, tag)
+    // Where a plan runs is chosen and started from any window, a remote home's too.
+    for (const tag of ['StartPlan', 'PlacePlan']) assert.include(SOCKET_CALLS, tag)
   })
 })

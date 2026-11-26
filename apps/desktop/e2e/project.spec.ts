@@ -116,7 +116,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
 
     // On the home, by its new name.
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await expect(page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: /Refunds v2/ })).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
     await tabs.getByRole('button', { name: /^Refunds v2/ }).click()
 
     // Removed, from the foot of its settings' side: it says what happens first, then the window goes home, without its tab.

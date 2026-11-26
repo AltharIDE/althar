@@ -104,6 +104,11 @@ export interface AccountsText {
   ends: (at: string) => string
   signIn: string
   signInAgain: string
+  /** What signing the usual folder's account in again does: the agent's own command, which reads the same folder, follows. */
+  signInAgainUsual: (agent: string) => string
+  signOut: string
+  /** What signing the usual folder's account out does: the agent's own command is signed out with it. */
+  signOutUsual: (agent: string) => string
   /** A provider within the agent that refused its sign-in, as the button that signs it in. */
   providerSignIn: (provider: string) => string
   /** The same, where no sign-in can start from here. */
@@ -138,6 +143,9 @@ export const accountsText: AccountsText = {
   ends: (at) => `sign-in ends by ${at}`,
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
+  signInAgainUsual: (agent) => `${agent}'s own command switches too`,
+  signOut: 'Sign out',
+  signOutUsual: (agent) => `Signs out ${agent}'s own command too`,
   providerSignIn: (provider) => `${provider}: sign in again`,
   providerOut: (provider) => `${provider}: signed out`,
   more: (name) => `More for ${name}`,
@@ -167,6 +175,8 @@ export type AccountsProps = RootProps<
     onMove?: (id: string, to: 'up' | 'down') => void
     /** Stops using it. Not offered for the usual folder's account. */
     onRemove?: (id: string) => void
+    /** Signs the usual folder's account out, which stays, to sign in again; the others are removed instead. */
+    onSignOut?: (id: string) => void
     /** Starts adding one. Without it, no way to add. */
     onAdd?: () => void
     /** A sign-in under way, drawn in the list. While one is, there is no way to start another. */
@@ -185,6 +195,7 @@ export function Accounts({
   onRename,
   onMove,
   onRemove,
+  onSignOut,
   onAdd,
   signIn,
   headingLevel = 3,
@@ -242,11 +253,13 @@ export function Accounts({
                 first={index === 0}
                 last={index === accounts.length - 1}
                 busy={signIn !== undefined}
+                agent={agent}
                 t={t}
                 onSignIn={onSignIn}
                 onRename={onRename}
                 onMove={onMove}
                 onRemove={onRemove}
+                onSignOut={onSignOut}
               />
             )}
           </Fragment>
@@ -262,8 +275,9 @@ export function Accounts({
   )
 }
 
-interface RowProps extends Pick<AccountsProps, 'onSignIn' | 'onRename' | 'onMove' | 'onRemove'> {
+interface RowProps extends Pick<AccountsProps, 'onSignIn' | 'onRename' | 'onMove' | 'onRemove' | 'onSignOut'> {
   account: AccountEntry
+  agent: string
   number: number
   first: boolean
   last: boolean
@@ -272,7 +286,7 @@ interface RowProps extends Pick<AccountsProps, 'onSignIn' | 'onRename' | 'onMove
   t: AccountsText
 }
 
-function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove, onRemove }: RowProps) {
+function Row({ account, number, first, last, busy, agent, t, onSignIn, onRename, onMove, onRemove, onSignOut }: RowProps) {
   const [renaming, setRenaming] = useState(false)
   const { state, place } = account
   // Who it is when the agent says; a folder another tool made, by where it is.
@@ -347,9 +361,12 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
         return unreachable(state)
     }
   })()
-  const removable = place.kind !== 'usual' && onRemove !== undefined
+  const usual = place.kind === 'usual'
+  const removable = !usual && onRemove !== undefined
   const again = onSignIn !== undefined && state.kind !== 'signedOut' && !busy
-  const menu = (again || onRename || onMove || removable) && (
+  // The usual folder's account isn't removed, as the agent's own command reads it too: it is signed out, and stays.
+  const signsOut = usual && onSignOut !== undefined && state.kind !== 'signedOut' && state.kind !== 'checking' && !busy
+  const menu = (again || onRename || onMove || removable || signsOut) && (
     <Menu
       label={t.more(account.name)}
       align="end"
@@ -359,7 +376,7 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
       trigger={<IconButton icon="more" label={t.more(account.name)} size="small" className={s.more} />}
     >
       {again && (
-        <MenuItem icon="external" onSelect={() => onSignIn(account.id)}>
+        <MenuItem icon="external" {...(usual ? { description: t.signInAgainUsual(agent) } : {})} onSelect={() => onSignIn(account.id)}>
           {t.signInAgain}
         </MenuItem>
       )}
@@ -388,6 +405,14 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
             onSelect={() => onRemove(account.id)}
           >
             {t.remove}
+          </MenuItem>
+        </>
+      )}
+      {signsOut && (
+        <>
+          <MenuSeparator />
+          <MenuItem icon="remove" tone="danger" description={t.signOutUsual(agent)} onSelect={() => onSignOut(account.id)}>
+            {t.signOut}
           </MenuItem>
         </>
       )}

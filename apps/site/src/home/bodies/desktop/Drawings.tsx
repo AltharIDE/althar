@@ -2,20 +2,23 @@ import { Brand, BrandMark } from '@althar/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
+import { SignInPage } from '../kit/CanvasAtWork'
+import { Shot } from '../kit/Shot'
 import s from './Drawings.module.css'
 
 /*
  * The flow's smaller features, drawn as the console's other drawn tiles are:
- * an interface lit by one light, on the cabin's warm dark, every size taken
+ * an interface lit by one light, on the cabin's warm dark (or, for the
+ * skills, which the flow also draws large, the paper's light ground), every size taken
  * from the drawing's width so each reads the same at any size. The canvas
  * carries more, so it draws a little smaller (`mid`). Pictures: nothing in
  * them can be pressed, and each reads as its label.
  */
 
-function Stage({ label, size, children }: { label: string; size: 'mid' | 'small'; children: ReactNode }) {
+function Stage({ label, size, light, children }: { label: string; size: 'mid' | 'small'; light?: boolean; children: ReactNode }) {
   return (
     <div className={s.box} role="img" aria-label={label}>
-      <div className={cx(s.stage, s[size])}>
+      <div className={cx(s.stage, s[size], light && s.light)}>
         <div className={s.scene}>{children}</div>
       </div>
     </div>
@@ -28,52 +31,33 @@ const mark = (brand: Brand) => (
   </span>
 )
 
-/** The canvas: a launch page the lead drew, at its third version, the one before it behind, a comment answered on it. */
+/** The canvas: Tally's sign-in page as the lead drew it in the carousel (CanvasAtWork.tsx), at its second version, split with the brand on its left, the one before it behind, the comment that asked for it answered on it. */
 export function CanvasDrawing() {
   return (
-    <Stage size="mid" label="A launch page the lead drew on the canvas, at version 3, with a comment answered in it">
+    <Stage
+      size="mid"
+      label="Tally's sign-in page the lead drew on the canvas, at version 2, split with its brand on the left, with the comment that asked for it answered"
+    >
       <div className={s.under} />
       <div className={s.ghost} />
       <div className={cx(s.window, s.cv)}>
         <div className={s.bar}>
           <span className={s.glyph} />
-          <b>Payouts launch page</b>
-          <span className={s.ver}>v3</span>
+          <b>Sign-in page</b>
+          <span className={s.ver}>v2</span>
           <span className={s.btn}>Comment</span>
         </div>
         <div className={s.page}>
-          <div className={s.mesh} />
-          <div className={s.pgNav}>
-            <b>
-              <i />
-              tally
-            </b>
-            <em>Start</em>
-          </div>
-          <div className={s.hero}>
-            <h4>
-              Payouts in
-              <br />
-              forty seconds.
-            </h4>
-            <span className={s.cta}>Get started</span>
-          </div>
-          <div className={s.payout}>
-            <span>Arriving today</span>
-            <b>€12,480.00</b>
-            <div className={s.bars}>
-              {[38, 52, 44, 70, 58, 86, 64, 100].map((h, i) => (
-                <i key={i} style={{ '--h': `${h}%` } as CSSProperties} />
-              ))}
-            </div>
-          </div>
+          <Shot w={980} h={566} label="Tally's sign-in page">
+            <SignInPage />
+          </Shot>
         </div>
       </div>
       <div className={s.pin}>
         <i />
         <span>
-          Bigger, bolder headline.
-          <em>Done in v3</em>
+          Split it, our brand on the left.
+          <em>Done in v2</em>
         </span>
       </div>
     </Stage>
@@ -82,7 +66,7 @@ export function CanvasDrawing() {
 
 /* ---- the small ones ---- */
 
-const WORDS = ['and', 'when', 'a', 'partner', 'sends', 'Retry-After,', 'wait', 'that', 'long']
+const WORDS = ['and', 'add', 'Google', 'sign-in', 'next', 'to', 'GitHub']
 
 export function VoiceDrawing() {
   return (
@@ -118,9 +102,9 @@ export function VoiceDrawing() {
 }
 
 const QUEUE = [
-  { no: '1', repo: 'engine', pr: '#152', title: 'Honour Retry-After', st: 'In the merge queue', on: true },
-  { no: '2', repo: 'frontend', pr: '#127', title: 'Show the next retry', st: 'Merges after engine' },
-  { no: '3', repo: 'docs', pr: '#131', title: 'The retry contract', st: 'Merges after frontend' },
+  { no: '1', repo: 'engine', pr: '#152', title: 'Add the sign-in endpoint', st: 'In the merge queue', on: true },
+  { no: '2', repo: 'frontend', pr: '#127', title: 'Build the sign-in page', st: 'Merges after engine' },
+  { no: '3', repo: 'docs', pr: '#131', title: 'Document signing in', st: 'Merges after frontend' },
 ]
 
 export function QueueDrawing() {
@@ -166,9 +150,10 @@ function Wires() {
   )
 }
 
-export function SkillsDrawing() {
+/** `light`: on the paper's light ground, as the flow's large drawings are. */
+export function SkillsDrawing({ light = false }: { light?: boolean } = {}) {
   return (
-    <Stage size="small" label="One skill, release-checklist, the same version in Claude Code, Codex and OpenCode">
+    <Stage size="small" light={light} label="One skill, release-checklist, the same version in Claude Code, Codex and OpenCode">
       <div className={s.under} />
       <div className={cx(s.card, s.hub, s.lit)}>
         <span className={s.book} />
@@ -227,9 +212,9 @@ export function ServersDrawing() {
 }
 
 const TASKS = [
-  { name: 'Backfill idempotency keys', by: Brand.ClaudeCode, cpu: 22 },
+  { name: 'Build the sign-in page', by: Brand.ClaudeCode, cpu: 22 },
   { name: 'Sign webhook v2 payloads', by: Brand.Codex, cpu: 14 },
-  { name: 'Honour Retry-After', by: Brand.ClaudeCode, cpu: 10 },
+  { name: 'Rotate webhook secrets', by: Brand.ClaudeCode, cpu: 10 },
 ]
 
 function Meter({ name, value, of, share }: { name: string; value: string; of: string; share: number }) {

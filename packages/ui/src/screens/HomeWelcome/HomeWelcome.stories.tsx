@@ -153,6 +153,34 @@ export const OlderFailed: Story = {
   },
 }
 
+/** The newest release moves the home's data to a new format: asked once, in place, before anything runs. */
+export const OlderMovesData: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0' } } },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement)
+    await expect(await page.findByText('Update runner-1 to 0.2.0?')).toBeVisible()
+    await fireEvent.click(page.getByRole('button', { name: 'Update' }))
+    await expect(args.onUpdate).toHaveBeenCalledOnce()
+  },
+}
+
+/** The same, with tasks running there: one question says both. */
+export const OlderMovesDataBusy: Story = {
+  args: { ...OLDER, update: { command: UPDATE, installed: 'known', run: { state: 'confirm', from: '0.1.0', to: '0.2.0', busy: 2 } } },
+}
+
+/** The newest release speaks an API this app doesn't: not run, and what to do instead. */
+export const OlderNewerApi: Story = {
+  args: {
+    ...OLDER,
+    update: {
+      command: UPDATE,
+      installed: 'known',
+      run: { state: 'failed', problem: 'Althar 0.3.0 for runner-1 needs a newer Althar app. Update this app first, then runner-1.' },
+    },
+  },
+}
+
 /** No published release makes projects from a window yet: said in place of the update, with Check again. */
 export const OlderNoRelease: Story = {
   args: { ...OLDER, update: { command: UPDATE, installed: 'known', release: 'unreleased' } },

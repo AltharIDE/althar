@@ -1,5 +1,5 @@
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import s from './Changelog.module.css'
 import { Log } from './takes/Log'
 
@@ -11,7 +11,7 @@ import { Log } from './takes/Log'
 export function Changelog() {
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
       <Log />
       <Footer />
     </div>

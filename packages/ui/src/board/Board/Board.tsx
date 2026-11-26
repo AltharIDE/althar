@@ -22,6 +22,7 @@ import { ListMotion } from '../../lib/ListMotion'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './Board.module.css'
 
@@ -51,6 +52,8 @@ export interface BoardText {
   expand: (lane: string, count: number) => string
   /** The chevron on Needs you's head while something waits in it. */
   stays: string
+  /** The button on a lane's head that chooses its order, by the lane's name. */
+  sort: (lane: string) => string
   /** What an empty lane says, where its consumer doesn't say more: what will be here, then how it gets here. */
   empty: Record<BoardLane, { title: string; how: string }>
 }
@@ -65,6 +68,7 @@ export const boardText: BoardText = {
   collapse: (lane) => `Collapse ${lane}`,
   expand: (lane, count) => `Expand ${lane}, ${count}`,
   stays: 'Needs you stays open while something waits on you',
+  sort: (lane) => `Sort ${lane}`,
   empty: {
     [BoardLane.Next]: { title: 'Nothing queued', how: 'The tasks the coordinator plans line up here.' },
     [BoardLane.Running]: { title: 'Nothing running', how: 'A task shows here while an agent works on it.' },
@@ -311,6 +315,12 @@ export interface LaneShelf {
   readonly icon?: IconName
 }
 
+/** One order a lane can be in. */
+export interface LaneOrder {
+  readonly value: string
+  readonly label: string
+}
+
 export interface BoardColumnProps {
   lane: BoardLane
   /** How many it holds. */
@@ -326,6 +336,17 @@ export interface BoardColumnProps {
     /** What choosing between them is: Settled or kept for later. */
     readonly label: string
     readonly options: ReadonlyArray<LaneShelf>
+    readonly value: string
+    readonly onChange: (value: string) => void
+  }
+  /**
+   * The orders its cards can be in, chosen from a menu on its head. The
+   * first is the lane's own: while another is chosen, the button stays in
+   * sight, so the lane never looks as it always does when it isn't.
+   */
+  order?: {
+    readonly label: string
+    readonly options: ReadonlyArray<LaneOrder>
     readonly value: string
     readonly onChange: (value: string) => void
   }
@@ -350,7 +371,18 @@ export interface BoardColumnProps {
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, filled = count > 0, shelves, children, lead, empty, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({
+  lane,
+  count,
+  filled = count > 0,
+  shelves,
+  order,
+  children,
+  lead,
+  empty,
+  headingLevel = 2,
+  text,
+}: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -460,6 +492,30 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
               ))}
             </fieldset>
           </>
+        )}
+        {order !== undefined && filled && (
+          <Menu
+            label={order.label}
+            align="end"
+            trigger={
+              <IconButton
+                icon="sort"
+                size="small"
+                tooltip="below"
+                tooltipAlign="end"
+                label={t.sort(name)}
+                className={cx(s.sort, order.value !== order.options[0]?.value && s.sorted)}
+              />
+            }
+          >
+            <MenuRadioGroup label={order.label} value={order.value} onChange={order.onChange}>
+              {order.options.map((one) => (
+                <MenuRadioItem key={one.value} value={one.value}>
+                  {one.label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </Menu>
         )}
         {folding !== null && (
           <IconButton

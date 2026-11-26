@@ -34,7 +34,11 @@ export const sshArguments = (options: SshTarget, homeId?: string): ReadonlyArray
  * The home's own managed update, by the launcher and profile its connection runs: it checks for a release, applies it
  * (restarting the home) and waits for the result, said as JSON (apps/host/README.md, Managed releases and updates).
  */
-export const sshUpdateArguments = (options: SshTarget): ReadonlyArray<string> => argumentsFor(options, 'update --apply --wait --json')
+export const sshUpdateArguments = (options: SshTarget, allowIncompatible = false): ReadonlyArray<string> =>
+  argumentsFor(options, `update --apply${allowIncompatible ? ' --allow-incompatible' : ''} --wait --json`)
+
+/** What the home's installed release is, by the launcher and profile its connection runs: its version, API version and storage format, as JSON. */
+export const sshReleaseInfoArguments = (options: SshTarget): ReadonlyArray<string> => argumentsFor(options, 'release-info --json')
 
 const argumentsFor = (options: SshTarget, command: string): ReadonlyArray<string> => {
   if (

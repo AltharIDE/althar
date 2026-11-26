@@ -1,6 +1,6 @@
 {
   "name": "@althar/host",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A persistent Althar home on a personal Linux host.",
   "license": "Apache-2.0",
@@ -19,8 +19,8 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.108.0",
-    "@agentclientprotocol/codex-acp": "2.7.0",
+    "@agentclientprotocol/claude-agent-acp": "0.112.0",
+    "@agentclientprotocol/codex-acp": "2.12.0",
     "@althar/contracts": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",

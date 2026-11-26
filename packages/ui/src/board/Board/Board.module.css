@@ -78,6 +78,21 @@ span.you {
   color: var(--t-3);
 }
 
+/* The button that sorts a lane, before the chevron: there
+   while its head is pointed at, it has the focus, its menu is open, or the
+   lane is in an order other than its own. */
+.sort {
+  margin: -6px -4px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.head:hover .sort,
+.sort:focus-visible,
+.sort[data-state='open'],
+.sorted {
+  opacity: 1;
+}
+
 /* The chevron that collapses a lane: there only while its head is pointed
    at, or it has the focus. On Needs you, while something waits, it only says
    why it can't. */
@@ -407,6 +422,7 @@ span.you {
 }
 @media (prefers-reduced-motion: reduce) {
   .board,
+  .sort,
   .collapse,
   .collapsed,
   .card,

@@ -366,10 +366,15 @@ describe('the models each agent offers', () => {
     const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
     const codex = Effect.flatMap(Models, (models) => Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')))
     return Effect.gen(function* () {
-      // The launch before: its session reached OpenAI, and offered the newer model.
+      // The launch before: its session reached OpenAI, on the newer model, and a turn on it went through.
       yield* Effect.gen(function* () {
         yield* until(codex, (found) => found[0]?.probing === false)
-        yield* (yield* Sessions).start({ threadId: yield* thread, agentId: 'codex', model: 'large' })
+        const threadId = yield* thread
+        yield* (yield* Sessions).start({ threadId, agentId: 'codex', model: 'large' })
+        const sql = yield* SqlClient.SqlClient
+        yield* until(sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`, (rows) =>
+          rows.some((row) => row.state === 'completed'),
+        )
       }).pipe(Effect.provide(codexOnly(database, () => ({}))))
       // Started again, Codex answers the asking with its older list; the session of a moment ago still says what it offers.
       const [asked] = yield* until(codex, (found) => found[0]?.probing === false).pipe(Effect.provide(codexOnly(database, () => older)))
@@ -444,7 +449,7 @@ describe('the models each agent offers', () => {
       yield* sql`UPDATE provider_sessions SET config = ${offering(['small', 'large'])}, state = 'completed' WHERE id = ${`sess_${'a'.repeat(32)}`}`
       assert.deepStrictEqual(yield* offered, ['large', 'small'])
       // One made in the same millisecond as one read already is read too.
-      yield* session(`sess_${'c'.repeat(32)}`, at + 120_000, offering(['huge']), 'completed')
+      yield* session(`sess_${'c'.repeat(32)}`, at + 120_000, offering(['small', 'huge']), 'completed')
       assert.sameMembers((yield* offered) ?? [], ['huge', 'large', 'small'])
     }).pipe(Effect.provide(codexOnly(':memory:', () => older)))
   })

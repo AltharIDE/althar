@@ -4,6 +4,7 @@ import { Limits } from './Limits'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { placingOf } from './taskPlaces'
 import { taskWorker } from './workerExecution'
 import { workerRequirementFields } from './workerRequirements'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
@@ -84,6 +85,7 @@ import { unstartedIn } from './waits'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
+import { placedOn } from './placedOn'
 import { beforeFirstStep, checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
 import { planTowardChoices } from './towards'
@@ -128,6 +130,7 @@ import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
 import { toolCallMoves } from './toolMoves'
+import { stopSaid, suspendedOf } from './stopSaid'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
@@ -2925,18 +2928,12 @@ export class Queries extends Context.Service<
                   // Suspended, its run stopped when its latest attempt ended: what stopped it is the turn that attempt ended in, not
                   // one its lead was sent after without the run carried on, so a later turn doesn't make it stopped "just now".
                   // Who suspended it is on record: Althar, as an automation's run out of time, or the coordinator, is no one's call.
-                  const [suspended] =
-                    task.runState === 'suspended'
-                      ? yield* sql<{ endedAt: string | null; actorId: string | null }>`
-                          SELECT
-                            (SELECT a.ended_at FROM run_attempts a WHERE a.run_id = r.id ORDER BY a.attempt_number DESC LIMIT 1) AS ended_at,
-                            (SELECT e.actor_id FROM record_events e WHERE e.aggregate_type = 'run' AND e.aggregate_id = r.id AND e.type = 'run.suspended'
-                              ORDER BY e.sequence DESC LIMIT 1) AS actor_id
-                          FROM runs r WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-                      : []
+                  const suspended = task.runState === 'suspended' ? yield* suspendedOf(taskId) : undefined
                   const until = suspended?.endedAt ?? null
+                  // Who stopped it, as stop_task recorded it: the coordinator or a lead, with why and where its work went on.
+                  const said = yield* stopSaid(taskId, suspended?.sequence ?? null, task.parentId)
                   if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
-                    return { by: 'althar' as const, at: until ?? task.runAt }
+                    return { by: 'althar' as const, at: until ?? task.runAt, ...said }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
                     WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
@@ -2945,8 +2942,10 @@ export class Queries extends Context.Service<
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
                   // Null where nothing says when: the card then shows no time.
                   const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? task.createdAt
+                  // The person's own Stop, on its card or in its menu; a reason or a fold said after it, by whoever said it.
+                  const theirs = { ...(suspended?.kind === 'person' ? { who: 'person' as const } : {}), ...said }
                   if (turn === undefined || turn.state !== 'interrupted')
-                    return { by: run?.endedAt == null ? null : ('althar' as const), at }
+                    return { by: run?.endedAt == null ? null : ('althar' as const), at, ...theirs }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
                   const [refused] = yield* sql<{ id: string }>`
                     SELECT d.id FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
@@ -2955,7 +2954,7 @@ export class Queries extends Context.Service<
                       AND d.decided_by_actor_id NOT IN (${instance.systemId}, ${instance.coordinatorId})
                       AND d.decided_at >= ${turn.startedAt} AND d.decided_at <= ${turn.endedAt ?? at}
                     LIMIT 1`
-                  return { by: refused === undefined ? ('interrupted' as const) : ('declined' as const), at }
+                  return { by: refused === undefined ? ('interrupted' as const) : ('declined' as const), at, ...theirs }
                 })
           const parameters = parse(task.parameters)
           const steps = field(parameters, 'steps')
@@ -3047,6 +3046,7 @@ export class Queries extends Context.Service<
                     ...(task.planState === 'proposed' && config.workers !== undefined
                       ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
                       : {}),
+                    ...(task.planState === 'proposed' ? placedOn(parameters) : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
@@ -4601,6 +4601,7 @@ export class Queries extends Context.Service<
               ],
               planId: standing.planId,
               workerId: yield* taskWorker(head.taskId),
+              placing: yield* placingOf(head.taskId).pipe(Effect.orElseSucceed(() => undefined)),
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {

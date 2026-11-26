@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -70,5 +70,28 @@ describe('portable release provider preflight', () => {
     await expect(verifyBundledPrograms(at.entry)).rejects.toThrow()
     writeFileSync(join(at.root, 'node_modules/@agentclientprotocol/codex-acp/package.json'), '{"version":"0.0.0"}')
     await expect(verifyBundledPrograms(at.entry)).rejects.toMatchObject({ code: 'ReleaseRejected' })
+  })
+
+  it('refuses a release that carries the worker but not its sandbox’s programs', async () => {
+    const at = fixture()
+    const entry = join(at.root, 'dist', 'host.js')
+    const target = join(at.root, 'node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl')
+    const codex = join(target, 'bin', 'codex')
+    mkdirSync(join(target, 'bin'), { recursive: true })
+    writeFileSync(codex, '#!/bin/sh\n[ "$1" = --version ]\n', { mode: 0o700 })
+    providers.claude.mockReturnValue(codex)
+    providers.codex.mockReturnValue(codex)
+    await verifyBundledPrograms(entry)
+    writeFileSync(join(at.root, 'althar-worker'), '', { mode: 0o700 })
+    await expect(verifyBundledPrograms(entry)).rejects.toMatchObject({ code: 'UpdateFailed', message: expect.stringContaining('bwrap') })
+    const shipped = [join(target, 'codex-resources', 'bwrap'), join(target, 'codex-path', 'rg'), join(at.root, 'tools', 'bin', 'socat')]
+    for (const program of shipped) {
+      mkdirSync(join(program, '..'), { recursive: true })
+      writeFileSync(program, '', { mode: 0o600 })
+    }
+    // There but not runnable is missing too.
+    await expect(verifyBundledPrograms(entry)).rejects.toMatchObject({ code: 'UpdateFailed' })
+    for (const program of shipped) chmodSync(program, 0o700)
+    await verifyBundledPrograms(entry)
   })
 })

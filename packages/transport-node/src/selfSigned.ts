@@ -1,4 +1,4 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, X509Certificate } from 'node:crypto'
 
 /*
  * A self-signed TLS certificate for a home that phones reach directly, such as
@@ -53,39 +53,119 @@ export interface SelfSigned {
   readonly key: string
 }
 
-/** A new P-256 key, or the one kept, and a certificate for it naming the home's host names. */
-export const selfSignedCertificate = (name: string, hosts: ReadonlyArray<string>, now: number, keptKey?: string): SelfSigned => {
-  const privateKey = keptKey === undefined ? generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey : createPrivateKey(keptKey)
-  const spki = createPublicKey(privateKey).export({ type: 'spki', format: 'der' })
-  const distinguished = sequence(set(sequence(COMMON_NAME, utf8(name.slice(0, 64) || 'Althar'))))
+const CLIENT_AUTH = oid(1, 3, 6, 1, 5, 5, 7, 3, 2)
+const SUBJECT_KEY_ID = oid(2, 5, 29, 14)
+const AUTHORITY_KEY_ID = oid(2, 5, 29, 35)
+
+const pem = (body: Buffer) =>
+  `-----BEGIN CERTIFICATE-----\n${body.toString('base64').replace(/(.{64})(?=.)/g, '$1\n')}\n-----END CERTIFICATE-----\n`
+const nameOf = (name: string) => sequence(set(sequence(COMMON_NAME, utf8(name.slice(0, 64) || 'Althar'))))
+/** A key's identifier, as RFC 5280 has it: SHA-1 of its public key's bits. */
+const keyId = (spki: Buffer) => {
+  const key = createPublicKey({ key: spki, format: 'der', type: 'spki' }).export({ type: 'spki', format: 'der' })
+  // The last BIT STRING of a SubjectPublicKeyInfo is the key itself; for P-256 it is the final 65 bytes.
+  return createHash('sha1')
+    .update(key.subarray(key.length - 65))
+    .digest()
+}
+
+/** One DER element at `at`: where its body starts and where it ends. */
+const element = (bytes: Buffer, at: number) => {
+  const first = bytes.readUInt8(at + 1)
+  const count = first < 0x80 ? 0 : first & 0x7f
+  let length = first < 0x80 ? first : 0
+  for (let i = 0; i < count; i++) length = length * 256 + bytes.readUInt8(at + 2 + i)
+  const body = at + 2 + count
+  return { body, end: body + length }
+}
+/** A certificate's subject, as the DER it was signed with: an issuer's name in what it signs is that, byte for byte. */
+const subjectOf = (raw: Buffer) => {
+  const tbs = element(raw, element(raw, 0).body)
+  let at = tbs.body
+  // version [0], serialNumber, signature, issuer, validity: then the subject.
+  for (let i = 0; i < 5; i++) at = element(raw, at).end
+  return raw.subarray(at, element(raw, at).end)
+}
+
+/** What a certificate is for: a server's name, a client, or an authority that signs the others. */
+export type CertificateUse =
+  | { readonly kind: 'server'; readonly hosts: ReadonlyArray<string> }
+  | { readonly kind: 'client' }
+  | { readonly kind: 'authority' }
+
+export interface IssueOptions {
+  /** Its common name. */
+  readonly name: string
+  /** The public key it certifies, as SPKI DER. */
+  readonly publicKey: Buffer
+  readonly use: CertificateUse
+  /** Who signs it: an authority's certificate and key (PEM); none signs it with its own `selfKey`. */
+  readonly issuer?: { readonly certificate: string; readonly key: string }
+  /** For a self-signed one, its own private key (PEM). */
+  readonly selfKey?: string
+  readonly now: number
+  /** Valid until, into 2049 at most. */
+  readonly until?: Date
+}
+
+/** A P-256 certificate: self-signed, or signed by an authority Althar made, for a server, a client or an authority. */
+export const issueCertificate = (options: IssueOptions): string => {
+  const signer = options.issuer === undefined ? options.selfKey : options.issuer.key
+  if (signer === undefined) throw new Error('A certificate needs a key to sign it')
+  const issuerCertificate = options.issuer === undefined ? undefined : new X509Certificate(options.issuer.certificate)
+  const subject = nameOf(options.name)
+  const issuerName = issuerCertificate === undefined ? subject : subjectOf(issuerCertificate.raw)
+  const issuerSpki =
+    issuerCertificate === undefined ? options.publicKey : issuerCertificate.publicKey.export({ type: 'spki', format: 'der' })
   const serial = randomBytes(16)
   // Positive, and its first byte never 0: DER keeps an integer's shortest form.
   serial.writeUInt8((serial.readUInt8(0) & 0x7f) | 0x40, 0)
-  const names = sequence(...hosts.map((host) => der(0x82, Buffer.from(host, 'ascii'))))
-  const extensions = explicit(
-    3,
-    sequence(
-      sequence(SUBJECT_ALT_NAME, octets(names)),
-      sequence(BASIC_CONSTRAINTS, CRITICAL, octets(sequence())),
-      // digitalSignature only
-      sequence(KEY_USAGE, CRITICAL, octets(der(0x03, Buffer.from([7, 0x80])))),
-      sequence(EXTENDED_KEY_USAGE, octets(sequence(SERVER_AUTH))),
-    ),
-  )
+  const use = options.use
+  const extensions = [
+    ...(use.kind === 'server'
+      ? [sequence(SUBJECT_ALT_NAME, octets(sequence(...use.hosts.map((host) => der(0x82, Buffer.from(host, 'ascii'))))))]
+      : []),
+    use.kind === 'authority'
+      ? sequence(BASIC_CONSTRAINTS, CRITICAL, octets(sequence(der(0x01, Buffer.from([0xff])), integer(Buffer.from([0])))))
+      : sequence(BASIC_CONSTRAINTS, CRITICAL, octets(sequence())),
+    // An authority signs certificates (keyCertSign); the rest sign their TLS handshakes (digitalSignature).
+    use.kind === 'authority'
+      ? sequence(KEY_USAGE, CRITICAL, octets(der(0x03, Buffer.from([1, 0x06]))))
+      : sequence(KEY_USAGE, CRITICAL, octets(der(0x03, Buffer.from([7, 0x80])))),
+    ...(use.kind === 'authority'
+      ? []
+      : [sequence(EXTENDED_KEY_USAGE, octets(sequence(use.kind === 'server' ? SERVER_AUTH : CLIENT_AUTH)))]),
+    sequence(SUBJECT_KEY_ID, octets(octets(keyId(options.publicKey)))),
+    ...(issuerCertificate === undefined ? [] : [sequence(AUTHORITY_KEY_ID, octets(sequence(der(0x80, keyId(issuerSpki)))))]),
+  ]
+  const until = options.until === undefined || options.until > UNTIL ? UNTIL : options.until
   const tbs = sequence(
     explicit(0, integer(Buffer.from([2]))),
     integer(serial),
     ECDSA_SHA256,
-    distinguished,
-    sequence(utcTime(new Date(now - 24 * 60 * 60_000)), utcTime(UNTIL)),
-    distinguished,
-    spki,
-    extensions,
+    issuerName,
+    sequence(utcTime(new Date(options.now - 24 * 60 * 60_000)), utcTime(until)),
+    subject,
+    options.publicKey,
+    explicit(3, sequence(...extensions)),
   )
-  const signature = sign('sha256', tbs, { key: privateKey, dsaEncoding: 'der' })
-  const body = sequence(tbs, ECDSA_SHA256, bits(signature)).toString('base64')
+  const signature = sign('sha256', tbs, { key: createPrivateKey(signer), dsaEncoding: 'der' })
+  return pem(sequence(tbs, ECDSA_SHA256, bits(signature)))
+}
+
+/** A new P-256 private key, as PKCS #8 PEM, and its public key as SPKI DER. */
+export const newKey = (): { readonly key: string; readonly publicKey: Buffer } => {
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
   return {
-    certificate: `-----BEGIN CERTIFICATE-----\n${body.replace(/(.{64})(?=.)/g, '$1\n')}\n-----END CERTIFICATE-----\n`,
-    key: keptKey ?? privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    publicKey: createPublicKey(privateKey).export({ type: 'spki', format: 'der' }),
   }
+}
+
+/** A new P-256 key, or the one kept, and a certificate for it naming the home's host names. */
+export const selfSignedCertificate = (name: string, hosts: ReadonlyArray<string>, now: number, keptKey?: string): SelfSigned => {
+  const privateKey = keptKey === undefined ? generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey : createPrivateKey(keptKey)
+  const key = keptKey ?? privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+  const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' })
+  return { certificate: issueCertificate({ name, publicKey, use: { kind: 'server', hosts }, selfKey: key, now }), key }
 }

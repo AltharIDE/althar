@@ -108,4 +108,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0102_canvas_boards': '5f80536c108d96d68b91d9a0f380968c190a934c4b3683fc6517c0560f791971',
   '0103_canvas_saves': '13a4975f84ef6d062f71cbab803250f00bb19ed4cb3c2415a090d356feefd893',
   '0104_artifact_chats': '4a31aa48db0e424982ad7a24cc9e20f46508492036527d2c4c3f2f2cd42905da',
+  '0105_worker_setups': 'f51d1d5b21c13b17ae051c446a023b9558f2baefa0d8828926342a2eb21264ba',
 }

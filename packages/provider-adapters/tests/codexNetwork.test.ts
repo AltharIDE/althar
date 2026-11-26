@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 // This catches an upstream turn policy overriding the session's CODEX_CONFIG.
 const source = readFileSync(createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp'), 'utf8')
 const start = source.indexOf('  async sendPrompt(')
-const end = source.indexOf('  async setCollaborationMode(', start)
+const end = source.indexOf('  async runPromptTurn(', start)
 const method = source.slice(start, end).trim().replace('async sendPrompt(', 'async function(')
 const sendPrompt = new Function('buildPromptItems', 'addAdditionalDirectoriesToSandboxPolicy', `return (${method})`)(
   () => [],
@@ -22,11 +22,9 @@ describe('Codex’s sandbox on every turn', () => {
         const client = {
           config: { 'sandbox_workspace_write.network_access': network },
           refreshSkills: () => Promise.resolve(),
-          codexClient: {
-            runTurn: (turn: Record<string, unknown>) => {
-              sent = turn
-              return Promise.resolve()
-            },
+          runPromptTurn: (turn: Record<string, unknown>) => {
+            sent = turn
+            return Promise.resolve()
           },
         }
         const policy = { type, networkAccess: false, writableRoots: ['/work'] }
@@ -57,11 +55,9 @@ describe('Codex’s sandbox on every turn', () => {
       const client = {
         config: { 'sandbox_workspace_write.network_access': true },
         refreshSkills: () => Promise.resolve(),
-        codexClient: {
-          runTurn: (turn: Record<string, unknown>) => {
-            sent = turn
-            return Promise.resolve()
-          },
+        runPromptTurn: (turn: Record<string, unknown>) => {
+          sent = turn
+          return Promise.resolve()
         },
       }
       const policy = { type: 'workspaceWrite', networkAccess: false, writableRoots: ['/work'] }

@@ -7,6 +7,8 @@
   --max: 1280px;
   --edge: max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut)));
   --display: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  /* Headings, on every page: Instrument Sans, as the home page sets its own (home/Home.module.css --head); the footer loads it everywhere. */
+  --heading: 'Instrument Sans Variable', 'Inter Variable', 'Inter', system-ui, sans-serif;
   /* Althar's cobalt as the light theme has it, taken here at the root: where a page lends the app's dark to a part of
      itself (the cabin's pictures), --live there turns pale, for dark grounds, and this stays the ink for a white one. */
   --cobalt: var(--live);

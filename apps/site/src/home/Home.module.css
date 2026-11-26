@@ -1,12 +1,32 @@
-/* The developer page's ground: the parts bring their own. */
-.page { background: var(--n-2); }
+/* The page's paper, and the measure its first screen and its story share: 1272px of content between the gutters. */
 
-/* The Runs on band in the first screen's night, its hairlines and words as the orrery draws them; the band is its own. */
-.night {
-  --n-2: #070605;
-  --t-1: rgba(255, 248, 240, 0.88);
-  --t-3: #8f887e;
-  --t-4: rgba(255, 244, 232, 0.3);
-  --line-2: rgba(255, 244, 232, 0.11);
-  color-scheme: dark;
+.page {
+  --wrap: 1272px;
+  --gut: 64px;
+  /* Headings in Instrument Sans; their second beat in Instrument Serif's italic. */
+  --head: 'Instrument Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  --beat: 'Instrument Serif', Georgia, serif;
+  background: var(--n-2);
+}
+@media (max-width: 900px) { .page { --gut: 22px; } }
+
+/* The site's nav and its room, on a phone only: wider, the page's own bar stands in for it. */
+.narrow { display: none; }
+@media (max-width: 900px) { .narrow { display: contents; } }
+
+/*
+ * Pinch-zoomed in (lib/zoom.ts): no animation runs and no layer is kept, so
+ * the browser draws the page once, in tiles, at its new size. A layer kept
+ * while zoomed is drawn whole at the zoom's sharpness, its memory growing
+ * with the zoom squared: the screens' row (2244px wide on a phone) and the
+ * light's blocks came to hundreds of MB, and a phone's browser reloaded the
+ * page. Zooming back out, they start again, which can flash once; a held
+ * animation, as before, kept its layer.
+ */
+:global(html[data-zoomed]) .page *,
+:global(html[data-zoomed]) .page *::before,
+:global(html[data-zoomed]) .page *::after {
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
 }

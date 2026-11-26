@@ -1857,6 +1857,43 @@ describe('a task', () => {
     expect(screen.getByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
   })
 
+  it('keeps the agent taking over in the picker while its switch is on its way, moves a pick made then to it, and asks for the switch once', async () => {
+    const base = thread()
+    let landed = false
+    // Once the runtime has the switch, the thread says Codex takes over, as the runtime does the moment the lead going out lets go.
+    const taking = (): ThreadSnapshot => ({
+      ...base,
+      session:
+        base.session === null
+          ? null
+          : { ...base.session, held: false, handover: true, nextLead: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null } },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => (landed ? taking() : base)) })
+    let release: () => void = () => {}
+    vi.mocked(client.switchAgent).mockImplementationOnce(() => new Promise<string>((resolve) => (release = () => resolve('s2'))))
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(box, 'Over to you{Enter}')
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledTimes(1))
+    // The switch is open: the picker is on the agent taking over, not the one going out, and a pick on it is for it.
+    const lead = await screen.findByRole('button', { name: /^Lead: gpt-5\.2-codex/ })
+    await userEvent.click(lead)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Extra high' })).toBeTruthy()
+    // Said again meanwhile, it is not another switch.
+    await userEvent.type(box, 'And this{Enter}')
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
+    expect(client.setEffort).not.toHaveBeenCalled()
+    landed = true
+    release()
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'extra-high' }))
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves a queued message in the queue when its images wouldn’t fit beside those waiting', async () => {
     const picture = (n: number) => ({
       digest: n.toString(16).padStart(64, '0'),
@@ -2149,6 +2186,109 @@ describe('a task', () => {
     // Its bar says nothing of it.
     expect(screen.queryByText('Toward release/0.8.0')).toBeNull()
     expect(screen.getAllByText('release/0.8.0')).toHaveLength(1)
+  })
+
+  it('moves between this home and its workers from its menu, asking for a model where the lead’s isn’t offered (ADR-103)', async () => {
+    const ready = {
+      sandbox: { starts: true as const },
+      tools: [{ name: 'git', version: '2.43.0' }],
+      agents: [{ providerId: 'claude-code', starts: true }],
+    }
+    const capacity = { platform: 'linux' as const, architecture: 'x64' as const, cpuCores: 8, freeMemoryMib: 12_288, freeDiskMib: 81_920 }
+    const runner = {
+      workerId: `wrk_${'a'.repeat(32)}`,
+      name: 'runner-1',
+      providers: ['claude-code'],
+      signedIn: ['claude-code'],
+      busy: false,
+      capacity,
+      readiness: { ...ready, models: [{ providerId: 'claude-code', models: [{ id: 'sonnet', name: 'Claude Sonnet' }] }] },
+    }
+    const unready = {
+      ...runner,
+      workerId: `wrk_${'b'.repeat(32)}`,
+      name: 'runner-2',
+      readiness: { ...ready, sandbox: { starts: false as const, problem: 'NoUserNamespaces' }, models: [] },
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread()),
+      listProjectWorkers: vi.fn(async () => [runner, unready]),
+      moveTaskTo: vi.fn(async () => ({ kind: 'waits' as const, why: 'Moves to runner-1 once its lead’s turn ends.' })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const menu = await screen.findByRole('menu', { name: 'This task' })
+    expect(
+      within(menu)
+        .getByRole('menuitemradio', { name: /This Mac/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(
+      within(menu)
+        .getByRole('menuitemradio', { name: /runner-2/ })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+    // runner-1 doesn't offer the lead's Claude Opus: the person picks a model it does, and it moves with it.
+    await userEvent.click(await within(menu).findByRole('menuitemradio', { name: /runner-1/ }))
+    const asking = await screen.findByRole('dialog', { name: 'Move to runner-1' })
+    expect(within(asking).getByText(/runner-1 doesn’t offer Claude Opus/u)).toBeTruthy()
+    // It starts on the model runner-1 offers, which the person may change.
+    expect(within(asking).getByRole('button', { name: /^Lead: Claude Sonnet/u })).toBeTruthy()
+    await userEvent.click(within(asking).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', runner.workerId, { model: 'sonnet' }))
+  })
+
+  it('moves a worker’s task home where this home offers its lead’s model, with no question (ADR-103)', async () => {
+    const runner = {
+      workerId: `wrk_${'a'.repeat(32)}`,
+      name: 'runner-1',
+      providers: ['claude-code'],
+      signedIn: ['claude-code'],
+      busy: true,
+      readiness: {
+        sandbox: { starts: true as const },
+        tools: [{ name: 'git', version: '2.43.0' }],
+        agents: [{ providerId: 'claude-code', starts: true }],
+        models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Claude Opus' }] }],
+      },
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, workerId: runner.workerId } })),
+      listProjectWorkers: vi.fn(async () => [runner]),
+      moveTaskTo: vi.fn(async () => ({ kind: 'placed' as const, said: 'Moved to This Mac: its lead carries on there.' })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const menu = await screen.findByRole('menu', { name: 'This task' })
+    // Where it runs, at work on it, is where it is: not a reason it can't be there.
+    const there = within(menu).getByRole('menuitemradio', { name: /runner-1/ })
+    expect(there.getAttribute('aria-checked')).toBe('true')
+    expect(there.getAttribute('aria-disabled')).not.toBe('true')
+    // This home offers the lead's Claude Opus: it moves with no question.
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: /This Mac/ }))
+    await waitFor(() => expect(client.moveTaskTo).toHaveBeenCalledWith('t1', 'home', undefined))
+    expect(screen.queryByRole('dialog', { name: /^Move to/u })).toBeNull()
+  })
+
+  it('offers a worker task only what its worker said, and only its agent’s default while that worker isn’t listed (ADR-103)', async () => {
+    const workerId = `wrk_${'c'.repeat(32)}`
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, workerId } })),
+      listProjectWorkers: vi.fn(async () => []),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('Carrying on.')
+    await userEvent.click(screen.getByRole('button', { name: /^Lead:/u }))
+    // Nothing of this home's is offered, Codex's model among them: the worker hasn't said what it has.
+    expect(await screen.findAllByRole('radio')).not.toHaveLength(0)
+    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/u })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /Claude Sonnet/u })).toBeNull()
+    // Nor among all its models.
+    await userEvent.click(screen.getByRole('button', { name: /All models/u }))
+    const browser = await screen.findByRole('dialog')
+    expect(within(browser).queryByRole('button', { name: 'Use gpt-5.2' })).toBeNull()
+    expect(within(browser).queryByRole('button', { name: 'Use Claude Sonnet' })).toBeNull()
+    await userEvent.keyboard('{Escape}')
   })
 
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {

@@ -70,6 +70,7 @@ import { MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { makeSessionBriefs } from './sessionBriefs'
+import { Models } from './Models'
 import { type SessionConnectionsDependencies, makeSessionConnections } from './sessionConnections'
 import {
   AcceptedInput,
@@ -449,7 +450,7 @@ export class Sessions extends Context.Service<
      * The lead's folder moved (a worktree to Local, or back): what is said to it next starts a fresh session in the new
      * folder, handed the work so far. Nothing where no session is: the next starts there anyway.
      */
-    moved(threadId: string): Effect.Effect<void>
+    moved(threadId: string, lead?: { readonly model?: string; readonly effort?: string }): Effect.Effect<void>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -465,6 +466,8 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
+      // What Althar holds of each agent, its sign-in as checked and its models, read again after a start that failed (connectSession).
+      const models = yield* Effect.serviceOption(Models)
       const sessionsSql = yield* SqlClient.SqlClient
       /*
        * Claude Code's adapter says the plan's windows with the usage it streams:
@@ -1535,6 +1538,7 @@ export class Sessions extends Context.Service<
         permissions,
         policies,
         questions,
+        refreshAgent: (agentId) => Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.refresh(agentId) }),
         quietFor,
         signInFault: planUsage.signInFault,
         run,
@@ -2128,8 +2132,10 @@ export class Sessions extends Context.Service<
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
-            const model = session?.model ?? undefined
-            const effort = session?.effort ?? undefined
+            // Moved to where its model isn't offered, it starts on the one the person picked for there.
+            const picked = reason === 'moved' ? previous.movedLead : undefined
+            const model = picked?.model ?? session?.model ?? undefined
+            const effort = picked?.effort ?? session?.effort ?? undefined
             // Written first: the old session takes no more turns, so the record already holds everything it did.
             const brief =
               thread.role === 'coordinator'
@@ -2969,10 +2975,16 @@ export class Sessions extends Context.Service<
             }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not give a lead back', cause), false))),
           ),
         switchAgent: (input) => run(switchAgent(input)),
-        moved: (threadId) =>
+        moved: (threadId, lead) =>
           Effect.sync(() => {
             const running = threads.get(threadId)
-            if (running !== undefined) running.moved = true
+            if (running === undefined) return
+            running.moved = true
+            // A model picked for where it went is the fresh session's: a pick for its next turn here goes with it.
+            if (lead !== undefined) {
+              running.movedLead = lead
+              if (running.nextLead?.agentId === running.entry.definition.id) running.nextLead = undefined
+            }
           }),
         interrupt: (threadId, by, background = false) =>
           Effect.suspend(() => {

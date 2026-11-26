@@ -9,6 +9,7 @@ import {
   type ReviewBrief,
 } from '@althar/contracts'
 import {
+  AbandonTask,
   Board,
   BoardCard as KitBoardCard,
   boardCardText,
@@ -27,6 +28,7 @@ import {
   FactLine,
   FileChips,
   Findings,
+  FoldedRow,
   heldBackWords,
   KeptRow as KitKeptRow,
   LinkButton,
@@ -75,14 +77,15 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, isFolded, stepNow, stepText, stoppedWords } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
+import { type Lanes, movesInLine, runningIn, type Waiting, yoursOf } from './lanes'
+import { useRunningOrder } from './runningOrder'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -201,6 +204,8 @@ export const text = {
   keepHint: 'Take it out of Needs you as it is, with its page still up. Writing to it brings it back.',
   /** The two the Settled lane's head names, while something is kept for later; the one showing in ink. */
   settledOrKept: 'Settled or kept for later',
+  /** Running's orders, from the menu on its head: the oldest first, as it is until the person picks, or by where each stands. */
+  runningOrder: { label: 'Order', oldest: 'Oldest first', status: 'Status' },
   settledShelf: 'Settled',
   keptShelf: 'Kept',
   /** When a kept task was kept, under its title. */
@@ -226,6 +231,8 @@ export interface TeamActions {
   /** Holds it, out of the line, until it is started. */
   readonly hold: (planId: string) => Promise<void>
   readonly change: (taskId: string) => void
+  /** Abandons a task, asked first here: its row leaves Up next at once; whether it went through. */
+  readonly abandon?: (taskId: string) => Promise<boolean>
 }
 
 /** What the home's dock holds: a task, by its id, or a call. */
@@ -528,7 +535,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
           : status === TaskStatus.Queued
             ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
             : status === TaskStatus.Stopped
-              ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
+              ? { status, word: text.status[status], ...whyStopped(work) }
               : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
                 work.settingUp != null
                 ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
@@ -585,6 +592,47 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   }
 }
 
+/** Who stopped a task and the reason they gave, or the task its work went on in, under its title; nothing where nothing says. */
+const whyStopped = (work: BoardTask): Pick<Card, 'why'> => {
+  const why = stoppedWords(work.stopped)
+  return why === undefined ? {} : { why }
+}
+
+/**
+ * A task stopped because its work went on in another (`stopped.into`): one quiet row, its title, when, and that task, which
+ * opens it; Resume at its end on hover, which tells its lead to go on, as a stopped card's does.
+ */
+function Folded({
+  work,
+  now,
+  actions,
+  onOpen,
+}: {
+  work: BoardTask
+  now: string
+  actions: CardActions | undefined
+  onOpen: (threadId: string) => void
+}) {
+  const into = work.stopped?.into
+  const sendBack = actions?.sendBack
+  return (
+    <FoldedRow
+      data-move={work.taskId}
+      title={useTaskTitle(work.taskId, work.title)}
+      into={into?.title ?? ''}
+      {...(into === undefined ? {} : { onOpenInto: () => onOpen(into.threadId) })}
+      {...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) })}
+      onOpen={() => onOpen(work.threadId)}
+      {...(sendBack === undefined
+        ? {}
+        : {
+            onResume: () => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true),
+            resuming: actions?.sending?.has(work.taskId) ?? false,
+          })}
+    />
+  )
+}
+
 /**
  * A task whose lead stopped with no agent on it: the person's to carry on or abandon. When it stopped, not a running time, and why
  * in plain words, with its branch and what changed in it, and Carry on, which tells the lead to go on. A conflict with the default
@@ -603,8 +651,8 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     status: TaskStatus.Stopped,
     // A draft whose plan never came didn't stop: it has no plan, and nothing stopped it.
     word: work.unplanned === true ? text.unplanned : text.status[TaskStatus.Stopped],
-    // What stopped it, where something says; the word Stopped says the rest.
-    ...(work.stopped?.by == null || work.unplanned === true ? {} : { why: text.stoppedBy[work.stopped.by] }),
+    // Who stopped it and why, where something says; the word Stopped says the rest.
+    ...(work.unplanned === true ? {} : whyStopped(work)),
     // When, where something says; else no time.
     ...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
@@ -1163,6 +1211,8 @@ export function BoardView({
   const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
+  const [order, setOrder] = useRunningOrder()
+  const running = runningIn(lanes.running, order)
   // What Settled draws has moved into it: once drawn, it arrives there no more, whatever the board does next. What is drawn
   // outside it is watched: only a task that settles while watched moves in.
   const settledShown = shelf === 'settled' || lanes.kept.length === 0
@@ -1189,6 +1239,10 @@ export function BoardView({
 
   // The plans starting from their rows, by id, until the runtime has answered.
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
+  // The row whose Abandon is being asked about, and the last one the runtime wouldn't abandon, which says why over the line.
+  const [asking, setAsking] = useState<string | null>(null)
+  const [unabandoned, setUnabandoned] = useState<string | null>(null)
+  const abandonFailed = unabandoned === null ? undefined : actions?.failed[unabandoned]?.message
   const { continuing, free, paused } = lanes
   // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
   const waitingRows = lanes.next.slice(0, continuing + free)
@@ -1293,6 +1347,7 @@ export function BoardView({
           {...(start === undefined ? {} : { onStart: start })}
           {...(hold === undefined ? {} : { onHold: hold })}
           onChange={() => team.change(work.taskId)}
+          {...(team.abandon === undefined ? {} : { onAbandon: () => setAsking(work.taskId) })}
         />
       ),
     }
@@ -1308,6 +1363,7 @@ export function BoardView({
       version={[
         lanes,
         shelf,
+        order,
         starting,
         closing?.busy,
         closing?.failed,
@@ -1359,6 +1415,7 @@ export function BoardView({
           : {})}
       >
         {line?.failed != null && <Problem className={s.failure}>{line.failed}</Problem>}
+        {abandonFailed !== undefined && <Problem className={s.failure}>{abandonFailed}</Problem>}
         {line !== undefined && lanes.reordered && waitingRows.length > 1 && (
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
         )}
@@ -1423,19 +1480,28 @@ export function BoardView({
                 })}
           />
         )}
-        {lanes.stopped.length > 0 && (
+        {/* Cards apart, as the lane's others are; a list rules rows, not cards. */}
+        {lanes.stopped
+          .filter((work) => !isFolded(work.stopped))
+          .map((work) => (
+            <BoardCard
+              taskId={work.taskId}
+              key={work.taskId}
+              data-move={work.taskId}
+              {...stoppedCardOf(work, now, actions)}
+              {...parentOf(work, onOpen)}
+              errands={work.errands}
+              onOpen={() => onOpen(work.threadId)}
+            />
+          ))}
+        {/* Its work gone on in another task: settled in all but name, a quiet row, Resume there on hover. */}
+        {lanes.stopped.some((work) => isFolded(work.stopped)) && (
           <BoardList>
-            {lanes.stopped.map((work) => (
-              <BoardCard
-                taskId={work.taskId}
-                key={work.taskId}
-                data-move={work.taskId}
-                {...stoppedCardOf(work, now, actions)}
-                {...parentOf(work, onOpen)}
-                errands={work.errands}
-                onOpen={() => onOpen(work.threadId)}
-              />
-            ))}
+            {lanes.stopped
+              .filter((work) => isFolded(work.stopped))
+              .map((work) => (
+                <Folded key={work.taskId} work={work} now={now} actions={actions} onOpen={onOpen} />
+              ))}
           </BoardList>
         )}
         {[halted, forLocal].map(
@@ -1449,8 +1515,21 @@ export function BoardView({
         )}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Running} count={lanes.atWork} filled={lanes.running.length > 0}>
-        {lanes.running.map((work) => (
+      <BoardColumn
+        lane={BoardLane.Running}
+        count={lanes.atWork}
+        filled={lanes.running.length > 0}
+        order={{
+          label: text.runningOrder.label,
+          options: [
+            { value: 'oldest', label: text.runningOrder.oldest },
+            { value: 'status', label: text.runningOrder.status },
+          ],
+          value: order,
+          onChange: (value: string) => setOrder(value === 'status' ? 'status' : 'oldest'),
+        }}
+      >
+        {running.map((work) => (
           <BoardCard
             taskId={work.taskId}
             key={work.taskId}
@@ -1602,6 +1681,22 @@ export function BoardView({
           </>
         )}
       </BoardColumn>
+      {/* Abandoning a row up next, asked first: nothing of it has begun, so there is no branch, worktree or pull request to say. */}
+      {asking !== null && team?.abandon !== undefined && (
+        <AbandonTask
+          worktree={null}
+          branch={null}
+          onAbandon={() => {
+            const abandon = team.abandon!
+            setAsking(null)
+            setUnabandoned(null)
+            void abandon(asking).then((through) => {
+              if (!through) setUnabandoned(asking)
+            })
+          }}
+          onClose={() => setAsking(null)}
+        />
+      )}
     </Board>
   )
 }

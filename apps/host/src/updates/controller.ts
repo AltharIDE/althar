@@ -144,7 +144,11 @@ const prepareActivation = async (
     throw new HostError({
       code: 'UpdateIncompatible',
       message:
-        'This release changes the API or stored-data format. Apply it explicitly with --allow-incompatible after planning client compatibility and recovery.',
+        from.info.apiVersion !== to.info.apiVersion
+          ? `This release serves API version ${to.info.apiVersion}, and this home serves ${from.info.apiVersion}: its clients must update too. Apply it with --allow-incompatible once they have.`
+          : from.info.storage !== to.info.storage
+            ? 'This release moves the home’s data to a new format. A snapshot is kept, but the home can’t go back to its current release after. Apply it with --allow-incompatible.'
+            : 'An earlier update needs recovery. Apply a corrected release with --allow-incompatible.',
     })
   await checkCandidate(to.folder, to.info, dependencies.execute)
   const transaction: Transaction = {

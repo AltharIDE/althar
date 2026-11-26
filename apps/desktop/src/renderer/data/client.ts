@@ -104,6 +104,7 @@ import {
   type Load,
   type Places,
   type HomeWorkers,
+  type WorkerGrant,
   type MissedReports,
   type ModelRoom,
   type PlanUsage,
@@ -114,7 +115,9 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type PlaceOutcome,
   type ProjectWorker,
+  type TaskPlace,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -622,11 +625,14 @@ export interface Client {
      */
     readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
+  /** Where a planned task runs once it starts: a worker, `auto`, or null for the home. Whether it was held, as one counting down is where that place can't take it. */
+  readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
   readonly holdDraft: (threadId: string, key: string, taskId?: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
@@ -745,6 +751,8 @@ export interface Client {
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   /** Stops using an account; `anyway`, its folder goes even where its sign-out didn't happen. */
   readonly removeAccount: (accountId: string, anyway?: boolean) => Promise<void>
+  /** Signs an account out with its agent's own command, and keeps it, to sign in again: the usual folder's too. */
+  readonly signOutAccount: (accountId: string) => Promise<void>
   readonly orderAccounts: (agentId: string, accountIds: ReadonlyArray<string>) => Promise<void>
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
@@ -798,6 +806,12 @@ export interface Client {
   readonly getWorkers: () => Promise<HomeWorkers>
   /** Takes a worker out of this home: its certificate is no longer accepted. */
   readonly removeWorker: (workerId: string) => Promise<void>
+  /** Has the home sign a worker's own key, as the worker set up over SSH made it: what the worker needs, to hand to it. */
+  readonly addWorker: (input: { readonly publicKey: string; readonly name: string; readonly ssh?: string }) => Promise<WorkerGrant>
+  /** A one-time code for a machine without SSH to add itself with. */
+  readonly createWorkerCode: (name: string) => Promise<{ readonly code: string; readonly expiresAt: number }>
+  /** The projects a worker works on, as the person picks them. */
+  readonly setWorkerProjects: (workerId: string, projectIds: ReadonlyArray<string>) => Promise<void>
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
@@ -914,6 +928,12 @@ export interface Client {
   }) => Promise<MoveOutcome>
   /** Calls off a move that waits. */
   readonly dropMove: (taskId: string) => Promise<void>
+  /** Moves a running task between the home and its workers (ADR-103): moved, waiting for its lead's turn, or already there. */
+  readonly moveTaskTo: (
+    taskId: string,
+    to: TaskPlace,
+    lead?: { readonly model?: string; readonly effort?: string },
+  ) => Promise<PlaceOutcome>
   /** Points a running task at another branch to work toward, or its default with null: what it did, in words. */
   readonly workToward: (taskId: string, toward: string | null) => Promise<ReadonlyArray<string>>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
@@ -1346,6 +1366,8 @@ export const connect = async (
       command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    placePlan: (planId, workerId, chosenAt) =>
+      command((commandId) => api.PlacePlan({ commandId, planId, workerId, ...(chosenAt === undefined ? {} : { chosenAt }) })),
     holdDraft: (threadId, key, taskId) =>
       command((commandId) => api.HoldDraft({ commandId, threadId, key, ...(taskId === undefined ? {} : { taskId }) })),
     changePlan: (planId, steps, end, worksIn, toward) =>
@@ -1414,6 +1436,7 @@ export const connect = async (
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>
       command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
+    signOutAccount: (accountId) => command((commandId) => api.SignOutAccount({ commandId, accountId })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId, host) =>
@@ -1449,6 +1472,9 @@ export const connect = async (
     getPlaces: () => settle(api.GetPlaces({})),
     getWorkers: () => settle(api.GetWorkers({})),
     removeWorker: (workerId) => command((commandId) => api.RemoveWorker({ commandId, workerId })),
+    addWorker: (input) => command((commandId) => api.AddWorker({ commandId, ...input })),
+    createWorkerCode: (name) => settle(api.CreateWorkerCode({ name })),
+    setWorkerProjects: (workerId, projectIds) => command((commandId) => api.SetWorkerProjects({ commandId, workerId, projectIds })),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     dismissSignInEnding: (accountId, endsAt, stage) =>
       command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),
@@ -1516,6 +1542,8 @@ export const connect = async (
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
+    moveTaskTo: (taskId, to, lead) =>
+      command((commandId) => api.MoveTaskTo({ commandId, taskId, to, ...(lead === undefined ? {} : { lead }) })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching, onReset) => {

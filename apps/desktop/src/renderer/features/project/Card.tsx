@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
@@ -26,12 +26,12 @@ import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText, stoppedWords } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 import { useHomeState } from '../homes/useHomes'
-import { HOME, placementOf, runsOnText } from './runsOn'
+import { ANY, HOME, placementOf, runsOnText } from './runsOn'
 import s from './Card.module.css'
 
 /*
@@ -81,8 +81,14 @@ export interface CardActions {
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly workers?: ReadonlyArray<ProjectWorker>
-  readonly onStart: (planId: string, workerId?: string) => void | Promise<boolean>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before. */
+  readonly onStart: (planId: string, workerId?: string | null) => void | Promise<boolean>
   readonly onHold: (planId: string) => void
+  /**
+   * Where a plan runs once it starts, chosen as it counts down or is held: a worker, any free one, or null for the home. Its
+   * countdown starts it there; one counting down that the place can't take is held. Whether it went through.
+   */
+  readonly onPlace?: (planId: string, workerId: string | null, chosenAt: number) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
   readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
   /** Reopens a task a plan waits for, once abandoned. */
@@ -94,7 +100,7 @@ export interface CardActions {
     worksIn?: Where,
     /** The branch it works toward (ADR-093); null for the default branch. */
     toward?: string | null,
-  ) => void
+  ) => void | Promise<void>
   /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
   readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
@@ -248,29 +254,61 @@ function PlanCard({
       worksIn: nextWhere ?? worksIn,
       toward: nextToward === undefined ? toward : nextToward,
     })
-    if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
-    else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
+    return nextToward === undefined
+      ? actions.onChange(plan.id, next, nextEnd, nextWhere)
+      : actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
-  // Where it runs, while it is held: the home, or one of its workers (ADR-103). The runtime checks the choice again as it starts.
+  // Where it runs, as it counts down or is held: the home, or one of its workers (ADR-103). The runtime keeps the choice, which
+  // its countdown starts it on, and checks it again as it starts.
   const homes = useServices().host.homes
   const here = useHomeState(homes)
   // The home by the window's name for it: This Mac, or the remote home's own; until the window has read which, neither.
   const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : here === null ? null : here.current.home.name
-  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: HOME })
-  const selected = card.phase === 'held' && place.planId === plan.id ? place.workerId : HOME
-  const placement =
-    card.phase === 'held'
-      ? placementOf({
-          workers: actions.workers ?? [],
-          selected,
-          steps,
-          requirements: plan.workerRequirements,
-          worksIn,
-          home: homeName,
-          agentName: (id) => actions.agentName(id),
-        })
-      : null
+  // The person's choice shows at once, kept until the plan's copy has it or a later choice (`runsOnChosenAt`), or the runtime
+  // turned it down; a read that lands before then doesn't undo it. Each is stamped when it was made, later than the last, so the
+  // runtime keeps the latest whatever order they reach it in.
+  const requests = useRef(0)
+  const lastChosen = useRef(0)
+  const [place, setPlace] = useState<{ readonly planId: string; readonly workerId: string; readonly chosenAt: number } | null>(null)
+  if (place !== null && place.planId === plan.id && (plan.runsOnChosenAt ?? -1) >= place.chosenAt) setPlace(null)
+  // A countdown the chosen place can't take shows held at once, as the runtime holds it, until the request that holds it is done.
+  const [holding, setHolding] = useState<{ readonly planId: string; readonly request: number } | null>(null)
+  const counting = card.phase === 'planned' && plan.startsAt !== null
+  const held = card.phase === 'held' || (counting && holding?.planId === plan.id)
+  const placeable = card.phase === 'held' || counting
+  const selected = !placeable ? HOME : place?.planId === plan.id ? place.workerId : (plan.runsOn ?? HOME)
+  const placementAt = (where: string, inWhere: Where | undefined = worksIn) =>
+    placementOf({
+      workers: actions.workers ?? [],
+      selected: where,
+      steps,
+      requirements: plan.workerRequirements,
+      worksIn: inWhere,
+      home: homeName,
+      agentName: (id) => actions.agentName(id),
+      modelName: (agentId, model) => named(agentId, model).name,
+    })
+  const placement = placeable ? placementAt(selected) : null
+  // On a worker, the picker offers what its agents offer there.
+  const onWorker = selected === HOME || selected === ANY ? undefined : actions.workers?.find((one) => one.workerId === selected)
   const startProblem = placement?.problem
+  /** Shows it held until `sent` is done, where the change makes the place chosen unable to take it. */
+  const holdWhile = (holds: boolean, sent: void | Promise<unknown>, request: number) => {
+    if (!holds) return
+    setHolding({ planId: plan.id, request })
+    void Promise.resolve(sent)
+      .catch(() => undefined)
+      .then(() => setHolding((was) => (was?.request === request ? null : was)))
+  }
+  const placeOn = (workerId: string) => {
+    const request = ++requests.current
+    const chosenAt = (lastChosen.current = Math.max(Date.now(), lastChosen.current + 1))
+    setPlace({ planId: plan.id, workerId, chosenAt })
+    const sent = actions.onPlace === undefined ? undefined : actions.onPlace(plan.id, workerId === HOME ? null : workerId, chosenAt)
+    holdWhile(counting && placementAt(workerId).problem !== undefined, sent, request)
+    // Turned down: as it was, the line saying why.
+    if (sent !== undefined) void sent.then((placed) => (placed ? undefined : setPlace((was) => (was?.chosenAt === chosenAt ? null : was))))
+  }
   const from = fromOf(card)
   return (
     <TaskLaunch
@@ -304,6 +342,8 @@ function PlanCard({
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
               variant="field"
               placement="below"
+              // The review runs on the home, whatever runs the lead.
+              {...(onWorker === undefined || step.id !== 'implement' ? {} : { worker: onWorker })}
             />
           )
         )
@@ -313,7 +353,7 @@ function PlanCard({
       {...(queuedTitle === undefined ? {} : { queuedTitle })}
       {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
-      held={card.phase === 'held'}
+      held={held}
       onHeldChange={(held) => {
         if (held) actions.onHold(plan.id)
       }}
@@ -326,7 +366,11 @@ function PlanCard({
         ? {}
         : {
             worksIn: placeOf(worksIn),
-            onWorksInChange: (next: WorksIn) => change(steps, end, whereOf(next)),
+            onWorksInChange: (next: WorksIn) => {
+              // Somewhere the place chosen can't take it, the runtime stops its countdown as it changes it: shown so at once.
+              const sent = change(steps, end, whereOf(next))
+              holdWhile(counting && placementAt(selected, whereOf(next)).problem !== undefined, sent, ++requests.current)
+            },
             ...(plan.worksInWhy == null || worksIn !== plan.worksIn ? {} : { worksInWhy: plan.worksInWhy }),
             ...(plan.localTaken == null ? {} : { localTaken: plan.localTaken.title }),
           })}
@@ -356,11 +400,15 @@ function PlanCard({
               places: placement.places,
               note: placement.note,
               ...(startProblem === undefined ? {} : { problem: startProblem }),
-              onChange: (workerId: string) => setPlace({ planId: plan.id, workerId }),
+              onChange: placeOn,
             },
           })}
       {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
-      onStart={() => actions.onStart(plan.id, selected === HOME ? undefined : selected)}
+      // The home by name where a place was chosen, so one chosen before and still being changed can't take its place; left out
+      // where none ever was, as homes from before placement can read.
+      onStart={() =>
+        actions.onStart(plan.id, selected !== HOME ? selected : plan.runsOn !== undefined || place !== null ? null : undefined)
+      }
       startDisabled={startProblem !== undefined}
     />
   )
@@ -491,21 +539,24 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Beside it, why, or what of its pull request stands first, as the board's card says it: a failed check, checks running.
   const standing = said === null ? undefined : (why ?? (card.change === null ? undefined : factsOf(card.change)[0]?.words))
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
-  const now = discarded
-    ? undefined
-    : standing !== undefined
-      ? standing
-      : status === TaskStatus.Done
-        ? card.summary?.split('\n')[0]
-        : card.externalWait !== undefined
-          ? externalWaitWords(card.externalWait, clock)
-          : card.queued !== null
-            ? queuedWords(card.queued)
-            : card.waits !== null
-              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-              : card.reconnects != null
-                ? reconnectsWords(card.reconnects, clock)
-                : stepNow(card.step, card.shipAt)
+  // Stopped: who stopped it and why, or the task its work went on in, under its title, rather than the step it was cut short in.
+  const stoppedWhy = status === TaskStatus.Stopped && card.phase === 'stopped' ? stoppedWords(card.stopped) : undefined
+  const now =
+    discarded || (status === TaskStatus.Stopped && card.phase === 'stopped')
+      ? undefined
+      : standing !== undefined
+        ? standing
+        : status === TaskStatus.Done
+          ? card.summary?.split('\n')[0]
+          : card.externalWait !== undefined
+            ? externalWaitWords(card.externalWait, clock)
+            : card.queued !== null
+              ? queuedWords(card.queued)
+              : card.waits !== null
+                ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+                : card.reconnects != null
+                  ? reconnectsWords(card.reconnects, clock)
+                  : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
@@ -525,6 +576,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       steps={steps}
       at={status === TaskStatus.Done || said !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
+      {...(stoppedWhy === undefined ? {} : { why: stoppedWhy })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
       {...(effort === null ? {} : { effort })}
@@ -582,7 +634,7 @@ function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardA
       case AsideState.Failed:
         return answer
       case AsideState.Stopped:
-        return card.stopped?.by == null ? undefined : stepText.stoppedBy[card.stopped.by]
+        return stoppedWords(card.stopped)
       case AsideState.Waiting:
         return card.queued !== null
           ? queuedWords(card.queued)

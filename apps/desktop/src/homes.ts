@@ -109,11 +109,26 @@ export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   )
 }
 
-/** A home updated from its window: the release it runs now, where it said. */
-export interface HomeUpdated {
-  readonly state: 'applied'
-  readonly version?: string
+/**
+ * What updating the window's home to the newest release changes, by what the home says it runs (its `release-info`) and
+ * what the newest release's signed manifest says: `none`, the same API and data; `data`, the same API as this app but
+ * its data moves to a new format, which the home can't come back from to its old release; `api`, an API this app
+ * doesn't speak, so the window doesn't update it.
+ */
+export interface HomeUpdateCheck {
+  /** The release the home runs, and the newest published. */
+  readonly from: string
+  readonly to: string
+  readonly change: 'none' | 'data' | 'api'
 }
+
+/**
+ * A home updated from its window: the release it runs now, where it said; or, where the newest moves its data to a
+ * new format and that wasn't accepted yet, nothing done, with what it changes, to ask first.
+ */
+export type HomeUpdated =
+  | { readonly state: 'applied'; readonly version?: string }
+  | { readonly state: 'confirm'; readonly check: HomeUpdateCheck }
 
 /**
  * The newest host release published, by its version: null where none is. The window offers a home's update by it,
@@ -146,9 +161,13 @@ export interface HomesHost {
   readonly release?: (fresh?: boolean) => Promise<HostReleaseNews>
   /**
    * The window's home, reached over SSH, updated by its own managed updater: answers once the new release runs, or
-   * fails with a line saying why. The window's connection drops while the home restarts.
+   * fails with a line saying why. The window's connection drops while the home restarts. Where the newest release
+   * moves the home's data to a new format, it goes only once `accept` names that release's version; otherwise it
+   * answers `confirm`, having done nothing.
    */
-  readonly update?: () => Promise<HomeUpdated>
+  readonly update?: (accept?: string) => Promise<HomeUpdated>
+  /** What updating the window's home, over SSH, would change: asked before it's offered, so a data change is asked about at once. */
+  readonly updateCheck?: () => Promise<HomeUpdateCheck>
   /** A home being set up over SSH, or none; with the calls that start and steer it. */
   readonly setup?: () => Promise<HomeSetup | null>
   readonly setUp?: (target: SshHomeTarget) => Promise<void>

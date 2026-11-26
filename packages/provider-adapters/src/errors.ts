@@ -19,6 +19,8 @@ export class AgentRequestFailed extends Schema.TaggedError<AgentRequestFailed>()
   failure: Schema.Literals(['usage_limit', 'context_full', 'session_lost', 'auth_required', 'invalid_request', 'transient', 'unknown']),
   message: Schema.String,
   resetsAt: Schema.optional(Schema.String),
+  /** The agent's whole answer, its code and all its data (`rawOf`), for the log: never shown as it is. */
+  raw: Schema.optional(Schema.String),
 }) {}
 
 /** The agent does not offer a mode or option value Althar asked for. */

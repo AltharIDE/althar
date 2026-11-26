@@ -25,6 +25,10 @@ import {
   type TaskAction,
   type ThreadItem,
   type ThreadSnapshot,
+  workerModels,
+  workerName,
+  workerOffersModel,
+  workerUnfit,
 } from '@althar/contracts'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -79,12 +83,17 @@ import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
+import { useProjectWorkers } from '../../shared/useProjectWorkers'
+import { device } from '../../shared/device'
+import { useHomeState } from '../homes/useHomes'
+import { runsOnText } from '../project/runsOn'
+import { MovePick } from './MovePick'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { stepNow, stepText, trackFor } from '../../shared/steps'
+import { stepNow, stepText, stoppedWords, trackFor } from '../../shared/steps'
 import { MERGE_QUEUE_STEP, queuedToMerge, shownChangeOf } from '../../data/merges'
 import { ago, clock, MINUTE, running, SECOND, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
@@ -326,10 +335,10 @@ export const statusOf = (
       // Abandoned, it says so in place of where it stood, as stopped does.
       return { status, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
     case TaskStatus.Stopped: {
-      const by = snapshot.task.stopped?.by
+      const why = stoppedWords(snapshot.task.stopped)
       // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
       const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
-      return { status, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+      return { status, state, ...(why === undefined ? {} : { why }) }
     }
     case TaskStatus.Running:
       // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
@@ -609,6 +618,11 @@ export function TaskView({
   const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
+  // The agent picked to take over, from the moment what the person said to it is sent until the runtime has the switch: the picker keeps saying it
+  // rather than going back to the lead going out, and no second switch is asked for by what is said meanwhile.
+  const [switching, setSwitching] = useState<Choice | null>(null)
+  // What was picked on that agent meanwhile, the last of it: moved to as the switch lands. A pick made once it has landed supersedes it.
+  const pickedMeanwhile = useRef<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
   // Tasks the person just stopped this one waiting for: gone from its list at once, until its head is read again.
@@ -621,6 +635,8 @@ export function TaskView({
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // A move to where its lead's model isn't offered: the person picks one that is, first.
+  const [movingTo, setMovingTo] = useState<{ readonly place: string; readonly name: string; readonly model: string } | null>(null)
   // Its plan's team, while nothing of it has begun, as its project's board reads it; and its dialog, open.
   const teamed = useTeamed(model.snapshot?.project.id ?? null, model.snapshot?.task.id ?? null)
   const [changingTeam, setChangingTeam] = useState(false)
@@ -865,6 +881,19 @@ export function TaskView({
   const snapshot = model.snapshot
   // An agent's rename types itself into the title; the person's own shows at once.
   const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
+  // The project's workers: where it may move to, and, on one, what its lead may run there.
+  const workers = useProjectWorkers(snapshot?.project.id)
+  // Assigned a worker, it runs there whether or not the worker is listed now: one not listed yet, or gone, has said nothing,
+  // so its picker offers only the lead agent's own default, which a run there starts on, never this home's models.
+  const leadAgent = snapshot?.session?.agentId ?? snapshot?.task.lead?.agentId ?? null
+  const onWorker =
+    snapshot?.task.workerId == null
+      ? undefined
+      : (workers.find((one) => one.workerId === snapshot.task.workerId) ?? { providers: leadAgent === null ? [] : [leadAgent] })
+  const homes = servicesHost.homes
+  const here = useHomeState(homes)
+  // The home by the window's name for it: This Mac, or the remote home's own.
+  const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : (here?.current.home.name ?? runsOnText.home)
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -955,7 +984,7 @@ export function TaskView({
       ? taking === null
         ? chosen
         : ((moving !== null ? { ...moving, agentId: taking.agentId } : null) ?? taking)
-      : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
+      : (waiting ?? switching ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -1019,7 +1048,11 @@ export function TaskView({
     setDraft('')
     images.clear()
     const picked = waiting
-    if (picked !== null) setHandover(null)
+    if (picked !== null) {
+      setHandover(null)
+      setSwitching(picked)
+      pickedMeanwhile.current = null
+    }
     const gathered = batch.taken
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
     const lines = gathered.filter(isDiffDraft).map(toLineComment)
@@ -1035,23 +1068,50 @@ export function TaskView({
       batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      if (picked !== null) setHandover(picked)
+      if (picked !== null) {
+        // The switch didn't go: what was picked on the agent since is the pick given back, not the one sent.
+        setHandover(pickedMeanwhile.current ?? picked)
+        pickedMeanwhile.current = null
+        setSwitching(null)
+      }
     }
     void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
       if (!accepted) return restore()
+      if (picked !== null) {
+        // What was picked on the agent taking over since is moved to as the switch lands, not lost with it.
+        const later = pickedMeanwhile.current
+        pickedMeanwhile.current = null
+        setSwitching(null)
+        if (later !== null) move(later)
+      }
       batch.finish(true)
       if (lines.length > 0) lineComments.reread()
     }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
-  const choose = (next: Choice) => {
-    if (session === null || !session.held) return setPick(next)
-    if (next.agentId !== session.agentId) return setHandover(next)
+  const move = (next: Choice) => {
+    // The last pick stands: one made on the agent before the switch landed is not moved to after this.
+    pickedMeanwhile.current = null
     setHandover(null)
     setMoving(next)
     // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
     // Only the last pick's end takes it away: one made after is still on its way.
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
+  }
+  const choose = (next: Choice) => {
+    // Another session taking over after the one going out let go is the lead as far as the runtime goes: a pick is moved to there too.
+    if (taking !== null) {
+      setSwitching(null)
+      return move(next)
+    }
+    // The switch to the agent is still on its way: a pick of its own waits for it, and is moved to as it lands.
+    if (switching !== null && next.agentId === switching.agentId) {
+      pickedMeanwhile.current = next
+      return setSwitching(next)
+    }
+    if (session === null || !session.held) return setPick(next)
+    if (next.agentId !== session.agentId) return setHandover(next)
+    move(next)
   }
   // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
   const sendComments = () => {
@@ -1283,6 +1343,8 @@ export function TaskView({
       ? {
           move: (to, consent) => void model.move(to, consent),
           dropMove: () => void model.dropMove(),
+          // Back where it runs: the move that waited is called off.
+          dropPlace: () => void model.moveTo(snapshot.task.workerId ?? 'home'),
           workToward: (branch) => void model.workToward(branch),
         }
       : {}),
@@ -1306,6 +1368,54 @@ export function TaskView({
     const partsActions = partsActionsAt(readingAt(now))
     return <TaskParts parts={partsOf(snapshot, partsActions)} kinds={kindsOf(snapshot, partsActions)} />
   }
+  // Where it runs, among the home and its workers (ADR-103), for a task under way in a worktree of its own: picking another
+  // moves it there once its lead's turn ends, with its work; where its lead's model isn't offered there, the person picks one.
+  const leadSteps = choice === null ? [] : [{ key: 'implement' as const, agentId: choice.agentId, model: choice.model, skipped: false }]
+  const placedOn = snapshot.task.workerId ?? 'home'
+  const movable =
+    workers.length > 0 &&
+    snapshot.task.phase !== 'settled' &&
+    snapshot.task.review == null &&
+    snapshot.task.worktree !== null &&
+    snapshot.task.local !== true &&
+    planId === null &&
+    choice !== null
+  const moveOrAsk = (place: string) => {
+    if (choice === null) return
+    const worker = workers.find((one) => one.workerId === place)
+    const name = place === 'home' ? homeName : worker === undefined ? place : workerName(worker)
+    // The home's own models: those its agent offers here.
+    const offered =
+      place === 'home'
+        ? (models ?? []).find((one) => one.agentId === choice.agentId)?.models.some((one) => one.id === choice.model) !== false
+        : workerOffersModel(worker, choice.agentId, choice.model)
+    if (!offered && choice.model !== null) return setMovingTo({ place, name, model: named(choice.agentId, choice.model).name })
+    void model.moveTo(place)
+  }
+  const runsOn = !movable
+    ? undefined
+    : {
+        value: snapshot.task.placing?.to ?? placedOn,
+        places: [
+          { value: 'home', label: homeName },
+          ...workers.map((worker) => {
+            const current = worker.workerId === placedOn
+            // The worker it runs on is at work on it: that's where it is, not a reason it can't be.
+            const unfit = current ? undefined : workerUnfit(worker, leadSteps)
+            const hint =
+              unfit === undefined
+                ? [runsOnText.free(worker.capacity?.freeMemoryMib), runsOnText.needs(worker)].filter(Boolean).join(' · ')
+                : runsOnText.unfit(unfit, agentName)
+            return {
+              value: worker.workerId,
+              label: workerName(worker),
+              ...(hint === undefined || hint === '' ? {} : { hint }),
+              ...(unfit === undefined ? {} : { disabled: true }),
+            }
+          }),
+        ],
+        onMove: moveOrAsk,
+      }
   // What else it can do is in its menu.
   const actionsAt = (now: string) => (
     <>
@@ -1385,6 +1495,8 @@ export function TaskView({
           : {})}
         // Held on by its project, allowing everything opens the project's rules, where it is turned off.
         {...(onRules === undefined ? {} : { onRules })}
+        // Where it runs, among the home and its workers (ADR-103): another place moves it there, with its work.
+        {...(runsOn === undefined ? {} : { runsOn })}
         // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
         {...(snapshot.task.worktree === null || editor === undefined
           ? {}
@@ -1590,6 +1702,7 @@ export function TaskView({
                 projectId={snapshot.project.id}
                 value={choice}
                 onChange={choose}
+                {...(onWorker === undefined ? {} : { worker: onWorker })}
                 {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
               />
             )}
@@ -2111,6 +2224,33 @@ export function TaskView({
           {turnUndo.dialog}
           {changingTeam && (
             <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
+          )}
+          {movingTo !== null && choice !== null && (
+            <MovePick
+              place={movingTo.name}
+              model={movingTo.model}
+              agents={model.agents}
+              // The first model the lead's agent offers there, to start from; the person picks another as they like.
+              start={{
+                agentId: choice.agentId,
+                model:
+                  workerModels(
+                    workers.find((one) => one.workerId === movingTo.place),
+                    choice.agentId,
+                  )?.[0]?.id ?? null,
+                effort: null,
+              }}
+              worker={workers.find((one) => one.workerId === movingTo.place)}
+              projectId={snapshot.project.id}
+              onMove={(picked) => {
+                setMovingTo(null)
+                void model.moveTo(movingTo.place, {
+                  ...(picked.model === null ? {} : { model: picked.model }),
+                  ...(picked.effort === null ? {} : { effort: picked.effort }),
+                })
+              }}
+              onClose={() => setMovingTo(null)}
+            />
           )}
           {abandoning && (
             <AbandonTask

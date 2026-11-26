@@ -125,7 +125,9 @@ jobs:
       # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 openssh-server
+      # The display is xvfb-run's, so the run keeps it (apps/desktop/scripts/display.ts).
       - env:
+          ALTHAR_E2E_DISPLAY: inherit
           SHARD: ${{ matrix.shard }}
           RUNS: ${{ fromJSON(needs.plan.outputs.specs).runs }}
           SPECS: ${{ join(fromJSON(needs.plan.outputs.specs).files, ' ') }}
