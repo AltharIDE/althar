@@ -3,7 +3,6 @@ import { Schema } from 'effect'
 
 import { useServices } from '../data/services'
 import { useHomesOverview } from '../features/homes/useHomes'
-import { hostnameOf } from './remotes'
 
 /*
  * This computer's projects whose code is on a code host, as its own window
@@ -26,16 +25,27 @@ export interface ProjectHere {
   readonly path: string
 }
 
-/** Whether a page is on the server at `base`, base path and all: https://git.acme.com/bitbucket/projects/… is on https://git.acme.com/bitbucket. */
-const within = (page: string, base: string) => {
+/** An address as a server's base is compared: its origin and path, no trailing slash, whatever its case. Null for no address. */
+const baseOf = (address: string) => {
   try {
-    const at = new URL(page)
-    const server = new URL(base)
-    const root = server.pathname.replace(/\/+$/, '')
-    return at.origin === server.origin && (root === '' || at.pathname === root || at.pathname.startsWith(`${root}/`))
+    const at = new URL(address)
+    return `${at.origin}${at.pathname.replace(/\/+$/, '')}`.toLowerCase()
   } catch {
-    return false
+    return null
   }
+}
+
+/**
+ * The server a repository's page is on, base path and all, as its product lays its pages out (as main's `pageOf` makes them):
+ * Bitbucket Data Center's under …/projects/KEY/repos/slug or …/users/name/repos/slug, the others' at the repository's own path.
+ * https://git.acme.com/bitbucket/projects/PLAT/repos/tide is on https://git.acme.com/bitbucket, and not on https://git.acme.com.
+ */
+const serverOf = (one: ProjectHere) => {
+  const page = baseOf(one.url)
+  if (page === null) return null
+  if (one.product === 'bitbucket_dc') return /^(.*)\/(?:projects|users)\/[^/]+\/repos\/[^/]+(?:\/.*)?$/.exec(page)?.[1] ?? null
+  const own = `/${one.path.replace(/^\/+|\/+$/g, '').toLowerCase()}`
+  return page.endsWith(own) ? page.slice(0, -own.length) : null
 }
 
 /** The code hosts whose page for a repository is its git address too; Bitbucket Data Center's isn't. */
@@ -45,10 +55,12 @@ const isProduct = Schema.is(Product)
 
 /**
  * Whether a connection of the home's is to the very server one of this computer's repositories is on, for its product: a
- * Jira on the same host isn't, nor another server at another base path there.
+ * Jira on the same host isn't, nor another server at another base path there, one at the host's root included.
  */
-export const servesHere = (connection: Pick<ConnectionSummary, 'product' | 'webUrl'>, one: ProjectHere) =>
-  connection.product === one.product && hostnameOf(connection.webUrl) === one.host.toLowerCase() && within(one.url, connection.webUrl)
+export const servesHere = (connection: Pick<ConnectionSummary, 'product' | 'webUrl'>, one: ProjectHere) => {
+  const server = serverOf(one)
+  return connection.product === one.product && server !== null && baseOf(connection.webUrl) === server
+}
 
 /**
  * Where the home clones one of this computer's repositories from: through its own connection to that server for that product,
