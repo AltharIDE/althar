@@ -3,8 +3,8 @@ import { open } from 'node:fs/promises'
 import { Duration, Effect } from 'effect'
 
 import { localAddress } from './ports'
-import { commandIn } from './rulePaths'
 import { shortCommand } from './shellCommands'
+import { commandIn } from './toolCalls'
 
 /*
  * What an agent left running in the background, such as a dev server, as a

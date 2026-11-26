@@ -37,8 +37,6 @@ import {
   NEXT_SHIP_EVERY,
   NEXT_SHIP_TRIES,
   NotMergingNow,
-  PlanParameters,
-  type PlanStep,
   type RoundBack,
   type RoundInput,
   type RoundStart,
@@ -50,12 +48,11 @@ import {
   type Store,
   type StuckInfo,
   TINY_LINES,
-  type TaskEnd,
   digestOf,
-  farOf,
   roundOf,
   unlessStopped,
 } from './runRecords'
+import { PlanParameters, type PlanStep, type TaskEnd, farOf } from './planParameters'
 import type { Sessions } from './Sessions'
 import { type MergeStanding, mergeStandingOf, reviewsBeforeShip, taskShipRoute } from './shipRoute'
 import { addItem } from './threads'

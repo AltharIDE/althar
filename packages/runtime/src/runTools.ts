@@ -45,8 +45,6 @@ import {
   type Finding,
   Finished,
   type Lead,
-  type PlanParameters,
-  type PlanStep,
   Reviewed,
   type RoundBack,
   type RoundStart,
@@ -54,12 +52,12 @@ import {
   Shown,
   type Store,
   type StuckInfo,
-  type TaskEnd,
   WaitingForPerson,
   read,
   roundOf,
   titleOf,
 } from './runRecords'
+import type { PlanParameters, PlanStep, TaskEnd } from './planParameters'
 import { addItem } from './threads'
 import { POOL, type Tool, type ToolAccess, type ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'

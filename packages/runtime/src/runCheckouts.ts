@@ -25,18 +25,9 @@ import {
   settledHolding,
   waitMove,
 } from './local'
+import type { PlanParameters, PlanStep, TaskEnd } from './planParameters'
 import { change, fact, timestamp } from './records'
-import {
-  type CheckoutHold,
-  type Place,
-  type PlanParameters,
-  type PlanStep,
-  type RunRow,
-  type Store,
-  type StuckInfo,
-  type TaskEnd,
-  waitingOf,
-} from './runRecords'
+import { type CheckoutHold, type Place, type RunRow, type Store, type StuckInfo, waitingOf } from './runRecords'
 import type { Sessions } from './Sessions'
 import { Setups } from './Setups'
 import { summarize } from './words'

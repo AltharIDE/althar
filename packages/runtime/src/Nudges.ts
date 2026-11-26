@@ -1,4 +1,5 @@
 import {
+  type AttentionEvent,
   type NudgeKind,
   kindWords,
   plainTitle,
@@ -40,7 +41,7 @@ import { programOf } from './shellCommands'
 /** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
 
-export type NudgeEvent = import('@althar/contracts').AttentionEvent
+export type NudgeEvent = AttentionEvent
 
 /** What a step that needs the person is called in a nudge. */
 const STEPS: Readonly<Record<StuckStep['step'], string>> = {

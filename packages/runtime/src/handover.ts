@@ -13,7 +13,7 @@ import { type Note, notesOf, sayNotes } from './notes'
 import { Policies, ruleSetOf } from './Policies'
 import { withRole } from './roles'
 import { sayRules } from './ruleContext'
-import { PlanParameters } from './runRecords'
+import { PlanParameters } from './planParameters'
 import { instructionsSection, repositoryInstructions } from './repositoryInstructions'
 import { type ItemKind, lastWithin, piecesOf, transcriptLines } from './threads'
 

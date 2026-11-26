@@ -42,9 +42,6 @@ import {
   pathsOf,
   credentialReason,
   secretOf,
-  commandIn,
-  field,
-  COMMAND_KEPT,
 } from './rulePaths'
 import {
   lineReadings,
@@ -65,6 +62,7 @@ import {
   assignment,
   INTERPRETERS,
 } from './shellCommands'
+import { COMMAND_KEPT, commandIn, field } from './toolCalls'
 import { hostOf } from '@althar/contracts'
 import type { PermissionRequest, McpCall } from '@althar/provider-adapters'
 import { existsSync, statSync, readFileSync, realpathSync } from 'node:fs'

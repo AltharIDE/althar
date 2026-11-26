@@ -31,11 +31,10 @@ import {
   together,
 } from './handed'
 import { diagnosticIn, diagnosticOf, printedFields } from './diagnostics'
-import { stoppedIn } from './tally'
+import { commandIn, essentials, stoppedIn } from './toolCalls'
 import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
-import { commandIn, essentials } from './rulePaths'
-import { indexThread } from './Search'
+import { indexThread } from './searchRows'
 import { mcpActOf } from './mcpActs'
 import { toolCallMoved } from './toolMoves'
 

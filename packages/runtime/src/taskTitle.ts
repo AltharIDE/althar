@@ -5,7 +5,7 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { NotFound, TaskRefused } from './errors'
 import { change, fact } from './records'
-import { indexTask } from './Search'
+import { indexTask } from './searchRows'
 
 /** How long a task's title may be: it is read in a line, beside other things, on every screen. */
 export const TITLE_LENGTH = 60

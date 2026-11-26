@@ -12,6 +12,10 @@
  * can reach no page but the one beside its task.
  */
 
+/** The lead and coordinator leave the person's page as they found it after inspecting it. */
+export const PAGE_VIEW_BRIEF =
+  'If you temporarily zoom the page or change its viewport to inspect or interact with it, remember the previous settings and restore them as soon as that browser work is done, before replying or finishing a step, even after a failed attempt. Undo temporary zoom styles you applied through page_evaluate too. Keep a view the person explicitly chose or asked you to leave in place.'
+
 /** An element the agent names: a reference from its last snapshot (`e12`), or a CSS selector. One of the two. */
 export interface PageTarget {
   readonly ref?: string

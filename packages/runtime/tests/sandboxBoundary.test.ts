@@ -17,8 +17,9 @@ import type { RuleContext } from '../src/ruleContext'
 import { decide, decideInside, type Hold, runsInside, tallyKindOf } from '../src/rules'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { stoppedIn, tallyOf } from '../src/tally'
+import { tallyOf } from '../src/tally'
 import { recorder } from '../src/threads'
+import { stoppedIn } from '../src/toolCalls'
 import { launches, runtime, task, turns, until } from './support'
 
 /*

@@ -1,5 +1,6 @@
 import { type System, systemOf, type RuleContext, kept } from './ruleContext'
 import { lineReadings, readings, REDIRECTS, type Parsed, NO_SCOPE } from './shellCommands'
+import { PATH_KEYS, commandIn, field } from './toolCalls'
 import { SECRET_PLACES, type PermissionRequest } from '@althar/provider-adapters'
 import { realpathSync, statSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -209,21 +210,8 @@ export const envFile = (path: string) => {
 export const envKept = (path: string) =>
   kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', 'floor')
 
-export const field = (value: unknown, key: string): unknown =>
-  typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
-
 /** The command an execute request runs: from its raw input where the agent gives one, else its title. */
 export const commandOf = (request: PermissionRequest): string => commandIn(request.rawInput) ?? request.title
-
-/** The command line in a tool call's raw input, as a shell would read it, when it names one. */
-export const commandIn = (rawInput: unknown): string | undefined => {
-  const command = field(rawInput, 'command') ?? field(rawInput, 'cmd')
-  if (typeof command === 'string') return command
-  if (Array.isArray(command) && command.every((part) => typeof part === 'string')) return command.map(quoteWord).join(' ')
-  return undefined
-}
-
-const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
 
 /**
  * The host a sandbox's network request is for (Claude Code's
@@ -242,50 +230,6 @@ export const networkHostOf = (request: PermissionRequest): string | undefined =>
   if (typeof host !== 'string') return undefined
   const name = host.trim()
   return name !== '' && request.title.trim() === name ? name : undefined
-}
-
-const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'old_path', 'new_path', 'destination', 'source', 'target']
-
-/** How much of a command the store keeps. The rules read all of it, in memory. */
-export const COMMAND_KEPT = 4_000
-
-/**
- * What of a tool call's input the store keeps (docs/architecture/07: no file
- * contents, and so no secrets, in the record): the command, the paths, the
- * host a network request is for, and which files a patch touches, without
- * what it writes. What is left out is
- * named, so the record says it was cut. The rules decide on the whole input;
- * this is only what is written down.
- */
-export const essentials = (
-  rawInput: unknown,
-): { readonly input: Readonly<Record<string, unknown>>; readonly cut: ReadonlyArray<string> } => {
-  if (typeof rawInput !== 'object' || rawInput === null || Array.isArray(rawInput))
-    return { input: {}, cut: rawInput === undefined || rawInput === null ? [] : ['input'] }
-  const input: Record<string, unknown> = {}
-  const cut: Array<string> = []
-  for (const [key, value] of Object.entries(rawInput)) {
-    if (key === 'command' || key === 'cmd') {
-      const whole = typeof value === 'string' ? value : Array.isArray(value) ? value : undefined
-      if (typeof whole === 'string' && whole.length > COMMAND_KEPT) {
-        input[key] = `${whole.slice(0, COMMAND_KEPT)}…`
-        cut.push(`${key} after ${COMMAND_KEPT} characters`)
-      } else if (whole !== undefined) input[key] = whole
-      else cut.push(key)
-    } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
-    // The host a network request is for (Claude Code's sandbox asks by it): a name, never a secret.
-    else if (key === 'host' && typeof value === 'string') input.host = value.slice(0, 253)
-    // Whether a command asked to run outside its sandbox (ADR-071): what was counted as crossing it.
-    else if (key === 'dangerouslyDisableSandbox' && typeof value === 'boolean') input[key] = value
-    else if (key === 'changes' && typeof value === 'object' && value !== null) {
-      // A patch's files, without their contents.
-      input.changes = Array.isArray(value)
-        ? value.map((change) => ({ path: field(change, 'path') }))
-        : Object.fromEntries(Object.keys(value).map((path) => [path, {}]))
-      cut.push('changes (contents)')
-    } else cut.push(key)
-  }
-  return { input, cut }
 }
 
 /** Every path an action names: the agent's locations, path fields of its raw input, and the files of a patch (Codex's `changes`). */

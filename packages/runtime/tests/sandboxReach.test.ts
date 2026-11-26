@@ -12,7 +12,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
-import { essentials } from '../src/rulePaths'
+import { essentials } from '../src/toolCalls'
 import * as Runtime from '../src/Runtime'
 import {
   ALWAYS,

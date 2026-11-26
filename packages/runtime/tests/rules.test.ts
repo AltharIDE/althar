@@ -8,9 +8,10 @@ import { assert, describe, it } from '@effect/vitest'
 
 import { ALTHAR_TOOL, OFFLINE, decideReader } from '../src/readerRules'
 import { MVP_RULES, type ProjectRuleSet, RULES, type RuleContext, sayRules } from '../src/ruleContext'
-import { commandOf, essentials, pathsOf } from '../src/rulePaths'
+import { commandOf, pathsOf } from '../src/rulePaths'
 import { alwaysOf, decide, matchesPattern, refusesHostsUnder } from '../src/rules'
 import { parseCommandLine, shortCommand, withoutQuotedHeredocs } from '../src/shellCommands'
+import { essentials } from '../src/toolCalls'
 
 const worktree = '/work/meridian/retry/app'
 /**

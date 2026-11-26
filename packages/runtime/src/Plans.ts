@@ -25,7 +25,7 @@ import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { Runs } from './Runs'
-import type { PlanStep, TaskEnd } from './runRecords'
+import type { PlanStep, TaskEnd } from './planParameters'
 import { blockedIn } from './waits'
 import { workerRequirementsOf } from './workerRequirements'
 

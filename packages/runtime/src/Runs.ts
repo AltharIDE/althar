@@ -48,8 +48,6 @@ import {
   type Finding,
   type Lead,
   type Place,
-  PlanParameters,
-  type PlanStep,
   type ReviewerChange,
   type RoundStart,
   type RunRow,
@@ -58,8 +56,6 @@ import {
   type StuckAnswer,
   type StuckInfo,
   type StuckWhy,
-  type TaskEnd,
-  type TaskEnding,
   type TeamChanged,
   type Waiting,
   beforeFirstStep,
@@ -73,6 +69,7 @@ import {
   unlessStopped,
   waitingOf,
 } from './runRecords'
+import { PlanParameters, type PlanStep, type TaskEnd, type TaskEnding } from './planParameters'
 import { type Placed, makeRunRecovery } from './runRecovery'
 import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'

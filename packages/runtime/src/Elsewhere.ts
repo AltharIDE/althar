@@ -23,7 +23,7 @@ import { Instance } from './Instance'
 import { Plans } from './Plans'
 import { freeSlug, Projects, slugify } from './Projects'
 import { fact, timestamp } from './records'
-import { indexTask } from './Search'
+import { indexTask } from './searchRows'
 import type { SignIns } from './SignIns'
 import { addItem } from './threads'
 

@@ -6,7 +6,7 @@ import { BranchRefused, NotFound } from './errors'
 import { branchOn, fetchBranch, fetchInto, git, gitOutcome, namedRemotes, PUSHED, pushTo } from './git'
 import { redacted } from './gitSaid'
 import { Instance } from './Instance'
-import { startOf } from './Projects'
+import { startOf } from './startsFrom'
 
 /*
  * A branch the person makes from a branch list (ADR-093): Run's, the plan

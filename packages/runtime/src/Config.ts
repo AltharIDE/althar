@@ -13,15 +13,13 @@ import {
   nativeAgent,
   type NativeProvider,
   type Transport,
-  usingLocated,
 } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
 import type { PressureReading } from './resourcePressure'
-import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
-import { Installs, type OnDevice } from './Installs'
+import type { OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
@@ -390,28 +388,6 @@ export class Agents extends Context.Service<
       },
     })
   }
-
-  /**
-   * The registry's agents, carrying the person's own code-host sign-ins (ADR-097).
-   * Althar's sealed connection tokens are never put in their environment. An
-   * outside review still loads none of the repository's config or hooks and
-   * uses git's untrusted-copy settings (`readingUntrusted`).
-   */
-  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs | Copilot> =>
-    Layer.effect(
-      Agents,
-      Effect.gen(function* () {
-        const installs = yield* Installs
-        const copilot = yield* Copilot
-        // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
-        // line the person runs names the app that carries it (`usingLocated`).
-        return Agents.fromRegistry(
-          (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
-          stderr,
-          (accountId) => copilot.provider(accountId),
-        )
-      }),
-    )
 
   /**
    * The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. What each

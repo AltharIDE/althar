@@ -13,20 +13,10 @@ import type { NotFound } from './errors'
 import type { Instance, InstanceInfo } from './Instance'
 import { type Limits, NEARLY_OUT, type Out, type Room, lowWords, type outStep, outWords, whoWords } from './Limits'
 import type { AutoModels } from './modelMoves'
+import type { PlanParameters, PlanStep, TaskEnd } from './planParameters'
 import { type Policies, type UsageLimit, usageLimitOf } from './Policies'
 import { change, fact, timestamp } from './records'
-import {
-  type Hold,
-  type HoldWhy,
-  type PlanParameters,
-  type PlanStep,
-  type RunRow,
-  type Store,
-  type StuckAnswer,
-  type StuckInfo,
-  type TaskEnd,
-  pauseWords,
-} from './runRecords'
+import { type Hold, type HoldWhy, type RunRow, type Store, type StuckAnswer, type StuckInfo, pauseWords } from './runRecords'
 import type { Sessions } from './Sessions'
 import { addItem } from './threads'
 

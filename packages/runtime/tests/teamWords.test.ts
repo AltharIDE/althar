@@ -1,4 +1,4 @@
-import type { PlanStep } from '../src/runRecords'
+import type { PlanStep } from '../src/planParameters'
 import { teamChanges, teamLine } from '../src/teamWords'
 import { assert, describe, it } from '@effect/vitest'
 
