@@ -5,6 +5,7 @@ import type { AgentStatus, Preset } from '@althar/contracts'
 import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch, Problem } from '@althar/ui'
 
 import { useGoneAtOnce } from '../../data/goneAtOnce'
+import { canCall } from '../../data/client'
 import { useServices } from '../../data/services'
 import { ModelChoice, type ModelChoiceProps } from '../../shared/ModelChoice'
 
@@ -265,6 +266,10 @@ export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentSt
   const presets = reset.shown
   const [editing, setEditing] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  // What the window's home takes from it: a home on another computer resets a tuned preset, and leaves removing one of
+  // the person's own to them.
+  const resets = canCall(client, 'ResetPreset')
+  const removes = canCall(client, 'RemovePreset')
   if (presets === undefined) return null
   const own = presets.filter((one) => !one.builtin)
   return (
@@ -301,7 +306,7 @@ export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentSt
                 <Button size="small" variant="quiet" onClick={() => setEditing(editing === preset.id ? null : preset.id)}>
                   {presetsText.tune}
                 </Button>
-                {preset.tuned === true && (
+                {preset.tuned === true && resets && (
                   <Button
                     size="small"
                     variant="quiet"
@@ -328,24 +333,26 @@ export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentSt
                 <Button size="small" variant="quiet" onClick={() => setEditing(editing === preset.id ? null : preset.id)}>
                   {presetsText.edit}
                 </Button>
-                <Button
-                  size="small"
-                  variant="quiet"
-                  onClick={() => {
-                    // It goes at once and stays gone until a list without it is read; one the runtime kept comes back, with a line.
-                    setFailed(null)
-                    gone.hide([preset.id])
-                    void client
-                      .removePreset(preset.id)
-                      .catch((error: unknown) => {
-                        gone.back(preset.id)
-                        setFailed(error instanceof Error ? error.message : String(error))
-                      })
-                      .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
-                  }}
-                >
-                  {presetsText.remove}
-                </Button>
+                {removes && (
+                  <Button
+                    size="small"
+                    variant="quiet"
+                    onClick={() => {
+                      // It goes at once and stays gone until a list without it is read; one the runtime kept comes back, with a line.
+                      setFailed(null)
+                      gone.hide([preset.id])
+                      void client
+                        .removePreset(preset.id)
+                        .catch((error: unknown) => {
+                          gone.back(preset.id)
+                          setFailed(error instanceof Error ? error.message : String(error))
+                        })
+                        .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
+                    }}
+                  >
+                    {presetsText.remove}
+                  </Button>
+                )}
               </>
             )
           }

@@ -317,6 +317,37 @@ const linksIn = (line: string, steps: ReadonlyArray<SaidStep>): ReadonlyArray<No
   return links
 }
 
+/** One merge an errand still has to make: its pull request as people say it (#1224), or its task's name while it has none. */
+export interface MergeLeft {
+  readonly label: string
+  readonly url: string | null
+  /** Its task, where it has one: what tells it from another merge of the same name until its pull request is known. */
+  readonly task: string | null
+  /** What it waits for, as "once its checks pass"; empty where it waits on nothing. */
+  readonly once: string
+}
+
+/**
+ * What an errand that only merges still has to merge, in order; null for an errand that does anything else, whose lines
+ * stand as they are. A step with no pull request to name goes by its task's name, else its own words.
+ */
+export const mergesLeft = (
+  steps: ReadonlyArray<{
+    readonly step: SaidStep
+    readonly done: boolean
+    readonly task: { readonly id: string; readonly title: string | null } | null
+  }>,
+): ReadonlyArray<MergeLeft> | null => {
+  if (steps.length === 0 || steps.some(({ step }) => step.tool !== 'merge_pull_request')) return null
+  return steps
+    .filter(({ done }) => !done)
+    .map(({ step, task }) => {
+      const link = labelOf(subject(step.target))
+      const label = link?.label ?? task?.title ?? stepWords(step).replace(/^Merge\s+(?:the\s+)?/i, '')
+      return { label, url: link?.url ?? null, task: task?.id ?? null, once: waitsWords(step) }
+    })
+}
+
 /** How many steps the kept line names before it counts the rest. */
 const NAMED_MOST = 3
 

@@ -355,7 +355,7 @@ export const handlers = apiLayer(
       identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
         ? effect
         : Effect.fail(
-            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+            new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
           )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
@@ -1109,15 +1109,19 @@ export const handlers = apiLayer(
             return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
           }),
         ),
+      // A host that can't tell lists all it says it does.
+      ReadHostReach: ({ connectionId }) =>
+        api(Effect.flatMap(codeHostOf(connectionId), (host) => host.reach?.() ?? Effect.succeed({ limited: null }))),
       ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
-      CloneRepository: ({ commandId, grant, from }) =>
+      CloneRepository: ({ commandId, grant, from, folder }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
-              const path = yield* cloneRepository({ parent, ...source })
+              // A name of the window's, in place of the repository's: refused, as one taken is, where it is anything but a name.
+              const path = yield* cloneRepository({ parent, ...source, ...(folder === undefined ? {} : { folder }) })
               return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
@@ -3165,7 +3169,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
                 return yield* new ApiError({
                   reason: 'PersonRequired',
-                  message: 'This call needs the person in the window or on a paired device.',
+                  message: 'This home doesn’t take that from this connection yet.',
                 })
               const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
               const prioritized = effect.pipe(

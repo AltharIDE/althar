@@ -16,6 +16,7 @@ import {
   LinkButton,
   Markdown,
   MergeLine,
+  MergingLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -854,6 +855,14 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
       case 'merge_line':
         return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
+      case 'merging':
+        return (
+          <Fragment key={block.id}>
+            {block.groups.map((group) => (
+              <MergingLine key={group.key} rows={group.rows} branch={group.branch} />
+            ))}
+          </Fragment>
+        )
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
