@@ -475,15 +475,21 @@ export interface Happened {
 
 /**
  * A held errand that closed by itself, since what it waited on has happened: done, where every step left was done already;
- * else closed, where the next step's wait came while Althar couldn't watch for it, so that step is the person's to ask again.
+ * else closed, where the next step's wait came while Althar couldn't watch for it, so that step and those after it are the
+ * person's to ask for again.
  */
-export const settledNote = (done: ReadonlyArray<Happened>, left?: { readonly step: SaidStep; readonly happened: Happened }): StepNote => {
-  const said = [...done, ...(left === undefined ? [] : [left.happened])]
+export const settledNote = (
+  done: ReadonlyArray<Happened>,
+  left?: { readonly steps: ReadonlyArray<SaidStep>; readonly happened: Happened },
+): StepNote => {
+  // A merge said done already isn't said again as what the next step waited for.
+  const again = left !== undefined && done.some((one) => one.said.startsWith(left.happened.said))
+  const said = [...done, ...(left === undefined || again ? [] : [left.happened])]
   const what = said.map((one) => one.said).join('; ')
   const title = fit(
     left === undefined
       ? `Errand done: ${what}`
-      : `Errand closed: ${what}, which Althar couldn’t watch for. Ask again to ${lower(stepWords(left.step))}.`,
+      : `Errand closed: ${what}, which Althar couldn’t watch for. Ask again to ${inOrder(left.steps, false)}.`,
   )
   const links: Array<NoteLink> = []
   for (const link of said.flatMap((one) => one.links)) if (!links.some((own) => own.label === link.label)) links.push(link)

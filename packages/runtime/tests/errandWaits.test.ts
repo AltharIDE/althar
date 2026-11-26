@@ -4,7 +4,7 @@ import { unwatchedStep } from '../src/errandWaits'
 
 describe('a step nothing of Althar’s would watch', () => {
   const head = { head: 'abc', branch: 'main' }
-  it('is a merge named by a title or branch, not its task or its pull request’s number, head and branch', () => {
+  it('is any merge not kept by its task: merge_pull_request keeps and binds one that is open already', () => {
     // 15 Nov's "merge the pull request once it's open".
     const branch = {
       tool: 'merge_pull_request',
@@ -13,17 +13,18 @@ describe('a step nothing of Althar’s would watch', () => {
       waits: [{ kind: 'checks_passed' }],
     }
     assert.include(unwatchedStep(branch), 'can’t find a pull request by its title or branch')
-    assert.include(unwatchedStep({ ...branch, ...head }), 'can’t find a pull request')
+    // Even its link, number, head and branch, which the merge line drops unless merge_pull_request bound them.
+    const linked = {
+      ...branch,
+      head: 'abc',
+      branch: 'main',
+      target: 'https://github.com/AltharIDE/althar/pull/957',
+      request: { repository: 'github:AltharIDE/althar', number: 957 },
+      waits: [{ kind: 'checks' }],
+    }
+    assert.include(unwatchedStep(linked), 'call merge_pull_request on the person’s message')
+    assert.include(unwatchedStep({ ...linked, target: 'althar/release-prep' }), 'call merge_pull_request')
     assert.isNull(unwatchedStep({ ...branch, target: 'task:release-prep', request: {}, waits: [{ kind: 'task_pull_request' }] }))
-    assert.isNull(
-      unwatchedStep({
-        ...branch,
-        ...head,
-        target: 'https://github.com/AltharIDE/althar/pull/957',
-        request: { repository: 'github:AltharIDE/althar', number: 957, method: 'squash', now: false },
-        waits: [{ kind: 'merge_queue' }, { kind: 'checks' }],
-      }),
-    )
   })
   it('is a release step whose target doesn’t name its repository and tag', () => {
     const tag = { tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'task_merged' }] }

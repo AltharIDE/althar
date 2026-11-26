@@ -227,15 +227,17 @@ export class Errands extends Context.Service<
     retell(errandId: string, note: StepNote): Effect.Effect<void>
     /**
      * Closes a held errand whose wait has happened, with its line (`settleHeldErrands` reads that): its `done` steps done
-     * already, and the errand done with them; or, with the step `left` whose wait came while Althar couldn't watch for it,
-     * closed, for the person to ask for again. Nothing where it is no longer held.
+     * already, and the errand done with them; or, with the steps `left` from the one whose wait came while Althar couldn't
+     * watch for it, closed, for the person to ask for again. Nothing where it has moved since its read (`revision`): resumed,
+     * held anew, or closed.
      */
     settle(
       errandId: string,
       closing: {
+        readonly revision: number
         readonly done: ReadonlyArray<string>
         readonly happened: ReadonlyArray<Happened>
-        readonly left: { readonly step: SaidStep; readonly happened: Happened } | undefined
+        readonly left: { readonly steps: ReadonlyArray<SaidStep>; readonly happened: Happened } | undefined
       },
     ): Effect.Effect<void, ToolRefused>
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
@@ -769,8 +771,9 @@ export class Errands extends Context.Service<
           provide(
             sql.withTransaction(
               Effect.gen(function* () {
-                const [row] = yield* sql<ErrandRow>`SELECT * FROM errands WHERE id = ${errandId}`
-                if (row?.state !== 'paused') return
+                const [row] = yield* sql<ErrandRow & { revision: number }>`SELECT * FROM errands WHERE id = ${errandId}`
+                // What was read was read of this hold: one the person made since, or a resume, is theirs.
+                if (row?.state !== 'paused' || row.revision !== closing.revision) return
                 for (const key of closing.done)
                   yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${row.id} AND step_key = ${key}`
                 const note = settledNote(closing.happened, closing.left)

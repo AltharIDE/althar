@@ -31,29 +31,21 @@ const releaseTargets: ReadonlyMap<string, { readonly shape: RegExp; readonly say
 
 /**
  * Why nothing of Althar's would ever see this step's waits met, or null where something does: the merge line watches a merge
- * by its task or by the pull request's number, head and branch; the release watcher a release step by its repository and tag;
+ * kept here by its task (merge_pull_request keeps and binds any other itself); the release watcher a release step by its repository and tag;
  * and any other step only a task's recorded results. Refused at keep_errand, so the coordinator keeps it another way rather
  * than leave it on hold.
  */
 export const unwatchedStep = (step: {
   readonly tool: string
   readonly target: string
-  readonly head?: string | undefined
-  readonly branch?: string | undefined
   readonly request: Readonly<Record<string, unknown>>
   readonly waits: ReadonlyArray<{ readonly kind: string }>
 }): string | null => {
-  if (step.tool === 'merge_pull_request') {
-    if (step.target.startsWith('task:')) return null
-    if (
-      step.head === undefined ||
-      step.branch === undefined ||
-      typeof step.request.number !== 'number' ||
-      typeof step.request.repository !== 'string'
-    )
-      return 'Althar can’t find a pull request by its title or branch to watch. Keep a task’s merge by its task (taskId, target task:<slug>, wait task_pull_request), or, for a pull request that is open already, call merge_pull_request on the person’s message: it keeps the merge errand itself.'
-    return null
-  }
+  // The merge line watches a concrete merge only as merge_pull_request binds it, from the head it read: never one kept here.
+  if (step.tool === 'merge_pull_request')
+    return step.target.startsWith('task:')
+      ? null
+      : 'Althar can’t find a pull request by its title or branch to watch, and a merge kept here isn’t bound to the head the merge line checks. Keep a task’s merge by its task (taskId, target task:<slug>, wait task_pull_request), or, for a pull request that is open already, call merge_pull_request on the person’s message: it keeps the merge errand itself.'
   const release = releaseTargets.get(step.tool)
   if (release !== undefined) {
     if (!release.shape.test(step.target.trim()) || typeof step.request.tag !== 'string')

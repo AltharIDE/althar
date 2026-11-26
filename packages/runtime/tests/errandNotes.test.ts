@@ -359,10 +359,23 @@ describe('the line of a held errand that closed by itself', () => {
   })
   it('says what came that Althar couldn’t watch for, and what to ask for again', () => {
     const note = settledNote([], {
-      step: { tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] },
+      steps: [
+        { tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] },
+        { tool: 'publish_release', target: 'AltharIDE/althar release v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'draft' }] },
+      ],
       happened: { said: '#957 merged', links: [pull] },
     })
-    assert.strictEqual(note.title, 'Errand closed: #957 merged, which Althar couldn’t watch for. Ask again to tag v0.9.0.')
+    assert.strictEqual(
+      note.title,
+      'Errand closed: #957 merged, which Althar couldn’t watch for. Ask again to tag v0.9.0, then publish the v0.9.0 release.',
+    )
     assert.deepStrictEqual(note.links, [pull])
+  })
+  it('says a merge done already once, not again as what the next step waited for', () => {
+    const note = settledNote([{ said: '#957 merged already', links: [pull] }], {
+      steps: [{ tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] }],
+      happened: { said: '#957 merged', links: [pull] },
+    })
+    assert.strictEqual(note.title, 'Errand closed: #957 merged already, which Althar couldn’t watch for. Ask again to tag v0.9.0.')
   })
 })
