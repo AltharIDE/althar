@@ -4599,10 +4599,7 @@ export class Queries extends Context.Service<
               ],
               planId: standing.planId,
               workerId: yield* taskWorker(head.taskId),
-              ...(yield* placingOf(head.taskId).pipe(
-                Effect.map((placing) => (placing === undefined ? {} : { placing })),
-                Effect.orElseSucceed(() => ({})),
-              )),
+              placing: yield* placingOf(head.taskId).pipe(Effect.orElseSucceed(() => undefined)),
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {

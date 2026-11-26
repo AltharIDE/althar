@@ -9,9 +9,9 @@ import { Instance } from './Instance'
 
 /*
  * The tools a project's files say it needs, with why (as Orca's environment doctor reads a repository): its package
- * manager from `package.json`'s `packageManager` or its lockfile (`bun.lock` Bun, `pnpm-lock.yaml` pnpm, `yarn.lock` Yarn,
- * `package-lock.json` npm), and Node for any but Bun; Node's version from `.nvmrc`, `.node-version` or `engines.node`;
- * Bun's from `.bun-version`; uv where `uv.lock` or `pyproject.toml` say so, else Python; `Cargo.toml` cargo, `go.mod` Go,
+ * manager as `package.json`'s `packageManager` or its lockfile names it (`bun.lock` Bun, `pnpm-lock.yaml` pnpm, `yarn.lock`
+ * Yarn, `package-lock.json` npm), and Node for any but Bun; Node's version as `.nvmrc`, `.node-version` or `engines.node`
+ * pin it; Bun's as `.bun-version` does; uv where `uv.lock` or `pyproject.toml` say so, else Python; `Cargo.toml` cargo, `go.mod` Go,
  * `Gemfile` Bundler. Git every task needs, and a worker's own check says. For a worker, those it lacks (`needsOn`): the
  * ones it installs itself, without root, before a task's setup (Bun, Node, pnpm, uv), and the rest for its lead.
  */
