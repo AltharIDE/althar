@@ -24,15 +24,15 @@ on:
 permissions:
   contents: read
 
-# One at a time, so two publishes in quick succession can't push over each other.
-concurrency:
-  group: homebrew-tap
-  cancel-in-progress: false
-
 jobs:
   cask:
     # A release of something else, such as the host's (host-v0.2.1), shows as skipped. A run by hand has its tag checked below.
     if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    # One at a time, so two publishes in quick succession can't push over each other. On the job, not the workflow: a
+    # skipped release must not take the place of a desktop run waiting its turn.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
