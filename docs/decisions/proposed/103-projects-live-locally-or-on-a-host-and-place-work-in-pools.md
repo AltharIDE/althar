@@ -4,7 +4,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
-- **Updated:** 2026-11-22
+- **Updated:** 2026-11-26
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
@@ -215,6 +215,27 @@ New tasks may go elsewhere when it fills. A running task stays put; load is
 not a reason to duplicate it. Later handoff stops and fences the old attempt,
 transfers a durable snapshot, and starts a new attempt. It is not live
 migration of a process or a promise that provider sessions are portable.
+
+**A worker checks it can run a task, and a task moves (26 Nov).** A worker's
+release ships what its agents' sandbox needs (bubblewrap and ripgrep from
+Codex's own package, socat built static), and adding one ends with a test run:
+bubblewrap started as a run starts it and each signed-in agent started once,
+which also says the models it offers there. Where newer Ubuntu keeps user
+namespaces to programs AppArmor names, a root login writes one rule for the
+worker's own bubblewrap; otherwise Add a worker offers one press with `sudo -n`,
+or the command to copy. The worker repeats its check after each sign-in and
+hourly, and reports it with its heartbeats. Placement reads it with the
+project's own files: a worker whose sandbox can't start (it takes no work, and
+says why), whose lead's agent isn't signed in there, with too little disk or no
+git is greyed out with why; Bun, Node, pnpm and uv it installs itself into its
+own folder before a task's setup; anything else its lead installs into its own
+folders, asking the person before root, and records as the project's setup for
+workers. A worker task's model picker offers that worker's models only. A
+running task moves between the home and its workers, or between workers, from
+its menu, between its lead's turns: the worker's work comes home first, its
+lead starts afresh where it runs now with a handover, and where its model
+isn't offered there the person picks one that is. This is the handoff above,
+between turns rather than mid-attempt.
 
 Pools express placement. Confidentiality also needs separate credentials,
 storage and caches; unrelated customers cannot share a personal host's
