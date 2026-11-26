@@ -1,4 +1,4 @@
-import type { ProjectWorker, WorkerGrant } from '@althar/contracts'
+import type { ProjectWorker, WorkerGrant, WorkerReadiness } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
   WorkerFile,
@@ -90,6 +90,8 @@ export interface EnrolledWorkerState {
   readonly signedIn?: ReadonlyArray<string>
   /** The Althar release it runs, where it says. */
   readonly release?: string
+  /** What its own check found, where it has checked. */
+  readonly readiness?: WorkerReadiness
   /** It works on whatever project it is given: the home's grants say which. */
   readonly anyProject?: boolean
 }

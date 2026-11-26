@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
-import { workerNameOf } from '@althar/contracts'
+import { type ProjectWorker, type WorkerUnfit, workerName, workerNameOf, workerUnfitWords } from '@althar/contracts'
 import { WORKER_REPOSITORY_FOLDER } from '@althar/worker-protocol/agent-runs'
 import { Ids, type RecordEventId, type Timestamp, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -70,6 +70,7 @@ import { taskWorker, type WorkerExecution } from './workerExecution'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
 import { startsAgain } from './startAgain'
+import { needsAcross, needsOn, toolsToInstall } from './toolNeeds'
 import { folderGoneWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
@@ -356,6 +357,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
       const selectedWorker = thread.role !== 'task' ? null : yield* taskWorker(thread.taskId)
+      // The worker as it is now, with what its own check found: whether its agents' sandbox starts there, and its tools.
+      const placedOn =
+        selectedWorker === null ? undefined : runtimeConfig.workers?.list(thread.projectId).find((one) => one.workerId === selectedWorker)
       const startWithin = selectedWorker === null ? SESSION_START_TIMEOUT : Duration.minutes(15)
       // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
       if (selectedWorker === null) yield* accounts.prepare(account)
@@ -544,6 +548,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                     taskBranch: thread.branch,
                     // Its git stops what can't be undone whatever runs it, so a Never of only that needn't read the rest (rules.ts).
                     ...(selectedWorker === null && guardHolds ? { guarded: true } : {}),
+                    // On a worker, running as root there asks the person first.
+                    ...(selectedWorker === null
+                      ? {}
+                      : { worker: placedOn === undefined ? workerNameOf(selectedWorker) : workerName(placedOn) }),
                   },
                 }
               : {
@@ -577,6 +585,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               : { sandbox: upFront }),
         ...(skills === undefined ? {} : { skills: skills.folder }),
         ...heldSkills,
+        // On a worker, its sandbox is the worker's to say; one that hasn't found it starts takes no work (below).
+        ...(selectedWorker === null ? {} : { sandboxStarts: placedOn?.readiness?.sandbox.starts === true }),
       }
       // A sandbox probe describes the machine running it. A worker starts its own provider process.
       const waiting = selectedWorker === null ? definition.ready?.() : undefined
@@ -633,6 +643,12 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               return yield* refuse('This agent or task can’t run on a worker.')
             if (thread.repositories.length === 0 || thread.repositories.some((repository) => repository.local === 1))
               return yield* refuse('A worker needs the task in a worktree of its own, not Local.')
+            // It takes work only where its own check found its agents' sandbox starts, and this agent started there once;
+            // a worker that hasn't said, or found otherwise, takes none, and says why, before anything opens there.
+            // The worker that receives the run is checked again as it does (agentRuns.ts, `requireReady`), in case it was
+            // replaced meanwhile.
+            const refusal = workerRefusal(placedOn, selectedWorker, definition.id)
+            if (refusal !== undefined) return yield* refuse(refusal)
             const assets =
               !workerCanLoadSkills || skills === undefined || skills.given.length === 0
                 ? []
@@ -679,7 +695,21 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
                 (workspaceId) => setups.workerPlan(thread.taskId, workspaceId).pipe(Effect.map((plan) => ({ workspaceId, plan }))),
               ).pipe(Effect.mapError(() => refuse(`Althar couldn’t work out the setup for its folder on ${workerNameOf(selectedWorker)}.`)))
               const layouts = plans.flatMap(({ workspaceId, plan }) => (plan?.spec === undefined ? [] : [{ workspaceId, ...plan.spec }]))
-              const setup = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
+              // What the task's files need that the worker lacks and installs itself, into its own folder, before the setup: read
+              // in each repository's folder, as its setup runs there.
+              const across = yield* Effect.promise(() =>
+                needsAcross(
+                  thread.repositories.map((one) => ({
+                    name: one.name,
+                    folder: one.within === null ? one.worktree : join(one.worktree, one.within),
+                  })),
+                ),
+              )
+              // Two repositories pinning versions of a tool that can't be one install: it doesn't go to a worker, which has one.
+              if ('conflict' in across) return yield* refuse(across.conflict)
+              const tools = toolsToInstall(needsOn(across.needs, placedOn?.readiness))
+              const commands = grouped && layouts.length > 0 ? { repositories: layouts } : plans[0]?.plan?.spec
+              const setup = tools.length === 0 ? commands : { ...(commands ?? { directory: '', commands: [] }), tools }
               remote = yield* platform.open({
                 workerId: selectedWorker,
                 projectId: thread.projectId,
@@ -1272,4 +1302,33 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     })
 
   return { activate, beforeTakingOver, busyNow, connectSession, stopRunning }
+}
+
+/**
+ * What keeps a worker from taking an agent's run, from its own check (ADR-103): it hasn't said, its sandbox can't start,
+ * or the agent couldn't start there; none where its check found both start. Not whether it is busy: placement says that.
+ */
+export const unreadyFor = (worker: ProjectWorker, agentId: string): WorkerUnfit | undefined => {
+  const readiness = worker.readiness
+  if (readiness === undefined) return { kind: 'unchecked' }
+  if (!readiness.sandbox.starts)
+    return {
+      kind: 'sandbox',
+      problem: readiness.sandbox.problem,
+      ...(readiness.sandbox.fix === undefined ? {} : { fix: readiness.sandbox.fix }),
+    }
+  const started = readiness.agents?.find((agent) => agent.providerId === agentId)
+  return started?.starts === true
+    ? undefined
+    : { kind: 'agentStarts', agentId, ...(started?.problem === undefined ? {} : { problem: started.problem }) }
+}
+
+/**
+ * Why a run doesn't open on its worker, in words, or none: one not connected to the project now (nothing is known of it,
+ * so nothing opens there), or one its own check didn't find ready for this agent (`unreadyFor`).
+ */
+export const workerRefusal = (placedOn: ProjectWorker | undefined, workerId: string, agentId: string): string | undefined => {
+  if (placedOn === undefined) return workerUnfitWords({ kind: 'gone' }, workerNameOf(workerId))
+  const refusal = unreadyFor(placedOn, agentId)
+  return refusal === undefined ? undefined : workerUnfitWords(refusal, workerName(placedOn))
 }

@@ -47,7 +47,7 @@ export const { DRAFT_LINEAR, FROM_231 } = planned
 export const PLAN_432 = planned.PLAN_432.filter((step) => step.id !== 'dry')
 export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
-export const { HALYARD, MERIDIAN: TALLY } = renamed({ ...home })
+export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SIGNED_OUT, SINCE, STUCK } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
 export const { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } = renamed({ ...models })
 export const { PROJECT } = renamed({ ...review })

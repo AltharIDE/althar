@@ -142,6 +142,25 @@ export const tasksHandlers = ({ actorId, api, envelope, issueFor }: ApiKit) =>
             ),
           ),
         ),
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
+        api(
+          Effect.flatMap(envelope('task.place', { taskId, to }, commandId), (said) =>
+            runs.place({
+              envelope: said,
+              taskId,
+              to,
+              ...(lead === undefined
+                ? {}
+                : {
+                    lead: {
+                      ...(lead.model === undefined ? {} : { model: lead.model }),
+                      ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                    },
+                  }),
+              ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
+            }),
+          ),
+        ),
       DropMove: ({ commandId, taskId }) =>
         api(Effect.flatMap(envelope('task.drop_move', { taskId }, commandId), (said) => runs.dropMove({ envelope: said, taskId }))),
       ShapeTask: ({ taskId, preset }) => api(taskActions.shape(taskId, preset, actorId)),

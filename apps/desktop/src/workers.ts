@@ -10,7 +10,7 @@ import type { SshHomeTarget } from './homes'
  * the whole app. Each step is safe to run again, so Try again starts it over, keeping the worker's key and its release.
  */
 
-export const WORKER_STEPS = ['reach', 'look', 'get', 'enroll', 'start'] as const
+export const WORKER_STEPS = ['reach', 'look', 'get', 'enroll', 'start', 'check'] as const
 export type WorkerStep = (typeof WORKER_STEPS)[number]
 
 /** An agent the worker has, from its release, and whether it is signed in there. */
@@ -18,6 +18,17 @@ export interface WorkerAgent {
   readonly id: string
   readonly name: string
   readonly signedIn: boolean
+}
+
+/**
+ * The worker's check of itself, as its setup ends and after each sign-in (apps/host/src/workerCheck.ts): whether its
+ * agents' sandbox starts, and where not why with the command an administrator runs to let it; each signed-in agent
+ * started once, or why it couldn't. `allowed`: what came of allowing the sandbox with sudo, where it was tried.
+ */
+export interface WorkerCheck {
+  readonly sandbox: { readonly starts: true } | { readonly starts: false; readonly problem: string; readonly fix?: string }
+  readonly agents: ReadonlyArray<WorkerAgent & { readonly started?: boolean; readonly message?: string }>
+  readonly allowed?: 'NeedsAdministrator' | 'SandboxStillFails' | 'SandboxUnfixable'
 }
 
 export interface WorkerSetup {
@@ -47,6 +58,10 @@ export interface WorkerSetup {
   /** The worker it became, once its home signed it and it started. */
   readonly workerId?: string
   readonly agents?: ReadonlyArray<WorkerAgent>
+  /** What its check found, once it ran; none from a release that doesn't check itself. */
+  readonly check?: WorkerCheck
+  /** Its check runs now, again or after allowing the sandbox. */
+  readonly checking?: boolean
   /** What ran, a line each, for What it ran. */
   readonly log: ReadonlyArray<string>
 }
@@ -60,6 +75,10 @@ export type WorkerSetupAction =
   /** The window's home didn't sign the worker's key: its words, for main to keep in the log. */
   | { readonly kind: 'unsigned'; readonly said?: string | undefined }
   | { readonly kind: 'dismiss' }
+  /** Its check again, once added. */
+  | { readonly kind: 'check' }
+  /** What only root may do to let its sandbox start, with sudo over SSH, where its login may without a password. */
+  | { readonly kind: 'sandbox' }
 
 /** An agent's sign-in on a worker, as its steps come: the sign-in flow's own, and a page to open in the browser here. */
 export type WorkerSignInEvent =
@@ -71,6 +90,8 @@ export type WorkerSignInEvent =
   | { readonly kind: 'failed'; readonly message: string }
   /** Checked again once it ended: the worker's agents, and whether it started again to say so. */
   | { readonly kind: 'agents'; readonly agents: ReadonlyArray<WorkerAgent> }
+  /** Its check after the sign-in: the agent signed in, started once. */
+  | { readonly kind: 'checked'; readonly check: WorkerCheck }
 
 /**
  * Whether the newest host release can add a worker: `ready`, with its version and where its files are (the code's line

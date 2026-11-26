@@ -1,8 +1,12 @@
-/* Makes the footer's engraving (src/shared/footer/engraving/) from a generated picture: `bun scripts/engraving.ts <picture.png>`.
-   Recolours it in the page's two inks, the paper #f4f2ec and the cobalt #1f35c8, by how dark it is, takes the light standing on
-   the altar out (the footer draws it, moving), and writes it in AVIF and WebP at 1280 and its own width, and the narrow crop
-   around the altar at 640 and its own width. The light's column and the crop are where they are in the picture of 1916 by 821:
-   for another picture, change COLUMN and CROP here, and the altar, table and water in Footer.tsx. */
+/* Makes the footer's engraving (src/shared/footer/engraving/) from a picture of 1916 by 821, and writes it in AVIF and WebP at
+   1280 and its own width, and the narrow crop around the lighthouse at 640 and its own width.
+
+   `bun scripts/engraving.ts --as-is <scene.png>`: the picture as it is. The footer's is the LinkedIn banner's scene (the brand
+   guide's LinkedInPersonal), drawn without its words at 1916 by 821: the engraving with its lighthouse and canoes, the colour
+   under the water, the lighthouse's beam, the labs' flags and Althar's boats.
+
+   `bun scripts/engraving.ts <picture.png>`: a generated picture, recoloured in the page's two inks, the paper #f4f2ec and the
+   cobalt #1f35c8, by how dark it is, with the light that stood on the old engraving's altar taken out (COLUMN). */
 
 import { mkdir, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -16,28 +20,17 @@ const INK = [31, 53, 200]
 const DARKEST = 14
 /** The paper's own unevenness, in red, made flat paper: kept, it shows as blocks once compressed. */
 const GRAIN = 6
-/** The light's column above the altar's table, in the picture's px: x from, x to, and its foot. */
+/** The old engraving's light, its column above the altar's table, in the picture's px: x from, x to, and its foot. */
 const COLUMN = { from: 1262, to: 1402, foot: 501 }
 /** Where the narrow crop starts, as a share of the width. */
 const CROP = 0.4
 
-const source = process.argv[2]
-if (!source) throw new Error('Usage: bun scripts/engraving.ts <picture.png>')
+const asIs = process.argv.includes('--as-is')
+const source = process.argv.slice(2).find((a) => !a.startsWith('--'))
+if (!source) throw new Error('Usage: bun scripts/engraving.ts [--as-is] <picture.png>')
 const { data, info } = await sharp(source).removeAlpha().raw().toBuffer({ resolveWithObject: true })
 const { width, height } = info
-const out = Buffer.alloc(data.length)
-for (let i = 0; i < data.length; i += 3) {
-  const t = Math.min(1, Math.max(0, (PAPER[0]! - GRAIN - data[i]!) / (PAPER[0]! - GRAIN - DARKEST)))
-  for (let k = 0; k < 3; k++) out[i + k] = Math.round(PAPER[k]! * (1 - t) + INK[k]! * t)
-}
-// The light, as paper, feathered at its sides.
-for (let y = 0; y < COLUMN.foot; y++)
-  for (let x = COLUMN.from; x < COLUMN.to; x++) {
-    const a = Math.min(1, Math.min(x - COLUMN.from, COLUMN.to - 1 - x) / 10)
-    const i = (y * width + x) * 3
-    for (let k = 0; k < 3; k++) out[i + k] = Math.round(out[i + k]! * (1 - a) + PAPER[k]! * a)
-  }
-
+const out = asIs ? data : recoloured()
 await mkdir(OUT, { recursive: true })
 const whole = () => sharp(out, { raw: { width, height, channels: 3 } })
 const left = Math.round(width * CROP)
@@ -53,4 +46,20 @@ for (const [name, make] of files) {
   await make().webp({ quality: 78 }).toFile(`${OUT}/${name}.webp`)
   for (const ext of ['avif', 'webp'])
     process.stdout.write(`${name}.${ext} ${Math.round((await stat(`${OUT}/${name}.${ext}`)).size / 1024)} KB\n`)
+}
+
+/** The picture in the page's two inks, by how dark it is, with the old altar's light taken out, as paper feathered at its sides. */
+function recoloured() {
+  const out = Buffer.alloc(data.length)
+  for (let i = 0; i < data.length; i += 3) {
+    const t = Math.min(1, Math.max(0, (PAPER[0]! - GRAIN - data[i]!) / (PAPER[0]! - GRAIN - DARKEST)))
+    for (let k = 0; k < 3; k++) out[i + k] = Math.round(PAPER[k]! * (1 - t) + INK[k]! * t)
+  }
+  for (let y = 0; y < COLUMN.foot; y++)
+    for (let x = COLUMN.from; x < COLUMN.to; x++) {
+      const a = Math.min(1, Math.min(x - COLUMN.from, COLUMN.to - 1 - x) / 10)
+      const i = (y * width + x) * 3
+      for (let k = 0; k < 3; k++) out[i + k] = Math.round(out[i + k]! * (1 - a) + PAPER[k]! * a)
+    }
+  return out
 }

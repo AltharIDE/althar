@@ -993,11 +993,19 @@ const gitReadsElsewhere = (subcommand: string, args: ReadonlyArray<string>): boo
   return false
 }
 
+/** The words that run a command as root: `sudo`, `doas` and `pkexec` before it, `su` with a command. */
+const AS_ROOT = /(?:^|[\s;&|()`$])(?:sudo|doas|pkexec)(?=\s|$)|(?:^|[\s;&|()`$])su\s+(?:\S+\s+)*-c\b/u
+
+/** What the person reads of a command run as root on a worker, why it asks: as ask cards say it (irreversible.ts). */
+export const AS_ROOT_REASON = 'Running a command as root on a worker changes it for every task and user there, so it asks you first.'
+
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
   // What a quoted heredoc holds is text: words in it say nothing of what the command does.
   const read = withoutQuotedHeredocs(text)
   return [
+    // On a worker, as root changes the machine outside the task's worktree for good: the person says first (ADR-103).
+    ...(context.worker !== undefined && AS_ROOT.test(read) ? [kept(AS_ROOT_REASON, 'outside', 'irreversible')] : []),
     ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(read)
       ? [
           kept(

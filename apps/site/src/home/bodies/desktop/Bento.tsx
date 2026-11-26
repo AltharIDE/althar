@@ -40,7 +40,7 @@ export interface Tile {
 }
 
 /** A smaller feature, a third of a row or half of one, drawn in the console's dark. */
-const compact = (id: string, title: ReactNode, lead: string, draw: () => ReactNode, span: 2 | 3 = 2): Tile => ({
+const compact = (id: string, title: ReactNode, lead: string, draw: (tone: Tone) => ReactNode, span: 2 | 3 = 2): Tile => ({
   id,
   span,
   drawn: true,
@@ -101,7 +101,7 @@ export const TILES: Tile[] = [
         Ten at once. <b>None in each other’s way.</b>
       </>
     ),
-    lead: 'Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.',
+    lead: 'Run as many tasks as you like side by side, each in a worktree of its own. No two agents ever work in the same files.',
     piece: (tone) => <Fragment key={tone} source={worktrees} tone={tone} className={s.stage} />,
   },
   {
@@ -147,7 +147,7 @@ export const TILES: Tile[] = [
       One set of skills. <b>Every agent.</b>
     </>,
     'Add a skill once; Claude Code, Codex and OpenCode all get it.',
-    () => <SkillsDrawing />,
+    (tone) => <SkillsDrawing light={tone === 'light'} />,
     3,
   ),
   compact(
@@ -178,18 +178,6 @@ export const TILES: Tile[] = [
     3,
   ),
 ]
-
-/** What isn't drawn, as words alone under the console. */
-export const ALSO = [
-  'A browser built in',
-  'Tasks as a graph',
-  'Run any branch',
-  'Work in your own checkout',
-  'Leads update your issues',
-  'Diagrams in threads',
-  'Usage per task',
-  'Warm dark mode',
-] as const
 
 const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4, 6: s.span6 } as const
 

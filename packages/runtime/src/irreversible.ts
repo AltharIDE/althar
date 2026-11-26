@@ -4,7 +4,7 @@ import type { PermissionRequest } from '@althar/provider-adapters'
 import { mcpActOf } from './mcpActs'
 import type { RuleContext } from './ruleContext'
 import { commandOf } from './rulePaths'
-import { lastingKept } from './rules'
+import { AS_ROOT_REASON, lastingKept } from './rules'
 
 /*
  * What the ask card says of a request that can't be undone (ADR-097): its
@@ -79,5 +79,14 @@ export const irreversibleOf = (request: PermissionRequest, context: RuleContext)
       through: { server: act.server, tool: act.tool },
     }
   }
+  // As root on a worker: it changes the machine itself.
+  if (lasting.reason === AS_ROOT_REASON)
+    return {
+      kind: 'history',
+      verb: 'Run it as root',
+      done: 'Ran as root.',
+      stays: `It changes ${context.worker ?? 'the worker'} itself, for every task and user on it.`,
+      through: { command: commandOf(request) },
+    }
   return { ...COMMANDS[lasting.rule](context), through: { command: commandOf(request) } }
 }

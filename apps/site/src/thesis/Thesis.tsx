@@ -4,7 +4,7 @@ import { DATE } from '../content/sheet'
 import { useCurrent } from '../lib/useCurrent'
 import { useNarrow } from '../home/bodies/kit/Narrow'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import { block, compile } from './prose'
 import s from './Thesis.module.css'
@@ -38,7 +38,7 @@ export function Thesis() {
 
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
 
       <main id="main" tabIndex={-1}>
         <Night head>

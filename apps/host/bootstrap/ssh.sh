@@ -62,6 +62,19 @@ probe() {
   event look done ",\"os\":\"linux\",\"arch\":\"$arch\",\"systemdUserManager\":$manager,\"freeKiB\":$available,\"git\":$git,\"login\":\"$user\",\"root\":$([ "$uid" = 0 ] && printf true || printf false),\"linger\":$linger$action"
 }
 
+# Newer Ubuntu lets only programs AppArmor names make a user namespace (kernel.apparmor_restrict_unprivileged_userns),
+# which bubblewrap, the sandbox of a worker's agents, needs. As root, once: a rule for the worker's own bubblewrap alone,
+# at its program folder's releases, as the release's check says it (apps/host/src/workerCheck.ts `apparmorRule`).
+sandbox_rule() {
+  [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || :)" = 1 ] || return 0
+  command -v apparmor_parser >/dev/null || return 0
+  case "$1" in /*) ;; *) return 0 ;; esac
+  case "$1" in *[!A-Za-z0-9._/-]*) return 0 ;; esac
+  printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' "profile althar-worker-bwrap $1/bundle-*/**/bwrap flags=(unconfined) {" '  userns,' '  include if exists <local/althar-worker-bwrap>' '}' > /etc/apparmor.d/althar-worker-bwrap.new &&
+    mv -f -- /etc/apparmor.d/althar-worker-bwrap.new /etc/apparmor.d/althar-worker-bwrap &&
+    apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap
+}
+
 root_login() {
   [ "$uid" = 0 ] || fail setup InvalidLogin
   key=$1
@@ -106,7 +119,10 @@ root_login() {
       mv -f -- "$temporary" .ssh/authorized_keys
     ' sh "$key" || fail setup AccountKeyFailed
     loginctl enable-linger althar || fail setup AccountLingerFailed
-    event setup done ',"login":"althar","linger":true'
+    account_home=$(getent passwd althar | cut -d: -f6)
+    sandbox=true
+    sandbox_rule "$account_home/.local/share/althar-worker-program" || sandbox=false
+    event setup done ",\"login\":\"althar\",\"linger\":true,\"sandboxRule\":$sandbox"
   ) 9>"$root_state/lock"
 }
 
@@ -195,6 +211,17 @@ if [ "$role" = worker ]; then
       case "$2" in browser|device) ;; *) fail sign-in InvalidRequest ;; esac
       worker_program
       exec "$current/node/bin/node" "$current/dist/althar-host.js" worker sign-in --agent "$1" --way "$2"
+      ;;
+    check)
+      [ "$#" -eq 0 ] || fail check InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$current/dist/althar-host.js" worker check
+      ;;
+    sandbox)
+      # What only root may do to let its agents' sandbox start, with sudo where this login may without a password.
+      [ "$#" -eq 0 ] || fail check InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$current/dist/althar-host.js" worker sandbox
       ;;
     linger)
       # A worker is a user service: without lingering, the user's service manager, and the worker with it, stops once

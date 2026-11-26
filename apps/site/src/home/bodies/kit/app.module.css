@@ -3,7 +3,7 @@
 .window { display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--n-2); overflow: hidden; }
 
 /* A board alone, as the Board room shows it. */
-.board { display: flex; flex: 1; flex-direction: column; min-width: 0; overflow: hidden; padding: 16px 0 0 16px; --lane-min: 186px; }
+.board { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; overflow: hidden; padding: 16px 0 0 16px; --lane-min: 186px; }
 
 /* Narrow: the lead's plan without the reasons, each step's name over its agents, the agents side by side, a pill never broken. */
 .narrowPlan ol[class*='steps'] > li:not([class*='end']) { grid-template-columns: 22px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 8px; padding-bottom: 8px; }
@@ -18,3 +18,6 @@
 .reserve { display: grid; }
 .reserve > * { grid-area: 1 / 1; align-self: start; }
 .reserve > :first-child { visibility: hidden; }
+.home { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+/* The home's heading keeps the room of its second line (where the calls are) once nothing waits and it has none: what is under it stays put rather than jumping up, and back down as the story plays back. */
+.home main section > header:first-child { min-height: 58px; }

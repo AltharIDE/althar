@@ -5,6 +5,12 @@
  * A few, each a screen someone would open the app for: a piece of a screen,
  * or one another already holds (the board, the plan), isn't among them.
  * scripts/screens.ts makes the pictures beside this from the brand pack's.
+ * The canvas is the exception: the gallery draws it live (CanvasScreen.tsx),
+ * framed the same way, with the sign-in page the carousel builds. On a phone
+ * it is a picture of that same card (story/canvas-signin.webp, taken of the
+ * live one on a desktop, as it isn't in the brand pack): the live one lays
+ * the whole window out at its desktop size, 1664 by 1144, to show it 300px
+ * wide, more than a phone's browser has room for.
  */
 
 export interface Screen {
@@ -43,7 +49,7 @@ export const SCREENS: readonly Screen[] = [
     file: 'canvas',
     name: 'Canvases',
     line: 'Pages and mockups the lead draws, a new version for each comment.',
-    alt: 'A launch page the lead drew on a canvas, beside the conversation that asked for a bigger, bolder headline',
+    alt: 'Tally’s sign-in page the lead drew on a canvas, split with the brand on its left, beside the conversation that asked for it',
   },
   {
     file: 'automations',

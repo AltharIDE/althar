@@ -7,6 +7,7 @@ import { WorkerSnapshots } from '../WorkerSnapshots'
 import { workerPreviewSockets } from '../workerPreviewSockets'
 import { RuntimeConfig } from '../Config'
 import { Instance } from '../Instance'
+import { checkoutNeeds, withNeeds } from '../toolNeeds'
 import { Launches } from '../Launches'
 import { homeWorkers } from '../homeWorkers'
 import type { ApiKit } from './kit'
@@ -25,7 +26,15 @@ export const workersHandlers = ({ identity, api, connectionAdmin }: ApiKit) =>
     const sql = yield* SqlClient.SqlClient
     const config = yield* RuntimeConfig
     return {
-      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
+      ListProjectWorkers: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const workers = config.workers?.list(projectId) ?? []
+            // What the project's files need that each lacks, for a worker that has checked itself.
+            if (workers.every((worker) => worker.readiness === undefined)) return workers
+            return withNeeds(workers, yield* checkoutNeeds(projectId).pipe(Effect.orElseSucceed(() => [])))
+          }).pipe(Effect.provideService(Instance, instance)),
+        ),
       GetWorkers: () => api(homeWorkers(config.workers)),
       // Adding, changing and removing workers is the home's operator's or the person's own client's, as pairing a device
       // is: a device paired over the network can't, nor can an agent's socket on another device.

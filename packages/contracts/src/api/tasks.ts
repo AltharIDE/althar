@@ -23,6 +23,18 @@ export type TaskList = typeof TaskList.Type
 export const OnePressAction = Schema.Literals(['merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject'])
 export type OnePressAction = typeof OnePressAction.Type
 
+/** Where a running task moves to run: the home, or one of its workers. */
+export const TaskPlace = Schema.Union([Schema.Literal('home'), Schema.String.check(Schema.isPattern(/^wrk_[a-f0-9]{32}$/u))])
+export type TaskPlace = typeof TaskPlace.Type
+
+/** What became of a move between the home and a worker: done, with what the thread says; waiting for the turn; already there. */
+export const PlaceOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('placed'), said: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('same') }),
+])
+export type PlaceOutcome = typeof PlaceOutcome.Type
+
 /**
  * A project's board: every task it hasn't settled, and the most recently
  * settled, each with its card; and every call that waits on the person.
@@ -157,6 +169,22 @@ export const TasksApi = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Moves a running task between the home and its workers, or between workers (ADR-103), from its ⋯ menu: between its
+   * lead's turns, with its work; its lead starts afresh there, on `lead`'s model where its own isn't offered there. Moved,
+   * waiting for the turn under way, or already there; refused, with words, where it can't go.
+   */
+  command(
+    'MoveTaskTo',
+    {
+      taskId: Schema.String,
+      to: TaskPlace,
+      lead: Schema.optional(Schema.Struct({ model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) })),
+      /** Where the worker it runs on can't bring its work home now: move from what its last turn brought home. */
+      fromLastTurn: Schema.optional(Schema.Boolean),
+    },
+    PlaceOutcome,
+  ),
   /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
   command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
   /**

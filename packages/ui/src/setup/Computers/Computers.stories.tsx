@@ -235,3 +235,31 @@ export const WorkerSigningIn: Story = {
     await expect(c.getByText('Enter this code at auth.openai.com/codex/device')).toBeInTheDocument()
   },
 }
+
+/** A worker added with a code whose check found newer Ubuntu keeps its sandbox from starting: what to run there, to copy. */
+export const WorkerNotReady: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: {
+      enabled: true,
+      list: [
+        {
+          ...ADDED,
+          reachable: false,
+          projects: ['meridian'],
+          projectIds: ['proj_meridian'],
+          unready: {
+            title: 'Its agents’ sandbox can’t start.',
+            body: 'This Linux lets only programs it names make the namespaces it needs. Have its administrator run this once there:',
+            command:
+              'sudo sh -c \'printf "%s\\n" "abi <abi/4.0>," "include <tunables/global>" "profile althar-worker-bwrap /home/althar/.local/share/althar-worker-program/bundle-*/**/bwrap flags=(unconfined) {" "  userns," "}" > /etc/apparmor.d/althar-worker-bwrap && apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap\'',
+          },
+        },
+      ],
+    },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+  },
+}
+
+export const WorkerNotReadyDark: Story = { ...WorkerNotReady, globals: { theme: 'dark' } }

@@ -19,7 +19,9 @@ export const LINKS = {
   components: `${REPO}/tree/main/packages/ui`,
   releases: `${REPO}/releases`,
   acp: 'https://agentclientprotocol.com',
-  /** Balazs's office hours: twenty minutes, booked on Cal.com. */
+  /** The community's Discord: the invite the desktop app's About links to (apps/desktop/src/renderer/shared/links.ts). */
+  discord: 'https://discord.gg/dWJd3qpyTR',
+  /** Office hours with Balazs and Niko: twenty minutes, booked on Cal.com (Balazs's booking page). */
   officeHours: 'https://cal.com/balazs-althar/20min',
 } as const
 

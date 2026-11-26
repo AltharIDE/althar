@@ -21,15 +21,15 @@ import s from './Computers.module.css'
  * A home that takes workers only by its operator's certificates (or an older one) gets the steps by hand, as before.
  */
 
-/** The steps of adding a worker over SSH, in order. */
-export const WORKER_STEP_COUNT = 5
+/** The steps of adding a worker over SSH, in order: the last, a test run, so what would fail a task fails here. */
+export const WORKER_STEP_COUNT = 6
 
 /** Where adding a worker over SSH stands, as the window words it. */
 export interface WorkerSetupView {
   /** The machine, as the person gave it. */
   name: string
   phase: 'running' | 'trust' | 'enroll' | 'failed' | 'done'
-  /** The step it is at, 0 to 4; 5 once done. */
+  /** The step it is at, 0 to 5; 6 once done. Done at 5: added, and its check found what stops a task there. */
   at: number
   /** What step 1 found: Linux · arm64 · 62 GB free. */
   facts?: string | undefined
@@ -40,6 +40,12 @@ export interface WorkerSetupView {
   hostKey?: { fingerprint: string; type?: string | undefined } | undefined
   /** Where it stopped: what happened, what to do, and whether trying again can help. */
   problem?: { title: string; body?: string | undefined; command?: string | undefined; retry: boolean } | undefined
+  /** What its check found, in a line: Sandbox starts · Claude Code starts. */
+  checked?: string | undefined
+  /** Its check runs again. */
+  checking?: boolean | undefined
+  /** Allowing the sandbox is one press here: sudo over SSH, where the login may. */
+  canAllow?: boolean | undefined
 }
 
 /** A one-time code for a machine without SSH, and the line that takes it there. */
@@ -80,6 +86,7 @@ export interface AddWorkerText {
   shows: string
   checkAgain: string
   checking: string
+  allow: string
 }
 
 export const addWorkerText: AddWorkerText = {
@@ -92,7 +99,14 @@ export const addWorkerText: AddWorkerText = {
   add: 'Add worker',
   cancel: 'Cancel',
   close: 'Close',
-  steps: (home) => ['Reach the machine', 'Look it over', 'Install the worker', `Enroll it with ${home}`, 'Start its service'],
+  steps: (home) => [
+    'Reach the machine',
+    'Look it over',
+    'Install the worker',
+    `Enroll it with ${home}`,
+    'Start its service',
+    'Check it can run a task',
+  ],
   sent: (done, all) => `Sending from this computer · ${done} of ${all} MB`,
   downloading: (done, all) => `Downloading · ${done} of ${all} MB`,
   checked: (version) => `${version}, signature checked`,
@@ -116,6 +130,7 @@ export const addWorkerText: AddWorkerText = {
   shows: 'It shows in Computers once it connects.',
   checkAgain: 'Check again',
   checking: 'Checking…',
+  allow: 'Allow with sudo',
 }
 
 export interface AddWorkerDialogProps {
@@ -135,6 +150,9 @@ export interface AddWorkerDialogProps {
   onTrust: () => void
   onAgain: () => void
   onStop: () => void
+  /** Its check again, once added; and allowing its sandbox where only root may, with sudo over SSH. */
+  onCheckWorker?: (() => void) | undefined
+  onAllow?: (() => void) | undefined
   /** The code, while that way is chosen. */
   code: WorkerCodeView | null
   /** No release can add a worker yet: said in place of both ways, until a setup has started. */
@@ -163,6 +181,8 @@ export function AddWorkerDialog({
   onTrust,
   onAgain,
   onStop,
+  onCheckWorker,
+  onAllow,
   code,
   unavailable,
   onCheck,
@@ -174,6 +194,8 @@ export function AddWorkerDialog({
   const field = useId()
   const hint = useId()
   const going = setup !== null && setup.phase !== 'failed' && setup.phase !== 'done'
+  // Added, and its check found what stops a task there: what to do about it.
+  const unready = setup !== null && setup.phase === 'done' && setup.at < WORKER_STEP_COUNT
   const chosen = ssh ? way : 'code'
   const blocked = setup === null && unavailable != null
   const checkAgain = onCheck !== undefined && (
@@ -206,6 +228,20 @@ export function AddWorkerDialog({
       <Button variant="signal" onClick={onTrust}>
         {t.trust}
       </Button>
+    </>
+  ) : unready ? (
+    <>
+      <Button onClick={onClose}>{t.close}</Button>
+      {onCheckWorker !== undefined && (
+        <Button variant={setup.canAllow === true ? 'default' : 'signal'} onClick={onCheckWorker} disabled={setup.checking === true}>
+          {setup.checking === true ? t.checking : t.checkAgain}
+        </Button>
+      )}
+      {setup.canAllow === true && onAllow !== undefined && (
+        <Button variant="signal" onClick={onAllow} disabled={setup.checking === true}>
+          {t.allow}
+        </Button>
+      )}
     </>
   ) : setup.phase === 'failed' ? (
     <>
@@ -290,7 +326,13 @@ export function AddWorkerDialog({
 function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string; t: AddWorkerText }) {
   const labels = t.steps(home)
   const stateOf = (index: number): StepState =>
-    index < setup.at || setup.phase === 'done' ? 'done' : index === setup.at ? (setup.phase === 'failed' ? 'failed' : 'now') : 'later'
+    index < setup.at || (setup.phase === 'done' && index > setup.at)
+      ? 'done'
+      : index === setup.at
+        ? setup.phase === 'failed' || (setup.phase === 'done' && setup.checking !== true)
+          ? 'failed'
+          : 'now'
+        : 'later'
   const detail = (index: number, state: StepState) => {
     if (index === 0 && state === 'done') return setup.name
     if (index === 1 && state === 'done') return setup.facts ?? null
@@ -301,6 +343,7 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
     if (index === 2 && state === 'done' && setup.version !== undefined) return t.checked(setup.version)
     if (index === 3 && state === 'done') return t.enrolled(home)
     if (index === 4 && state === 'done') return t.started
+    if (index === 5 && state === 'done') return setup.checked ?? null
     return null
   }
   return (
@@ -362,7 +405,7 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
           )
         })}
       </ol>
-      {setup.phase === 'done' && <span className={s.waiting}>{t.waiting}</span>}
+      {setup.phase === 'done' && setup.at >= WORKER_STEP_COUNT && <span className={s.waiting}>{t.waiting}</span>}
     </div>
   )
 }
