@@ -32,3 +32,4 @@ apps/desktop/.flatpak-builder/
 
 # Cargo workspace build products
 /target/
+__pycache__/
