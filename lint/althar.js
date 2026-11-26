@@ -3,7 +3,9 @@ import { definePlugin } from 'vite-plus/lint/plugins'
 import { specTime, testTime } from './budget.js'
 import { oneClock } from './clock.js'
 import { noFutureDates } from './dates.js'
+import { exportedWhereMade } from './exports.js'
 import { systemKeys } from './keys.js'
+import { layers } from './layers.js'
 import { pressAtOnce } from './press.js'
 import { oneRemoval } from './removal.js'
 import { offTheThread } from './thread.js'
@@ -20,5 +22,7 @@ export default definePlugin({
     'spec-time': specTime,
     'system-keys': systemKeys,
     'no-future-dates': noFutureDates,
+    layers,
+    'exported-where-made': exportedWhereMade,
   },
 })

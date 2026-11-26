@@ -1,7 +1,6 @@
 import type { ProjectId, WorksIn } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
-import { CANVAS_BRIEF } from './Canvases'
 import { type ModelNamer, modelNamer } from './coordinatorNews'
 import { thisDevice } from './device'
 import { errandLines } from './Errands'
@@ -13,7 +12,7 @@ import type { InstanceInfo } from './Instance'
 import { quickIn } from './kinds'
 import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
 import { notesOf } from './notes'
-import { PAGE_VIEW_BRIEF } from './PageTools'
+import { PAGE_VIEW_BRIEF } from './pageBridge'
 import { type Policies, worksInOf } from './Policies'
 import { LEAD_PLANS_FROM_PRESETS, PARTS_CHANGE, PLAN_FROM_PRESETS } from './presetBrief'
 import { evidenceFolderOf } from './reviewCopy'
@@ -39,6 +38,10 @@ import {
   localBrief,
 } from './sessionState'
 import { transcript } from './threads'
+
+/** What a lead's and the coordinator's brief says of canvases: when to draw one, and to look before saying it's done. */
+const CANVAS_BRIEF =
+  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css). Designs to compare side by side (screens, states, sizes, directions) go on one canvas of boards, its entry canvas.json, each board a page of the canvas at its own size; when the person points at a part of a board and says what to change, change that board and publish again.'
 
 interface SessionBriefsDependencies {
   readonly instance: InstanceInfo

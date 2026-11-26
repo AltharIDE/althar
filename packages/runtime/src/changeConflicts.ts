@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { ChangeRequest, type Check, type CodeHost, type Repository } from '@althar/connectors'
+import type { ChangeRequest, Check, CodeHost, Repository } from '@althar/connectors'
 import { Ids, type ProjectId, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { Cause, Clock, type Crypto, Duration, Effect, Option, Result, Schema, type Scope } from 'effect'
@@ -17,7 +17,7 @@ import {
   type RoundRow,
   RoundWaiting,
   STOPPED_MIDWAY,
-  Snapshot,
+  type Snapshot,
   type Store,
   checksFailed,
   couldntFetch,

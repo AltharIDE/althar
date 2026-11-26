@@ -28,7 +28,7 @@ import { until } from '@althar/testing/effect'
 import { connection, services } from '../src/Api'
 import { copyTo, measure, wordsOf } from '../src/attachments'
 import { Folders } from '../src/Folders'
-import { promptFor, sentWithWords } from '../src/Sessions'
+import { promptFor, sentWithWords } from '../src/sessionState'
 import { Secrets } from '../src/Secrets'
 import { transcript } from '../src/threads'
 

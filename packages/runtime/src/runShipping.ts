@@ -16,7 +16,8 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import type { Artifacts } from './Artifacts'
 import type { Order } from './Busy'
 import { touchCard } from './cards'
-import type { ChangeSummary, Changes, Published } from './Changes'
+import type { Changes } from './Changes'
+import type { ChangeSummary, Published } from './changeRecords'
 import { NotConnected } from './Connections'
 import { NoChangeToOpen, NotFound, ShipRefused } from './errors'
 import { evidencePaths } from './evidence'
@@ -36,8 +37,6 @@ import {
   NEXT_SHIP_EVERY,
   NEXT_SHIP_TRIES,
   NotMergingNow,
-  PlanParameters,
-  type PlanStep,
   type RoundBack,
   type RoundInput,
   type RoundStart,
@@ -49,16 +48,15 @@ import {
   type Store,
   type StuckInfo,
   TINY_LINES,
-  TaskEnd,
   digestOf,
-  farOf,
   roundOf,
   unlessStopped,
 } from './runRecords'
+import { PlanParameters, type PlanStep, type TaskEnd, farOf } from './planParameters'
 import type { Sessions } from './Sessions'
 import { type MergeStanding, mergeStandingOf, reviewsBeforeShip, taskShipRoute } from './shipRoute'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { summarize, words } from './words'
 
 interface RunShippingDependencies {

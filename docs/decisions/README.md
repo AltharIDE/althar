@@ -6,7 +6,7 @@ matters, and says plainly what is decided but not built yet.
 
 | Document | What it covers |
 |---|---|
-| [Foundations](foundations.md) | The Electron shell and the runtime, the UI is instant, staying quick while the computer is busy, Effect, the desktop app's layers, how failures stay small, what CI gates, numbers that can't collide, one feature for every host and agent, where the runtime runs, clients of another version |
+| [Foundations](foundations.md) | The Electron shell and the runtime, the UI is instant, staying quick while the computer is busy, Effect, the desktop app's layers, the runtime's layers, how failures stay small, what CI gates, numbers that can't collide, one feature for every host and agent, where the runtime runs, clients of another version |
 | [Agents](agents.md) | ACP, which agents join, accounts, briefs and switching, how models are picked, keeping context small, plan usage and what a task used |
 | [The coordinator](coordinator.md) | Always on, one pool of tools with leads, directing leads, its copies, its notes and handover, moving tasks, clearing its chat |
 | [What agents may do](what-agents-may-do.md) | Allow everything, what asks, speaking for the person, the sandbox as the boundary, git's guard, the person's rules, the web, what stays and why |

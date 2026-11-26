@@ -6,7 +6,8 @@ import { join } from 'node:path'
  * window from the store without the database (`@althar/runtime/artifacts`).
  */
 
-export { pictureSize, pictureType, type PictureType, type Size } from './pictures'
+// oxlint-disable-next-line althar/exported-where-made -- this file is `@althar/runtime/artifacts`, where the app's main process reads them.
+export { type PictureType, type Size, pictureSize, pictureType } from '@althar/contracts'
 
 /** The file a digest is kept in: two levels, so no folder holds too many. */
 export const artifactPath = (root: string, sha256: string) => join(root, sha256.slice(0, 2), sha256)

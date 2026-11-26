@@ -18,7 +18,7 @@ import {
   type PublishRow,
   type Published,
   type PublishedOne,
-  Snapshot,
+  type Snapshot,
   type Store,
   type Unshipped,
   filesWord,
@@ -68,17 +68,18 @@ import {
 import type { Instance, InstanceInfo } from './Instance'
 import { outward } from './outward'
 import { Policies, linksIssues } from './Policies'
-import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
+import { hasBranch, startCommitOf, towardIn } from './Projects'
 import { type PullRequestIssue, commitsWord, nameOf, sameDescription, withIssues } from './pullRequestWords'
 import { refreshRemotes } from './recordedRemotes'
 import { change, fact, timestamp } from './records'
 import { guardPush } from './repositoryGuard'
-import { indexTask } from './Search'
+import { indexTask } from './searchRows'
 import type { Sessions } from './Sessions'
 import { ShipBranchMove } from './shipBranchMove'
+import { startOf } from './startsFrom'
 import { TITLE_LENGTH } from './taskTitle'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { removeWorktree } from './worktreeRemoval'
 
 export interface ChangePublishingDependencies {

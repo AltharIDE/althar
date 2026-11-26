@@ -16,7 +16,8 @@ import { Instance } from './Instance'
 import { newProjectDefaultsOf } from './plansAndReviews'
 import { fact, timestamp } from './records'
 import { DEFAULT_REPOSITORY_FILES, type RepositoryFiles } from '@althar/skills'
-import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
+import { type ProjectRuleSet, RULES, type RuleId } from './ruleContext'
+import type { AlwaysRule } from './rules'
 
 /*
  * A project's rules (the glossary's project rules; docs/architecture/05,

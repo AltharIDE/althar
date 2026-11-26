@@ -1,15 +1,15 @@
 import { type CheckLogShown, checkFailuresIn } from '@althar/contracts'
-import {
-  type Account,
+import type {
+  Account,
   ChangeRequest,
-  type Check,
-  type CodeHost,
+  Check,
+  CodeHost,
   Comment,
-  type ConnectorFailed,
-  type Person,
-  type PushTarget,
-  type Repository,
-  type Review,
+  ConnectorFailed,
+  Person,
+  PushTarget,
+  Repository,
+  Review,
 } from '@althar/connectors'
 import { type ActorId, Ids, type ProjectId, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
@@ -23,7 +23,7 @@ import {
   type LinkRow,
   RERUN_SHOWS,
   RULES_EVERY,
-  Snapshot,
+  type Snapshot,
   type Store,
   snapshotOf,
   refusalOf,

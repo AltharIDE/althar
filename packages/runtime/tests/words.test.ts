@@ -29,7 +29,7 @@ import {
   withDescribed,
   withIssues,
 } from '../src/pullRequestWords'
-import { listenDue } from '../src/Changes'
+import { listenDue } from '../src/changeRecords'
 import { changeOf, itemOf, stuckOf } from '../src/Queries'
 
 const dana = { id: 'u2', login: 'dana', name: 'Dana', bot: false }

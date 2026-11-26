@@ -57,6 +57,21 @@ export default defineConfig({
         files: ['packages/{provider-adapters,connectors}/src/testing/**'],
         rules: { 'althar/off-the-thread': 'off' },
       },
+      /*
+       * The runtime's modules import one way (packages/runtime/ARCHITECTURE.md, "Where a file goes"): never in a cycle of
+       * values, never up its layers (lint/layers.js, packages/runtime/layers.js), each name from the file that makes it
+       * (lint/exports.js), and a type as a type, so an import that only names one loads nothing.
+       */
+      {
+        files: ['packages/runtime/src/**'],
+        rules: {
+          'import/no-cycle': ['error', { ignoreTypes: true }],
+          'althar/layers': 'error',
+          'althar/exported-where-made': 'error',
+          'typescript/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
+          'typescript/no-import-type-side-effects': 'error',
+        },
+      },
       /* A press in the window or the kit shows its result at once, never after a call answers (lint/press.js). */
       {
         files: ['apps/desktop/src/renderer/**/*.tsx', 'packages/ui/src/**/*.tsx'],

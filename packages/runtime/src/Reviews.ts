@@ -47,13 +47,14 @@ import {
 import { change, fact, timestamp } from './records'
 import { automationOf, linkTask } from './automated'
 import { copyReviewed, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
-import { indexTask } from './Search'
+import { indexTask } from './searchRows'
 import { Sessions } from './Sessions'
 import { Launches } from './Launches'
 import { LeftBehind } from './LeftBehind'
 import { notInstalled } from './lockOutside'
 import { addItem, moveToEnd, updateItem } from './threads'
-import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
+import { ToolServer, type ToolAccess } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { ChecksAsked, inspectChecks } from './readChecks'
 
 /*

@@ -6,13 +6,14 @@ import { Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { acceptingOf } from '../src/admission'
+import { COMPACT } from '../src/compact'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { COMPACT, Sessions } from '../src/Sessions'
+import { Sessions } from '../src/Sessions'
 import { repository, runtime, task, turns, until, withWork } from './support'
 
 /*

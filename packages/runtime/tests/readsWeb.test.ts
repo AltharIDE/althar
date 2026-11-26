@@ -1,6 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
 
-import { readsWeb } from '../src/rules'
+import { readsWeb } from '../src/shellCommands'
 
 /*
  * A plain read of a web page to the terminal (rules.ts, readsWeb): curl or

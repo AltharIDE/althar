@@ -1,16 +1,6 @@
 import { gitCall } from './gitPermissionRules'
 import { type System, systemOf, ALLOW } from './ruleContext'
-import {
-  HOME_WORD,
-  pathsOf,
-  field,
-  envFile,
-  pathsInWord,
-  credentialReason,
-  secretCommandReason,
-  secretReason,
-  commandIn,
-} from './rulePaths'
+import { HOME_WORD, pathsOf, envFile, pathsInWord, credentialReason, secretCommandReason, secretReason } from './rulePaths'
 import {
   parseCommandLine,
   REDIRECTS,
@@ -23,9 +13,10 @@ import {
   redirectsLast,
   readsWeb,
 } from './shellCommands'
+import { commandIn, field } from './toolCalls'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { realpathSync } from 'node:fs'
-import { posix } from 'node:path'
+import type { posix } from 'node:path'
 
 // ---- Roles that only read ----------------------------------------------------
 

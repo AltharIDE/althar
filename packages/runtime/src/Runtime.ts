@@ -1,5 +1,6 @@
 import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
+import { usingLocated } from '@althar/provider-adapters'
 import { Context, Effect, Layer } from 'effect'
 
 import { startupLayer } from './startup'
@@ -12,7 +13,7 @@ import { AccountSignIns } from './AccountSignIns'
 import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
-import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+import { type AgentStderr, Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
 import { Connectivity } from './Connectivity'
 import { Installs, type InstallsOptions } from './Installs'
@@ -47,7 +48,7 @@ import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
-import { fillIndex } from './Search'
+import { fillIndex } from './searchRows'
 import { finderIndex } from './finderIndex'
 import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
@@ -94,6 +95,28 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
 }
 
 /**
+ * The registry's agents, carrying the person's own code-host sign-ins (ADR-097), each where Installs finds it and
+ * Copilot through Althar's own sign-in. Althar's sealed connection tokens are never put in their environment. An
+ * outside review still loads none of the repository's config or hooks and uses git's untrusted-copy settings
+ * (`readingUntrusted`).
+ */
+const registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs | Copilot> =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const installs = yield* Installs
+      const copilot = yield* Copilot
+      // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+      // line the person runs names the app that carries it (`usingLocated`).
+      return Agents.fromRegistry(
+        (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
+        stderr,
+        (accountId) => copilot.provider(accountId),
+      )
+    }),
+  )
+
+/**
  * The runtime, composed: the store, this launch, and the services clients
  * call. Building it opens and migrates the database (copying it first, where
  * a migration is pending) and reconciles what an earlier launch left; closing
@@ -135,7 +158,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   ).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
-    Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
+    Layer.provideMerge(options.agents ?? registry(options.agentStderr)),
     Layer.provideMerge(
       Copilot.layer({
         ...(copilotClientId ? { clientId: copilotClientId } : {}),
@@ -253,4 +276,5 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
 }
 
+// oxlint-disable-next-line althar/exported-where-made -- the CLI and the home make a command's envelope as `Runtime.envelope` (index.ts).
 export { envelope } from './envelope'

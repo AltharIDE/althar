@@ -8,7 +8,7 @@ import {
   type WindowKind,
 } from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
-import { Clock, Context, Duration, Effect, Layer, Option, Random, Schema } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Option, Random, type Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'

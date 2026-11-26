@@ -10,7 +10,7 @@ import { type CopyFile, writeCopy } from './canvasFiles'
 import type { Connections } from './Connections'
 import { GitFailed } from './errors'
 import { addDetachedWorktree, committerIn, defaultBranch, git, gitOutcome, gitWithInput } from './git'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 export const refuse = (message: string) => new ToolRefused({ message })
 

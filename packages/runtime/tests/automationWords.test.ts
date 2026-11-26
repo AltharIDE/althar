@@ -7,7 +7,8 @@ import { definitionOf, partsOf, runRules } from '../src/automated'
 import { briefOf, titleOf, widens } from '../src/Automations'
 import { orderIn } from '../src/Busy'
 import { bodyOf, nameInLine, signed } from '../src/pullRequestWords'
-import { decide, MVP_RULES, type ProjectRuleSet } from '../src/rules'
+import { MVP_RULES, type ProjectRuleSet } from '../src/ruleContext'
+import { decide } from '../src/rules'
 
 /*
  * What an automation's run is told and how it is signed, the rules it runs

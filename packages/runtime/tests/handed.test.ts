@@ -10,7 +10,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { artifactPath, Artifacts } from '../src/Artifacts'
+import { artifactPath } from '../src/artifactFiles'
+import { Artifacts } from '../src/Artifacts'
 import {
   countLines,
   exitIn,

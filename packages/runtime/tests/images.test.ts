@@ -12,10 +12,11 @@ import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 
-import { Artifacts, artifactPath } from '../src/Artifacts'
+import { Artifacts } from '../src/Artifacts'
+import { artifactPath } from '../src/artifactFiles'
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
-import { DICTATED, promptFor } from '../src/Sessions'
+import { DICTATED, promptFor } from '../src/sessionState'
 import { Secrets } from '../src/Secrets'
 import { transcript } from '../src/threads'
 

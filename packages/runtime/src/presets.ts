@@ -3,7 +3,7 @@ import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { ChangeRefused, NotFound } from './errors'
-import { type ModelPick, type PresetModels } from './presetModels'
+import type { ModelPick, PresetModels } from './presetModels'
 import { fact, timestamp } from './records'
 import { touchCard } from './cards'
 

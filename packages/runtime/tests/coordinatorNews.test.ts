@@ -16,7 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { change, fact } from '../src/records'
 import * as Runtime from '../src/Runtime'
-import type { PlanStep } from '../src/Runs'
+import type { PlanStep } from '../src/planParameters'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, repository, runtime, until } from './support'
 

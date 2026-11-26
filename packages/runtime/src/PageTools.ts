@@ -1,10 +1,20 @@
 import { Context, Effect, Layer } from 'effect'
-import { SqlClient } from 'effect/sql'
+import type { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
-import { LONGEST_SCRIPT, LONGEST_TEXT, type PageAnswer, type PageCall, type PageTarget, type PageViewport, WAIT } from './pageBridge'
+import {
+  LONGEST_SCRIPT,
+  LONGEST_TEXT,
+  PAGE_VIEW_BRIEF,
+  type PageAnswer,
+  type PageCall,
+  type PageTarget,
+  type PageViewport,
+  WAIT,
+} from './pageBridge'
 import { settledAmong } from './settled'
-import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolPicture, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import { POOL, type Tool, type ToolAccess, type ToolPicture, ToolServer } from './ToolServer'
 
 /*
  * The page beside a conversation, read and driven by the conversation's agent
@@ -20,10 +30,6 @@ import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolPicture, ToolSe
  * project; the runtime reads the page's owner from the session's own access,
  * so a lead can reach no page but the one beside its task.
  */
-
-/** The lead and coordinator leave the person's page as they found it after inspecting it. */
-export const PAGE_VIEW_BRIEF =
-  'If you temporarily zoom the page or change its viewport to inspect or interact with it, remember the previous settings and restore them as soon as that browser work is done, before replying or finishing a step, even after a failed attempt. Undo temporary zoom styles you applied through page_evaluate too. Keep a view the person explicitly chose or asked you to leave in place.'
 
 type Input = Readonly<Record<string, unknown>>
 

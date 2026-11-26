@@ -28,7 +28,7 @@ import { projectTracker } from './projectTracker'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 /*
  * Issues the coordinator, or a task's lead, drafts on the person's connected

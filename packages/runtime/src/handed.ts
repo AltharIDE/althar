@@ -6,9 +6,9 @@ import type { CommandOutput, FileMention as ContractFile, Picture } from '@altha
 import type { ProjectId } from '@althar/domain'
 import type { Handed, ToolContent } from '@althar/provider-adapters'
 import { Effect } from 'effect'
+import { pictureSize, pictureType } from '@althar/contracts'
 
 import { Artifacts } from './Artifacts'
-import { pictureSize, pictureType } from './pictures'
 
 /*
  * What an agent hands back beside its words, as a thread item keeps it

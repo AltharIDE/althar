@@ -7,7 +7,7 @@ import { Instance } from '../src/Instance'
 import { allowsEverything, modeOf, Policies, type ProjectRules, ruleSetOf, withRemembered } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { RULES } from '../src/rules'
+import { RULES } from '../src/ruleContext'
 import { repository, runtime } from './support'
 
 /*

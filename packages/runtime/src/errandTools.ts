@@ -1,6 +1,6 @@
 import { Effect, Schema } from 'effect'
 
-import { Errands } from './Errands'
+import type { Errands } from './Errands'
 import { errandWaitKinds } from './errandWaits'
 import type { Tool } from './ToolServer'
 import { ToolRefused } from './toolErrors'

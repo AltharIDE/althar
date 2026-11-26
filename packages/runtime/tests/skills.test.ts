@@ -12,7 +12,8 @@ import { SqlClient } from 'effect/sql'
 
 import { Agents, type AgentEntry, type RuntimeOptions } from '../src/Config'
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
-import { onlyReads, Sessions } from '../src/Sessions'
+import { Sessions } from '../src/Sessions'
+import { onlyReads } from '../src/sessionState'
 import { listSkills, runSkills } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
 import {

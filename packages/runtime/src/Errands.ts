@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 
 import { ConnectorFailed } from '@althar/connectors'
-import { type ProjectId } from '@althar/domain'
-import { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
+import type { ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
+import { Cause, Context, type Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'

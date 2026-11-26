@@ -71,26 +71,8 @@ import { RECENT, refreshRemotes } from './recordedRemotes'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { afterOpen, startup } from './startup'
-import { ToolRefused, ToolServer } from './ToolServer'
-
-export {
-  type AttachInput,
-  type Attached,
-  type ChangeSummary,
-  type ConflictStanding,
-  FIX_ROUNDS,
-  type Fixing,
-  type Hands,
-  type Held,
-  type Host,
-  OFF_FOR_PROJECT,
-  OFF_FOR_TASK,
-  type OnHost,
-  type Published,
-  STUCK_AFTER,
-  type Unshipped,
-  listenDue,
-} from './changeRecords'
+import { ToolRefused } from './toolErrors'
+import { ToolServer } from './ToolServer'
 
 /*
  * A task's change on its code host (docs/architecture/06; docs/plans/

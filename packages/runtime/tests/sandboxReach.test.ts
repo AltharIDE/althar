@@ -12,7 +12,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
-import { essentials } from '../src/rules'
+import { essentials } from '../src/toolCalls'
 import * as Runtime from '../src/Runtime'
 import {
   ALWAYS,
@@ -27,7 +27,8 @@ import {
 } from '../src/sandboxReach'
 import { agents, SECRET_PLACES } from '@althar/provider-adapters'
 import { cachesOf, TOOL_PLACES } from '../src/toolPlaces'
-import { Sessions, upFrontSaid } from '../src/Sessions'
+import { Sessions } from '../src/Sessions'
+import { upFrontSaid } from '../src/sessionState'
 import { fakeSandbox, repository, runtime, sessionMetas, turns, until } from './support'
 
 /*

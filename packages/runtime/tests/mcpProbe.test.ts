@@ -8,8 +8,7 @@ import type { ServerSpec } from '@althar/provider-adapters'
 import { waitFor } from '@althar/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { probeServer } from '../src/mcpHealth'
-import { forgetProbes, probe, PROBE_LIMITS } from '../src/mcpProbe'
+import { PROBE_LIMITS, forgetProbes, probe, probeServer } from '../src/mcpProbe'
 
 /*
  * Althar's own count of a server's tools, against real servers of the test's own: a tiny MCP server over stdio

@@ -1,24 +1,32 @@
-import { type Account, ChangeRequest, type CodeHost, ConnectorFailed, MergeRules, type Product, type Repository } from '@althar/connectors'
+import {
+  type Account,
+  type ChangeRequest,
+  type CodeHost,
+  ConnectorFailed,
+  MergeRules,
+  type Product,
+  type Repository,
+} from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
 import type { ActorId, ChangeTarget, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, type Crypto, Duration, Schema } from 'effect'
-import { SqlClient } from 'effect/sql'
-import { Busy } from './Busy'
-import { Agents, RuntimeConfig } from './Config'
-import { Connections, NotConnected } from './Connections'
-import { Errands } from './Errands'
-import { GitFailed, NotFound } from './errors'
-import { FastLane } from './fastLane'
+import { type Cause, type Crypto, Duration, Schema } from 'effect'
+import type { SqlClient } from 'effect/sql'
+import type { Busy } from './Busy'
+import type { Agents, RuntimeConfig } from './Config'
+import { type Connections, NotConnected } from './Connections'
+import type { Errands } from './Errands'
+import { type GitFailed, NotFound } from './errors'
+import type { FastLane } from './fastLane'
 import { type GitFailure, gitFailureOf, gitLine, gitSummary } from './gitSaid'
-import { Instance } from './Instance'
-import { IssueChanges } from './IssueChanges'
-import { LeftBehind } from './LeftBehind'
-import { Live } from './Live'
-import { Models } from './Models'
-import { Policies } from './Policies'
-import { Sessions } from './Sessions'
-import { ToolServer } from './ToolServer'
+import type { Instance } from './Instance'
+import type { IssueChanges } from './IssueChanges'
+import type { LeftBehind } from './LeftBehind'
+import type { Live } from './Live'
+import type { Models } from './Models'
+import type { Policies } from './Policies'
+import type { Sessions } from './Sessions'
+import type { ToolServer } from './ToolServer'
 import { sentence, summarize } from './words'
 
 /** What Althar last saw of a change, as its external link keeps it. */
@@ -279,8 +287,6 @@ export interface Unshipped {
   readonly add: number
   readonly del: number
 }
-
-export { latestOf } from './pullRequestStanding'
 
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
 export const QUIET_AFTER = Duration.minutes(10)

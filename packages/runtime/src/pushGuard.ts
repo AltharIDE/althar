@@ -29,7 +29,8 @@ import type { GitRun } from './rules'
  * was pointed elsewhere included.
  *
  * What it stops it names on a line of its own (`STOPPED`), which Althar
- * reads on the failed call to count it as a refusal (`guardStopIn`).
+ * reads on the failed call to count it as a refusal (`guardStopIn`, in
+ * toolCalls.ts).
  *
  * It reads only the task's own repositories, by their git folder, which
  * every worktree of one shares, and a push to one of their remotes from
@@ -110,14 +111,6 @@ const HOW =
 
 /** The line after what the guard says, naming the kind it stopped, for the record to count. */
 const STOPPED = '(stopped by Althar: %s)'
-
-/** The kind of what git's guard stopped, where a failed command's output says it did. */
-export const guardStopIn = (printed: string): 'default-branch' | 'force-push' | 'delete-branch' | undefined =>
-  /\(stopped by Althar: (default-branch|force-push|delete-branch)\)/.exec(printed)?.[1] as
-    | 'default-branch'
-    | 'force-push'
-    | 'delete-branch'
-    | undefined
 
 /**
  * The guard, in the task's repositories: a push of the default branch, of a

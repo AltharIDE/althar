@@ -10,7 +10,7 @@ import { evidencePaths } from './evidence'
 import { branchExists, commitsAhead, git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
-import { indexTask } from './Search'
+import { indexTask } from './searchRows'
 import { addItem } from './threads'
 
 /*

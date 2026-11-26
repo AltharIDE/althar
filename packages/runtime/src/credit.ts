@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { GitFailed } from './errors'
+import type { GitFailed } from './errors'
 import { commitRecord, commitsOf, git, gitOutcome, recommit, signsCommits } from './git'
 import { timestamp } from './records'
 

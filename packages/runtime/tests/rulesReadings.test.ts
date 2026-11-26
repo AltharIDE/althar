@@ -3,7 +3,10 @@ import { resolve } from 'node:path'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import { decide, decideInside, decideReader, gitRunsOf, parseCommandLine, type RuleContext, shortCommand, tallyKindOf } from '../src/rules'
+import { decideReader } from '../src/readerRules'
+import type { RuleContext } from '../src/ruleContext'
+import { decide, decideInside, gitRunsOf, tallyKindOf } from '../src/rules'
+import { parseCommandLine, shortCommand } from '../src/shellCommands'
 
 /*
  * How the rules read a line where they read it only in part: what a script,
