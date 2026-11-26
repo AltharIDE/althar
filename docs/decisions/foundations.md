@@ -87,6 +87,14 @@ Not open yet: a product elsewhere than in `ListConnections`, a nudge's kind, a n
 
 What leaving out costs: an event the client passes over moves nothing, its cursor neither, so it reads again what that event changed only with the next it knows; and a page of a thread whose every item is of a kind it doesn't know reads as empty, from which it can't ask for the page before. A newer home's kinds are few beside its items, so neither is likely, and both end when the client updates.
 
+26 Nov 2026: a check refuses a break. Until now the snapshot showed a change to the wire, but nothing judged it. `wire`, in `queue.yml`, runs on every pull request and group whatever they change, with no install (`.github/scripts/wire.py`). It compares `api.schema.json` with main's, both ways:
+
+- **An older client calling a newer home** can't when a call is gone, a socket can't make it any more, a payload's field is required that wasn't, or a payload takes less than it did.
+- **An older client reading a newer home's answer** fails when a union that isn't open has a new member, a field it reads is left out or made null, or a field's type changes. Its success, each element of a stream and its error are all answers.
+- **These don't break:** a call added, a payload that takes more or an optional field, an answer's field added (Effect's structs drop keys they don't know), an answer that narrows, and a member added to an open union. A home never sends an open union's fallback, so the check doesn't count it as sent.
+
+A break passes only where `API_VERSION` goes up. Each message names the call, the path into it and why. Run on #717, it refuses the role in each of the four calls that answer with thread items: "compacted" and "interrupted" are new to a union the older client reads closed.
+
 ## The UI is instant
 
 Everything the person does shows its result in the frame they do it. The runtime, git, agents and the network catch up behind it, and what fails is taken back with a line saying why. This holds for every screen, on every platform, idle or under load. It was decided on 12 Nov 2026, after a day of bugs that all had one shape: the window waited for something before it showed what the person did, or let an older read take back what it had shown.
