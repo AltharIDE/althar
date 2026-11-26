@@ -161,6 +161,9 @@ jobs:
           binary: 'false'
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       - run: bun run test:coverage
         working-directory: ${{ matrix.package }}
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
@@ -200,6 +203,9 @@ jobs:
           run: ${{ needs.plan.outputs.durations }}
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
       - run: >-
           bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter

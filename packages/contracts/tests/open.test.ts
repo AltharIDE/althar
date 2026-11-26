@@ -11,6 +11,7 @@ import {
   ConnectionList,
   HeardAttention,
   HeardEvent,
+  HomeSnapshot,
   isKnownAttention,
   isKnownEvent,
   OpenLiterals,
@@ -101,6 +102,23 @@ describe('a client of an older version', () => {
       connections.map((one) => one.product),
       ['github'],
     )
+  })
+
+  it('leaves out of the home what the loop did of a kind it doesn’t know, and hears a streamed kind it doesn’t know as unknown', () => {
+    const events = Schema.decodeUnknownSync(HomeSnapshot.fields.events)([
+      { kind: 'weather', id: 'e1', at: '2026-11-20T09:00:00.000Z', projectId: 'p1' },
+    ])
+    assert.deepStrictEqual(events, [])
+    const streamed = Schema.decodeUnknownSync(HeardEvent)({
+      _tag: 'Streaming',
+      threadId: 'th1',
+      itemId: 'i1',
+      sequence: 1,
+      kind: 'agent_plan',
+      agentId: 'claude',
+      text: 'First,',
+    })
+    assert.strictEqual(streamed._tag === 'Streaming' && streamed.kind, 'unknown')
   })
 
   it('takes a failure for a reason it doesn’t know, which is words already', () => {

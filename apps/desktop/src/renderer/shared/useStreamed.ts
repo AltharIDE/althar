@@ -59,6 +59,8 @@ export const useStreamed = (
 
   useWatch((event) => {
     if (event._tag !== 'Streaming' || event.threadId !== threadId) return
+    // A kind of item a newer home streams that this window doesn't draw: it shows as its item, once that lands.
+    if (event.kind === 'unknown') return
     if (view !== undefined && !placedInView(view, event.sequence)) return
     hear(words, event.itemId, event.text, { kind: event.kind, agentId: event.agentId, sequence: event.sequence })
   })

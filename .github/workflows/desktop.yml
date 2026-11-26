@@ -313,6 +313,9 @@ jobs:
           binary: 'false'
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       - run: bun run test:coverage
       - name: Show remaining branch coverage gaps
         if: failure()

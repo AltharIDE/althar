@@ -297,8 +297,13 @@ if (main && process.argv[2] === 'read') {
   try {
     const path = join(process.env.RUNNER_TEMP ?? tmpdir(), 'althar-quarantine.json')
     writeFileSync(path, JSON.stringify(quarantine))
-    const skipped = skippedSpecs(quarantine)
-    if (process.env.GITHUB_ENV !== undefined) appendFileSync(process.env.GITHUB_ENV, `QUARANTINE=${path}\nQUARANTINE_SKIPPED=${skipped}\n`)
+    const run = process.env.LAPSED === 'run'
+    const skipped = run ? '' : skippedSpecs(quarantine)
+    if (process.env.GITHUB_ENV !== undefined)
+      appendFileSync(
+        process.env.GITHUB_ENV,
+        `QUARANTINE=${path}\nQUARANTINE_SKIPPED=${skipped}\nQUARANTINE_LAPSED=${run ? 'run' : 'skip'}\n`,
+      )
     if ('unread' in quarantine)
       process.stdout.write(
         `::warning title=Quarantine::Couldn't read which tests are quarantined, so none is: every test gates in this job. ${quarantine.unread}\n`,
@@ -311,7 +316,7 @@ if (main && process.argv[2] === 'read') {
         [
           `${quarantined.length} ${quarantined.length === 1 ? 'test is' : 'tests are'} quarantined: they run, but don't fail this job.`,
           ...quarantined.map((issue) => `  #${issue.number} ${issue.title}, until ${day(lapsesAt(issue))}`),
-          `${ended.size} ${ended.size === 1 ? "test's quarantine has" : "tests' quarantines have"} lapsed: skipped in this job.`,
+          `${ended.size} ${ended.size === 1 ? "test's quarantine has" : "tests' quarantines have"} lapsed: ${run ? "run for their coverage, but don't fail this job" : 'skipped in this job'}.`,
           ...[...ended].map((issue) => `  #${issue.number} ${issue.title}`),
           '',
         ].join('\n'),

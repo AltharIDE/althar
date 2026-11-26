@@ -85,6 +85,8 @@ Decided 26 Nov 2026. A home, the desktop and the phone ship apart, so a client c
 
 Not open yet: a product elsewhere than in `ListConnections`, a nudge's kind, a notice's step, a task's phase and a tool call's kinds. A new one of those still fails an older client.
 
+What leaving out costs: an event the client passes over moves nothing, its cursor neither, so it reads again what that event changed only with the next it knows; and a page of a thread whose every item is of a kind it doesn't know reads as empty, from which it can't ask for the page before. A newer home's kinds are few beside its items, so neither is likely, and both end when the client updates.
+
 ## The UI is instant
 
 Everything the person does shows its result in the frame they do it. The runtime, git, agents and the network catch up behind it, and what fails is taken back with a line saying why. This holds for every screen, on every platform, idle or under load. It was decided on 12 Nov 2026, after a day of bugs that all had one shape: the window waited for something before it showed what the person did, or let an older read take back what it had shown.

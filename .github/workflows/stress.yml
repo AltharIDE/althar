@@ -2,7 +2,8 @@ name: stress
 
 # New and changed tests, run many times over with no retry, on Linux (packages/testing/src/stress.ts), and the tests
 # nearest the source it changes by their imports, eight at most on a pull request and sixteen at night, so a race in
-# the code shows as well as one in a test. On a pull request, three times each and a changed end-to-end spec twice, a
+# the code shows as well as one in a test; on a pull request, not those with an open flaky issue, which it quarantines
+# nothing for. On a pull request, three times each and a changed end-to-end spec twice, a
 # few minutes: a race that shows one run in three fails here, on the pull request that brought it, rather than on
 # everyone's after it lands. The pull request's
 # required `merge queue` check waits for it (queue.yml). Not on a draft, which runs it once it is ready for review; and
@@ -41,6 +42,10 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Which tests have an open flaky issue: a pull request's run doesn't stress those it only reaches.
+      issues: read
     outputs:
       linux: ${{ steps.plan.outputs.linux }}
       specs: ${{ steps.plan.outputs.specs }}
@@ -67,6 +72,7 @@ jobs:
           since="$(git rev-list -1 --before='26 hours ago' HEAD)"
           git diff --name-only --diff-filter=AMR "${since:-HEAD}" HEAD > "$RUNNER_TEMP/changed"
           cat "$RUNNER_TEMP/changed"
+      - uses: ./.github/actions/flaky/quarantine
       - id: plan
         env:
           WHEN: ${{ inputs.nightly && 'nightly' || 'pull-request' }}

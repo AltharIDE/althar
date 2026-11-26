@@ -76,6 +76,9 @@ jobs:
           binary: 'false'
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       # @althar/testing has no coverage gate of its own: its tests run plain.
       - env:
           PACKAGES: packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/provider-adapters packages/skills packages/testing apps/cli
@@ -128,6 +131,9 @@ jobs:
           run: ${{ needs.plan.outputs.durations }}
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
       - run: >-
           bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter
@@ -174,6 +180,9 @@ jobs:
           merge-multiple: true
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       # The parts' results and coverage as one run's: the thresholds hold for the whole suite, as before it was split.
       # The parts reported their flaky and quarantined tests; merging, @althar/testing/reporter only lets the
       # quarantined ones through again.
@@ -207,6 +216,9 @@ jobs:
       - run: bun run check
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       - run: bun run test:coverage
       - run: bun run build
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
@@ -235,6 +247,9 @@ jobs:
       - run: bun run check
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       - run: bun run test:coverage
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()

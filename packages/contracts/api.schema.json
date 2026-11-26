@@ -8902,8 +8902,22 @@
               "type": "string"
             },
             "kind": {
-              "enum": ["agent_message", "agent_thought"],
-              "type": "string"
+              "anyOf": [
+                {
+                  "enum": ["agent_message", "agent_thought"],
+                  "type": "string"
+                },
+                {
+                  "allOf": [
+                    {
+                      "not": {
+                        "enum": ["agent_message", "agent_thought"]
+                      }
+                    }
+                  ],
+                  "type": "string"
+                }
+              ]
             },
             "offset": {
               "anyOf": [
@@ -9611,314 +9625,6 @@
       ],
       "type": "object"
     },
-    "HomeEvent": {
-      "anyOf": [
-        {
-          "additionalProperties": true,
-          "properties": {
-            "at": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": ["step"],
-              "type": "string"
-            },
-            "projectId": {
-              "type": "string"
-            },
-            "result": {
-              "additionalProperties": true,
-              "properties": {
-                "afterMerge": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": true,
-                      "properties": {
-                        "kept": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "url": {
-                          "type": "string"
-                        },
-                        "words": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["url", "words"],
-                      "type": "object"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "agentId": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "built": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "change": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/ChangeSummary"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "descriptions": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "evidence": {
-                  "items": {
-                    "$ref": "#/$defs/Evidence"
-                  },
-                  "type": "array"
-                },
-                "findings": {
-                  "items": {
-                    "$ref": "#/$defs/Finding"
-                  },
-                  "type": "array"
-                },
-                "gallery": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/GalleryUpdate"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "keptViews": {
-                  "anyOf": [
-                    {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "model": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "round": {
-                  "anyOf": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "enum": ["Infinity", "-Infinity", "NaN"],
-                      "type": "string"
-                    }
-                  ]
-                },
-                "step": {
-                  "enum": ["implement", "review", "settle", "publish"],
-                  "type": "string"
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "unverified": {
-                  "anyOf": [
-                    {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "verdict": {
-                  "anyOf": [
-                    {
-                      "enum": ["pass", "changes_requested"],
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["step", "round", "summary", "change", "verdict", "findings", "built", "evidence", "unverified", "agentId"],
-              "type": "object"
-            },
-            "task": {
-              "additionalProperties": true,
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "slug": {
-                  "type": "string"
-                },
-                "threadId": {
-                  "type": "string"
-                },
-                "title": {
-                  "type": "string"
-                }
-              },
-              "required": ["id", "threadId", "slug", "title"],
-              "type": "object"
-            }
-          },
-          "required": ["kind", "id", "at", "projectId", "task", "result"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "about": {
-              "enum": ["limit", "stall"],
-              "type": "string"
-            },
-            "at": {
-              "type": "string"
-            },
-            "description": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": ["dealt"],
-              "type": "string"
-            },
-            "projectId": {
-              "type": "string"
-            },
-            "task": {
-              "additionalProperties": true,
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "slug": {
-                  "type": "string"
-                },
-                "threadId": {
-                  "type": "string"
-                },
-                "title": {
-                  "type": "string"
-                }
-              },
-              "required": ["id", "threadId", "slug", "title"],
-              "type": "object"
-            },
-            "title": {
-              "type": "string"
-            }
-          },
-          "required": ["kind", "id", "at", "projectId", "task", "about", "title", "description"],
-          "type": "object"
-        },
-        {
-          "additionalProperties": true,
-          "properties": {
-            "at": {
-              "type": "string"
-            },
-            "by": {
-              "anyOf": [
-                {
-                  "enum": ["rules", "coordinator"],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "count": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "enum": ["Infinity", "-Infinity", "NaN"],
-                  "type": "string"
-                }
-              ]
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": ["answered"],
-              "type": "string"
-            }
-          },
-          "required": ["kind", "id", "at", "count"],
-          "type": "object"
-        }
-      ]
-    },
     "HomeFolders": {
       "additionalProperties": true,
       "properties": {
@@ -10026,7 +9732,329 @@
         },
         "events": {
           "items": {
-            "$ref": "#/$defs/HomeEvent"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": ["step"],
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "afterMerge": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": true,
+                            "properties": {
+                              "kept": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "words": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["url", "words"],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "agentId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "built": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "change": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/ChangeSummary"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "descriptions": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "evidence": {
+                        "items": {
+                          "$ref": "#/$defs/Evidence"
+                        },
+                        "type": "array"
+                      },
+                      "findings": {
+                        "items": {
+                          "$ref": "#/$defs/Finding"
+                        },
+                        "type": "array"
+                      },
+                      "gallery": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/GalleryUpdate"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "keptViews": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "model": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "round": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "enum": ["Infinity", "-Infinity", "NaN"],
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "step": {
+                        "enum": ["implement", "review", "settle", "publish"],
+                        "type": "string"
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "unverified": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "verdict": {
+                        "anyOf": [
+                          {
+                            "enum": ["pass", "changes_requested"],
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["step", "round", "summary", "change", "verdict", "findings", "built", "evidence", "unverified", "agentId"],
+                    "type": "object"
+                  },
+                  "task": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "threadId", "slug", "title"],
+                    "type": "object"
+                  }
+                },
+                "required": ["kind", "id", "at", "projectId", "task", "result"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "about": {
+                    "enum": ["limit", "stall"],
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": ["dealt"],
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "task": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "threadId", "slug", "title"],
+                    "type": "object"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "id", "at", "projectId", "task", "about", "title", "description"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "by": {
+                    "anyOf": [
+                      {
+                        "enum": ["rules", "coordinator"],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "count": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "enum": ["Infinity", "-Infinity", "NaN"],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": ["answered"],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "id", "at", "count"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "not": {
+                          "enum": ["step", "dealt", "answered"]
+                        }
+                      }
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         },

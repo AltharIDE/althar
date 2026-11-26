@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 import { FeedPosition } from '../identities'
-import { KnownArray, OpenUnion } from '../open'
+import { KnownArray, OpenLiterals, OpenUnion } from '../open'
 import { call, ClientAuthority, command, SocketAllowed } from './rpc'
 import {
   AccountStatus,
@@ -170,7 +170,7 @@ export const HomeSnapshot = Schema.Struct({
   since: Schema.String,
   tasks: Schema.Array(HomeTask),
   calls: KnownArray('kind', [HomeCall]),
-  events: Schema.Array(HomeEvent),
+  events: KnownArray('kind', HomeEvent.members),
   projects: Schema.Array(ProjectSummary),
 })
 export type HomeSnapshot = typeof HomeSnapshot.Type
@@ -240,8 +240,8 @@ export const WatchEvent = Schema.Union([
     itemId: Schema.String,
     /** Where the thread places the item, so a window with a cleared view can tell whether it is in it. */
     sequence: Schema.Int,
-    /** What it is and who is saying it, so a client can show it before it has read the item. */
-    kind: Schema.Literals(['agent_message', 'agent_thought']),
+    /** What it is and who is saying it, so a client can show it before it has read the item; one it doesn't know, it reads when it lands. */
+    kind: OpenLiterals(['agent_message', 'agent_thought'], 'unknown'),
     agentId: Schema.String,
     /** Its text as far as it has come; to a watch that asked for `deltas`, what came after `offset`. */
     text: Schema.String,

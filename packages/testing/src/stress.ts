@@ -9,7 +9,10 @@
  * A change to source stresses the tests that import it too, through select.ts's import graph: the nearest first (those
  * that import a changed file, then those that import them), eight on a pull request and sixteen at night, so a race
  * in the code, not only in a test, shows on the change that brought it. Not the specs that reach it: the app's whole
- * end-to-end run (desktop.yml) runs those already, and each run of a spec builds the app.
+ * end-to-end run (desktop.yml) runs those already, and each run of a spec builds the app. On a pull request, not a
+ * test with an open flaky issue either (quarantine.ts): stress quarantines nothing, and a race the change didn't
+ * bring would hold its `merge queue` check. Changed, such a test is stressed, as its fix must hold here; at night,
+ * where nothing waits on it, it runs with the rest.
  *
  * `bun stress.ts plan <changed> [nightly]` writes the plan for the file of changed paths to GITHUB_OUTPUT;
  * `bun stress.ts run` runs the part of it in PLAN.
@@ -17,6 +20,7 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 
+import { held, quarantinedTests, testOf as testOfIssue } from './quarantine'
 import { graph, type Graph, nearest, repository } from './select'
 
 /** A package's changed test files, from its own folder. */
@@ -77,16 +81,25 @@ const testOf = (path: string) => {
   return dir !== undefined && file !== undefined && !REAL.test(path) ? [[dir, file] as const] : []
 }
 
-/** The plan for `changed`; with the repository's import graph, the tests that import its source too. */
-export const plan = (changed: ReadonlyArray<string>, when: When = 'pull request', known?: Graph): Plan => {
+/**
+ * The plan for `changed`; with the repository's import graph, the tests that import its source too, on a pull request
+ * leaving out the files of `flaky`, the tests with an open flaky issue.
+ */
+export const plan = (
+  changed: ReadonlyArray<string>,
+  when: When = 'pull request',
+  known?: Graph,
+  flaky: ReadonlySet<string> = new Set(),
+): Plan => {
   const nightly = when === 'nightly'
   const sources = changed.filter((path) => !TEST.test(path) && !SPEC.test(path))
+  const waits = (path: string) => !nightly && flaky.has(path)
   // As many more than the changed tests as the cap, not counting those among them.
   const reached =
     known === undefined
       ? []
-      : nearest(known, sources, REACHED[when] + changed.length)
-          .filter((path) => !changed.includes(path) && testOf(path).length > 0)
+      : nearest(known, sources, REACHED[when] + changed.length + flaky.size)
+          .filter((path) => !changed.includes(path) && !waits(path) && testOf(path).length > 0)
           .slice(0, REACHED[when])
   const tests = [...changed, ...reached].flatMap(testOf)
   const windows = tests.filter(([dir]) => ON_WINDOWS.has(dir))
@@ -151,7 +164,7 @@ const run = ({ parts, runs, seconds }: Plan['linux']) => {
   })
   if (failed.length > 0) {
     process.stdout.write(
-      `::error::A changed test failed in one of its runs, in ${failed.map(({ dir }) => dir).join(', ')}. It fails sometimes: find why before it lands.\n`,
+      `::error::A changed test, or one that imports what changed, failed in one of its runs, in ${failed.map(({ dir }) => dir).join(', ')}. It fails sometimes: find why before it lands.\n`,
     )
     process.exit(1)
   }
@@ -166,6 +179,8 @@ if (mode === 'plan' && list !== undefined && output !== undefined) {
       .filter((line) => line.trim() !== ''),
     when === 'nightly' ? 'nightly' : 'pull request',
     graph(repository()),
+    // The files of the tests with an open flaky issue, as the plan's own step read them (.github/actions/flaky/quarantine).
+    new Set(quarantinedTests(held()).map((issue) => testOfIssue(issue.title).file)),
   )
   appendFileSync(
     output,

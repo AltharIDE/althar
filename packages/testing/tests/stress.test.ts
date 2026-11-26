@@ -112,4 +112,25 @@ describe('the stress plan', () => {
     // Without the graph, only what changed.
     expect(plan(changed).reached).toEqual([])
   })
+
+  it('leaves a test with an open flaky issue out of what a pull request reaches, unless it changed, and not at night', () => {
+    const files: Record<string, string> = {
+      'packages/runtime/package.json': JSON.stringify({ name: '@althar/runtime' }),
+      'packages/runtime/src/git.ts': 'export const commit = () => {}',
+      'packages/runtime/tests/git.test.ts': "import { commit } from '../src/git'",
+      'packages/runtime/tests/push.test.ts': "import { commit } from '../src/git'",
+    }
+    const known = graph({ files: Object.keys(files), read: (path) => files[path] ?? '' })
+    const flaky = new Set(['packages/runtime/tests/git.test.ts'])
+    // A race the change didn't bring would hold its merge queue check: stress quarantines nothing.
+    expect(plan(['packages/runtime/src/git.ts'], 'pull request', known, flaky).reached).toEqual(['packages/runtime/tests/push.test.ts'])
+    // Changed, it is stressed, as its fix must hold here.
+    const fixed = plan(['packages/runtime/src/git.ts', 'packages/runtime/tests/git.test.ts'], 'pull request', known, flaky)
+    expect(fixed.linux.parts).toEqual([{ dir: 'packages/runtime', files: ['tests/git.test.ts', 'tests/push.test.ts'] }])
+    // At night nothing waits on it, so it runs with the rest.
+    expect(plan(['packages/runtime/src/git.ts'], 'nightly', known, flaky).reached).toEqual([
+      'packages/runtime/tests/git.test.ts',
+      'packages/runtime/tests/push.test.ts',
+    ])
+  })
 })

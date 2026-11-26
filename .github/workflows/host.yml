@@ -92,6 +92,9 @@ jobs:
         with:
           binary: 'false'
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       - name: Prepare isolated OpenSSH integration tests
         run: |
           if [ ! -x /usr/sbin/sshd ]; then

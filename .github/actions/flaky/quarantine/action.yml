@@ -7,7 +7,12 @@ description: >-
   job (Vitest's by the shared setup, Playwright's with --grep-invert of QUARANTINE_SKIPPED, which this sets) and listed on
   the job's summary, and it runs only at night, where it gates. Every other test gates as before, and a test whose issue
   is closed gates again. Use it as a step before a job's tests, after Bun is set up. If the issues can't be read, nothing
-  is quarantined or skipped, and it says so; it never fails the job.
+  is quarantined or skipped, and it says so; it never fails the job. A job that measures coverage says `lapsed: run`:
+  there a lapsed test runs as a quarantined one does, its failure failing nothing, so the lines it covers still count.
+inputs:
+  lapsed:
+    description: What a lapsed test does in this job, `skip` or `run` (a job that measures coverage).
+    default: skip
 runs:
   using: composite
   steps:
@@ -15,4 +20,5 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
+        LAPSED: ${{ inputs.lapsed }}
       run: bun "$GITHUB_WORKSPACE/packages/testing/src/quarantine.ts" read
