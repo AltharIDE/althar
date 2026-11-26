@@ -377,7 +377,7 @@ describe('checking a GitHub connection', () => {
       const report = yield* check
       const push = report.lines.find((one) => one.need === 'push')
       assert.deepStrictEqual(push?.repositories, [
-        { path: 'northwind/api', state: 'no', reason: { kind: 'role', role: null }, accountPush: false },
+        { path: 'northwind/api', state: 'no', reason: { kind: 'role', role: null, names: ['northwind/api'] }, accountPush: false },
         {
           path: 'northwind/web',
           state: 'no',
