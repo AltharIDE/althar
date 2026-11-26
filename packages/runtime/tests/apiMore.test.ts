@@ -655,7 +655,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.seconds(3),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy, readiness: READY }],
             open: () => Effect.die('A busy worker must not start'),
           },
         })
@@ -698,7 +698,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.seconds(3),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false, readiness: READY }],
             open: (request) => Effect.sync(() => opened.push(request.workerId)).pipe(Effect.andThen(Effect.die('Seen opening the worker'))),
           },
         })
@@ -730,7 +730,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.minutes(5),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false, readiness: READY }],
             open: () => Effect.die('Nothing starts here'),
           },
         })
@@ -771,7 +771,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.minutes(5),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: false, readiness: READY }],
             open: () => Effect.die('A plan held must not start'),
           },
         })
@@ -806,7 +806,7 @@ describe('a normal task assigned to a worker', () => {
         const { client, grant } = yield* connected({
           countdown: Duration.minutes(5),
           workers: {
-            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true }],
+            list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true, readiness: READY }],
             open: () => Effect.die('A busy worker must not start'),
           },
         })
