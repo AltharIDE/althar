@@ -31,7 +31,7 @@ import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 import { useHomeState } from '../homes/useHomes'
-import { HOME, placementOf, runsOnText } from './runsOn'
+import { ANY, HOME, placementOf, runsOnText } from './runsOn'
 import s from './Card.module.css'
 
 /*
@@ -286,8 +286,11 @@ function PlanCard({
       worksIn: inWhere,
       home: homeName,
       agentName: (id) => actions.agentName(id),
+      modelName: (agentId, model) => named(agentId, model).name,
     })
   const placement = placeable ? placementAt(selected) : null
+  // On a worker, the picker offers what its agents offer there.
+  const onWorker = selected === HOME || selected === ANY ? undefined : actions.workers?.find((one) => one.workerId === selected)
   const startProblem = placement?.problem
   /** Shows it held until `sent` is done, where the change makes the place chosen unable to take it. */
   const holdWhile = (holds: boolean, sent: void | Promise<unknown>, request: number) => {
@@ -339,6 +342,8 @@ function PlanCard({
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
               variant="field"
               placement="below"
+              // The review runs on the home, whatever runs the lead.
+              {...(onWorker === undefined || step.id !== 'implement' ? {} : { worker: onWorker })}
             />
           )
         )

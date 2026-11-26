@@ -90,6 +90,7 @@ import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { checkoutNeeds, withNeeds } from './toolNeeds'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Terminals } from './Terminals'
@@ -1331,7 +1332,15 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
+      ListProjectWorkers: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const workers = config.workers?.list(projectId) ?? []
+            // What the project's files need that each lacks, for a worker that has checked itself.
+            if (workers.every((worker) => worker.readiness === undefined)) return workers
+            return withNeeds(workers, yield* checkoutNeeds(projectId).pipe(Effect.orElseSucceed(() => [])))
+          }).pipe(Effect.provideService(Instance, instance)),
+        ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       GetSearchDocuments: ({ after, search }) =>
         api(
@@ -2281,6 +2290,28 @@ export const handlers = apiLayer(
         once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
       DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
+      MoveTaskTo: ({ commandId, taskId, to, lead, fromLastTurn }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.place', { taskId, to }, commandId), (said) =>
+              runs.place({
+                envelope: said,
+                taskId,
+                to,
+                ...(lead === undefined
+                  ? {}
+                  : {
+                      lead: {
+                        ...(lead.model === undefined ? {} : { model: lead.model }),
+                        ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                      },
+                    }),
+                ...(fromLastTurn === true ? { fromLastTurn: true } : {}),
+              }),
+            ),
+          ),
+        ),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,

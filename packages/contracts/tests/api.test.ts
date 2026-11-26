@@ -611,6 +611,7 @@ describe('the API', () => {
               AnswerCheckout: () => Effect.die('unused'),
               MoveTask: () => Effect.die('unused'),
               DropMove: () => Effect.die('unused'),
+              MoveTaskTo: () => Effect.die('unused'),
               WorkToward: () => Effect.die('unused'),
               ShelveTask: () => Effect.die('unused'),
               StopHelper: () => Effect.die('unused'),

@@ -7,7 +7,7 @@ import { sshArguments } from '@althar/transport-node'
 
 import script from '../../../../host/bootstrap/ssh.sh?raw'
 import type { SshHomeTarget } from '../../homes'
-import type { WorkerAgent, WorkerSetup, WorkerSetupAction, WorkerSignInEvent } from '../../workers'
+import type { WorkerAgent, WorkerCheck, WorkerSetup, WorkerSetupAction, WorkerSignInEvent } from '../../workers'
 import type { Fields } from '../../logs/logFile'
 import { ReleaseProblem, type HostRelease, type WorkerRelease } from './release'
 import { loggedInWith, type SetupSystem } from './setup'
@@ -43,10 +43,42 @@ const lastWords = (stderr: string) =>
     .at(-1)
     ?.slice(0, 300)
 
-const STEP = { reach: 0, look: 1, get: 2, enroll: 3, start: 4 } as const
-const STEP_NAMES = ['reach', 'look', 'get', 'enroll', 'start', 'done']
+const STEP = { reach: 0, look: 1, get: 2, enroll: 3, start: 4, check: 5 } as const
+const STEP_NAMES = ['reach', 'look', 'get', 'enroll', 'start', 'check', 'done']
 /** A field of an event as text: its string, else nothing. */
 const textOf = (value: unknown) => (typeof value === 'string' ? value : '')
+
+const ALLOWED = new Set(['NeedsAdministrator', 'SandboxStillFails', 'SandboxUnfixable'])
+
+/** The worker's check, from its `check done` event: kept to what the window shows. */
+export const checkOf = (event: Readonly<Record<string, unknown>> | undefined): WorkerCheck | undefined => {
+  if (event === undefined || typeof event.sandbox !== 'object' || event.sandbox === null) return undefined
+  const sandbox = event.sandbox as { starts?: unknown; problem?: unknown; fix?: unknown }
+  const agents = Array.isArray(event.agents) ? (event.agents as ReadonlyArray<Record<string, unknown>>) : []
+  return {
+    sandbox:
+      sandbox.starts === true
+        ? { starts: true }
+        : {
+            starts: false,
+            problem: typeof sandbox.problem === 'string' ? sandbox.problem : 'Failed',
+            ...(typeof sandbox.fix === 'string' && sandbox.fix.length <= 4_096 && !sandbox.fix.includes('\n') ? { fix: sandbox.fix } : {}),
+          },
+    agents: agents.flatMap((agent) =>
+      typeof agent.id === 'string' && typeof agent.name === 'string' && typeof agent.signedIn === 'boolean'
+        ? [
+            {
+              id: agent.id,
+              name: agent.name,
+              signedIn: agent.signedIn,
+              ...(typeof agent.started === 'boolean' ? { started: agent.started } : {}),
+              ...(typeof agent.message === 'string' ? { message: agent.message.slice(0, 300) } : {}),
+            },
+          ]
+        : [],
+    ),
+  }
+}
 
 /** Where it goes in main.log: Althar's own log, for what went wrong. */
 export interface WorkerLog {
@@ -298,7 +330,9 @@ export const workerSetups = (
       // As a home is, a worker runs as a user of its own, reached with the key that logged in.
       const key = await acceptedKey(target, probed.stderr, signal)
       say('useradd --create-home althar · your SSH key to ~althar/.ssh/authorized_keys · loginctl enable-linger althar')
-      await bootstrap(target, 'root-login', [key], signal)
+      const made = await bootstrap(target, 'root-login', [key], signal)
+      if (made.events.some((one) => one.step === 'setup' && one.state === 'done' && one.sandboxRule === true))
+        say('AppArmor: bubblewrap may make namespaces for the worker (/etc/apparmor.d/althar-worker-bwrap)')
       target = { ...target, target: `althar@${hostOf(target.target)}` }
       set({ target })
       say(`$ ssh ${target.target}`)
@@ -379,6 +413,22 @@ export const workerSetups = (
             : []
         })
       : []
+
+  /** The check that ends adding it, or ran again: done, and at its step where it found the worker can't run a task yet. */
+  const checked = (events: ReadonlyArray<Event>) => {
+    const check = checkOf(events.findLast((one) => one.step === 'check' && one.state === 'done'))
+    const ready = check === undefined || (check.sandbox.starts && check.agents.every((agent) => agent.started !== false))
+    if (check !== undefined)
+      log.info('Adding a worker: checked', {
+        worker: setup!.name,
+        sandbox: check.sandbox.starts ? 'starts' : check.sandbox.problem,
+        agents: check.agents
+          .map((agent) => `${agent.id}:${agent.started === undefined ? 'signed out' : agent.started ? 'started' : 'failed'}`)
+          .join(' '),
+      })
+    if (check !== undefined && !check.sandbox.starts) say(`Sandbox: ${check.sandbox.problem}`)
+    set({ phase: 'done', at: ready ? STEP.check + 1 : STEP.check, checking: false, ...(check === undefined ? {} : { check }) })
+  }
 
   const go = (work: (signal: AbortSignal) => Promise<void>) => {
     running?.abort()
@@ -466,11 +516,46 @@ export const workerSetups = (
           return go(async (signal) => {
             const grant = Buffer.from(JSON.stringify(action.grant)).toString('base64url')
             say(`Signed by the home as ${action.grant.workerId}: starting the worker’s service`)
-            const ran = await bootstrap(setup!.target, 'worker-enroll', [grant, here ? '1' : '0'], signal, { timeout: 120_000 })
+            const ran = await bootstrap(setup!.target, 'worker-enroll', [grant, here ? '1' : '0'], signal, {
+              timeout: 5 * 60_000,
+              event: (one) => {
+                if (one.step === 'start' && one.state === 'done') set({ at: STEP.check })
+              },
+            })
             const started = ran.events.find((one) => one.step === 'start' && one.state === 'done')
             if (started === undefined) throw new Stopped('NotStarted', STEP.start)
             log.info('Adding a worker: started', { worker: setup!.name, workerId: action.grant.workerId })
-            set({ phase: 'done', at: STEP.start + 1, workerId: action.grant.workerId, agents: agentsOf(started.agents) })
+            set({ workerId: action.grant.workerId, agents: agentsOf(started.agents) })
+            checked(ran.events)
+          })
+        case 'check':
+        case 'sandbox':
+          if (setup.phase !== 'done' || setup.checking === true) return
+          set({ checking: true })
+          return go(async (signal) => {
+            let last: Readonly<Record<string, unknown>> | undefined
+            const keep = (one: Readonly<Record<string, unknown>> & { step: string; state: string }) => {
+              if (one.step === 'check' && one.state === 'done') last = one
+            }
+            try {
+              say(action.kind === 'sandbox' ? `$ sudo -n sh -c '…' on ${setup!.name}` : `Checking ${setup!.name} again`)
+              const ran = await bootstrap(setup!.target, action.kind === 'sandbox' ? 'worker-sandbox' : 'worker-check', [], signal, {
+                timeout: 5 * 60_000,
+                event: keep,
+              })
+              checked(ran.events)
+            } catch (error) {
+              // Allowing it couldn't: its check stands, with why, and the command stays for an administrator.
+              if (!(error instanceof Stopped) || !ALLOWED.has(error.code)) {
+                set({ checking: false })
+                throw error
+              }
+              const found = checkOf(last) ?? setup!.check
+              set({
+                checking: false,
+                ...(found === undefined ? {} : { check: { ...found, allowed: error.code as NonNullable<WorkerCheck['allowed']> } }),
+              })
+            }
           })
         case 'again':
           if (setup.phase !== 'failed') return
@@ -524,7 +609,10 @@ export const workerSetups = (
             else log.info('Worker sign-in', { target: ssh, agent, kind: one.kind })
             said(one as unknown as WorkerSignInEvent)
           } else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
-          else if (one.state === 'failed') {
+          else if (one.step === 'check' && one.state === 'done') {
+            const check = checkOf(one)
+            if (check !== undefined) said({ kind: 'checked', check })
+          } else if (one.state === 'failed') {
             log.warn('Worker sign-in failed', {
               target: ssh,
               agent,

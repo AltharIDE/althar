@@ -15,7 +15,6 @@ import { Community } from './Community'
 import { Flow } from './Flow'
 import { Patch, sides, STORY_S } from './Patch'
 import { Race } from './Race'
-import aurora from './aurora.webp'
 import { END, SCENE, VIEW_HEADS } from './scenes'
 import { useScrolled } from './scroll'
 import { VIEW_COUNT, Views } from './Views'
@@ -206,8 +205,18 @@ function Screens() {
               {SCREENS.map((x) => (
                 <figure key={x.file} className={s.shot}>
                   <div className={s.frame}>
-                    {/* The canvas is drawn here, the sign-in page the carousel builds (CanvasScreen); the rest are the brand pack's screenshots. */}
-                    {x.file === 'canvas' ? <CanvasScreen label={x.alt} /> : <img src={screen(x.file)} alt={x.alt} loading="lazy" />}
+                    {/* The canvas is drawn here, the sign-in page the carousel builds (CanvasScreen); the rest are the brand pack's
+                        screenshots, and on a phone the canvas is too (Story.module.css shows one or the other). */}
+                    {x.file === 'canvas' ? (
+                      <>
+                        <div className={s.live}>
+                          <CanvasScreen label={x.alt} />
+                        </div>
+                        <img className={s.still} src={screen(x.file)} alt={x.still ?? x.alt} loading="lazy" />
+                      </>
+                    ) : (
+                      <img src={screen(x.file)} alt={x.alt} loading="lazy" />
+                    )}
                   </div>
                   <figcaption>
                     <b>{x.name}</b>
@@ -234,9 +243,9 @@ function End() {
     <section ref={box} id="end" className={s.end} aria-label="Download Althar" data-km={KM.end}>
       <LightUnder tone="light" className={s.under} />
       <div className={s.aurora} aria-hidden="true">
-        <img src={aurora} alt="" />
+        <i />
         {BLOCKS.map((b) => (
-          <img key={b} src={aurora} alt="" className={s.block} data-block={b} />
+          <i key={b} className={s.block} data-block={b} />
         ))}
       </div>
       <div className={s.wrap}>

@@ -106,6 +106,7 @@ import { statements as boundedHomeSearch } from './0101_bounded_home_search'
 import { statements as canvasBoards } from './0102_canvas_boards'
 import { statements as canvasSaves } from './0103_canvas_saves'
 import { statements as artifactChats } from './0104_artifact_chats'
+import { statements as workerSetups } from './0105_worker_setups'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -229,6 +230,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0102_canvas_boards', statements: canvasBoards },
   { key: '0103_canvas_saves', statements: canvasSaves },
   { key: '0104_artifact_chats', statements: artifactChats },
+  { key: '0105_worker_setups', statements: workerSetups },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

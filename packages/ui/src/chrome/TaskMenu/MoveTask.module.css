@@ -1,0 +1,11 @@
+/* Moving a task where its lead's model isn't offered: the line that says so, and the picker. */
+.pick {
+  display: grid;
+  gap: 10px;
+}
+.says {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}

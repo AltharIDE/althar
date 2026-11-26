@@ -22,6 +22,7 @@ import { messageOf, type RunRef } from '../../data/client'
 import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import { useProjectWorkers } from '../../shared/useProjectWorkers'
 import type { OutputSoFar } from '../../shared/handed'
 import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
@@ -200,13 +201,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const readNow = thread.data ?? null
-  const workers =
-    useQuery({
-      queryKey: ['project-workers', projectId],
-      queryFn: () => client.listProjectWorkers(projectId),
-      retry: false,
-      refetchInterval: 5000,
-    }).data ?? []
+  const workers = useProjectWorkers(projectId)
   // What a clear or a forgotten conversation takes from the thread, gone from the press until the thread is read rewritten:
   // the view's version as it was pressed on, and what goes, by id.
   const [rewriting, setRewriting] = useState<{ readonly version: number; readonly gone: ReadonlySet<string> } | null>(null)

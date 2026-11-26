@@ -115,7 +115,9 @@ import {
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
+  type PlaceOutcome,
   type ProjectWorker,
+  type TaskPlace,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -926,6 +928,12 @@ export interface Client {
   }) => Promise<MoveOutcome>
   /** Calls off a move that waits. */
   readonly dropMove: (taskId: string) => Promise<void>
+  /** Moves a running task between the home and its workers (ADR-103): moved, waiting for its lead's turn, or already there. */
+  readonly moveTaskTo: (
+    taskId: string,
+    to: TaskPlace,
+    lead?: { readonly model?: string; readonly effort?: string },
+  ) => Promise<PlaceOutcome>
   /** Points a running task at another branch to work toward, or its default with null: what it did, in words. */
   readonly workToward: (taskId: string, toward: string | null) => Promise<ReadonlyArray<string>>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
@@ -1533,6 +1541,8 @@ export const connect = async (
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
+    moveTaskTo: (taskId, to, lead) =>
+      command((commandId) => api.MoveTaskTo({ commandId, taskId, to, ...(lead === undefined ? {} : { lead }) })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching, onReset) => {

@@ -154,6 +154,11 @@ export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [],
 export interface RuleContext {
   /** Where the agent works: the task's worktree, a folder in it, or the task's folder that holds its worktrees. */
   readonly worktree: string
+  /**
+   * The worker it runs on, by name, where it isn't the home (ADR-103): its lead installs what a setup lacks into its own
+   * folders freely, and asks the person before running anything as root there (`sudo`), as what can't be undone does.
+   */
+  readonly worker?: string
   /** Coordinator commands may visibly write only within this folder; opaque commands run. */
   readonly readOnly?: boolean
   /** The task's worktrees, one per repository, where it may write; just `worktree` unless the task has several. */

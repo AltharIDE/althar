@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import type { HomeWorker } from '@althar/contracts'
 
-import { codeView, problemOf, setupView, sshTargetOf, unavailableOf } from '../src/renderer/features/settings/useAddWorker'
+import {
+  checkedLine,
+  checkProblem,
+  codeView,
+  problemOf,
+  setupView,
+  sshTargetOf,
+  unavailableOf,
+} from '../src/renderer/features/settings/useAddWorker'
 import { computerWorkerOf, loadWorkerOf, mibOf, workerKindOf, workerStateOf } from '../src/renderer/shared/useWorkers'
 
 describe('adding a worker, in words', () => {
@@ -91,6 +99,60 @@ describe('where adding a worker stopped, in words', () => {
   })
 })
 
+describe('what a worker’s check found, in words', () => {
+  const claude = { id: 'claude-code', name: 'Claude Code', signedIn: true }
+  const codex = { id: 'codex', name: 'Codex', signedIn: true }
+  const starts = { starts: true } as const
+  const fails = (problem: string, fix?: string) => ({ starts: false, problem, ...(fix === undefined ? {} : { fix }) }) as const
+
+  it('says what started where nothing stops a task', () => {
+    expect(checkedLine({ sandbox: starts, agents: [] })).toBe('Its sandbox starts. Sign its agents in on its sheet.')
+    expect(checkedLine({ sandbox: starts, agents: [{ ...claude, started: true }] })).toBe('Its sandbox starts, and Claude Code started.')
+    expect(
+      checkedLine({
+        sandbox: starts,
+        agents: [
+          { ...claude, started: true },
+          { ...codex, started: true },
+        ],
+      }),
+    ).toBe('Its sandbox starts, and Claude Code and Codex started.')
+    expect(checkProblem({ sandbox: starts, agents: [{ ...claude, started: true }] }, 'box')).toBeUndefined()
+  })
+
+  it('says why its sandbox can’t start, what lets it, and where sudo couldn’t or didn’t', () => {
+    const fix = 'sudo sh -c x'
+    expect(checkProblem({ sandbox: fails('NoUserNamespaces', fix), agents: [] }, 'box')).toEqual({
+      title: 'Its agents’ sandbox can’t start on box.',
+      body: 'This Linux lets only programs it names make the namespaces the sandbox needs. Allow the worker’s once, as an administrator:',
+      command: fix,
+      retry: true,
+    })
+    expect(checkProblem({ sandbox: fails('NoUserNamespaces'), agents: [] }, 'box')).not.toHaveProperty('command')
+    expect(checkProblem({ sandbox: fails('NoUserNamespaces'), agents: [] }, 'box')?.body).toContain('keeps user namespaces off')
+    expect(checkProblem({ sandbox: fails('NoUserNamespaces', fix), agents: [], allowed: 'NeedsAdministrator' }, 'box')?.body).toContain(
+      'can’t use sudo without a password',
+    )
+    expect(checkProblem({ sandbox: fails('NoUserNamespaces', fix), agents: [], allowed: 'SandboxStillFails' }, 'box')?.body).toContain(
+      'still can’t after that',
+    )
+    for (const problem of ['NoBubblewrap', 'NoSocat'])
+      expect(checkProblem({ sandbox: fails(problem), agents: [] }, 'box')?.title).toBe(
+        'The worker on box is missing what its sandbox needs.',
+      )
+    expect(checkProblem({ sandbox: fails('Failed'), agents: [] }, 'box')?.body).toBe('Althar’s log says what it found.')
+  })
+
+  it('says which agent couldn’t start, in its own words where it gave some', () => {
+    expect(checkProblem({ sandbox: starts, agents: [{ ...codex, started: false, message: 'Not signed in.' }] }, 'box')).toEqual({
+      title: 'Codex couldn’t start on box.',
+      body: 'Not signed in.',
+      retry: true,
+    })
+    expect(checkProblem({ sandbox: starts, agents: [{ ...codex, started: false }] }, 'box')).not.toHaveProperty('body')
+  })
+})
+
 describe('a worker, as the window lists it', () => {
   const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 1, freeMemoryMib: 2048, freeDiskMib: 640 } as const
   const worker: HomeWorker = {
@@ -155,6 +217,27 @@ describe('a worker, as the window lists it', () => {
     })
     expect(added.agents[0]?.signedIn).toBe(true)
     expect(computerWorkerOf({ ...worker, signedIn: [] }, (id) => id, true)).toMatchObject({ reachable: false })
+  })
+
+  it('says why its agents’ sandbox can’t start, with the one command that lets it where its check found one', () => {
+    const fails = (problem: string, fix?: string) =>
+      computerWorkerOf(
+        { ...worker, readiness: { sandbox: { starts: false, problem, ...(fix === undefined ? {} : { fix }) }, tools: [], models: [] } },
+        (id) => id,
+      ).unready
+    expect(computerWorkerOf(worker, (id) => id)).not.toHaveProperty('unready')
+    expect(computerWorkerOf({ ...worker, readiness: { sandbox: { starts: true }, tools: [], models: [] } }, (id) => id)).not.toHaveProperty(
+      'unready',
+    )
+    expect(fails('NoUserNamespaces', 'sudo sh -c x')).toEqual({
+      title: 'Its agents’ sandbox can’t start.',
+      body: 'This Linux lets only programs it names make the namespaces it needs. Have its administrator run this once there:',
+      command: 'sudo sh -c x',
+    })
+    expect(fails('NoUserNamespaces')).toMatchObject({ body: expect.stringContaining('keeps user namespaces off') })
+    expect(fails('NoBubblewrap')).toMatchObject({ body: expect.stringContaining('add it again') })
+    expect(fails('NoSocat')).toMatchObject({ body: expect.stringContaining('add it again') })
+    expect(fails('Failed')).toMatchObject({ body: 'Its check found bubblewrap couldn’t make a sandbox there.' })
   })
 })
 

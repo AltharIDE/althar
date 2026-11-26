@@ -125,7 +125,34 @@ export const computerWorkerOf = (worker: HomeWorker, agentName: (id: string) => 
     reachable: reachable && worker.ssh !== undefined,
     // Offline, yet holding a task's workspace: it went offline during that task, and keeps it until it says it stopped.
     stranded: !worker.connected && worker.busy,
+    ...(unreadyOf(worker) === undefined ? {} : { unready: unreadyOf(worker) }),
   }
+}
+
+/**
+ * What a worker's own check found that stops a task there (ADR-103), in words, with the command its administrator runs:
+ * its agents' sandbox, which Runs on greys it out for. None where it starts, or the worker hasn't checked.
+ */
+export const unreadyOf = (worker: Pick<HomeWorker, 'readiness'>): ComputerWorker['unready'] => {
+  const sandbox = worker.readiness?.sandbox
+  if (sandbox === undefined || sandbox.starts) return undefined
+  if (sandbox.problem === 'NoUserNamespaces')
+    return sandbox.fix === undefined
+      ? {
+          title: 'Its agents’ sandbox can’t start.',
+          body: 'This Linux keeps user namespaces off, which it needs. Have its administrator turn them on.',
+        }
+      : {
+          title: 'Its agents’ sandbox can’t start.',
+          body: 'This Linux lets only programs it names make the namespaces it needs. Have its administrator run this once there:',
+          command: sandbox.fix,
+        }
+  if (sandbox.problem === 'NoBubblewrap' || sandbox.problem === 'NoSocat')
+    return {
+      title: 'Its agents’ sandbox can’t start.',
+      body: 'Its release lacks what the sandbox needs: add it again to install it afresh.',
+    }
+  return { title: 'Its agents’ sandbox can’t start.', body: 'Its check found bubblewrap couldn’t make a sandbox there.' }
 }
 
 /** A worker as the load popover lists it, under the home's readings: where it stands, and the task it runs or what it has free. */

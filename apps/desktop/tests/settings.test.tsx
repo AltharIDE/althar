@@ -936,13 +936,83 @@ describe('the Settings tab', () => {
         task: null,
       },
     ]
-    act(() => listening?.({ ...base, phase: 'done', at: 5, workerId }))
+    // Connected while its check still runs: the dialog stays until the check is in.
+    act(() => listening?.({ ...base, phase: 'running', at: 5, workerId }))
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
+    act(() =>
+      listening?.({
+        ...base,
+        phase: 'done',
+        at: 6,
+        workerId,
+        check: { sandbox: { starts: true }, agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: true }] },
+      }),
+    )
     expect(await within(page).findByRole('heading', { name: 'box' })).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'Add a worker to This Mac' })).toBeNull()
     expect(bridge.act).toHaveBeenCalledWith({ kind: 'dismiss' })
     await userEvent.click(await within(page).findByRole('checkbox', { name: 'Meridian' }))
     expect(client.setWorkerProjects).toHaveBeenCalledWith(workerId, ['proj_m'])
     expect(within(page).getByText('Signed in')).toBeTruthy()
+  })
+
+  it('keeps a worker whose check found its sandbox can’t start, with the command that lets it, and allows it with sudo in one press', async () => {
+    let listening: ((setup: WorkerSetup | null) => void) | undefined
+    const fix = "sudo sh -c 'printf x > /etc/apparmor.d/althar-worker-bwrap && apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+    const added: WorkerSetup = {
+      target: { target: 'althar@box' },
+      name: 'box',
+      log: [],
+      phase: 'done',
+      at: 5,
+      workerId: `wrk_${'5'.repeat(32)}`,
+      check: { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] },
+    }
+    const bridge: WorkersHost = {
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://example.com' })),
+      setup: vi.fn(async () => added),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      onSetup: vi.fn((listener: (setup: WorkerSetup | null) => void) => {
+        listening = listener
+        return () => undefined
+      }),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }
+    const workers: HomeWorker[] = [
+      {
+        workerId: added.workerId!,
+        name: 'box',
+        anyProject: true,
+        signedIn: [],
+        connected: true,
+        busy: false,
+        providers: ['codex'],
+        projects: [],
+        task: null,
+      },
+    ]
+    const { client } = fakeClient({ getWorkers: vi.fn(async () => ({ enabled: true, adds: true, workers })) })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge }))
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /^Add a worker/ }))
+    const adding = await screen.findByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(await within(adding).findByText('Its agents’ sandbox can’t start on box.')).toBeTruthy()
+    expect(within(adding).getByText(fix)).toBeTruthy()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Allow with sudo' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'sandbox' })
+    // It shows it checking at once.
+    expect(within(adding).getByRole('button', { name: 'Checking…' })).toBeTruthy()
+    // The login can't use sudo without a password: the command stays, for its administrator.
+    act(() => listening?.({ ...added, check: { ...added.check!, allowed: 'NeedsAdministrator' } }))
+    expect(await within(adding).findByText(/Its login can’t use sudo without a password/u)).toBeTruthy()
+    expect(within(adding).queryByRole('button', { name: 'Allow with sudo' })).toBeNull()
+    await userEvent.click(within(adding).getByRole('button', { name: 'Check again' }))
+    expect(bridge.act).toHaveBeenCalledWith({ kind: 'check' })
+    expect(screen.getByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
   })
 
   it('says plainly, before anything is pressed, that no release can add a worker yet, and checks again', async () => {

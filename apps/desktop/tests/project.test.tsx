@@ -57,6 +57,14 @@ function Project({
   )
 }
 
+/** What a worker's own check found where it can take a task: its sandbox starts, it has git, and Claude Code started there. */
+const CHECKED = {
+  sandbox: { starts: true as const },
+  tools: [{ name: 'git', version: '2.43.0' }],
+  models: [],
+  agents: [{ providerId: 'claude-code', starts: true }],
+}
+
 const session = {
   id: 'sc',
   agentId: 'claude-code',
@@ -618,7 +626,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
       startPlan: vi
         .fn(async () => undefined)
         .mockRejectedValueOnce(new ApiError({ reason: 'Invalid', message: 'Linux worker aaaaaa is at work on another task.' })),
@@ -652,8 +660,8 @@ describe('the Talk room', () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
       listProjectWorkers: vi.fn(async () => [
-        { workerId: free, providers: ['claude-code'], busy: false },
-        { workerId: busy, providers: ['claude-code'], busy: true },
+        { workerId: free, providers: ['claude-code'], busy: false, readiness: CHECKED },
+        { workerId: busy, providers: ['claude-code'], busy: true, readiness: CHECKED },
       ]),
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -682,7 +690,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
       changePlan: vi.fn(() => new Promise<void>(() => {})),
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -713,7 +721,7 @@ describe('the Talk room', () => {
     const answers: Array<(placed: boolean) => void> = []
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(counting)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId: first, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId: first, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
       placePlan: vi.fn(() => new Promise<boolean>((resolve) => answers.push(resolve))),
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -745,6 +753,7 @@ describe('the Talk room', () => {
           providers: ['claude-code'],
           busy: false,
           capacity: { platform: 'linux' as const, architecture: 'arm64' as const, cpuCores: 6, freeMemoryMib: 4096, freeDiskMib: 8192 },
+          readiness: CHECKED,
         },
       ]),
     })
@@ -767,8 +776,8 @@ describe('the Talk room', () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
       listProjectWorkers: vi.fn(async () => [
-        { workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false },
-        { workerId: available, providers: ['claude-code'], multiRepoProviders: ['claude-code'], busy: false },
+        { workerId: 'wrk_' + 'b'.repeat(32), providers: ['claude-code'], busy: false, readiness: CHECKED },
+        { workerId: available, providers: ['claude-code'], multiRepoProviders: ['claude-code'], busy: false, readiness: CHECKED },
       ]),
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -791,7 +800,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
     })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
@@ -816,7 +825,7 @@ describe('the Talk room', () => {
     })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
-      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness: CHECKED }]),
     })
     // The workers are in, and the window's read of its home hasn't answered yet.
     let answer: (state: HomeState) => void = () => {}

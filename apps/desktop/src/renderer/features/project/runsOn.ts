@@ -10,6 +10,8 @@ import {
   workerName,
   workerNameOf,
   workerPlanUnfit,
+  workerModelUnfit,
+  workerModelWords,
   workerUnfit,
   workerUnfitWords,
 } from '@althar/contracts'
@@ -46,9 +48,29 @@ export const runsOnText = {
         return undefined
       case 'agent':
         return `No ${agentName(unfit.agentId)}`
+      case 'signedOut':
+        return `${agentName(unfit.agentId)} signed out`
+      case 'unchecked':
+        return 'Not checked yet'
+      case 'agentStarts':
+        return unfit.problem === undefined ? `${agentName(unfit.agentId)} not tried yet` : `${agentName(unfit.agentId)} won’t start`
+      case 'sandbox':
+        return 'Sandbox can’t start'
+      case 'disk':
+        return `Only ${(unfit.freeMib / 1024).toFixed(1)} GB free`
+      case 'git':
+        return 'No git'
       case 'repositories':
         return unfit.count === 0 ? 'No repository' : unfit.limit === 1 ? 'One repository' : `Up to ${unfit.limit} repositories`
     }
+  },
+  /** What a ready worker does first for this project's files: installs what it installs itself, or leaves the rest to the lead. */
+  needs: (worker: ProjectWorker) => {
+    const needs = worker.needs ?? []
+    const named = (name: string) => ({ bun: 'Bun', node: 'Node', python3: 'Python', go: 'Go' })[name] ?? name
+    const installs = needs.filter((need) => need.installs).map((need) => named(need.name))
+    const lead = needs.filter((need) => !need.installs).map((need) => named(need.name))
+    return installs.length > 0 ? `Installs ${installs.join(', ')} first` : lead.length > 0 ? `Needs ${lead.join(', ')}` : undefined
   },
   note: (home: string) => `The setup and lead run on the worker, the review on ${home}.`,
   /** The home, until the window has read which it is: a remote window mustn't say This Mac meanwhile. */
@@ -74,6 +96,7 @@ export const placementOf = ({
   worksIn,
   home,
   agentName,
+  modelName = (_agentId, model) => model,
 }: {
   readonly workers: ReadonlyArray<ProjectWorker>
   /** HOME, ANY, or a worker's id. */
@@ -84,6 +107,8 @@ export const placementOf = ({
   /** The home, as the window names it: This Mac, or the home's own name; null until the window knows which. */
   readonly home: string | null
   readonly agentName: (id: string) => string
+  /** A model by the name people know it by: claude-opus-5-5 Claude Opus 5.5. */
+  readonly modelName?: (agentId: string, model: string) => string
 }): Placement => {
   const label = home ?? runsOnText.home
   const said = home ?? runsOnText.homeSaid
@@ -96,7 +121,12 @@ export const placementOf = ({
     if (plan !== undefined) return planUnfitWords(plan, said)
     if (selected === ANY) return best === undefined ? automaticWorkerUnavailable : undefined
     const unfit = workerUnfit(chosen, steps, repositories)
-    return unfit === undefined ? undefined : workerUnfitWords(unfit, chosen === undefined ? workerNameOf(selected) : workerName(chosen))
+    if (unfit !== undefined) return workerUnfitWords(unfit, chosen === undefined ? workerNameOf(selected) : workerName(chosen))
+    // Its agent there doesn't offer the lead's model: the picker offers what it does.
+    const model = workerModelUnfit(chosen, steps)
+    return model === undefined || chosen === undefined
+      ? undefined
+      : workerModelWords(workerName(chosen), modelName(model.agentId, model.model))
   })()
   // A task no worker can ever take (one that stays on the home, a review, or a home too old to say) has nothing to choose.
   const never = plan !== undefined && (plan.kind === 'unknown' || plan.kind === 'home' || plan.kind === 'review')
@@ -116,7 +146,11 @@ export const placementOf = ({
       : []),
     ...workers.map((worker): LaunchPlace => {
       const unfit = plan === undefined ? workerUnfit(worker, steps, repositories) : undefined
-      const hint = unfit === undefined ? runsOnText.free(worker.capacity?.freeMemoryMib) : runsOnText.unfit(unfit, agentName)
+      const needs = runsOnText.needs(worker)
+      const hint =
+        unfit === undefined
+          ? [runsOnText.free(worker.capacity?.freeMemoryMib), ...(needs === undefined ? [] : [needs])].join(' · ')
+          : runsOnText.unfit(unfit, agentName)
       return {
         value: worker.workerId,
         label: workerName(worker),
