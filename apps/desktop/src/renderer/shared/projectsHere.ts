@@ -19,7 +19,8 @@ export interface ProjectHere {
   readonly ink: string
   /** Its page on the host: https://github.com/acme/site. */
   readonly url: string
-  readonly product: Product | null
+  /** The code host it's on: one on a host Althar doesn't know isn't one of these. */
+  readonly product: Product
   /** The host's address and its path there, as Althar knows them: github.com, acme/site. */
   readonly host: string
   readonly path: string
@@ -52,18 +53,15 @@ export const cloneFromHere = (
   list: ConnectionList | null,
 ): { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string } | null => {
   // The home's connection to that very server, for that product: a Jira on the same host, or another base path there, isn't.
-  const connection =
-    one.product === null
-      ? undefined
-      : (list?.connections ?? []).find(
-          (candidate) =>
-            candidate.state === 'ready' &&
-            candidate.product === one.product &&
-            hostnameOf(candidate.webUrl) === one.host.toLowerCase() &&
-            within(one.url, candidate.webUrl),
-        )
+  const connection = (list?.connections ?? []).find(
+    (candidate) =>
+      candidate.state === 'ready' &&
+      candidate.product === one.product &&
+      hostnameOf(candidate.webUrl) === one.host.toLowerCase() &&
+      within(one.url, candidate.webUrl),
+  )
   if (connection !== undefined) return { connectionId: connection.id, path: one.path.split('/') }
-  return one.product !== null && PAGE_CLONES.has(one.product) ? { url: one.url } : null
+  return PAGE_CLONES.has(one.product) ? { url: one.url } : null
 }
 
 /**
@@ -78,13 +76,13 @@ export const useProjectsHere = (list: ConnectionList | null): ReadonlyArray<Proj
   return (overview?.projects.local?.list ?? []).flatMap((project) =>
     (project.remotes ?? []).flatMap((remote) => {
       const key = `${remote.host.toLowerCase()}/${remote.path.toLowerCase()}`
-      if (seen.has(key)) return []
+      if (seen.has(key) || !isProduct(remote.product)) return []
       const one: ProjectHere = {
         projectId: project.id,
         name: project.name,
         ink: project.ink,
         url: remote.url,
-        product: isProduct(remote.product) ? remote.product : null,
+        product: remote.product,
         host: remote.host,
         path: remote.path,
       }

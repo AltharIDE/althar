@@ -173,10 +173,11 @@ export const useHostRepositories = (
   const fromHere = projectsHere
     .filter((one) => homeHas(one) === -1)
     .map((one): HostedRepository => {
-      const name = one.path.split('/').at(-1) ?? one.path
+      const name = one.path.slice(one.path.lastIndexOf('/') + 1)
+      const service = serviceOfProduct(one.product)
       return {
         id: `here:${one.url}`,
-        host: one.product === null ? '' : serviceOfProduct(one.product),
+        host: service,
         owner: one.path.split('/').slice(0, -1).join('/'),
         name,
         description: null,
@@ -185,7 +186,7 @@ export const useHostRepositories = (
         like: like.some((word) => name.toLowerCase().includes(word)),
         here: null,
         from: onHere,
-        ...(one.product === null ? {} : { brand: serviceBrand(serviceOfProduct(one.product)) }),
+        brand: serviceBrand(service),
       }
     })
   all.unshift(...fromHere)
@@ -244,7 +245,7 @@ export const useHostRepositories = (
           remote: mine.path,
           from: source,
           product: mine.product,
-          hostName: mine.product === null ? mine.host : serviceName(serviceOfProduct(mine.product)),
+          hostName: serviceName(serviceOfProduct(mine.product)),
           host: mine.host,
           here: null,
         }

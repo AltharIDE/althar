@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
+import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, SOCKET_CALLS, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
 import { type Host, useServices } from '../src/renderer/data/services'
@@ -1035,6 +1035,25 @@ it('signs an agent in on an empty remote home and connects a code host there, ea
   await userEvent.click(screen.getByRole('button', { name: 'From this Mac' }))
   expect(onNew).toHaveBeenCalledOnce()
   expect(draftsOf(client).get()?.way).toBe('clone')
+})
+
+it('welcomes a home too old to sign its agents in or connect a code host from here with its ways in, and its update for those', async () => {
+  const linux = onLinuxHome('runner-1')
+  const older = SOCKET_CALLS.filter((call) => call !== 'StartAccountSignIn' && call !== 'ConnectToken')
+  const { client } = fakeClient({
+    connection: { ...linux.connection, calls: older },
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })),
+  })
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome({ ...fakeHost(), homes: linux.homes } as Host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('Update runner-1 to sign its agents in and connect GitHub or GitLab from here.')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: /^Sign .* in on runner-1$/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /^Connect .* on runner-1$/ })).toBeNull()
+  // What it can do from here still goes in.
+  await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
+  expect(onNew).toHaveBeenCalledOnce()
 })
 
 it('asks a home from before windows made projects there, on a launcher of its own, to update there: its command folded away, and Check again', async () => {

@@ -907,6 +907,48 @@ describe('a new project on a home on another computer', () => {
     expect(screen.queryByRole('button', { name: 'Clone PLAT/site' })).toBeNull()
   })
 
+  it('says which of the home’s own repositories are this Mac’s too, once each, and clones one through the home’s connection', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const site = { url: 'https://github.com/acme/harbor', product: 'github', host: 'github.com', path: 'acme/harbor' }
+    const local = {
+      live: true,
+      list: [
+        // On a host Althar doesn't know: not offered.
+        {
+          id: 'p_here',
+          name: 'Harbor',
+          ink: 'teal',
+          working: 0,
+          yours: 0,
+          remotes: [site, { ...site, product: 'gitea', path: 'acme/forge' }],
+        },
+        // Another of this Mac's projects with the same repository: offered once.
+        { id: 'p_copy', name: 'Harbor copy', ink: 'sky', working: 0, yours: 0, remotes: [{ ...site, path: 'ACME/Harbor' }] },
+      ],
+    }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const at = onHome(
+      {
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })),
+        listHostRepositories: vi.fn(async () => [listed('acme/harbor'), listed('acme/docs')]),
+      },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    // The home's own listing of it, once that's read, says it's this Mac's too, and is the one row of it.
+    const docs = await screen.findByRole('button', { name: 'Clone acme/docs' })
+    const row = screen.getByRole('button', { name: 'Clone acme/harbor' })
+    expect(within(row).getByText('On this Mac')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^Clone acme\/harbor$/i })).toHaveLength(1)
+    expect(within(docs).queryByText('On this Mac')).toBeNull()
+    expect(screen.queryByRole('button', { name: /forge/ })).toBeNull()
+    await userEvent.click(row)
+    await create('Harbor')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn1', path: ['acme', 'harbor'] }),
+    )
+  })
+
   it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {
     onHome(
       { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },

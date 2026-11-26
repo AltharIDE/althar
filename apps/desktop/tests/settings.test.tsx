@@ -810,6 +810,12 @@ describe('the Settings tab', () => {
     withServices(<Settings at="code-hosts" />, old.client, fakeHost({ homes: studio.homes }))
     expect(await screen.findByText('Update studio to connect GitHub or GitLab there from here.')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: /^Connect/ })).toBeNull()
+    // Where the window doesn't run the update itself, its command, copied.
+    const copied = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
+    await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy the update command' }))
+    expect(copied).toHaveBeenCalledWith(expect.stringContaining('update'))
     cleanup()
     withServices(
       <Settings at="agents" />,
