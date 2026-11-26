@@ -63,6 +63,7 @@ import {
   failedOf,
   limited,
   probe,
+  pushAnswer,
   type Reached,
   reachLine,
   readAs,
@@ -2356,10 +2357,28 @@ export const accessGitHub: Access = (input: AccessInput) =>
     if (reached.length > 0) lines.push(reachLine(reached, owners === '' ? null : owners))
     const [first] = seen
 
+    // Each repository it sees, asked as git asks before a push, signed in as a push is: a public one reads with any token,
+    // and GitHub's own answers say what the account may do, not what this token may, so only this shows a token kept to
+    // reading, or made for another owner.
+    const authorization =
+      input.credential.kind === 'bearer'
+        ? `Basic ${Buffer.from(`x-access-token:${input.credential.token}`).toString('base64')}`
+        : authorizationOf(input.credential)
+    const pushes = yield* Effect.forEach(
+      seen,
+      (found) => Effect.map(pushAnswer(input.fetch, `${web}/${found.path.join('/')}.git`, authorization), (answer) => ({ found, answer })),
+      { concurrency: 4 },
+    )
+    const unpushed = pushes.filter((one) => one.answer === 'no').map((one) => one.found.path.join('/'))
     // Where GitHub says the account itself may not push, no token of it may.
     if (seen.some((found) => found.push === false)) lines.push(line('push', 'no', { reason: { kind: 'role', role: null } }))
+    // A classic token without repo says so by its scope, which is what puts it right.
+    else if (kind === 'classic' && scopes?.includes('repo') !== true) lines.push(byScope('push'))
+    else if (unpushed.length > 0)
+      lines.push(line('push', 'no', { reason: { kind: 'no_push', names: unpushed, url: kind === 'app' ? null : settings } }))
     else if (kind === 'classic') lines.push(byScope('push'))
-    else lines.push(kind === 'app' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID }))
+    else if (kind === 'app' || (pushes.length > 0 && pushes.every((one) => one.answer === 'yes'))) lines.push(line('push', 'ok'))
+    else lines.push(line('push', 'unknown', { reason: UNSAID }))
 
     if (kind === 'classic') lines.push(byScope('changes'), byScope('checks'), byScope('issues'))
     else if (kind === 'app') lines.push(line('changes', 'ok'), line('checks', 'ok'), line('issues', 'ok'))

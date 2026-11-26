@@ -54,6 +54,11 @@ export type AccessReason =
   | { readonly kind: 'role'; readonly role: string | null }
   /** Repositories it doesn't see, by their paths. */
   | { readonly kind: 'unseen'; readonly names: ReadonlyArray<string>; readonly url: string | null }
+  /**
+   * Repositories it sees but may not push to, by their paths, as git's own first question of a push was answered: a token
+   * given read alone there, or one made for another owner. Where the token's access is changed, where there is a page for it.
+   */
+  | { readonly kind: 'no_push'; readonly names: ReadonlyArray<string>; readonly url: string | null }
   /** Althar's GitHub App isn't installed on the owner, and where it is installed. */
   | { readonly kind: 'not_installed'; readonly owner: string; readonly url: string | null }
   /** The owner restricts OAuth apps, which keeps out an OAuth token such as gh's. */
