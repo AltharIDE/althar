@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -7,11 +7,9 @@ import { assert, describe, expect, it } from '@effect/vitest'
 import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { canonicalJson, sha256Hex } from '../src/canonicalJson'
 import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
 import { idOf, migrations } from '../src/migrations'
-import { checksums } from '../src/migrations/checksums'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
 
@@ -68,12 +66,16 @@ describe('schema', () => {
     }).pipe(Effect.provide(InMemory)),
   )
 
-  it('never changes a released migration', () => {
-    const actual = Object.fromEntries(migrations.map((migration) => [migration.key, sha256Hex(canonicalJson(migration.statements))]))
+  // What main has never changes: CI's `numbers` check compares the folder with main's (.github/scripts/numbers.py).
+  it('runs every migration file in the folder, in the order of its number', () => {
+    const files = readdirSync(new URL('../src/migrations/', import.meta.url)).filter((name) => /^\d{4}_.+\.ts$/.test(name))
     assert.deepStrictEqual(
-      actual,
-      checksums,
-      'A released migration changed. Add a new migration instead; for a new migration, add its checksum to src/migrations/checksums.ts.',
+      migrations.map((migration) => `${migration.key}.ts`),
+      files.toSorted(),
+    )
+    assert.deepStrictEqual(
+      migrations.map(idOf),
+      migrations.map((_, n) => n + 1),
     )
   })
 
