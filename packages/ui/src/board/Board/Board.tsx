@@ -16,6 +16,7 @@ import {
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BoardLane, unreachable } from '../../foundations/vocabulary'
+import { boardLaneText } from '../../foundations/vocabularyText'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { ListMotion } from '../../lib/ListMotion'
@@ -28,7 +29,7 @@ import s from './Board.module.css'
 
 /*
  * The board: every piece of a project's work, in the order it moves. Up
- * next, running, waiting on you, settled. Each lane holds its own kind of
+ * next, running, needs you, settled. Each lane holds its own kind of
  * object, because each is read differently: a queue says what it waits for,
  * a running task where it is, a call its choices, and settled work what it
  * came to. There is no held lane: a task held on a call stays in Up next,
@@ -59,12 +60,7 @@ export interface BoardText {
 }
 
 export const boardText: BoardText = {
-  lane: {
-    [BoardLane.Next]: 'Up next',
-    [BoardLane.Running]: 'Running',
-    [BoardLane.Yours]: 'Needs you',
-    [BoardLane.Settled]: 'Settled',
-  },
+  lane: boardLaneText,
   collapse: (lane) => `Collapse ${lane}`,
   expand: (lane, count) => `Expand ${lane}, ${count}`,
   stays: 'Needs you stays open while something waits on you',

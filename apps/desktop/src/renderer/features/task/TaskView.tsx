@@ -53,6 +53,7 @@ import {
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
+  taskStatusText,
   Thread,
   ThreadShellProvider,
   ThreadMeasure,
@@ -219,7 +220,7 @@ export const text = {
     return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
   },
   working: 'Working',
-  needsYou: 'Needs you',
+  needsYou: taskStatusText[TaskStatus.Yours],
   waiting: 'Waiting',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
@@ -238,7 +239,7 @@ export const text = {
   /** Changes its lead proposed to its issue wait for the person to apply. */
   issueChanges: kindWords.issueChanges,
   fileAll: (count: number) => `File all ${count}`,
-  done: 'Done',
+  done: taskStatusText[TaskStatus.Done],
   abandoned: 'Abandoned',
   idle: 'Idle',
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,

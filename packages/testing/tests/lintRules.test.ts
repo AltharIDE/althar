@@ -24,6 +24,7 @@ const testTime = await rule('budget.js', 'testTime')
 const specTime = await rule('budget.js', 'specTime')
 const systemKeys = await rule('keys.js', 'systemKeys')
 const noFutureDates = await rule('dates.js', 'noFutureDates')
+const statusWords = await rule('words.js', 'statusWords')
 
 const tsx = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'tsx' } } })
 const ts = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'ts' } } })
@@ -237,5 +238,37 @@ check(ts, 'no-future-dates', noFutureDates, {
     { code: `const day = '${tomorrow.slice(0, 10)}'`, errors: [{ messageId: 'future' }] },
     { code: `const json = '{"at":"${tomorrow}"}'`, errors: [{ messageId: 'future' }] },
     { code: `sql\`SELECT '${tomorrow}'\``, errors: [{ messageId: 'future' }] },
+  ],
+})
+
+check(ts, 'status-words', statusWords, {
+  valid: [
+    // The kit's words, and a word one place says differently, by its name.
+    `const text = { status: taskStatusText, lane: boardLaneText }`,
+    `const status = { ...taskStatusText, [TaskStatus.Done]: READY }`,
+    `const shown = { ...text.status, [status]: said }`,
+    // Words derived from the kit's, and what isn't a word.
+    `const status = { ...taskStatusText, [TaskStatus.Stopped]: \`\${taskStatusText[TaskStatus.Stopped]} by you\` }`,
+    `const RANK: Record<TaskStatus, number> = { [TaskStatus.Running]: 0, [TaskStatus.Yours]: 1 }`,
+    `const empty = { [BoardLane.Next]: { title: 'Nothing queued' } }`,
+    // Only a key written as a status's or a lane's member is the rule's.
+    `const kinds = { you: 'Needs you', 'running': 'Running' }`,
+    `const other = { [FoundState.Yours]: 'Needs you' }`,
+  ],
+  invalid: [
+    {
+      code: `const status = { [TaskStatus.Yours]: 'Waiting on you' }`,
+      errors: [{ messageId: 'word', data: { member: 'TaskStatus.Yours' } }],
+    },
+    { code: `const lane = { [BoardLane.Yours]: 'Needs you' }`, errors: [{ messageId: 'word', data: { member: 'BoardLane.Yours' } }] },
+    // A table written out, every word of it.
+    {
+      code: `const status = { [TaskStatus.Running]: 'Running', [TaskStatus.Done]: 'Done' } satisfies Record<TaskStatus, string>`,
+      errors: [{ messageId: 'word' }, { messageId: 'word' }],
+    },
+    // One word over the kit's, written out.
+    { code: `const status = { ...taskStatusText, [TaskStatus.Done]: 'Ready' }`, errors: [{ messageId: 'word' }] },
+    { code: `const status = { [TaskStatus.Stopped]: \`Stopped by you\` }`, errors: [{ messageId: 'word' }] },
+    { code: `const status = { [TaskStatus.Queued]: 'Waiting' as const }`, errors: [{ messageId: 'word' }] },
   ],
 })

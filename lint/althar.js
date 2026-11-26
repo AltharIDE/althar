@@ -9,6 +9,7 @@ import { layers } from './layers.js'
 import { pressAtOnce } from './press.js'
 import { oneRemoval } from './removal.js'
 import { offTheThread } from './thread.js'
+import { statusWords } from './words.js'
 
 /* Althar's own lint rules, one file each; vite.config.ts says where each applies. */
 export default definePlugin({
@@ -24,5 +25,6 @@ export default definePlugin({
     'no-future-dates': noFutureDates,
     layers,
     'exported-where-made': exportedWhereMade,
+    'status-words': statusWords,
   },
 })
