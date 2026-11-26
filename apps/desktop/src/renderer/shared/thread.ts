@@ -15,6 +15,7 @@ import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@a
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending, locallyReading, messageMove } from './items'
+import { allIn, type ErrandMerges, type MergingBlock, mergingOf, newestCards } from './merging'
 import { took } from './time'
 import { type Spent, spentOf, turnOfItems } from './turnTime'
 
@@ -271,6 +272,8 @@ export type Block =
   | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
   /** The merge line for a branch: one card, kept current in place. */
   | { readonly kind: 'merge_line'; readonly id: string; readonly line: MergeLineContent }
+  /** What is on its way into a branch, as one line at the thread's foot, under whatever was said since (merging.ts). */
+  | MergingBlock
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -838,6 +841,11 @@ export const blocksOf = (
   const deliveryOf = new Map<string, string | undefined>()
   /** When each part was first heard, by its id: how long a thought took is read from them. */
   const atOf = new Map<string, string>()
+  /** Each branch's newest merge card, which the foot holds while it moves; the cards moving; what merges kept for later wait for. */
+  const newestCard = newestCards(source.items)
+  const moving: Array<MergeLineContent> = []
+  const onCards = new Set<string>()
+  const errands = new Map<string, ErrandMerges>()
   const add = (agentId: string | null, at: string, part: Part, model: string | null = null, delivery?: string) => {
     atOf.set(part.id, at)
     const last = blocks.at(-1)
@@ -977,9 +985,17 @@ export const blocksOf = (
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
       case 'merge_line':
-        blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
+        for (const row of item.content.rows) onCards.add(`#${row.number}`)
+        // A card still moving is the foot's, kept current under whatever was said since; one all in stands where it was asked.
+        if (newestCard.has(item.id) && !allIn(item.content)) moving.push(item.content)
+        else blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
         continue
       case 'notice':
+        // An errand that merges, moving on: what it waits for joins the foot, and its line folds there.
+        if (item.content.errand !== undefined) {
+          errands.set(item.content.errand.id, item.content.errand)
+          if (item.content.errand.quiet) continue
+        }
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
         // The agent's context compacted: a line of its own, with what it kept behind it.
@@ -1126,7 +1142,9 @@ export const blocksOf = (
             ),
     }
   })
-  if (!waiting || askedWhen == null) return drawn
+  const merging = mergingOf(moving, errands, onCards)
+  const footed = merging === null ? drawn : [...drawn, merging]
+  if (!waiting || askedWhen == null) return footed
   // Counted from when it was asked, through the agent's start where it starts for it. Where it waited behind something first,
   // as what the person sent while the agent was at work, or a task's request behind its setup, from when the turn on it started,
   // or from when it was asked where that is later, as when the turn heard of is the one before; uncounted until then.
@@ -1147,5 +1165,7 @@ export const blocksOf = (
       took: since !== null && waited >= WAIT.counted ? took(new Date(since).toISOString(), now) : null,
       slow: waited >= WAIT.slow,
     },
+    // The foot stays the foot, under the reply on its way too.
+    ...(merging === null ? [] : [merging]),
   ]
 }

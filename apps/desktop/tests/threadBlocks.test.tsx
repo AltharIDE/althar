@@ -76,12 +76,16 @@ describe('Althar’s lines and a step’s report', () => {
 })
 
 describe('the merge line', () => {
-  it('draws the line as one card, each pull request linked with where it stands, and no line of chat', () => {
+  it('draws a line still moving at the thread’s foot, each by its number, opening to a row for each linked with where it stands', async () => {
     show([items.mergeLine()])
-    const card = screen.getByRole('region', { name: 'Merge line' })
-    expect(card.querySelectorAll('li')).toHaveLength(4)
+    const line = screen.getByRole('region', { name: 'Merging' })
+    for (const number of ['#778', '#783', '#773', '#779']) expect(line.textContent).toContain(number)
+    // Closed, it is one line: the rows wait behind it.
+    expect(screen.queryByRole('link', { name: /#783/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Merging/ }))
+    expect(line.querySelectorAll('li')).toHaveLength(4)
     expect(screen.getByRole('link', { name: /#783/ }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/783')
-    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getByText(word)).toBeTruthy()
+    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getAllByText(word).length).toBeGreaterThan(0)
     // Nothing of the internal name, the repository or a number said twice.
     expect(screen.queryByText(/merge line,|AltharIDE|of meridian/i)).toBeNull()
   })
@@ -102,7 +106,7 @@ describe('the merge line', () => {
     expect(screen.queryByText('Waiting')).toBeNull()
   })
 
-  it('says what is wrong with a pull request sent back, and what to do', () => {
+  it('says what is wrong with a pull request sent back, and what to do', async () => {
     show([
       items.mergeLine({
         rows: [
@@ -116,7 +120,10 @@ describe('the merge line', () => {
         ],
       }),
     ])
-    expect(screen.getByText('Sent back')).toBeTruthy()
+    // Closed, why stands under the line; opened, its row says so.
+    expect(screen.getByText(/#773 sent back\./).parentElement?.textContent).toContain('Checks failed. It goes back in once they pass.')
+    await userEvent.click(screen.getByRole('button', { name: /Merging/ }))
+    expect(screen.getByText('Sent back', { selector: 'li span' })).toBeTruthy()
     expect(screen.getByText('Checks failed. It goes back in once they pass.')).toBeTruthy()
   })
 })

@@ -16,6 +16,8 @@ import {
   failedNote,
   heldNote,
   keptNote,
+  type MergeLeft,
+  mergesLeft,
   resumedNote,
   type SaidStep,
   stepNote,
@@ -297,23 +299,31 @@ export class Errands extends Context.Service<
           if (row === undefined || access.role === 'reviewer') return yield* refused('This errand does not belong to this thread.')
           return row
         })
-      const noteContent = (note: StepNote) => ({
+      const noteContent = (note: StepNote, errand?: { id: string; quiet: boolean; merges: ReadonlyArray<MergeLeft> }) => ({
         source: 'runtime',
         severity: 'info',
         title: note.title,
         description: null,
         ...(note.links.length === 0 ? {} : { links: note.links }),
         ...(note.details === undefined ? {} : { details: note.details }),
+        ...(errand === undefined ? {} : { errand }),
       })
-      const say = (row: ErrandRow, said: string | StepNote) =>
+      /**
+       * An errand's line, in its thread and its tasks'. One of an errand that only merges says what is left to merge, so the
+       * thread can fold it into its merging line; `quiet` where it only says the errand moved on, not what needs the person.
+       */
+      const say = (row: ErrandRow, line: string | StepNote, quiet = false) =>
         Effect.gen(function* () {
-          const note: StepNote = typeof said === 'string' ? { title: said, links: [] } : said
-          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', noteContent(note))
+          const note: StepNote = typeof line === 'string' ? { title: line, links: [] } : line
+          const steps = yield* sql<StepRow & { taskTitle: string | null }>`SELECT s.*, t.title AS task_title FROM errand_steps s
+            LEFT JOIN tasks t ON t.id = s.task_id WHERE s.errand_id = ${row.id} ORDER BY s.position`
+          const merges = mergesLeft(steps.map((step) => ({ step: said(step), done: step.state === 'done', task: step.taskTitle })))
+          const content = noteContent(note, merges === null ? undefined : { id: row.id, quiet, merges })
+          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', content)
           const tasks = yield* sql<{ taskId: string; threadId: string }>`SELECT DISTINCT s.task_id, t.id AS thread_id FROM errand_steps s
         JOIN threads t ON t.task_id = s.task_id AND t.kind = 'task' WHERE s.errand_id = ${row.id}`
           for (const task of tasks) {
-            if (task.threadId !== row.threadId)
-              yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', noteContent(note))
+            if (task.threadId !== row.threadId) yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', content)
             yield* touchTask(task.taskId)
           }
         })
@@ -443,7 +453,7 @@ export class Errands extends Context.Service<
               actorId: instance.systemId,
               payload: { messageId, steps },
             })
-            yield* say(row, keptNote(words, steps))
+            yield* say(row, keptNote(words, steps), true)
             return id
           }),
         )
@@ -533,11 +543,11 @@ export class Errands extends Context.Service<
                   if (errand !== undefined && step !== undefined) {
                     yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${errand.id} AND step_key = ${step.stepKey}`
                     const next = (yield* stepsOf(errand.id)).find((s) => s.state !== 'done')
-                    if (kept.saidAt === null) yield* say(errand, afterStep(note, next === undefined ? undefined : said(next)))
+                    if (kept.saidAt === null) yield* say(errand, afterStep(note, next === undefined ? undefined : said(next)), true)
                     if (errand.state !== 'done' && next === undefined) {
                       yield* set(errand, 'done', null)
                       // Its last step's note said so; where that was said before, the errand ending still gets its line.
-                      if (kept.saidAt !== null) yield* say(errand, 'Errand done')
+                      if (kept.saidAt !== null) yield* say(errand, 'Errand done', true)
                     }
                   } else if (kept.saidAt === null)
                     yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
@@ -688,7 +698,8 @@ export class Errands extends Context.Service<
                     yield* change('work_items', pending.workItemId, { state: 'uncertain', updatedAt: yield* timestamp })
                   }
                   const note = stepNote(tool, action.target, action.request, answer.answer)
-                  if (errand !== undefined) yield* say(errand, note)
+                  // The host took it and lands it later: the errand moving on, which its merging line shows.
+                  if (errand !== undefined) yield* say(errand, note, true)
                   else yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
                 }),
               )
@@ -747,7 +758,7 @@ export class Errands extends Context.Service<
                   actorId: instance.systemId,
                   payload: { messageId, words },
                 })
-                yield* say(row, resumedNote((yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)))
+                yield* say(row, resumedNote((yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)), true)
                 return 'Resumed the errand on the person’s word.'
               }),
             ),
