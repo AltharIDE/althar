@@ -1,6 +1,7 @@
 import { type ReactElement, useRef } from 'react'
 
 import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSegments, MenuSeparator, MenuSwitchItem } from '../../primitives/Menu/Menu'
+import { Icon } from '../../foundations/Icon/Icon'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
@@ -306,6 +307,8 @@ export function TaskMenu({
             <MenuRadioItem
               key={option.value}
               value={option.value}
+              // The home and its workers, marked as Runs on marks them on a plan.
+              lead={<Icon name={option.value === 'home' ? 'house' : 'worker'} size={13} />}
               {...(option.hint === undefined ? {} : { hint: option.hint })}
               {...(option.value === runsOn.value || option.disabled === true ? {} : { description: t.runsOnAbout })}
               {...(option.disabled === true ? { disabled: true } : {})}
