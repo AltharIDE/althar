@@ -247,7 +247,7 @@ export const RunsOn: Story = {
       value: 'home',
       places: [
         { value: 'home', label: 'This Mac' },
-        { value: 'wrk_a', label: 'runner-1', hint: '12 GB free · Installs Bun first' },
+        { value: 'wrk_a', label: 'runner-1', hint: '12 GB free' },
         { value: 'wrk_b', label: 'runner-2', hint: 'Sandbox can’t start', disabled: true },
       ],
       onMove: fn(),
