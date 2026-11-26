@@ -6,6 +6,7 @@ import type { Host } from '../../data/services'
 import { useServices } from '../../data/services'
 import { ConnectHome } from './ConnectHome'
 import { ManageHomes } from './ManageHomes'
+import { PhonesDialog } from '../phones/PhonesDialog'
 import { SetupChip } from './SetUp'
 import { homesUi, livenessOf, openedAgo, useHomeSetup, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
 import s from './Homes.module.css'
@@ -14,7 +15,8 @@ import s from './Homes.module.css'
  * The window's home is one chip at the end of its bar: in a home's window,
  * its name; in this computer's, a plug, including before the first connection.
  * Its menu is the chooser: this computer and each
- * home, Connect a home…, Manage homes…. A dropped connection shows in the
+ * home, Connect a home…, Manage homes…, then Pair a phone… for the window's
+ * home. A dropped connection shows in the
  * chip itself, with Reconnect beside it: the window stays as it was,
  * readable, and nothing covers it.
  */
@@ -91,6 +93,10 @@ function HomesMenu({
           Manage homes…
         </MenuItem>
       )}
+      <MenuSeparator />
+      <MenuItem icon="phone" onSelect={() => homesUi.set({ dialog: 'phones' })}>
+        Pair a phone…
+      </MenuItem>
     </Menu>
   )
 }
@@ -98,7 +104,25 @@ function HomesMenu({
 /** At the bar's end: the home's name in its window; a plug in this computer's, including for its first connection. */
 export function HomeButton() {
   const { host } = useServices()
-  return host.homes === undefined ? null : <Chip homes={host.homes} />
+  return host.homes === undefined ? null : (
+    <>
+      <Chip homes={host.homes} />
+      <PhonesFromMenu homes={host.homes} />
+    </>
+  )
+}
+
+/** Pair a phone…, opened from the menu: here, with the window's services, which the dialog reaches the home through. */
+function PhonesFromMenu({ homes }: { homes: HomesHost }) {
+  const here = useHomeState(homes)
+  const { dialog } = useHomesUi()
+  if (dialog !== 'phones' || here === null) return null
+  return (
+    <PhonesDialog
+      home={here.current.kind === 'local' ? 'This Mac' : here.current.home.name}
+      onClose={() => homesUi.set({ dialog: null })}
+    />
+  )
 }
 
 export function Chip({ homes }: { homes: HomesHost }) {

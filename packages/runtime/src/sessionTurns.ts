@@ -32,12 +32,12 @@ import {
   type ThreadContext,
   type Why,
   asTold,
-  automaticCompactionDue,
   compactedSpan,
   compactedWords,
   errorClassOf,
   foldersOf,
   heardContext,
+  idleCompactionDue,
   markCompacted,
   promptFor,
   sentWithWords,
@@ -58,6 +58,7 @@ export interface SessionTurnsDependencies {
     taskId: string,
   ) => Effect.Effect<{ aside: boolean; brought: boolean; unsaid: boolean }, SqlError.SqlError, SqlClient.SqlClient>
   readonly betweenAgents: Duration.Duration
+  readonly compactionIdle: number
   readonly changeHeads: (
     threadId: string,
   ) => Effect.Effect<{ head: string; name: string; own: string | null; path: string }[] | undefined, never, SqlClient.SqlClient>
@@ -156,6 +157,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
   const {
     applyLead,
     betweenAgents,
+    compactionIdle,
     changeHeads,
     heardBackground,
     heardPlan,
@@ -254,10 +256,12 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       ].join('\n\n')
     }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not brief an aside that became work', cause), null)))
 
-  /** Delivers the queued input as one turn, and records it to its end. */
   const undoing = new Map<string, Deferred.Deferred<void>>()
 
-  const deliver = (running: Running) =>
+  const idleDue = (running: Running) => Effect.map(Clock.currentTimeMillis, (now) => idleCompactionDue(running, now, compactionIdle))
+
+  /** Delivers queued input, or a separate idle compaction, and records the turn to its end. */
+  const deliver = (running: Running, autoCompact = false) =>
     Effect.gen(function* () {
       if (undoing.has(running.thread.threadId)) return false
       const sql = yield* SqlClient.SqlClient
@@ -266,18 +270,25 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         return false
       // A session being replaced takes no more turns. Keep queued inputs for the replacement.
       if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) return false
+      const idleCanStart = Effect.gen(function* () {
+        if (inputBatches.pending(thread.threadId) || !(yield* idleDue(running)) || (yield* inputWaiting(thread.threadId))) return false
+        return thread.role !== 'task' || (yield* runnableGoal(thread.threadId)) === null
+      })
+      if (autoCompact && !(yield* idleCanStart)) return false
       // A model or effort chosen from here is kept for the turn after this one: it is the lead as it stands now that goes out.
       running.leadHeld = true
-      yield* inputBatches.ready(thread.threadId)
+      if (!autoCompact) yield* inputBatches.ready(thread.threadId)
       // From here to its prompt going out is the turn getting ready, which its timings keep (turnTimes.ts).
       const readying = yield* Clock.currentTimeMillis
-      // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
+      // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it. A session's
+      // first turn, its brief, takes up the lead picked while it started (`adopt`), though nothing else waits.
+      const briefing = running.adoptedLead === true && running.brief !== undefined && running.waitsForWords !== true
       const availableGoal = thread.role === 'task' && thread.helper === undefined ? yield* runnableGoal(thread.threadId) : null
       if (availableGoal !== null && availableGoal.rounds >= availableGoal.roundLimit)
         yield* endGoalRound(thread.threadId, availableGoal.revision, null)
       const goal = availableGoal !== null && availableGoal.rounds < availableGoal.roundLimit ? availableGoal : null
       const hasWork = () => (goal !== null ? Effect.succeed(true) : inputWaiting(thread.threadId))
-      if (running.nextLead !== undefined && (yield* hasWork())) {
+      if (running.nextLead !== undefined && (briefing || (yield* hasWork()))) {
         const next = running.nextLead
         if (next.agentId !== running.entry.definition.id) {
           if (!(yield* setLeadChoice(running, undefined, { after: next }))) return true
@@ -340,11 +351,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const compactAt = queued.findIndex((input) => input.body === COMPACT)
       const beforeCompact = compactAt === -1 ? queued : queued.slice(0, compactAt)
       const manualCompact = compactAt >= 0 && beforeCompact.every((input) => input.state === 'noted')
-      // Compact a full coordinator as its turn ends. A lead waits for its next message or goal round.
-      const autoCompact =
-        compactAt === -1 &&
-        automaticCompactionDue(running) &&
-        (thread.role === 'coordinator' || goal !== null || queued.some((input) => input.state === 'queued'))
+      if (autoCompact && (goal !== null || waiting.some((input) => input.state === 'queued'))) return false
       const compacting = manualCompact || autoCompact
       const selected = autoCompact ? [] : manualCompact ? queued.slice(compactAt, compactAt + 1) : beforeCompact
       const before = running.context
@@ -459,7 +466,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             const still = waiting.filter((input) => !running.blockedInputs?.has(input.id))
             if (
               inputBatches.pending(thread.threadId) ||
-              (autoCompact && !automaticCompactionDue(running)) ||
+              (autoCompact && !(yield* idleCanStart)) ||
               still.length !== queued.length ||
               still.some((input, index) => input.id !== queued[index]?.id)
             )
@@ -538,8 +545,9 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       if (!compacting) {
         running.brief = undefined
         running.waitsForWords = undefined
+        running.adoptedLead = undefined
         if (knowsTime && (brief !== undefined || timeNews !== null)) running.timeTold = { at: timeNow, zone }
-      } else if (contextFull(before, thread.role === 'task')) running.compactAttempted = true
+      } else if (!autoCompact && contextFull(before, thread.role === 'task')) running.compactAttempted = true
       running.turnRunning = true
       running.stoppedByPerson = false
       running.turnStartedAt = yield* Clock.currentTimeMillis
@@ -707,7 +715,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         ...(asked?.files ?? []),
         ...inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])]),
       ]
-      yield* notingListening(running)
+      if (!autoCompact) yield* notingListening(running)
       // A turn that fails before its prompt reaches the agent never has one to stop: told either way, so an interrupt
       // waiting for it doesn't wait forever.
       let prevented = false
@@ -722,6 +730,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
           // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
           const admitted = yield* sql.withTransaction(
             Effect.gen(function* () {
+              if (autoCompact && !(yield* idleCanStart)) return false
               if (goalRound && (inputBatches.pending(thread.threadId) || (yield* inputWaiting(thread.threadId)))) return false
               if (activeGoal !== null && !(yield* startGoalRound(thread.threadId, activeGoal, goalRound))) return false
               const revision = yield* change('turn_deliveries', turnId, { state: 'delivered', deliveredAt: yield* timestamp })
@@ -756,10 +765,16 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             return
           }
           // Recording delivery and dispatch are one boundary: any crash from here may have reached the agent.
-          if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) {
+          if (
+            running.stopping ||
+            running.handover === 'under_way' ||
+            threads.get(thread.threadId) !== running ||
+            (autoCompact && (inputBatches.pending(thread.threadId) || !(yield* idleDue(running))))
+          ) {
             prevented = true
             return
           }
+          if (autoCompact) running.compactAttempted = true
           return yield* Stream.runForEach(running.agent.prompt(prompt, parts, run(started)), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
@@ -798,7 +813,8 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       running.turnRunning = false
       running.promptSent = null
       running.goalRoundTurn = undefined
-      running.turnEndedAt = yield* Clock.currentTimeMillis
+      const endedAt = yield* Clock.currentTimeMillis
+      if (!autoCompact || !prevented) running.turnEndedAt = endedAt
       // Its copies made fresh again for its next turn now, while the person reads and writes, rather than as they wait.
       if (readsCopies) yield* copiesAfter(thread.projectId)
       // A model or effort chosen while the turn ran is set on its agent now, rather than when something is said next.
@@ -826,8 +842,8 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         place: spent.place + Math.max(0, placed?.waited ?? 0),
         session: spent.starting === null ? 0 : spent.session,
         starting: spent.starting,
-        work: Math.max(0, running.turnEndedAt - (running.turnStartedAt ?? running.turnEndedAt)),
-        tools: tools.total(running.turnEndedAt),
+        work: Math.max(0, endedAt - (running.turnStartedAt ?? endedAt)),
+        tools: tools.total(endedAt),
         ...(committed.length === 0 ? {} : { changes: committed }),
         ready: Math.max(0, ready),
         ...(copies === undefined ? {} : { copies: Math.max(0, copies) }),
@@ -1023,7 +1039,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         yield* Effect.forkIn(run(dependencies.handOver(running, { lost: typeof said === 'string' ? said : '' })), sessionsScope)
       }
       // Out of usage, or out of reach, nothing more goes to it until what carries the work on says so.
-      return !prevented && (!refused || autoCompact) && !held && !lost && running.deliveryHeld !== 'recovery'
+      return (!prevented || autoCompact) && (!refused || autoCompact) && !held && !lost && running.deliveryHeld !== 'recovery'
     }).pipe(
       Effect.ensuring(
         Effect.suspend(() => {
@@ -1114,6 +1130,12 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
         : Effect.ignore(run(touchTask(running.thread.taskId)))
     })
 
+  const compactWhileIdle = (running: Running) =>
+    Effect.gen(function* () {
+      if (!(yield* idleDue(running)) || Option.isSome(yield* limits.outAccount(running.account.id))) return false
+      return yield* deliver(running, true)
+    })
+
   /** Delivers queued input, one turn at a time, until the session stops. */
   const deliveries = (running: Running) =>
     Effect.forever(
@@ -1176,6 +1198,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
               while (!running.stopping && (yield* deliver(running))) {
                 // Each turn may leave more input queued, such as what arrived while it ran.
               }
+              if (yield* compactWhileIdle(running)) yield* Queue.offer(running.wake, undefined)
             }).pipe(contained('Sessions.deliver', () => undefined, running.entry.definition.id)),
           )
         // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
@@ -1188,7 +1211,11 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             (thread.role === 'task' && thread.helper === undefined && (yield* runnableGoal(thread.threadId)) !== null)
           )
         )
-          return
+          return yield* run(running.delivering.withPermits(1)(compactWhileIdle(running))).pipe(
+            Effect.tap((more) => (more ? Queue.offer(running.wake, undefined) : Effect.void)),
+            Effect.asVoid,
+            Effect.catchCause((cause) => Effect.logWarning('Could not compact an idle session', cause)),
+          )
         // A compaction is one call of the agent's own, and loads nothing here: it never waits for a place.
         const delivered = (effect: Effect.Effect<boolean, unknown, Store>) =>
           run(effect).pipe(

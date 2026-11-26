@@ -196,7 +196,7 @@ describe('what other tools left, as tiles', () => {
 
 function Start({ onProject = vi.fn() }: { onProject?: (id: string) => void }) {
   const start = useStart()
-  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} home={() => null} />
+  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} onNew={() => {}} home={() => null} />
 }
 
 const reading: FolderReading = {

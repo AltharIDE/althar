@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState, type ComponentProps } from 'react'
+import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
@@ -12,15 +12,10 @@ import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { BlockerStands, TaskEnd, WorksIn } from '../../foundations/vocabulary'
-import { Select } from '../../primitives/Select/Select'
-import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
+import { TaskLaunch, type LaunchPick, type LaunchPlace, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
-function usePicker(
-  steps: readonly LaunchStep[],
-  setSteps: (s: readonly LaunchStep[]) => void,
-  room?: ComponentProps<typeof ModelPick>['room'],
-) {
+function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
@@ -30,7 +25,6 @@ function usePicker(
         variant="field"
         placement="below"
         owner={owner}
-        room={room}
         model={agent}
         pinned={prefs.pinned}
         effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
@@ -56,11 +50,10 @@ function Launch({
   plan = PLAN_432,
   wait,
   onStart = () => {},
-  room,
   ...rest
-}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[]; room?: ComponentProps<typeof ModelPick>['room'] }) {
+}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[] }) {
   const [steps, setSteps] = useState<readonly LaunchStep[]>(plan)
-  const picker = usePicker(steps, setSteps, room)
+  const picker = usePicker(steps, setSteps)
   return (
     <TaskLaunch
       task="432"
@@ -160,50 +153,147 @@ export const Held: Story = {
   },
 }
 
-export const HeldWithWorker: Story = {
+const PLACES: readonly LaunchPlace[] = [
+  { value: 'home', label: 'This Mac', kind: 'home' },
+  { value: 'auto', label: 'Any free worker', kind: 'any' },
+  { value: 'wrk_3f9a2c', label: 'Linux worker 3f9a2c', kind: 'worker', hint: '12 GB free' },
+  { value: 'wrk_b71e04', label: 'Linux worker b71e04', kind: 'worker', hint: 'At work', disabled: true },
+  { value: 'wrk_c0d2f8', label: 'Linux worker c0d2f8', kind: 'worker', hint: 'No Claude Code', disabled: true },
+]
+
+/** Held, where the home has workers: where it runs, beside where it works, a menu of the home and its workers. */
+export const HeldWithWorkers: Story = {
   render: function Render() {
-    const [worker, choose] = useState('home')
+    const [place, choose] = useState('home')
     return (
       <Launch
         held
         estimate={undefined}
-        footNote={
-          <>
-            <Select
-              label="Run on"
-              variant="filled"
-              value={worker}
-              options={[
-                { value: 'home', label: 'This home' },
-                { value: 'auto', label: 'Best available worker' },
-                { value: 'worker', label: 'Linux worker aaaaaa' },
-              ]}
-              onChange={choose}
-            />
-            {worker !== 'home' && (
-              <>
-                {' '}
-                <span role="status">Setup and lead run on the worker. Review runs on this home.</span>
-              </>
-            )}
-          </>
-        }
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: PLACES, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
       />
     )
   },
 }
 
-export const HeldWithAutomaticPlacement: Story = {
-  ...HeldWithWorker,
+/** Its menu open: each worker with how it stands at its row's end, one that can't take it greyed, and what a worker runs at its foot. */
+export const WorkersOpen: Story = {
+  ...HeldWithWorkers,
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Run on' }))
-    await userEvent.click(await within(document.body).findByRole('option', { name: 'Best available worker' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await expect(await within(document.body).findByRole('menuitemradio', { name: 'Linux worker b71e04' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
   },
 }
 
-export const HeldOnHome: Story = {
-  render: () => <Launch held estimate={undefined} footNote={<span role="status">A worker needs a task with one repository.</span>} />,
+const CHECKED: readonly LaunchPlace[] = [
+  { value: 'home', label: 'This Mac', kind: 'home' },
+  { value: 'auto', label: 'Any free worker', kind: 'any' },
+  { value: 'wrk_runner1', label: 'runner-1', kind: 'worker', hint: '12 GB free · Installs Bun first' },
+  { value: 'wrk_runner2', label: 'runner-2', kind: 'worker', hint: 'Sandbox can’t start', disabled: true },
+  { value: 'wrk_runner3', label: 'runner-3', kind: 'worker', hint: 'Claude Code signed out', disabled: true },
+]
+
+/** Workers as their own checks found them: one ready, installing Bun first for this project; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
+export const WorkersChecked: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: CHECKED, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await expect(await within(document.body).findByRole('menuitemradio', { name: 'runner-2' })).toHaveAttribute('aria-disabled', 'true')
+  },
 }
+
+/** Set to run on a worker whose agent doesn't offer the lead's model: Start waits until the picker has one it does. */
+export const ModelNotOnTheWorker: Story = {
+  render: () => (
+    <Launch
+      held
+      estimate={undefined}
+      worksIn={WorksIn.Worktree}
+      runsOn={{
+        value: 'wrk_runner1',
+        places: CHECKED,
+        onChange: fn(),
+        problem: 'runner-1 doesn’t offer Claude Opus 5. Pick a model it has.',
+      }}
+      startDisabled
+    />
+  ),
+}
+
+/** Set to run on any free worker. */
+export const OnAnyFreeWorker: Story = {
+  ...HeldWithWorkers,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Any free worker' }))
+    await expect(within(canvasElement).getByRole('button', { name: 'Runs on: Any free worker' })).toBeInTheDocument()
+  },
+}
+
+/** The worker it was set to run on took another task: Start waits, and the line under the head goes back to the home. */
+export const WorkerTaken: Story = {
+  render: function Render() {
+    const [place, choose] = useState('wrk_3f9a2c')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{
+          value: place,
+          places: PLACES,
+          onChange: choose,
+          ...(place === 'home' ? {} : { problem: 'Linux worker 3f9a2c is at work on another task.' }),
+        }}
+        startDisabled={place !== 'home'}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Start' })).toBeDisabled()
+    await userEvent.click(c.getByRole('button', { name: 'Use This Mac' }))
+    await expect(c.getByRole('button', { name: 'Start' })).toBeEnabled()
+  },
+}
+
+/** Counting down, where the home has workers: a worker chosen now is where the countdown starts it, and the clock goes on. */
+export const CountingDownWithWorkers: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        wait={60}
+        startsAt={Date.now() + 60_000}
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: PLACES, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Linux worker 3f9a2c' }))
+    await expect(c.getByRole('button', { name: 'Runs on: Linux worker 3f9a2c' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start now' })).toBeEnabled()
+  },
+}
+
+export const CountingDownWithWorkersDark: Story = { ...CountingDownWithWorkers, globals: { theme: 'dark' } }
 
 const started = fn()
 
@@ -257,17 +347,6 @@ export const AReview: Story = {
     await expect(reviewStarted).not.toHaveBeenCalled()
   },
 }
-
-/** The reviewer's usage stays out of its model picker. */
-const reviewerNearly = (left: number): Story => ({
-  render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
-  play: async ({ canvasElement }) => {
-    const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
-    await expect(within(canvasElement).queryByText(said)).toBeNull()
-  },
-})
-export const ReviewerNearlyOut: Story = reviewerNearly(4)
-export const ReviewerOut: Story = reviewerNearly(0)
 
 const heldChanged = fn()
 const startedHeld = fn()

@@ -5,6 +5,7 @@ import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 import { messageOf, type OnePress, type StuckAnswer } from '../../data/client'
 import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
+import { unmovedWhy } from '../../shared/calls'
 import { headsOf } from '../../shared/mergeHere'
 import { planIt } from '../../shared/planIt'
 
@@ -58,6 +59,8 @@ export interface WorkActions {
   readonly resolveNow: (taskId: string) => Promise<boolean>
   /** Settles a finished task that isn't a change as Done; whether it went through. */
   readonly markDone: (taskId: string) => Promise<boolean>
+  /** Abandons a task, asked first by the caller: a plan up next that hasn't begun, from its row's menu; whether it went through. */
+  readonly abandon: (taskId: string) => Promise<boolean>
   /** Takes a finished task that isn't a change out of Needs you, kept for later; whether it went through. */
   readonly keep: (taskId: string) => Promise<boolean>
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
@@ -93,9 +96,10 @@ const READ_NOTHING = () => Promise.resolve(undefined)
 /** Where Done and Keep for later move a card: settled, or kept for later, as the runtime's card then says. */
 type Settling = Extract<BoardTask['phase'], 'settled' | 'kept'>
 
-/** What the window says where the runtime answered Done or Keep for later but the task didn't move. */
-export const workText = {
-  stillOpen: 'Something of it opened meanwhile, so it stays as it was.',
+/** Where a press moved a card, and, abandoned, that it was: Settled says so, not Done. */
+interface Moved {
+  readonly to: Settling
+  readonly state?: 'abandoned'
 }
 
 /**
@@ -109,13 +113,18 @@ export const useWorkActions = (
 ): WorkActions => {
   const { client } = useServices()
   // The cards moved by Done or Keep for later, by task, until a read of each says so.
-  const [moved, setMoved] = useState<ReadonlyMap<string, Settling>>(new Map())
+  const [moved, setMoved] = useState<ReadonlyMap<string, Moved>>(new Map())
   const agreed =
-    tasks === null ? [] : [...moved].filter(([taskId, to]) => (tasks.find((task) => task.taskId === taskId)?.phase ?? to) === to)
+    tasks === null ? [] : [...moved].filter(([taskId, { to }]) => (tasks.find((task) => task.taskId === taskId)?.phase ?? to) === to)
   if (agreed.length > 0) setMoved((now) => new Map([...now].filter(([taskId]) => !agreed.some(([one]) => one === taskId))))
   const over = useCallback(
     <T extends BoardTask>(shown: ReadonlyArray<T>): ReadonlyArray<T> =>
-      moved.size === 0 ? shown : shown.map((task) => (moved.has(task.taskId) ? { ...task, phase: moved.get(task.taskId)! } : task)),
+      moved.size === 0
+        ? shown
+        : shown.map((task) => {
+            const one = moved.get(task.taskId)
+            return one === undefined ? task : { ...task, phase: one.to, ...(one.state === undefined ? {} : { state: one.state }) }
+          }),
     [moved],
   )
   // The tasks read again from after a press's answer: what failed to read is the feed's to catch up on.
@@ -168,7 +177,7 @@ export const useWorkActions = (
       taskId: string,
       act: () => Promise<unknown>,
       action: 'push' | 'merge' | 'ship' | 'other' = 'other',
-      to?: Settling,
+      to?: Moved,
     ) => {
       const set = (on: boolean) =>
         mark((now) => {
@@ -194,7 +203,8 @@ export const useWorkActions = (
         if (to !== undefined) {
           // Read afresh after the answer, as an aside's Clear is: one the runtime answered without moving comes back, saying so.
           const now = after?.find((task) => task.taskId === taskId)
-          if (now !== undefined && now.phase !== to) throw new ApiError({ reason: 'Unchanged', message: workText.stillOpen })
+          if (now !== undefined && now.phase !== to.to)
+            throw new ApiError({ reason: 'Unchanged', message: unmovedWhy({ phase: now.phase, pullOpen: now.change?.state === 'open' }) })
         }
         return true
       } catch (failure) {
@@ -209,9 +219,10 @@ export const useWorkActions = (
     [fail, readAfter],
   )
 
-  /** Done or Keep for later: the card moved from the press, until a read says so. */
+  /** Done, Keep for later or Abandon: the card moved from the press, until a read says so. */
   const settle = useCallback(
-    (taskId: string, to: Settling, act: () => Promise<unknown>) => busy(setSettling, taskId, act, 'other', to),
+    (taskId: string, to: Settling, act: () => Promise<unknown>, state?: Moved['state']) =>
+      busy(setSettling, taskId, act, 'other', state === undefined ? { to } : { to, state }),
     [busy],
   )
 
@@ -240,6 +251,8 @@ export const useWorkActions = (
       },
       [settle, client, pressed, inNeeds],
     ),
+    // Asked first by the caller, it moves at once; not a card of Needs you, so not a press kept as one.
+    abandon: useCallback((taskId) => settle(taskId, 'settled', () => client.abandonTask(taskId), 'abandoned'), [settle, client]),
     keep: useCallback(
       async (taskId) => {
         const from = inNeeds(taskId)

@@ -1,0 +1,240 @@
+import type { RegisteredClient } from '@althar/contracts'
+import { ApiError } from '@althar/contracts'
+import { act, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { PairPhone } from '@althar/ui'
+
+import { PhonesDialog } from '../src/renderer/features/phones/PhonesDialog'
+import { fakeClient } from './fixtures'
+import { withServices } from './render'
+
+/*
+ * Pair a phone… from the homes menu: This Mac lets phones in at a press, the
+ * code shows as a QR and to paste, the dialog hears when a phone used it, and
+ * the phones it paired are listed and come off at once.
+ */
+
+const iPhone: RegisteredClient = {
+  deviceId: 'dev_1a2b3c4d5e6f708192a3b4c5d6e7f809',
+  name: 'iPhone',
+  publicKey: 'A'.repeat(43),
+  role: 'socket',
+  revision: 1,
+  createdAt: new Date(Date.now()).toISOString(),
+  revokedAt: null,
+}
+const pixel: RegisteredClient = {
+  ...iPhone,
+  deviceId: 'dev_9f8e7d6c5b4a39281706f5e4d3c2b1a0',
+  name: 'Pixel 9',
+  createdAt: '2026-10-12T09:00:00.000Z',
+}
+const code = `althar-pairing1.${btoa(JSON.stringify({ homeId: 'home_5c1e0a7d93b24f6e8a01c2d3e4f5a6b7', tlsKeyPin: 'a'.repeat(64) }))
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/, '')}`
+const made = () => ({
+  code,
+  link: `https://althar.ai/pair#${code.slice('althar-pairing'.length)}`,
+  tokenHash: 'b'.repeat(64),
+  expiresAt: Date.now() + 300_000,
+  left: 300_000,
+})
+
+/** The dialog asks the home after a code every 1.5s: the next ask, without waiting for it. */
+const nextAsk = () => act(() => vi.advanceTimersByTimeAsync(1_600))
+
+describe('pairing a phone from the homes menu', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('lets phones in to This Mac, shows the code, and hears the phone pair', async () => {
+    let on = false
+    let paired = false
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: on ? 'https://studio-mac.local:6769' : null, switchable: true, on })),
+      setPhoneAccess: vi.fn(async (wanted: boolean) => {
+        on = wanted
+        return { origin: 'https://studio-mac.local:6769', switchable: true, on }
+      }),
+      createPairingCode: vi.fn(async () => made()),
+      pairingStatus: vi.fn(async () =>
+        paired ? { state: 'paired' as const, device: iPhone } : { state: 'waiting' as const, expiresAt: Date.now() + 300_000 },
+      ),
+      pairedDevices: vi.fn(async () => ({ clients: paired ? [iPhone, pixel] : [pixel], next: null })),
+    })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    withServices(<PhonesDialog home="This Mac" onClose={() => undefined} />, client)
+    await user.click(await screen.findByRole('button', { name: 'Let phones in' }))
+    expect(client.setPhoneAccess).toHaveBeenCalledWith(true)
+    expect(await screen.findByText('Scan it with your phone’s camera')).toBeTruthy()
+    expect(screen.getByText(code)).toBeTruthy()
+    expect(screen.getByText('Phones on the same Wi-Fi reach it, at studio-mac.local.')).toBeTruthy()
+    expect(screen.getByText('Pixel 9')).toBeTruthy()
+    paired = true
+    await nextAsk()
+    expect(await screen.findByText('iPhone is paired')).toBeTruthy()
+    expect(await screen.findByText('Paired just now')).toBeTruthy()
+  })
+
+  it('takes a phone off at once, and puts it back with the home’s reason when it refuses', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => made()),
+      pairedDevices: vi.fn(async () => ({ clients: [pixel], next: null })),
+      removePairedDevice: vi.fn(async () => {
+        throw new ApiError({ reason: 'ClientNotFound', message: 'Choose a connection device registered on this home.' })
+      }),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    await screen.findByText('Pixel 9')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    const asking = within(screen.getByRole('dialog', { name: 'Remove Pixel 9?' }))
+    await userEvent.click(asking.getByRole('button', { name: 'Remove' }))
+    expect(client.removePairedDevice).toHaveBeenCalledWith(pixel.deviceId)
+    expect(await screen.findByText('Choose a connection device registered on this home.')).toBeTruthy()
+    expect(screen.getByText('Pixel 9')).toBeTruthy()
+  })
+
+  it('says why a window that may not make codes can’t, with nothing to try again', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => {
+        throw new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' })
+      }),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    expect(await screen.findByText('Manage connection devices from a trusted client or the host console.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('shows a remote home’s setup command where its host doesn’t take phones', async () => {
+    const { client } = fakeClient({ phoneAccess: vi.fn(async () => ({ origin: null, switchable: false, on: false })) })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    expect(await screen.findByText('studio doesn’t take phones yet')).toBeTruthy()
+    await waitFor(() => expect(client.createPairingCode).not.toHaveBeenCalled())
+  })
+
+  it('puts back each device whose removal the home refused, however the answers cross', async () => {
+    const answers: Array<() => void> = []
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => made()),
+      pairedDevices: vi.fn(async () => ({ clients: [iPhone, pixel], next: null })),
+      removePairedDevice: vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            answers.push(() => reject(new ApiError({ reason: 'Unavailable', message: 'The home is busy. Try again.' })))
+          }),
+      ),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    for (const name of ['iPhone', 'Pixel 9']) {
+      const row = (await screen.findByText(name)).closest('li') as HTMLElement
+      await userEvent.click(within(row).getByRole('button', { name: 'Remove' }))
+      await userEvent.click(within(screen.getByRole('dialog', { name: `Remove ${name}?` })).getByRole('button', { name: 'Remove' }))
+    }
+    await waitFor(() => expect(answers).toHaveLength(2))
+    expect(screen.queryByText('iPhone')).toBeNull()
+    expect(screen.queryByText('Pixel 9')).toBeNull()
+    // The first press's refusal answers first: both come back, not only the last.
+    answers[0]?.()
+    answers[1]?.()
+    expect(await screen.findByText('iPhone')).toBeTruthy()
+    expect(await screen.findByText('Pixel 9')).toBeTruthy()
+  })
+
+  it('keeps a removed device hidden when the list can’t be read again after', async () => {
+    let reads = 0
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => made()),
+      pairedDevices: vi.fn(async () => {
+        reads += 1
+        if (reads > 1) throw new ApiError({ reason: 'Unavailable', message: 'The home didn’t answer.' })
+        return { clients: [pixel], next: null }
+      }),
+      removePairedDevice: vi.fn(async () => {}),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    await screen.findByText('Pixel 9')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Remove Pixel 9?' })).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(reads).toBeGreaterThan(1))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText('Pixel 9')).toBeNull()
+  })
+
+  it('offers Stop letting phones in where phones are kept let in but the listener didn’t open', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: null, switchable: true, on: true })),
+      setPhoneAccess: vi.fn(async () => {
+        throw new ApiError({ reason: 'PhonesCantReach', message: 'Althar couldn’t save that. Try again.' })
+      }),
+    })
+    withServices(<PhonesDialog home="This Mac" onClose={() => undefined} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop letting phones in' }))
+    expect(client.setPhoneAccess).toHaveBeenCalledWith(false)
+    expect(await screen.findByText('Althar couldn’t save that. Try again.')).toBeTruthy()
+  })
+
+  it('asks the home once more when its count reaches 0, and hears a phone that paired in the last second', async () => {
+    let asked = 0
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => ({ ...made(), left: 200 })),
+      pairingStatus: vi.fn(async () => {
+        asked += 1
+        return asked < 2 ? { state: 'waiting' as const, expiresAt: Date.now() + 100 } : { state: 'paired' as const, device: iPhone }
+      }),
+    })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    await waitFor(() => expect(asked).toBe(1))
+    await nextAsk()
+    expect(await screen.findByText('iPhone is paired')).toBeTruthy()
+    expect(screen.queryByText('This code ran out')).toBeNull()
+  })
+
+  it('says a code ran out only once the home does', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio.example:6769', switchable: false, on: true })),
+      createPairingCode: vi.fn(async () => ({ ...made(), left: 0 })),
+      pairingStatus: vi.fn(async () => ({ state: 'expired' as const })),
+    })
+    withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
+    expect(await screen.findByText('This code ran out')).toBeTruthy()
+    expect(client.pairingStatus).toHaveBeenCalled()
+  })
+
+  it('stops letting phones in to This Mac at once', async () => {
+    const { client } = fakeClient({
+      phoneAccess: vi.fn(async () => ({ origin: 'https://studio-mac.local:6769', switchable: true, on: true })),
+      setPhoneAccess: vi.fn(async (on: boolean) => ({ origin: on ? 'https://studio-mac.local:6769' : null, switchable: true, on })),
+      createPairingCode: vi.fn(async () => made()),
+    })
+    withServices(<PhonesDialog home="This Mac" onClose={() => undefined} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop letting phones in' }))
+    expect(client.setPhoneAccess).toHaveBeenCalledWith(false)
+    expect(await screen.findByRole('button', { name: 'Let phones in' })).toBeTruthy()
+  })
+
+  it('keeps the code to paste where it is too long for a QR', () => {
+    const long = `althar-pairing1.${'A'.repeat(3200)}`
+    withServices(
+      <PairPhone
+        home="studio"
+        state={{ kind: 'waiting', code: long, link: `https://althar.ai/pair#1.${'A'.repeat(3200)}`, left: 60_000 }}
+        onNewCode={() => undefined}
+        onDone={() => undefined}
+        onPairAnother={() => undefined}
+      />,
+      fakeClient().client,
+    )
+    expect(screen.getByText(/too long for a QR/)).toBeTruthy()
+    expect(screen.getByText(long)).toBeTruthy()
+  })
+})

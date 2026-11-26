@@ -138,15 +138,15 @@ describe('managing saved homes', () => {
   const fixture = (inspect = async (_target: unknown) => status) => {
     let at = 1_000
     const profile = temporary()
-    const opened: Array<{ home: WindowHome; projectId?: string }> = []
+    const opened: Array<{ home: WindowHome; projectId?: string; fresh?: true }> = []
     const told: Array<{ owner: number; name: string }> = []
     let overviews = 0
     const glances = homeGlances({ profile, now: () => at, writeAfter: 0, wanted: () => controller.wanted() })
     const controller = homeController({
       store: homeStore(profile),
       inspect,
-      open: (home, projectId) => {
-        opened.push({ home, ...(projectId === undefined ? {} : { projectId }) })
+      open: (home, projectId, fresh) => {
+        opened.push({ home, ...(projectId === undefined ? {} : { projectId }), ...(fresh === true ? { fresh } : {}) })
       },
       changed: (owner, state) => {
         if (state.current.kind === 'ssh') told.push({ owner, name: state.current.home.name })
@@ -255,9 +255,34 @@ describe('managing saved homes', () => {
       [{ ...project('x'), id: '../x' }],
       [{ ...project('x'), working: -1 }],
       Array.from({ length: 201 }, (_, i) => project(`p${i}`)),
+      // Where its code is: a page on a host, never an address with a sign-in in it, or anything but https.
+      [
+        {
+          ...project('x'),
+          remotes: [{ url: 'https://token@github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }],
+        },
+      ],
+      [{ ...project('x'), remotes: [{ url: 'git@github.com:acme/site.git', product: 'github', host: 'github.com', path: 'acme/site' }] }],
+      [{ ...project('x'), remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: '../etc' }] }],
+      [{ ...project('x'), remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'a b', path: 'acme/site' }] }],
+      [
+        {
+          ...project('x'),
+          remotes: Array.from({ length: 9 }, () => ({
+            url: 'https://github.com/acme/site',
+            product: null,
+            host: 'github.com',
+            path: 'acme/site',
+          })),
+        },
+      ],
     ])
       expect(() => at.controller.report(1, bad)).toThrow()
     expect(reportedProjects([project('a'), project('a')])).toHaveLength(1)
+    const told = [
+      { ...project('a'), remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }] },
+    ]
+    expect(reportedProjects(told)).toEqual(told)
   })
   it('keeps names and inks across launches, prunes forgotten homes, and ignores a cache it can’t read', async () => {
     const at = fixture()
@@ -291,6 +316,14 @@ describe('managing saved homes', () => {
     await at.controller.open(1, 'local', 'althar')
     expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' }, projectId: 'althar' })
     await expect(at.controller.open(1, home.id, '../../etc')).rejects.toThrow('project')
+  })
+  it('opens a home on New project, and only where it was asked for in so many words', async () => {
+    const at = fixture()
+    const home = await at.saved()
+    await at.controller.open(1, home.id, undefined, true)
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'ssh', home }, fresh: true })
+    await at.controller.open(1, 'local', undefined, 'yes')
+    expect(at.opened.at(-1)).toEqual({ home: { kind: 'local' } })
   })
 })
 

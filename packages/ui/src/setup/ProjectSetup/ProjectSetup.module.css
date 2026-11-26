@@ -258,6 +258,16 @@
   flex: none;
   color: var(--t-3);
 }
+/* Where else it is: one of your projects on another computer. */
+.from {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+.from > svg {
+  flex: none;
+}
 @keyframes landing {
   from {
     opacity: 0;

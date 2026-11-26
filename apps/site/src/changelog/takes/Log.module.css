@@ -54,11 +54,11 @@
 .out:hover { color: #fff; }
 
 /* The version, as code, and the release's title. */
-.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 20px 0 30px; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 20px 0 30px; font-family: var(--heading); }
 .v { font: 500 28px/1.15 var(--mono); letter-spacing: -0.03em; color: #fff; }
 a.v { text-decoration: none; }
 a.v:hover { color: var(--lit); }
-.title { font: 400 28px/1.2 'Inter Display', var(--display); letter-spacing: -0.03em; color: #d6cfc4; text-wrap: balance; }
+.title { font: 400 28px/1.2 var(--heading); letter-spacing: -0.03em; color: #d6cfc4; text-wrap: balance; }
 
 /* Its changes, a run of each kind under its word. */
 .runs { display: grid; gap: 26px; }
@@ -78,7 +78,7 @@ a.v:hover { color: var(--lit); }
 /* ---- a highlight: what it gives you, why, and the picture ---- */
 
 .shown { display: grid; gap: 10px; margin-bottom: 40px; }
-.hl { font-family: 'Inter Display', var(--display); font-size: 23px; font-weight: 550; line-height: 1.2; letter-spacing: -0.025em; color: #fff; text-wrap: balance; }
+.hl { font-family: var(--heading); font-size: 23px; font-weight: 550; line-height: 1.2; letter-spacing: -0.025em; color: #fff; text-wrap: balance; }
 .hlWhy { max-width: 40em; font-size: 15.5px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .hlPic { margin-top: 14px; }
 

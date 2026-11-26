@@ -93,6 +93,13 @@
   display: none;
 }
 
+.toolsEnd {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .count {
   min-width: 48px;
   font-size: 12px;
@@ -349,4 +356,162 @@
 .opened > * {
   flex: 1;
   min-height: 0;
+}
+
+/* ——— The cards ——— */
+
+.noMatchLine {
+  padding: 24px 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 18px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+.card:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.card:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* a picture of it, filling the top at the screen's own shape; a drawing of its kind where there is none yet */
+.cardPicture {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-2);
+}
+.cardPicture img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+.cardDrawing {
+  position: absolute;
+  inset: 18% 22%;
+  display: grid;
+  place-items: center;
+}
+.cardDrawing svg {
+  width: 100%;
+  height: 100%;
+}
+/* One its chat is still drawing: its kind's drawing, breathing, until its first version has a picture. */
+.cardDrawn .cardDrawing {
+  animation: drawn 1.8s ease-in-out infinite alternate;
+}
+@keyframes drawn {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cardDrawn .cardDrawing {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.cardWords {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px 12px;
+  min-width: 0;
+}
+.cardTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.cardFacts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.cardKind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t-2);
+}
+.cardWhen {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.cardBy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cardComments {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--signal-ink);
+  font-variant-numeric: tabular-nums;
+}
+.cardSaved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--t-2);
+}
+.cardPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.cardFailed {
+  color: var(--danger);
+}
+.cardFailed .cardPath {
+  font-family: inherit;
 }

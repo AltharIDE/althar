@@ -76,7 +76,7 @@ export const PAGE_META = {
     name: 'Office hours',
     title: 'Office hours · Althar',
     description:
-      'Twenty minutes on video with Balazs, who makes Althar: get it set up together, or talk through working with coding agents. Free.',
+      'Twenty minutes on video with Balazs and Niko, who build Althar: get it set up together, or talk through working with coding agents. Free.',
     image: '/og/home.jpg',
     index: true,
   },
@@ -88,6 +88,15 @@ export const PAGE_META = {
       'What Althar sends and to whom: anonymous usage data and crash reports you can turn off, problem reports only when you send one, no cookies.',
     image: '/og/home.jpg',
     index: true,
+  },
+  /** What a phone's camera opens from the pairing QR in Althar on a computer, where the phone has no Althar yet: linked from nowhere, kept out of search. */
+  '/pair': {
+    path: '/pair',
+    name: 'Pair your phone',
+    title: 'Pair your phone · Althar',
+    description: 'Get Althar on your phone, then open the pairing code your computer showed.',
+    image: '/og/home.jpg',
+    index: false,
   },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {

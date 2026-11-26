@@ -6,8 +6,8 @@
  * diagram, a picture or a page) and says what was said on it.
  */
 
-/** How a canvas is drawn: a document, a diagram, an SVG, a picture or a page of its own. */
-export type CanvasKind = 'markdown' | 'mermaid' | 'svg' | 'picture' | 'html'
+/** How a canvas is drawn: a document, a diagram, an SVG, a picture, a page of its own, or boards laid side by side. */
+export type CanvasKind = 'markdown' | 'mermaid' | 'svg' | 'picture' | 'html' | 'boards'
 
 /** A canvas as a thread's part names it, to open it beside the conversation: a version, or the latest. */
 export interface CanvasRef {
@@ -26,4 +26,5 @@ export const canvasKindWords: Readonly<Record<CanvasKind, string>> = {
   svg: 'Drawing',
   picture: 'Picture',
   html: 'Page',
+  boards: 'Boards',
 }

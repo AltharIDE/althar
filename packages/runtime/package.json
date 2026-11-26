@@ -13,10 +13,12 @@
     "./attachments": "./src/attachments.ts",
     "./screenshots": "./src/screenshots.ts",
     "./pageBridge": "./src/pageBridge.ts",
+    "./computerBridge": "./src/computerBridge.ts",
     "./pullRequestReview": "./src/pullRequestReview.ts",
     "./privateFiles": "./src/privateFiles.ts",
     "./workerHome": "./src/workerHome/index.ts",
-    "./windowActions": "./src/windowActions.ts"
+    "./windowActions": "./src/windowActions.ts",
+    "./repositories": "./src/repositoriesFound.ts"
   },
   "scripts": {
     "check": "vp check && bun scripts/check-source-size.ts",

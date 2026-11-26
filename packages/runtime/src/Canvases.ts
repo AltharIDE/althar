@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  BOARDS_ENTRY,
   CANVAS_LIMITS,
   CANVASES_FOLDER,
   type CanvasAnchor,
@@ -15,6 +16,7 @@ import {
   type CanvasVersionFacts,
   isCanvasName,
   manifestBytes,
+  readBoards,
   type SentCanvasComment,
 } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
@@ -23,7 +25,18 @@ import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
-import { asideFor, canvasesIn, type CopyFile, holdsOnly, isCopyPath, manifestOf, readCopy, writeCopy } from './canvasFiles'
+import {
+  asideFor,
+  canvasesIn,
+  type CopyFile,
+  holdsOnly,
+  isCopyPath,
+  manifestOf,
+  readCopy,
+  readVersionFiles,
+  writeCopy,
+} from './canvasFiles'
+import { CanvasSaves } from './CanvasSaves'
 import { RuntimeConfig } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
@@ -50,7 +63,7 @@ import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolRole, ToolServe
 
 /** What a lead's and the coordinator's brief says of canvases: when to draw one, and to look before saying it's done. */
 export const CANVAS_BRIEF =
-  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css).'
+  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css). Designs to compare side by side (screens, states, sizes, directions) go on one canvas of boards, its entry canvas.json, each board a page of the canvas at its own size; when the person points at a part of a board and says what to change, change that board and publish again.'
 
 type Input = Readonly<Record<string, unknown>>
 
@@ -107,7 +120,7 @@ export const entryAmong = (files: ReadonlyArray<CopyFile>, latest: string | null
   const paths = files.map((file) => file.path)
   if (latest !== null && paths.includes(latest)) return latest
   if (paths.length === 1) return paths[0] ?? null
-  for (const usual of ['index.html', 'index.htm', 'index.md', 'README.md', 'index.mmd', 'index.svg'])
+  for (const usual of [BOARDS_ENTRY, 'index.html', 'index.htm', 'index.md', 'README.md', 'index.mmd', 'index.svg'])
     if (paths.includes(usual)) return usual
   return null
 }
@@ -138,6 +151,9 @@ interface VersionRow {
   readonly bytes: number
   readonly taskId: string | null
   readonly taskTitle: string | null
+  /** 1 where it was published from an artifact's own chat. */
+  readonly artifactChat: number
+  readonly threadId: string
   readonly createdAt: string
 }
 
@@ -154,8 +170,8 @@ const factsOf = (row: VersionRow): CanvasVersionFacts => ({
   bytes: row.bytes,
   by:
     row.taskId === null
-      ? { role: 'coordinator', taskId: null, taskTitle: null }
-      : { role: 'lead', taskId: row.taskId, taskTitle: row.taskTitle },
+      ? { role: 'coordinator', taskId: null, taskTitle: null, threadId: row.threadId }
+      : { role: row.artifactChat === 1 ? 'chat' : 'lead', taskId: row.taskId, taskTitle: row.taskTitle, threadId: row.threadId },
   at: row.createdAt,
 })
 
@@ -176,7 +192,7 @@ export const CANVAS_TOOLS = [
 ] as const
 
 /** Selects a project's canvases with their latest versions. */
-const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.created_at`
+const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, coalesce(t.artifact_chat, 0) AS artifact_chat, v.thread_id, v.created_at`
 
 export class Canvases extends Context.Service<
   Canvases,
@@ -192,13 +208,14 @@ export class Canvases extends Context.Service<
   static readonly layer: Layer.Layer<
     Canvases,
     never,
-    SqlClient.SqlClient | Ledger | Artifacts | RuntimeConfig | Instance | ToolServer | Crypto.Crypto
+    SqlClient.SqlClient | Ledger | Artifacts | CanvasSaves | RuntimeConfig | Instance | ToolServer | Crypto.Crypto
   > = Layer.effect(
     Canvases,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const ledger = yield* Ledger
       const artifacts = yield* Artifacts
+      const saves = yield* CanvasSaves
       const instance = yield* Instance
       const toolServer = yield* ToolServer
       const context = yield* Effect.context<SqlClient.SqlClient | Ledger | RuntimeConfig | Instance | Crypto.Crypto>()
@@ -230,21 +247,7 @@ export class Canvases extends Context.Service<
           (rows) => rows[0] ?? null,
         )
 
-      /** A version's manifest and its files' bytes, from the artifact store. */
-      const filesOf = (version: VersionRow) =>
-        Effect.gen(function* () {
-          const raw = yield* artifacts.read(version.manifest)
-          if (raw === null) return null
-          const manifest = yield* decodeManifest(new TextDecoder().decode(raw)).pipe(Effect.orElseSucceed(() => null))
-          if (manifest === null) return null
-          const files: Array<CopyFile> = []
-          for (const file of manifest.files) {
-            const bytes = yield* artifacts.read(file.sha256)
-            if (bytes === null) return null
-            files.push({ path: file.path, bytes })
-          }
-          return { manifest, files }
-        })
+      const filesOf = (version: VersionRow) => readVersionFiles(artifacts, version.manifest)
 
       const copyOf = (folder: string, path: string) =>
         Effect.map(
@@ -336,6 +339,16 @@ export class Canvases extends Context.Service<
           }
         })
 
+      /** A canvas's own chat, open: where anyone who opens it talks to it (ADR-104, "Talking to an artifact"). */
+      const chatOf = (canvasId: string) =>
+        Effect.map(
+          sql<{ taskId: string; threadId: string }>`
+            SELECT k.id AS task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.artifact_chat = 1 AND k.artifact_canvas_id = ${canvasId} AND k.state IN ('open', 'draft')
+            ORDER BY k.created_at DESC LIMIT 1`,
+          ([one]) => (one === undefined ? null : { taskId: one.taskId, threadId: one.threadId }),
+        )
+
       const summaryOf = (canvas: CanvasRow) =>
         Effect.gen(function* () {
           const latest = yield* latestOf(canvas.id)
@@ -355,6 +368,8 @@ export class Canvases extends Context.Service<
                   versions: counts?.versions ?? 0,
                   openComments: counts?.open ?? 0,
                   archived: canvas.archivedAt !== null,
+                  saved: yield* saves.saved(canvas.id),
+                  chat: yield* chatOf(canvas.id),
                 }
           return summary
         })
@@ -539,7 +554,15 @@ export class Canvases extends Context.Service<
           if (!read.files.some((file) => file.path === entry)) return yield* refuse(`${entry} isn’t in ${CANVASES_FOLDER}/${from}/.`)
           const kind = canvasKindOf(entry)
           if (kind === null)
-            return yield* refuse(`${entry} can’t be drawn: a canvas starts from a .md, .mmd, .svg, .png, .jpg, .gif, .webp or .html file.`)
+            return yield* refuse(
+              `${entry} can’t be drawn: a canvas starts from a .md, .mmd, .svg, .png, .jpg, .gif, .webp or .html file, or from ${BOARDS_ENTRY} for boards.`,
+            )
+          if (kind === 'boards') {
+            const words = read.files.find((file) => file.path === entry)
+            const paths = new Set(read.files.map((file) => file.path))
+            const boards = readBoards(new TextDecoder().decode(words?.bytes ?? new Uint8Array()), (path) => paths.has(path))
+            if (!boards.ok) return yield* refuse(`${CANVASES_FOLDER}/${from}/${entry} can’t be drawn: ${boards.why} Nothing was published.`)
+          }
           // The version it was made on: the agent's word, else the copy's record.
           const record = yield* copyOf(folder, from)
           const base = wholeIn(input, 'base') ?? (canvas !== null && record?.canvasId === canvas.id ? record.version : null)
@@ -599,6 +622,10 @@ export class Canvases extends Context.Service<
               yield* sql`INSERT INTO canvas_versions (canvas_id, number, base, manifest, entry, entry_sha256, kind, title, note, files, bytes, actor_id, thread_id, task_id, session_id, created_at)
                   VALUES (${row.id}, ${number}, ${base}, ${putManifest.sha256}, ${entry}, ${manifest.files.find((file) => file.path === entry)?.sha256 ?? ''}, ${kind}, ${title ?? latest?.title ?? row.title}, ${note},
                     ${read.files.length}, ${read.files.reduce((sum, file) => sum + file.bytes.length, 0)}, ${actorId}, ${access.threadId}, ${access.taskId}, ${access.sessionId}, ${at})`
+              // A chat drawing a new artifact takes the first canvas it publishes as its own (ADR-104, "Talking to an artifact").
+              if (access.taskId !== null)
+                yield* sql`UPDATE tasks SET artifact_canvas_id = ${row.id}
+                    WHERE id = ${access.taskId} AND artifact_chat = 1 AND artifact_canvas_id IS NULL`
               const subject = { type: 'canvas_version' as const, id: `${row.id}:${number}`, role: 'file' as const }
               const kept = {
                 projectId: access.projectId as ProjectId,
@@ -625,6 +652,7 @@ export class Canvases extends Context.Service<
             return yield* refuse(
               `Not published: another agent published ${name} at the same moment. canvas_get it again and bring your change onto it.`,
             )
+          yield* saves.published(done.canvas.id)
           yield* postItem(access, done.canvas, done.version, 'published', open)
           return [
             `Published ${name} v${done.version.number}${done.version.number === 1 ? ', a new canvas of the project’s' : ` on v${base}`}: ${done.version.title}, ${plural(read.files.length, 'file', 'files')}, drawn from ${entry} (${kind}).`,
@@ -650,7 +678,7 @@ export class Canvases extends Context.Service<
               case 'area':
                 return `on an area ${Math.round(anchor.x * 100)}% across and ${Math.round(anchor.y * 100)}% down, ${Math.round(anchor.width * 100)}% by ${Math.round(anchor.height * 100)}% of it`
               case 'element':
-                return `on ${anchor.label} (${anchor.selector})${anchor.text === '' ? '' : `: “${anchor.text}”`}`
+                return `on ${anchor.label} (${anchor.selector})${anchor.text === '' ? '' : `: “${anchor.text}”`}${anchor.board === undefined ? '' : ` on the board ${anchor.board}${anchor.page === undefined ? '' : ` of the page ${anchor.page}`}`}`
             }
           }
           const open = comments.filter((one) => one.resolved === null)
@@ -777,7 +805,7 @@ export class Canvases extends Context.Service<
         },
         {
           name: 'canvas_publish',
-          description: `Publishes a canvas from its files in your folder, ${CANVASES_FOLDER}/<name>/ (or from, a copy set aside), as a new version every lead, the coordinator and the person can see. Draw a canvas for what the person will look at again, iterate on, compare or pass on: a mockup, directions to choose between (the same group), a chart, a diagram to come back to, a page that explains a flow. What they read once belongs in your reply, and a diagram that only explains it in a mermaid block there. entry is the file drawn first: .md (Markdown, with mermaid blocks drawn), .mmd (Mermaid), .svg, a picture, or .html (a page of its own, which may load from the web or run against localhost; link its files relatively, style.css, never /style.css). A canvas that is already one is published on the version your copy came from, which Althar knows: if someone published since, nothing is published and their version is set aside beside yours to bring your change onto.`,
+          description: `Publishes a canvas from its files in your folder, ${CANVASES_FOLDER}/<name>/ (or from, a copy set aside), as a new version every lead, the coordinator and the person can see. Draw a canvas for what the person will look at again, iterate on, compare or pass on: a mockup, directions to choose between (the same group), a chart, a diagram to come back to, a page that explains a flow. What they read once belongs in your reply, and a diagram that only explains it in a mermaid block there. entry is the file drawn first: .md (Markdown, with mermaid blocks drawn), .mmd (Mermaid), .svg, a picture, or .html (a page of its own, which may load from the web or run against localhost; link its files relatively, style.css, never /style.css). For designs to lay side by side, as a design tool lays out frames (screens, states, sizes, directions), the entry is ${BOARDS_ENTRY}, a canvas of boards: {"pages":[{"name":"Checkout","boards":[{"name":"Desktop","file":"checkout/desktop.html","width":1440,"height":900},{"name":"Phone","file":"checkout/phone.html","width":390,"height":844}]}]}. Each board is a file of the canvas, a page or a picture, drawn at its width and height; a board’s name is its own on its page. The person points at a part of a board to say what to change, and that comes to you as a comment on its selector, board and page. A canvas that is already one is published on the version your copy came from, which Althar knows: if someone published since, nothing is published and their version is set aside beside yours to bring your change onto.`,
           input: {
             type: 'object',
             properties: {

@@ -251,7 +251,7 @@ describe('changing a part', () => {
       const task = yield* aTask(working)
       assert.strictEqual(
         yield* callTool(task.lead, 'change_part', { part: 'workspace', why: 'Elsewhere.' }),
-        'Say where it moves (to: worktree or checkout), or what it works toward (toward).',
+        'Say where it moves (to: worktree or checkout; runs_on: the home or a worker), or what it works toward (toward).',
       )
       assert.strictEqual(
         yield* callTool(task.lead, 'change_part', { part: 'workspace', toward: null, why: 'The default branch.' }),

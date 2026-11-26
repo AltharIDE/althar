@@ -10,7 +10,10 @@ import {
   waitingOn,
 } from '@althar/contracts'
 
+import { TaskStatus } from '@althar/ui'
+
 import { asMerging } from '../../data/merges'
+import { taskStatusOf } from '../../shared/taskStatus'
 
 /*
  * Which lane of the board each task and call goes in (ADR-065). Up next:
@@ -84,12 +87,11 @@ export interface Lanes {
   readonly running: ReadonlyArray<BoardTask>
   /** How many have an agent on them, or checks Althar sees through: Running's count, which leaves out what waits. */
   readonly atWork: number
-  readonly workPlaces?: BoardSnapshot['workPlaces']
   /** Tasks that wait on a call of the person's, each once, with its call. */
   readonly waiting: ReadonlyArray<Waiting>
   /** Tasks that wait on nothing but issues their lead drafted, or changes to their issue, for the person to file or apply. */
   readonly issues: ReadonlyArray<BoardTask>
-  /** Stopped tasks held Up next for Resume, the latest stopped first; outside Needs you. */
+  /** Stopped tasks held Up next for Resume, the latest stopped first; outside Needs you. Those folded into another task are rows. */
   readonly stopped: ReadonlyArray<BoardTask>
   /** Calls no task on the board waits on: the coordinator's questions, and a held plan's. */
   readonly calls: ReadonlyArray<BoardCall>
@@ -166,7 +168,7 @@ export const lanesOf = (
     // By their latest exchange, the latest first; one with nothing said yet, by when it began.
     scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
     ...arranged,
-    ...(board.workPlaces === undefined ? {} : { workPlaces: board.workPlaces }),
+    // Every stopped task the lane holds, a folded one's quiet row too: its count is what it shows, collapsed or not.
     upNext: arranged.upNext + stopped.length,
     waiting: waits.waiting,
     issues: waits.issues,
@@ -179,6 +181,29 @@ export const lanesOf = (
     settledTotal: board.settledTotal,
   }
 }
+
+/** The orders Running can be in, as the person picks one: the oldest first, as the board has it, or by where each stands. */
+export type RunningOrder = 'oldest' | 'status'
+
+/** Where a card in Running stands, as it says it, at work first: waiting on something outside, paused, waiting for an agent, stopped. */
+const standingRank = (task: BoardTask): number => {
+  const status = taskStatusOf(task)
+  if (status === TaskStatus.Running) return task.externalWait === undefined ? 0 : 1
+  return STATUS_RANK[status]
+}
+
+const STATUS_RANK: Record<TaskStatus, number> = {
+  [TaskStatus.Running]: 0,
+  [TaskStatus.Paused]: 2,
+  [TaskStatus.Queued]: 3,
+  [TaskStatus.Stopped]: 4,
+  [TaskStatus.Yours]: 5,
+  [TaskStatus.Done]: 6,
+}
+
+/** Running's cards in the order the person picked; by status, each keeps its place among those that stand as it does. */
+export const runningIn = (running: ReadonlyArray<BoardTask>, order: RunningOrder): ReadonlyArray<BoardTask> =>
+  order === 'oldest' ? running : running.toSorted((a, b) => standingRank(a) - standingRank(b))
 
 /** How many cards are in Needs you: what waits on the person, each once. */
 export const yoursOf = (lanes: Lanes) => waitingCount(lanes)

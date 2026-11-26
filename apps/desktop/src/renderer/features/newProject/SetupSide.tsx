@@ -40,7 +40,7 @@ import type { SetupActions, SetupModel } from './useSetup'
 export const text = {
   code: 'Where its code lives',
   issues: 'Issues',
-  here: `Only on ${device.this}`,
+  here: (home: string) => `Only on ${home}`,
   hereNote: 'Finished work merges into main here',
   newOn: (thing: string, host: string) => `A new ${thing} on ${host}`,
   thenNew: (thing: string) => `Then a new ${thing} there`,
@@ -67,6 +67,8 @@ export const text = {
   fresh: 'A new repository, on main',
   nameFirst: 'Name it first',
   chooseFresh: 'Choose where it goes…',
+  /** On another computer's home, where it goes is the home's usual place. */
+  freshOn: (home: string) => `Start it on ${home}`,
   connect: 'Connect',
   connectTracker: 'Connect a tracker',
   add: 'Add a folder…',
@@ -152,6 +154,7 @@ export function SetupSide({
   onOpenProject,
   dropping,
   only,
+  homeName,
   folderWay,
   minHeight = 196,
 }: {
@@ -162,12 +165,19 @@ export function SetupSide({
   onLeaveOut: (path: string) => void
   onReplace: (path: string) => void
   onStartFresh: () => void
-  onChooseCloneInto: () => void
+  /** Asks where a clone goes; without it, it goes in the usual place. */
+  onChooseCloneInto?: () => void
   onOpenProject: (projectId: string) => void
   /** A folder is being dragged over the page. */
   dropping: boolean
   /** Only where its code comes from, as the first run's step for it is: where it lives and its issues are steps of their own. */
   only?: 'source'
+  /**
+   * Made on another computer's home: its name. Its code goes where that home
+   * keeps code, so there's no choosing where; its folders are those it
+   * found, in `folderWay`.
+   */
+  homeName?: string
   /** In place of the folders chosen: the consumer's own, as the first run's list of what this computer has. */
   folderWay?: ReactNode
   minHeight?: number
@@ -218,13 +228,15 @@ export function SetupSide({
           {clone !== null && clone.here === null && (
             <p className={s.cloneWhere}>
               {clone.where === null ? (
-                <LinkButton onClick={onChooseCloneInto}>{text.chooseWhere}</LinkButton>
+                onChooseCloneInto !== undefined && <LinkButton onClick={onChooseCloneInto}>{text.chooseWhere}</LinkButton>
               ) : (
                 <>
                   <span>{text.into(clone.where)}</span>
-                  <LinkButton onClick={onChooseCloneInto} aria-label={`${text.change}: ${text.cloneWhere}`}>
-                    {text.change}
-                  </LinkButton>
+                  {onChooseCloneInto !== undefined && (
+                    <LinkButton onClick={onChooseCloneInto} aria-label={`${text.change}: ${text.cloneWhere}`}>
+                      {text.change}
+                    </LinkButton>
+                  )}
                 </>
               )}
             </p>
@@ -239,7 +251,7 @@ export function SetupSide({
           <SetupZone empty>
             <Icon name="create" size={18} />
             <Button size="small" icon="plus" onClick={onStartFresh} disabled={draft.name.trim() === ''}>
-              {draft.name.trim() === '' ? text.nameFirst : text.chooseFresh}
+              {draft.name.trim() === '' ? text.nameFirst : homeName === undefined ? text.chooseFresh : text.freshOn(homeName)}
             </Button>
           </SetupZone>
         )
@@ -251,7 +263,7 @@ export function SetupSide({
             name={shown?.name ?? ''}
             where={shown?.where ?? ''}
             facts={text.fresh}
-            {...(madeNew === undefined && !creating ? { onChange: onStartFresh } : {})}
+            {...(madeNew === undefined && !creating && homeName === undefined ? { onChange: onStartFresh } : {})}
           />
         </SetupZone>
       )
@@ -294,10 +306,17 @@ export function SetupSide({
   return (
     <fieldset className={s.fieldset} disabled={creating}>
       <div className={s.stack}>
-        <SetupWays way={setup.way} onWay={setup.onWay} hosts={setup.hosts} minHeight={height + 40}>
+        <SetupWays
+          way={setup.way}
+          onWay={setup.onWay}
+          hosts={setup.hosts}
+          minHeight={height + 40}
+          // A folder of the home's own, on another computer's.
+          {...(homeName === undefined ? {} : { text: { folderNote: `On ${homeName}` } })}
+        >
           {body}
         </SetupWays>
-        {only === undefined && home.kind !== 'none' && (
+        {only === undefined && home.kind !== 'none' && !(home.kind === 'picks' && home.connected.length + home.away.length === 0) && (
           <SetupSection title={text.code} status={setup.statuses.home}>
             {home.kind === 'fixed' ? (
               <SetupFixed mark={home.brand === null ? <Icon name="download" size={14} /> : <BrandMark brand={home.brand} size={14} />}>
@@ -354,14 +373,14 @@ export function SetupSide({
                   checked={home.value === 'here'}
                   onChoose={() => setup.onHome('here')}
                   mark={<Icon name="folder" size={15} />}
-                  title={text.here}
+                  title={text.here(homeName ?? device.this)}
                   note={text.hereNote}
                 />
               </SetupPicks>
             )}
           </SetupSection>
         )}
-        {only === undefined && (
+        {only === undefined && (issues.host !== null || issues.trackers.length + issues.away.length > 0) && (
           <SetupSection title={text.issues} status={setup.statuses.issues}>
             {setup.connecting !== null && issues.away.some((one) => one.service === setup.connecting) ? (
               <ConnectInPlace service={setup.connecting} onDone={setup.endConnect} />

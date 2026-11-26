@@ -51,7 +51,11 @@ export function StartedTask({ title, tone, word, detail, model, className, ...re
         {word}
       </span>
       <span className={s.title}>{title}</span>
-      {detail !== undefined && detail !== '' && <span className={s.detail}>{detail}</span>}
+      {detail !== undefined && detail !== '' && (
+        <span className={s.detail} title={detail}>
+          {detail}
+        </span>
+      )}
       {model !== undefined && <Model model={model} short className={s.model} />}
     </button>
   )

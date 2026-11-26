@@ -343,7 +343,7 @@ describe('the board’s lanes', () => {
       })
 
       it('says what continues and why it waits, in the one order with the line and the plans, each with a grip', () => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), startAnyway: vi.fn(), failed: null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -394,46 +394,13 @@ describe('the board’s lanes', () => {
         expect(next.queryByText(/^Continues/)).toBeNull()
       })
 
-      it('lists every machine-wide place while work waits', () => {
-        const lanes = lanesOf(
-          board({
-            tasks: [working, continuing('x', 1)],
-            workPlaces: {
-              busy: 2,
-              atOnce: 2,
-              configured: 5,
-              offline: false,
-              holders: [
-                {
-                  taskId: 'elsewhere',
-                  title: 'An agent in another project',
-                  threadId: 't1',
-                  role: 'lead',
-                  reason: 'turn',
-                  kept: false,
-                  running: [],
-                },
-                {
-                  taskId: 'elsewhere',
-                  title: 'An agent in another project',
-                  threadId: 't2',
-                  role: 'reviewer',
-                  reason: 'starting',
-                  kept: false,
-                  running: [],
-                },
-              ],
-            },
-          }),
-        )
+      it('keeps no line of the machine’s places: the load popover and the slider say them', () => {
+        const lanes = lanesOf(board({ tasks: [working, continuing('x', 1)] }))
         withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
         const next = within(screen.getByRole('region', { name: 'Up next' }))
-        const summary = next.getByText('2 of 5 agent places in use · Temporarily limited to 2')
-        summary.closest('details')!.open = true
-        const holders = within(next.getByRole('list', { name: 'Agents using a place' }))
-        expect(holders.getAllByText('An agent in another project')).toHaveLength(2)
-        expect(holders.getByText('Lead · In a turn')).toBeTruthy()
-        expect(holders.getByText('Reviewer · Starting')).toBeTruthy()
+        expect(next.getByText('Going on x')).toBeTruthy()
+        expect(next.queryByText(/agent places/)).toBeNull()
+        expect(next.queryByRole('list', { name: 'Agents using a place' })).toBeNull()
       })
 
       it('moves into Running on its admission update alone while the pointer is in Up next', async () => {
@@ -487,7 +454,7 @@ describe('the board’s lanes', () => {
     })
 
     it('heads the plans with Planned under the line, each row saying its place; one alone has nothing to reorder', () => {
-      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
+      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), startAnyway: vi.fn(), failed: null }
       const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
       expect(screen.getByText('Next in line')).toBeTruthy()
@@ -510,7 +477,13 @@ describe('the board’s lanes', () => {
     describe('in the person’s order', () => {
       const three = [waiting('a', 1), waiting('b', 2), waiting('c', 3), planned, held]
       const drawn = (tasks: ReadonlyArray<BoardTask>) => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null as string | null }
+        const line = {
+          move: vi.fn(async () => {}),
+          oldestFirst: vi.fn(),
+          cancelTurn: vi.fn(),
+          startAnyway: vi.fn(),
+          failed: null as string | null,
+        }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -2580,6 +2553,67 @@ describe('a ready card’s next step, done from the card', () => {
     expect(startSession).not.toHaveBeenCalled()
     expect(resolveConflictsNow).not.toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('says who stopped a task and why, and keeps one folded into another task as a quiet row, Resume on it', async () => {
+    const pairing = { threadId: 'th-pair', title: 'Phone pairs with this Mac over Wi-Fi' }
+    tasks = [
+      task({
+        taskId: 's11',
+        threadId: 'th-s11',
+        title: 'Slow search',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z', who: 'lead', lead: pairing, why: 'It reads the wrong index.' },
+      }),
+      task({
+        taskId: 's12',
+        threadId: 'th-s12',
+        title: 'Crisp pull-to-reload icon',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z', who: 'lead', lead: pairing, why: 'Asked to.', into: pairing },
+      }),
+      task({
+        taskId: 's13',
+        threadId: 'th-s13',
+        title: 'Stopped by hand',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: null, at: '2026-09-29T09:00:00.000Z', who: 'person' },
+      }),
+    ]
+    const send = vi.fn(async () => {})
+    const resumeTask = vi.fn(async () => {})
+    const base = snapshot()
+    const getThread = vi.fn(async () =>
+      snapshot({
+        session: null,
+        task: { ...base.task, actions: ['resume', 'abandon'], lead: { agentId: 'claude-code', model: null, account: null } },
+      }),
+    )
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, resumeTask, getThread, getBoard: getBoard() }).client)
+    // A lead's stop names its task, and the reason it gave; the person's says so.
+    expect(
+      (await cardOf('Slow search')).getByText('Stopped by Phone pairs with this Mac over Wi-Fi: It reads the wrong index'),
+    ).toBeTruthy()
+    expect((await cardOf('Stopped by hand')).getByText('Stopped by you')).toBeTruthy()
+    // Cards stand apart, as the lane's others do, never ruled together in one list.
+    expect(screen.getByRole('button', { name: 'Slow search' }).closest('li')).toBeNull()
+    // Folded into another task: a quiet row, not a card with a track and a violet Resume.
+    const row = await cardOf('Crisp pull-to-reload icon')
+    expect(row.getByText('Folded into')).toBeTruthy()
+    expect(row.queryByText('Stopped')).toBeNull()
+    expect(row.queryByText('Implement')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Crisp pull-to-reload icon' }).closest('li')).not.toBeNull()
+    // The task it went into opens from it.
+    await userEvent.click(row.getByRole('button', { name: 'Phone pairs with this Mac over Wi-Fi' }))
+    expect(onOpen).toHaveBeenCalledWith('th-pair')
+    // Resume is still there, and tells its lead to go on.
+    await userEvent.click(row.getByRole('button', { name: 'Resume' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-s12', body: 'Carry on.', disposition: 'after_current' }))
+    await waitFor(() => expect(resumeTask).toHaveBeenCalledWith({ taskId: 's12' }))
   })
 
   it('says why the lead couldn’t resolve a conflict, and opens its task rather than asking the lead again (DEV-173)', async () => {

@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -24,7 +24,7 @@ const open = (filename: string, maintenanceToken?: string) =>
     }),
     Layer.fresh(Database.layer({ filename, ...(maintenanceToken === undefined ? {} : { maintenanceToken }) })),
   )
-const marker = (filename: string, text = JSON.stringify({ format: 1, token })) =>
+const marker = (filename: string, text: string | Buffer = JSON.stringify({ format: 1, token })) =>
   writeFileSync(`${filename}.maintenance`, text, { mode: 0o600 })
 
 describe('reserved database maintenance', () => {
@@ -47,7 +47,18 @@ describe('reserved database maintenance', () => {
   it.effect('fails closed on malformed, oversized, exposed or linked reservations, without leaking their contents', () =>
     withFile((filename) =>
       Effect.gen(function* () {
-        for (const value of ['bad json', '{}', JSON.stringify({ format: 2, token }), 'x'.repeat(5000)]) {
+        for (const value of [
+          'bad json',
+          'null',
+          '[]',
+          '{}',
+          '{"format":1}',
+          '{"format":1,"token":7}',
+          '{"format":1,"token":"abc"}',
+          JSON.stringify({ format: 2, token }),
+          Buffer.from([0xc3, 0x28]),
+          'x'.repeat(5000),
+        ]) {
           marker(filename, value)
           const error = yield* Effect.flip(checkMaintenance(filename, token))
           assert.instanceOf(error, Database.DatabaseInMaintenance)
@@ -64,6 +75,24 @@ describe('reserved database maintenance', () => {
           assert.instanceOf(yield* Effect.flip(checkMaintenance(filename, token)), Database.DatabaseInMaintenance)
         }
         yield* checkMaintenance(':memory:')
+      }),
+    ),
+  )
+
+  it.effect('requires a private regular marker even if its contents would grant the permit', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const path = `${filename}.maintenance`
+        mkdirSync(path)
+        assert.instanceOf(yield* Effect.flip(checkMaintenance(filename, token)), Database.DatabaseInMaintenance)
+        rmSync(path, { recursive: true })
+
+        marker(filename)
+        const alias = `${filename}.alias`
+        linkSync(path, alias)
+        assert.instanceOf(yield* Effect.flip(checkMaintenance(filename, token)), Database.DatabaseInMaintenance)
+        rmSync(alias)
+        yield* checkMaintenance(filename, token)
       }),
     ),
   )

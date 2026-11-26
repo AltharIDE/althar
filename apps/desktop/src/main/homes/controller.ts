@@ -41,7 +41,8 @@ export interface HomeControllerOptions {
   readonly store: ReturnType<typeof homeStore>
   readonly pair?: (code: string, name: string, signal: AbortSignal) => Promise<RemoteHome>
   readonly inspect: (target: SshHomeTarget, signal: AbortSignal) => Promise<HostStatus>
-  readonly open: (home: WindowHome, projectId?: string) => void
+  /** Its window, opened or brought forward: on a project where one is given, or on New project where `fresh`. */
+  readonly open: (home: WindowHome, projectId?: string, fresh?: boolean) => void
   readonly changed: (owner: number, state: HomeState) => void
   /** What the chip's menu and Manage homes show changed: the saved homes, a window and how it stands, or a home's projects. */
   readonly overviewChanged?: () => void
@@ -241,20 +242,20 @@ export const homeController = ({
       })
       overviewChanged()
     },
-    open: async (owner: number, id: unknown, project?: unknown) => {
+    open: async (owner: number, id: unknown, project?: unknown, fresh?: unknown) => {
       available()
       if (!windows.has(owner)) throw new Error('This window is no longer open.')
       const projectId = projectIdOf(project)
       const page = windows.get(owner)?.page
       if (id === 'local') {
-        open({ kind: 'local' }, projectId)
+        open({ kind: 'local' }, projectId, fresh === true)
         return
       }
       const home = (await store.list()).find((one) => one.id === id)
       if (home === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
       if (accepting && windows.get(owner)?.page === page) {
         opening(home)
-        open({ kind: home.https === undefined ? 'ssh' : 'https', home }, projectId)
+        open({ kind: home.https === undefined ? 'ssh' : 'https', home }, projectId, fresh === true)
       }
     },
     rename: async (owner: number, id: unknown, name: unknown) => {
@@ -359,4 +360,3 @@ export const homeController = ({
     },
   }
 }
-export type HomeController = ReturnType<typeof homeController>

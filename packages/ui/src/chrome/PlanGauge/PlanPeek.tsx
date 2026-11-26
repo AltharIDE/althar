@@ -123,7 +123,7 @@ function Window({ window, t }: { window: PlanWindow; t: PlanPeekText }) {
 
 function Account({ account, t }: { account: PlanAccount; t: PlanPeekText }) {
   return (
-    <div className={s.account}>
+    <div className={s.account} data-stale={account.stale === true ? '' : undefined}>
       {(account.name !== null || account.age !== null) && (
         <span className={s.accountName}>
           {account.name !== null && <span>{account.name}</span>}
@@ -180,6 +180,7 @@ function AgentRow({ agent, t, onSignIn }: { agent: PlanAgent; t: PlanPeekText; o
         </ActionButton>
       )}
       <div id={detail} className={s.detail} hidden={!open}>
+        {open && agent.fault !== undefined && <span className={s.fault}>{agent.fault}</span>}
         {open && agent.accounts.map((account) => <Account key={account.id} account={account} t={t} />)}
       </div>
     </li>

@@ -550,7 +550,8 @@ export interface StuckInfo {
  * the reset, where it is known.
  */
 export type StuckAnswer =
-  | { readonly kind: 'tell'; readonly note: string }
+  /** `quiet` where Althar tells it, not the person, as an external wait resolving: the agent reads it, the thread shows its own line. */
+  | { readonly kind: 'tell'; readonly note: string; readonly quiet?: boolean }
   | {
       readonly kind: 'retry'
       readonly agentId: string

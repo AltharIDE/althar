@@ -6,7 +6,7 @@ import { PageLine, PagePanel } from '../../browser/PagePanel/PagePanel'
 import { Behind } from '../../composer/Behind/Behind'
 import { Brand } from '../../foundations/brands/brands'
 import { Composer } from '../../composer/Composer/Composer'
-import { FINDINGS_SETTLED, reviewDoc, STEPS, summaryDoc } from '../../fixtures/meridian'
+import { FINDINGS_SETTLED, STEPS, summaryDoc } from '../../fixtures/meridian'
 import { LAUNCH_PAGE, REFUNDS_PAGE } from '../../fixtures/scenes'
 import { GEMINI_PRO, OPUS, SONNET } from '../../fixtures/models'
 import { Delivery, StepState, ToolKind, ToolState, Verdict } from '../../foundations/vocabulary'
@@ -15,8 +15,7 @@ import { CanvasPanel } from '../Canvas/CanvasPanel'
 import { DocPanel } from '../DocPanel/DocPanel'
 import { Document } from '../Document/Document'
 import { Review } from '../Review/Review'
-import { ThreadShellProvider, type DocRef, type StepRef, type ThreadShell } from '../Shell/Shell'
-import { StepPanel } from '../StepPanel/StepPanel'
+import { ThreadShellProvider, type DocRef, type ThreadShell } from '../Shell/Shell'
 import { Thread } from '../Thread/Thread'
 import { Tool } from '../Tool/Tool'
 import { Prose, Turn } from '../Turn/Turn'
@@ -32,25 +31,17 @@ interface Said {
 
 /*
  * The host a product would write: which panel is open, what sending does.
- * A document and a step's thread share the one panel; Escape closes it
- * (SidePanel hears Escape first).
+ * A document opens in the panel; Escape closes it (SidePanel hears Escape
+ * first).
  */
 function Face({ busy, children, initialDoc }: { busy?: boolean; children: ReactNode; initialDoc?: DocRef }) {
   const [doc, setDoc] = useState<DocRef | null>(initialDoc ?? null)
-  const [step, setStep] = useState<StepRef | null>(null)
   const [draft, setDraft] = useState('')
   const [said, setSaid] = useState<Said[]>([])
   const shell = useMemo<ThreadShell>(
     () => ({
-      openDoc: (d) => {
-        setStep(null)
-        setDoc(d)
-      },
+      openDoc: setDoc,
       openImage: () => {},
-      openStep: (st) => {
-        setDoc(null)
-        setStep(st)
-      },
     }),
     [],
   )
@@ -62,18 +53,7 @@ function Face({ busy, children, initialDoc }: { busy?: boolean; children: ReactN
       ...(busy ? [] : [{ id: v.length + 1, text: 'Understood. I’ll take that into what I do next and say here what changed.' }]),
     ])
   }
-  const panel = doc ? (
-    <DocPanel doc={doc} onClose={() => setDoc(null)} />
-  ) : step ? (
-    <StepPanel
-      step={{ ...STEPS.review, ...step }}
-      agents={[SONNET, GEMINI_PRO]}
-      instructions={{ path: '.althar/review.md', ...reviewDoc }}
-      body={() => <Prose>Both reviewers read the router and the limiter.</Prose>}
-      composer={<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the reviewers" />}
-      onClose={() => setStep(null)}
-    />
-  ) : undefined
+  const panel = doc ? <DocPanel doc={doc} onClose={() => setDoc(null)} /> : undefined
   return (
     <ThreadShellProvider value={shell}>
       <div style={{ height: '100vh' }}>
@@ -153,21 +133,6 @@ export const Busy: Story = { render: () => <Face busy>{THREAD}</Face> }
 
 /** A document opens beside the thread, not over it. */
 export const WithDocument: Story = { render: () => <Face initialDoc={summaryDoc}>{THREAD}</Face> }
-
-/** The review's thread opens in the same place. */
-export const WithStep: Story = {
-  render: () => <Face>{THREAD}</Face>,
-}
-
-/** Opening a step’s thread beside the task’s. */
-export const OpeningAStep: Story = {
-  render: () => <Face>{THREAD}</Face>,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getAllByRole('button', { name: /thread/i })[0]!)
-    await waitFor(() => expect(c.getByRole('tablist')).toBeInTheDocument())
-  },
-}
 
 /** The end of the thread clears everything on the composer's edge: the chip, a notice and its Keep link. At the bottom, the last message ends above the chip. */
 export const LastMessageClearsTheEdge: Story = {
@@ -351,18 +316,7 @@ export const WithACanvas: Story = {
     <Beside
       opened={LAUNCH.canvasId}
       panel={
-        <CanvasPanel
-          {...LAUNCH}
-          version={3}
-          latest={3}
-          by="The lead of Payouts launch · just now"
-          note="Bigger, bolder headline"
-          onVersion={fn()}
-          onComment={fn()}
-          onReload={fn()}
-          onClose={fn()}
-          fill
-        >
+        <CanvasPanel {...LAUNCH} version={3} latest={3} onVersion={fn()} onComment={fn()} onReload={fn()} onClose={fn()} fill>
           {page('Payouts launch page', LAUNCH_PAGE)}
         </CanvasPanel>
       }

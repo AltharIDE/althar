@@ -176,6 +176,10 @@ only on a line of their own: change folder in a command of its own first, as
 above. Claude Code keeps a line that starts with `bun` in its sandbox
 whatever its settings say, so `bun run test:e2e` fails there: run
 `node scripts/e2e.ts e2e/your.spec.ts` from `apps/desktop` instead.
+On Linux the run takes a display of its own that no one sees, Xvfb where it's
+installed and Chromium's headless platform where it isn't, so a lead never
+starts a display, such as a nested Xwayland, on the person's desktop
+([apps/desktop](apps/desktop#work-on-it)).
 
 ## Reviewing on Linux
 

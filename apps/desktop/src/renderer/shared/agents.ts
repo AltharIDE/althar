@@ -1,5 +1,5 @@
 import type { AgentStatus, HeldForConnection, HeldForExternal, Queued } from '@althar/contracts'
-import { Brand, type PinnedDownload } from '@althar/ui'
+import { Brand, freesUpWords, heldBackWords, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
 
@@ -60,9 +60,22 @@ export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => st
  * What work waiting for a free agent waits for (ADR-032): every agent this
  * computer runs at once is busy, its own task's left out. More busy than
  * that, by what the person started or after they lowered the number, says
- * how many are busy and how many run at a time.
+ * how many are busy and how many run at a time. Held back while memory or the
+ * CPU lets fewer work than the number, it says so and until when: a count of
+ * busy agents under the number would read as room to spare.
  */
-export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting · ${busyWords(queued, where)}`
+export const queuedWords = (queued: Queued, where: string = device.this) =>
+  queued.held === undefined ? `Waiting · ${busyWords(queued, where)}` : heldBackWords(queued.held)
+
+/** Why a task is held back, at length, for a hover: This Mac lets 1 agent work at a time, of your 4, until memory frees up. */
+export const heldWhyWords = ({ atOnce, configured, held }: Queued, where: string = device.This): string | undefined =>
+  held === undefined
+    ? undefined
+    : `${where} lets ${atOnce} ${atOnce === 1 ? 'agent' : 'agents'} work at a time${configured === undefined ? '' : `, of your ${configured}`}, ${freesUpWords(held)}.`
+
+/** How many may work for now, of the person's number, as Up next says it over what is held back: 1 of 4 at a time. */
+export const atOnceWords = ({ atOnce, configured }: Queued) =>
+  configured === undefined ? `${atOnce} at a time` : `${atOnce} of ${configured} at a time`
 
 /** 1 → Next, 2 → 2nd, 3 → 3rd, 11 → 11th. */
 const ordinal = (n: number) => {
@@ -99,8 +112,14 @@ export const holdersWords = ({ holders }: Queued): string | undefined => {
  * computer's anyway: how many wait, and for what, in the line under the
  * project's name.
  */
-export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
-  `${n === 1 ? 'Waiting' : `${n} waiting`} · ${busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`}`
+export const queuedOfWords = (n: number, { busy, atOnce, held }: Queued) =>
+  `${n === 1 ? 'Waiting' : `${n} waiting`} · ${
+    held !== undefined
+      ? `held back ${freesUpWords(held)}`
+      : busy > atOnce
+        ? `${busy} agents busy, ${atOnce} at a time`
+        : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
+  }`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
@@ -119,6 +138,17 @@ const CAUTIONS: Readonly<Record<string, string>> = {
 }
 
 export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS[agentId]
+
+/**
+ * The agents whose sign-in in the browser comes back as a code to paste (Claude Code's page shows one), rather than to a
+ * port on the computer the agent runs on: from a window on another computer's home, only theirs can finish in this one's
+ * browser. The rest sign in there by a one-time code, where they have one, or in a terminal on the home.
+ */
+const PASTES_BACK: ReadonlySet<string> = new Set(['claude-code'])
+
+/** The ways an agent signs in from this window: on another computer's home, a browser way only where it comes back as a code. */
+export const waysFrom = (agent: Pick<AgentStatus, 'id' | 'ways'>, remote: boolean): AgentStatus['ways'] =>
+  remote ? agent.ways.filter((way) => way !== 'browser' || PASTES_BACK.has(agent.id)) : agent.ways
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {

@@ -129,19 +129,22 @@ People choose who does work by model, not by the tool that runs it. The coordina
 - **`list_models` gives every model Althar can use now,** once each, grouped by maker: every model of every agent that is signed in and not out of usage, apart from the ones the person switched off. An agent's own default stands for the model it is. `propose_plan` names each step's model and effort.
 - **What is known of models comes from OpenRouter's public list:** Artificial Analysis's indices, price and context size, matched by id or name. It is read at start and fetched again in the background, and nothing waits for it. The scores are for the coordinator, and the window doesn't show them.
 - **Agents are routes.** Althar reaches a named model the best way there is: on an agent whose account a plan pays for before one on a key, then in the agents' order.
-- **When a step's agent runs out,** the step goes to the strongest free model on a plan. A different maker wins within five points of the strongest. Althar never spends on a key unasked ([scheduling.md](scheduling.md)).
+- **When a step's agent runs out,** or its plan runs low, the step stays on its model: the same model on another agent or account with room comes first. Only where none has room does it go to the strongest free model on a plan, where a different maker wins within five points of the strongest, and the thread says it is a different model. Althar never spends on a key unasked ([scheduling.md](scheduling.md)).
+- **When the person turns a lead's model off for its agent,** the lead starts on the same model through another agent with room, as the task's lead rather than a stand-in, and the thread says so. Only where no agent with room offers it does it go to another model, and the thread says that plainly. A stand-in on the task's own model isn't one; one kept standing in for another model stands in for the task's lead, and a restart keeps it standing in. A step that ends twice without its report goes back to the task's own model first where a stand-in on another model was the one failing, and a review never goes to the lead itself, on its agent and model: where that is the only one free, the review waits (an agent's Default read as the model it names), and a reviewer whose model is turned off with only the lead's model left doesn't start but asks the person. A handover from a live thread goes the same way, and a stand-in returned to a task's lead it didn't stand in for is back once that lead's agent has usage and its plan's latest reading has room left on the model. A stand-in going back to a model turned off on its own agent goes to that model through another agent, said plainly; where none has it, the stand-in carries on.
 - **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it. Work that names no model, only its agent, never starts on one: where the agent's own default is a model switched off, its session starts on the agent's model a takeover would pick, or, before Althar has read the agent's models, the first other one it lists. With none left on, it doesn't start, and says why.
 - **The window names who works by model,** as people know it, such as "Claude Sonnet 5.5", with its maker's mark. The agent and account show on hover. Agent names appear only where the agent is what's meant, such as signing in.
 
 ## Keeping context small
 
-A task's lead keeps its session as its context fills. When a lead reaches
-200,000 tokens or 80% of its window, whichever comes first, Althar can ask it
-to compact before its next message or goal round. The [coordinator](coordinator.md#compaction-and-session-recovery)
-compacts while idle at 80% of its window. Althar sends `/compact` on Claude Code, Codex and
-OpenCode. Other agents can manage their own compaction, as can a reviewer.
-An automatic request is attempted once while the reported context remains
-above the threshold. The next turn proceeds if the command fails.
+A task's lead keeps its session as its context fills. At 200,000 tokens or
+80% of its window, whichever comes first, it is eligible for the same
+[idle compaction](coordinator.md#compaction-and-session-recovery) as the
+coordinator. Althar sends `/compact` on Claude Code, Codex and OpenCode after
+an hour of inactivity, using that delay to estimate prompt cache expiry.
+A message or goal round can start on a full session. The agent can use its
+own compaction when it needs more room, and reviewers manage their own
+compaction. Althar makes one automatic attempt while usage remains above
+the threshold.
 
 The next ordinary turn after compaction gets the task brief, the lead's
 standing instructions, current project notes and open errands, and the

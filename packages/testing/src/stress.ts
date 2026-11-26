@@ -21,8 +21,8 @@ export interface Part {
 export interface Plan {
   /** Every changed test, on Linux, how many times each runs, and the seconds all of them have, shared out. */
   readonly linux: { readonly parts: ReadonlyArray<Part>; readonly runs: number; readonly seconds: number }
-  /** Those of packages that also run on Windows (desktop.yml), where tests run three or four times slower: fewer runs. */
-  readonly windows: { readonly parts: ReadonlyArray<Part>; readonly runs: number }
+  /** Those of packages that also run on Windows (desktop.yml), where tests run three or four times slower: fewer runs, in the same time. */
+  readonly windows: Plan['linux']
   /** The changed end-to-end specs, from apps/desktop, how many times each runs, and on how many machines. */
   readonly specs: { readonly files: ReadonlyArray<string>; readonly runs: number; readonly shards: ReadonlyArray<string> }
 }
@@ -74,7 +74,8 @@ export const plan = (changed: ReadonlyArray<string>, when: When = 'pull request'
     linux: nightly
       ? { parts: byPackage(tests), runs: share(tests.length, 200, 3, 20), seconds: 40 * 60 }
       : { parts: byPackage(tests), runs: share(tests.length, 3, 3, 3), seconds: 15 * 60 },
-    windows: { parts: byPackage(windows), runs: share(windows.length, 100, 2, 10) },
+    // Forty minutes of the hour the night's Windows job has (nightly.yml), as Linux's.
+    windows: { parts: byPackage(windows), runs: share(windows.length, 100, 2, 10), seconds: 40 * 60 },
     specs: { files: specs, runs: specRuns, shards: Array.from({ length: shards }, (_, index) => `${index + 1}/${shards}`) },
   }
 }
@@ -97,6 +98,11 @@ export const moreRuns = (planned: number, seconds: number, share: number): numbe
  * order again (`--sequence.seed`).
  */
 const run = ({ parts, runs, seconds }: Plan['linux']) => {
+  // A plan without its runs or its seconds would run each test NaN times, which is once more and checks nothing.
+  if (!Number.isFinite(runs) || !Number.isFinite(seconds)) {
+    process.stdout.write(`::error::The stress plan needs its runs and seconds, as numbers: ${JSON.stringify({ runs, seconds })}.\n`)
+    process.exit(1)
+  }
   const seed = process.env.GITHUB_RUN_ID ?? '1'
   const share = seconds / Math.max(parts.length, 1)
   process.stdout.write(`Each test runs up to ${runs} times, shuffled with seed ${seed}.\n`)

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
+import { readModelsAgain } from '../../data/models'
 import { reads, recheckStatus } from '../../data/reads'
 import { useServices } from '../../data/services'
 
@@ -13,9 +14,11 @@ import { useServices } from '../../data/services'
  * project is the first screen's own (useFirstProject); every later one is
  * made in a tab of its own (features/newProject). Signing an account in is
  * the accounts' own model (features/accounts), which reads the agents from
- * here. An account renamed, moved or removed shows so at once, and the
- * agents are read again behind it, as the runtime has them: what didn't go
- * through comes back with that read, and the error says why.
+ * here. An account renamed, moved, signed out or removed shows so at once,
+ * and the agents are read again behind it, as the runtime has them: what
+ * didn't go through comes back with that read, and the error says why. One
+ * signed out or removed offers its agent's models no more, so they are read
+ * again too.
  */
 
 export interface StartModel {
@@ -33,6 +36,8 @@ export interface StartModel {
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   readonly moveAccount: (agentId: string, accountId: string, to: 'up' | 'down') => Promise<void>
   readonly removeAccount: (accountId: string) => Promise<void>
+  /** Signs an account out, shown signed out at once: the usual folder's too, which signs the agent's own command out. */
+  readonly signOutAccount: (accountId: string) => Promise<void>
   /** An account whose removal couldn't sign it out, which can be removed anyway; null when there's none. */
   readonly unremoved: string | null
   readonly removeAnyway: () => Promise<void>
@@ -134,7 +139,8 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
       const at = ids.indexOf(accountId)
       const next = ids.filter((id) => id !== accountId)
       next.splice(Math.max(0, to === 'up' ? at - 1 : at + 1), 0, accountId)
-      return changing(() => client.orderAccounts(agentId, next), {
+      // The models follow the accounts' order (the first's own first), so they are read again once it is kept.
+      return changing(() => client.orderAccounts(agentId, next).then(() => readModelsAgain(client)), {
         of: `order ${agentId}`,
         show: (agent) =>
           agent.id !== agentId
@@ -181,6 +187,7 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
         async () => {
           try {
             await client.removeAccount(accountId)
+            readModelsAgain(client)
           } catch (failure) {
             if (failure instanceof ApiError && failure.reason === 'SignOutFailed') setUnremoved(accountId)
             throw failure
@@ -192,10 +199,36 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
         },
       )
     },
+    signOutAccount: (accountId) =>
+      changing(
+        async () => {
+          await client.signOutAccount(accountId)
+          readModelsAgain(client)
+        },
+        {
+          of: `signed out ${accountId}`,
+          show: (agent) => {
+            if (!agent.accounts.some((account) => account.id === accountId)) return agent
+            const accounts = agent.accounts.map((account) =>
+              account.id === accountId ? { ...account, signIn: 'signed_out' as const, outUntil: null } : account,
+            )
+            // Signed in where any of its accounts is, as the runtime says it.
+            const signIn = accounts.some((account) => account.signIn === 'signed_in')
+              ? 'signed_in'
+              : accounts.some((account) => account.signIn === 'unknown')
+                ? 'unknown'
+                : 'signed_out'
+            return { ...agent, accounts, signIn }
+          },
+        },
+      ),
     unremoved,
     removeAnyway: () =>
       changing(async () => {
-        if (unremoved !== null) await client.removeAccount(unremoved, true)
+        if (unremoved !== null) {
+          await client.removeAccount(unremoved, true)
+          readModelsAgain(client)
+        }
         setUnremoved(null)
       }),
   }

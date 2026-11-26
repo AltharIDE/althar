@@ -7,8 +7,8 @@
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build && vp build --config vite.edge.config.ts",
-    "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build && vp build --config vite.edge.config.ts",
+    "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build --config vite.ground.config.ts && vp build --config vite.chip.config.ts && vp build && vp build --config vite.edge.config.ts",
+    "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build --config vite.ground.config.ts && vp build --config vite.chip.config.ts && vp build && vp build --config vite.edge.config.ts",
     "start": "electron .",
     "measure:startup": "bun run build && bun build scripts/measure-startup.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-startup.mjs && node test-results/measure-startup.mjs > test-results/startup-measurements.jsonl",
     "measure:long-thread": "bun run build && bun build scripts/measure-long-thread.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-long-thread.mjs && node test-results/measure-long-thread.mjs",
@@ -24,8 +24,8 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.109.0",
-    "@agentclientprotocol/codex-acp": "2.8.0",
+    "@agentclientprotocol/claude-agent-acp": "0.112.0",
+    "@agentclientprotocol/codex-acp": "2.12.0",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
@@ -36,6 +36,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tanstack/react-query": "^5.107.1",
     "@tanstack/react-router": "^1.170.46",
+    "@trycua/cua-driver": "0.56.8",
     "effect": "4.0.7",
     "electron-updater": "6.8.11",
     "node-pty": "1.1.0",
@@ -46,6 +47,7 @@
     "sherpa-onnx-node": "1.13.8"
   },
   "devDependencies": {
+    "@althar/site": "workspace:*",
     "@althar/testing": "workspace:*",
     "@effect/vitest": "4.0.7",
     "@playwright/test": "^1.65.1",

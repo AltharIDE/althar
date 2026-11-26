@@ -6,7 +6,7 @@ import { type AccountSignInStep, accountsText, SignInWay } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
-import { signInWordsOf } from '../../shared/agents'
+import { signInWordsOf, waysFrom } from '../../shared/agents'
 import type { StartModel } from '../start/useStart'
 
 /*
@@ -294,8 +294,10 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
 
   const again = (agentId: string, accountId: string) => {
     const mine = leave()
-    // Where Althar runs the agent's login, its ways; elsewhere, Terminal at once.
-    if (agentId === 'copilot' || (agentOf(agentId)?.ways.length ?? 0) > 0) {
+    // Where Althar runs the agent's login, its ways (from another computer's home, those that can finish from here); elsewhere,
+    // Terminal at once.
+    const agent = agentOf(agentId)
+    if (agentId === 'copilot' || (agent === undefined ? 0 : waysFrom(agent, client.connection !== undefined).length) > 0) {
       const saved = agentId === 'copilot' ? agentOf(agentId)?.accounts.find((account) => account.id === accountId)?.signInHost : undefined
       const enterpriseHost = saved === 'github.com' ? null : (saved ?? null)
       return setFlow({

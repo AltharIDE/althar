@@ -93,9 +93,9 @@ afterEach(() => {
 describe('signing in inside Althar, when it goes otherwise', () => {
   it('says Codex’s own words when it refuses to start, and that it refused where it gives none', async () => {
     const worded = await run(codex({ initialize: { error: { code: -32600, message: 'Unsupported client' } } }), { way: 'browser' })
-    expect(worded.said).toEqual([{ kind: 'failed', message: 'Unsupported client' }])
+    expect(worded.said).toEqual([{ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Unsupported client' }])
     const wordless = await run(codex({ initialize: { error: { code: -32600 } } }), { way: 'browser' })
-    expect(wordless.said).toEqual([{ kind: 'failed', message: 'Codex refused.' }])
+    expect(wordless.said).toEqual([{ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Codex refused.' }])
   })
 
   it('says why Codex didn’t start signing in: its words, nothing at all, or no way to sign in', async () => {
@@ -103,11 +103,11 @@ describe('signing in inside Althar, when it goes otherwise', () => {
     const refused = await run(codex({ initialize, 'account/login/start': { error: { message: 'Sign-in is turned off' } } }), {
       way: 'browser',
     })
-    expect(refused.said).toEqual([{ kind: 'failed', message: 'Sign-in is turned off' }])
+    expect(refused.said).toEqual([{ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Sign-in is turned off' }])
     const silent = await run(codex({ initialize, 'account/login/start': { result: null } }), { way: 'browser' })
-    expect(silent.said).toEqual([{ kind: 'failed', message: 'Codex didn’t start signing in.' }])
+    expect(silent.said).toEqual([{ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Codex didn’t start signing in.' }])
     const wayless = await run(codex({ initialize, 'account/login/start': { result: { loginId: 7, type: 'chatgpt' } } }), { way: 'device' })
-    expect(wayless.said).toEqual([{ kind: 'failed', message: 'Codex didn’t say how to sign in.' }])
+    expect(wayless.said).toEqual([{ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Codex didn’t say how to sign in.' }])
   })
 
   it('minds only Codex’s word that its sign-in ended, and says it didn’t finish where Codex gives no reason', async () => {
@@ -125,7 +125,7 @@ describe('signing in inside Althar, when it goes otherwise', () => {
     )
     expect(said).toEqual([
       { kind: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: false },
-      { kind: 'failed', message: 'Codex didn’t finish signing in.' },
+      { kind: 'failed', message: 'Couldn’t sign in.', detail: 'Codex didn’t finish signing in.' },
     ])
   })
 
@@ -177,12 +177,16 @@ describe('signing in inside Althar, when it goes otherwise', () => {
       claude(() => ({ command: 'bun', args: ['-e', `process.stdout.write('Opening browser to sign in…\\n\\n'); process.exit(1)`] })),
       { way: 'browser' },
     )
-    expect(printed.said.at(-1)).toEqual({ kind: 'failed', message: 'Opening browser to sign in…' })
+    expect(printed.said.at(-1)).toEqual({ kind: 'failed', message: 'Couldn’t sign in.', detail: 'Opening browser to sign in…' })
     const quiet = await run(
       claude(() => ({ command: 'bun', args: ['-e', 'process.exit(1)'] })),
       { way: 'browser' },
     )
-    expect(quiet.said.at(-1)).toEqual({ kind: 'failed', message: 'Claude Code stopped signing in.' })
+    expect(quiet.said.at(-1)).toEqual({
+      kind: 'failed',
+      message: 'Claude Code stopped before signing in.',
+      detail: 'Claude Code stopped signing in.',
+    })
   })
 
   it('signs Claude Code in as no one in particular where it has no status to ask', async () => {

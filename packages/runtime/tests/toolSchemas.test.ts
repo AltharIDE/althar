@@ -90,6 +90,35 @@ const pullRequest = (at: { readonly working: string; readonly bare: string }, gi
 }
 
 describe('a tool’s input as Althar serves it', () => {
+  it('keeps mixed enums and type-specific constraints on the branches they apply to', () => {
+    const array = ['draft']
+    const object = { state: 'draft' }
+    const before = {
+      title: 'Selection',
+      default: object,
+      type: ['array', 'object', 'integer', 'number', 'boolean', 'null'],
+      enum: [array, object, 2, 0.5, true, null],
+      minItems: 1,
+      required: ['state'],
+      minimum: 0,
+    }
+    const after = singleTypes(before)
+    assert.deepStrictEqual(after, {
+      title: 'Selection',
+      default: object,
+      anyOf: [
+        { type: 'array', enum: [array], minItems: 1 },
+        { type: 'object', enum: [object], required: ['state'] },
+        { type: 'integer', enum: [2], minimum: 0 },
+        { type: 'number', enum: [2, 0.5], minimum: 0 },
+        { type: 'boolean', enum: [true] },
+        { type: 'null' },
+      ],
+    })
+    for (const input of [array, object, 2, 0.5, true, null, [], {}, 3, false, 'draft'])
+      assert.strictEqual(allows(after, input).valid, allows(before, input).valid, JSON.stringify(input))
+  })
+
   it('makes a list of types anyOf branches of one type each, the same values allowed', () => {
     const before = {
       type: 'object',

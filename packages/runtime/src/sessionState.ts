@@ -399,6 +399,8 @@ export interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /** Its `nextLead` was picked while it took the thread over: its first turn, the brief alone though it be, takes it up first. */
+  adoptedLead?: boolean | undefined
   /** Held while its agent is set to a model or effort, so two settings never cross: the chosen one and the one before (`chooseLead`). */
   leadLock: Semaphore.Semaphore
   /** Its agent is being set to a model or effort now. */
@@ -410,6 +412,8 @@ export interface Running {
    * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
    */
   moved: boolean
+  /** The model and effort its lead starts on where it moved, as the person picked them for where it went. */
+  movedLead?: { readonly model?: string; readonly effort?: string }
   /**
    * Where the next turn's time went before it was delivered (turnTimes.ts):
    * how long its session took to start or be handed over, and its folder's
@@ -440,11 +444,17 @@ export const BASELINE_WITHIN = Duration.seconds(5)
 /** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
 export const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
-export const automaticCompactionDue = (running: Running) => {
+export const idleSince = (running: Running) =>
+  Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt)
+
+export const canCompactWhileIdle = (running: Running) => {
   const { thread } = running
   return (
     !running.stopping &&
     running.brief === undefined &&
+    running.nextLead === undefined &&
+    !running.settingLead &&
+    !running.moved &&
     running.handover === 'none' &&
     running.deliveryHeld === null &&
     !running.compactAttempted &&
@@ -455,6 +465,9 @@ export const automaticCompactionDue = (running: Running) => {
     canCompact(running.entry.definition.id)
   )
 }
+
+export const idleCompactionDue = (running: Running, now: number, idleFor: number) =>
+  canCompactWhileIdle(running) && now - idleSince(running) >= idleFor
 
 export const markCompacted = (running: Running) => {
   const { thread } = running
@@ -597,6 +610,12 @@ export const offSwitchedOff = (definition: AgentDefinition, agent: AgentSession,
     }
     yield* agent.setOption(definition.options.model, instead.id)
   })
+
+/** A model as people know it, by what its agent calls it ("GPT-6.1 Sol"); its id where the agent doesn't name it. */
+export const modelNamed = (definition: AgentDefinition, options: ReadonlyArray<ConfigOption>, model: string) => {
+  const named = modelsOf(definition, options).models.find((one) => one.id === model)
+  return named === undefined ? model : knownModelName(definition, named)
+}
 
 /** What an agent is told of a message the person dictated, after its words (the standing instructions of a coordinator and a lead explain it). */
 export const DICTATED = "(Dictated by voice: words may be misheard. Read names generously; 'Alpha'/'Alter' likely means Althar.)"

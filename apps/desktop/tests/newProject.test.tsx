@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  SOCKET_CALLS,
   type ConnectionList,
   type FolderReading,
   type FoundRepository,
@@ -14,15 +15,17 @@ import {
 
 import { newProjectId } from '../src/renderer/data/client'
 import { makeQueryClient } from '../src/renderer/data/reads'
-import type { FoundRepositories } from '../src/renderer/data/services'
+import type { FoundRepositories, Host } from '../src/renderer/data/services'
 import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
 import { unsent } from '../src/renderer/features/elsewhere/unsent'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { changesOn, codeHostOf, remoteOf } from '../src/renderer/shared/remotes'
-import { connectionList, fakeClient, fakeHost, githubConnection, project } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, homeFolders, onLinuxHome, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { USUAL_LAUNCHER } from '../src/renderer/features/homes/useHomes'
 
 /*
  * A new project, in a tab of its own: named on its left, set up on its right.
@@ -778,5 +781,352 @@ describe('where code is hosted', () => {
       account: null,
     })
     expect([changesOn('gitlab'), changesOn('github'), changesOn(null)]).toEqual(['merge requests', 'pull requests', 'pull requests'])
+  })
+})
+
+describe('a new project on a home on another computer', () => {
+  const SITE = repo('/home/althar/code/site', 'git@github.com:acme/site.git')
+  /** What the home refuses this window, as it does a socket: putting a repository on a host, and a project's tracker. */
+  const refused = () =>
+    vi.fn(async () => {
+      throw new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' })
+    })
+  /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
+  const onHome = (
+    overrides: Parameters<typeof fakeClient>[0] = {},
+    calls: ReadonlyArray<string> | null = SOCKET_CALLS,
+    host: Host = fakeHost(),
+  ) => {
+    const fake = fakeClient({
+      connection: remoteConnection(calls),
+      readFolder: vi.fn(async (grant: string) =>
+        grant === 'grant_site' ? { kind: 'repository' as const, name: 'site', repositories: [SITE], project: null } : readings.grant_ops!,
+      ),
+      publishRepository: refused(),
+      listRepositoryOwners: refused(),
+      setProjectTracker: refused(),
+      listContainers: refused(),
+      ...overrides,
+    })
+    const onCreated = vi.fn()
+    draftsOf(fake.client).start()
+    withServices(<NewProject onCreated={onCreated} onOpen={vi.fn()} onClose={vi.fn()} />, fake.client, foldersOnHome(host, fake.client))
+    return { ...fake, host, onCreated }
+  }
+
+  it('clones one of this Mac’s projects there by its address, with the code hosts it has none of offered to connect there', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const local = {
+      live: true,
+      list: [
+        {
+          id: 'p_here',
+          name: 'Site',
+          ink: 'teal',
+          working: 0,
+          yours: 0,
+          remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }],
+        },
+      ],
+    }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const at = onHome(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    // Clone says where from, rather than a bare From.
+    expect(way(/^Clone/).textContent).toContain('From GitHub, GitLab or Bitbucket')
+    const row = await screen.findByRole('button', { name: 'Clone acme/site' })
+    expect(within(row).getByText('On this Mac')).toBeTruthy()
+    // The hosts it isn't connected to, there to connect beside it.
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('menuitem', { name: 'GitHub' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(row)
+    await create('Site')
+    await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { url: 'https://github.com/acme/site' }))
+  })
+
+  it('clones a Bitbucket Data Center project of this Mac’s through the home’s own connection to that server, and offers none it can’t reach', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = [
+      {
+        url: 'https://git.acme.com/bitbucket/projects/PLAT/repos/site/browse',
+        product: 'bitbucket_dc',
+        host: 'git.acme.com',
+        path: 'PLAT/site',
+      },
+      { url: 'https://code.other.com/projects/OPS/repos/infra/browse', product: 'bitbucket_dc', host: 'code.other.com', path: 'OPS/infra' },
+    ]
+    const local = { live: true, list: [{ id: 'p_here', name: 'Site', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const server = {
+      ...githubConnection,
+      id: 'conn_dc',
+      product: 'bitbucket_dc' as const,
+      name: 'Bitbucket',
+      webUrl: 'https://git.acme.com/bitbucket',
+    }
+    // Jira on the same server, at a base path of its own, listed first: it's no code host, and isn't taken for one.
+    const jira = { ...githubConnection, id: 'conn_jira', product: 'jira_dc' as const, name: 'Jira', webUrl: 'https://git.acme.com/jira' }
+    const at = onHome(
+      {
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [jira, server] })),
+        listHostRepositories: vi.fn(async () => []),
+      },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    const row = await screen.findByRole('button', { name: 'Clone PLAT/site' })
+    // Its page isn't its git address, and the home isn't connected to the other server: that one isn't offered.
+    expect(screen.queryByRole('button', { name: 'Clone OPS/infra' })).toBeNull()
+    await userEvent.click(row)
+    await create('Site')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'site'] }),
+    )
+  })
+
+  it('offers no Bitbucket Data Center project of this Mac’s where the home has only a Jira on that server', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = [
+      {
+        url: 'https://git.acme.com/bitbucket/projects/PLAT/repos/site/browse',
+        product: 'bitbucket_dc',
+        host: 'git.acme.com',
+        path: 'PLAT/site',
+      },
+      { url: 'https://github.com/acme/web', product: 'github', host: 'github.com', path: 'acme/web' },
+    ]
+    const local = { live: true, list: [{ id: 'p_here', name: 'Site', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const jira = { ...githubConnection, id: 'conn_jira', product: 'jira_dc' as const, name: 'Jira', webUrl: 'https://git.acme.com/jira' }
+    onHome({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [jira] })) }, SOCKET_CALLS, host as unknown as Host)
+    expect(await screen.findByRole('button', { name: 'Clone acme/web' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Clone PLAT/site' })).toBeNull()
+  })
+
+  it('says which of the home’s own repositories are this Mac’s too, once each, and clones one through the home’s connection', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const site = { url: 'https://github.com/acme/harbor', product: 'github', host: 'github.com', path: 'acme/harbor' }
+    const local = {
+      live: true,
+      list: [
+        // On a host Althar doesn't know: not offered.
+        {
+          id: 'p_here',
+          name: 'Harbor',
+          ink: 'teal',
+          working: 0,
+          yours: 0,
+          remotes: [site, { ...site, product: 'gitea', path: 'acme/forge' }],
+        },
+        // Another of this Mac's projects with the same repository: offered once.
+        { id: 'p_copy', name: 'Harbor copy', ink: 'sky', working: 0, yours: 0, remotes: [{ ...site, path: 'ACME/Harbor' }] },
+      ],
+    }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const at = onHome(
+      {
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })),
+        listHostRepositories: vi.fn(async () => [listed('acme/harbor'), listed('acme/docs')]),
+      },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+    // The home's own listing of it, once that's read, says it's this Mac's too, and is the one row of it.
+    const docs = await screen.findByRole('button', { name: 'Clone acme/docs' })
+    const row = screen.getByRole('button', { name: 'Clone acme/harbor' })
+    expect(within(row).getByText('On this Mac')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^Clone acme\/harbor$/i })).toHaveLength(1)
+    expect(within(docs).queryByText('On this Mac')).toBeNull()
+    expect(screen.queryByRole('button', { name: /forge/ })).toBeNull()
+    await userEvent.click(row)
+    await create('Harbor')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn1', path: ['acme', 'harbor'] }),
+    )
+  })
+
+  /**
+   * Two Bitbucket Data Center servers on one host, the other listed first: beside this Mac's at /bitbucket, or at the host's
+   * root, which this Mac's page is under too.
+   */
+  const LAYOUTS = [
+    { layout: 'side by side', other: { id: 'conn_mirror', name: 'Mirror', base: '/mirror' } },
+    { layout: 'one at the root, the other under it', other: { id: 'conn_root', name: 'Root', base: '' } },
+  ]
+  const twoServers = (other: (typeof LAYOUTS)[number]['other'], onMac: ReadonlyArray<string>, listing: ReadonlyArray<HostRepository>) => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = onMac.map((base) => ({
+      url: `https://git.acme.com${base}/projects/PLAT/repos/tide/browse`,
+      product: 'bitbucket_dc',
+      host: 'git.acme.com',
+      path: 'PLAT/tide',
+    }))
+    const local = { live: true, list: [{ id: 'p_here', name: 'Tide', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const server = ({ id, name, base }: { id: string; name: string; base: string }) => ({
+      ...githubConnection,
+      id,
+      product: 'bitbucket_dc' as const,
+      name,
+      webUrl: `https://git.acme.com${base}`,
+    })
+    return onHome(
+      {
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          connections: [server(other), server({ id: 'conn_dc', name: 'Bitbucket', base: '/bitbucket' })],
+        })),
+        listHostRepositories: vi.fn(async () => listing),
+      },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+  }
+
+  it.each(LAYOUTS)('says which of two servers’ repositories of one path is this Mac’s, $layout, and clones that one', async ({ other }) => {
+    const at = twoServers(other, ['/bitbucket'], [listed('PLAT/tide')])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })).toHaveLength(2))
+    // The other server's, listed first, is another repository: not this Mac's.
+    const mine = screen.getAllByRole('button', { name: 'Clone PLAT/tide' }).filter((row) => within(row).queryByText('On this Mac'))
+    expect(mine).toHaveLength(1)
+    await userEvent.click(mine[0]!)
+    await create('Tide')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'tide'] }),
+    )
+  })
+
+  it.each(LAYOUTS)('offers this Mac’s repositories of one path on two servers, $layout, each cloned from its own', async ({ other }) => {
+    const at = twoServers(other, ['/bitbucket', other.base], [])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })).toHaveLength(2))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })[0]!)
+    await create('Tide')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'tide'] }),
+    )
+  })
+
+  it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {
+    onHome(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },
+      SOCKET_CALLS.filter((one) => one !== 'ConnectToken'),
+    )
+    expect(way(/^Clone/).textContent).toContain('From its address')
+    expect(await screen.findByRole('searchbox', { name: /repository/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Connect/ })).toBeNull()
+  })
+
+  it('offers the repositories the home found, each read by the grant the home made, and no folder picker', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^A folder/))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    await userEvent.click(within(list).getByRole('checkbox', { name: /^site/ }))
+    await waitFor(() => expect(at.client.readFolder).toHaveBeenCalledWith('grant_site'))
+    expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
+    expect(at.host.pickFolders).not.toHaveBeenCalled()
+    expect(at.host.findRepositories).not.toHaveBeenCalled()
+  })
+
+  it('starts a new repository where the home keeps code, with nowhere else to choose', async () => {
+    const at = onHome()
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalledWith('grant_code', 'Tide Tables'))
+    expect(screen.queryByRole('button', { name: /^Change/ })).toBeNull()
+    expect(at.host.pickPlace).not.toHaveBeenCalled()
+  })
+
+  it('makes it with a code host and a tracker connected there, offering neither where the home won’t let this window use them', async () => {
+    const at = onHome({ listConnections: vi.fn(async () => connected) })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    expect(screen.queryByRole('radiogroup', { name: 'Where its code lives' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /Linear/ })).toBeNull()
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+    expect(at.client.makeRepository).toHaveBeenCalled()
+    expect(at.client.openProject).toHaveBeenCalled()
+    for (const call of [at.client.publishRepository, at.client.listRepositoryOwners, at.client.setProjectTracker, at.client.listContainers])
+      expect(call).not.toHaveBeenCalled()
+  })
+
+  it('says where it couldn’t ask the home where a new repository goes, and lets Create go on once it can', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^Start empty/))
+    await named('Tide Tables')
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    expect(await screen.findByText('The home disconnected.')).not.toBeNull()
+    expect(draftsOf(at.client).get()?.reading).toEqual([])
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Start it on this home' }))
+    await waitFor(() => expect(at.client.placeRepository).toHaveBeenCalled())
+    await create('Tide Tables')
+    await waitFor(() => expect(at.onCreated).toHaveBeenCalled())
+  })
+
+  it('says it couldn’t look on the home, rather than that it found nothing there, and looks again', async () => {
+    let failing = true
+    const at = onHome({
+      findHomeFolders: vi.fn(async () => {
+        if (failing) throw new ApiError({ reason: 'Disconnected', message: 'The home disconnected.' })
+        return homeFolders
+      }),
+    })
+    await userEvent.click(way(/^A folder/))
+    expect(await screen.findByText('Couldn’t look on this home just now.')).not.toBeNull()
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Look again' }))
+    const list = await screen.findByRole('list', { name: 'Repositories on this home' })
+    expect(within(list).getByRole('checkbox', { name: /^site/ })).not.toBeNull()
+    expect(at.client.findHomeFolders).toHaveBeenCalled()
+  })
+
+  it('asks before an update that stops tasks running on the home, and updates only once the person says so', async () => {
+    const { homes } = onLinuxHome('runner-1')
+    const update = vi.fn(async () => ({ state: 'applied' as const }))
+    const busy: Host['homes'] = {
+      ...homes,
+      update,
+      overview: vi.fn(async () => ({
+        homes: [],
+        windows: {},
+        projects: { [`home_${'6'.repeat(32)}`]: { live: true, list: [{ id: 'p1', name: 'Site', ink: 'teal', working: 2, yours: 0 }] } },
+        opened: {},
+      })),
+    }
+    onHome({}, null, fakeHost({ homes: busy }))
+    expect(await screen.findByText('2 tasks are running on runner-1. They stop while it restarts.')).not.toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    expect(screen.getByText('Stop 2 running tasks?')).not.toBeNull()
+    expect(update).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update anyway' }))
+    expect(update).toHaveBeenCalledOnce()
+    await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+  })
+
+  it('asks a home from before windows made projects there to update, with its command, and asks it nothing else', async () => {
+    const at = onHome({}, null)
+    expect(await screen.findByText(/this home runs an older Althar. Once it’s updated/)).not.toBeNull()
+    // Not read how the home was installed: where Althar installs one, folded away, and said so.
+    await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+    await waitFor(() => expect(document.querySelector('code')?.textContent).toBe(`sh ${USUAL_LAUNCHER} update --apply --wait`))
+    expect(screen.getByText(/That’s for a home Althar installed/)).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy the update command' })).not.toBeNull()
+    expect(at.client.findHomeFolders).not.toHaveBeenCalled()
   })
 })

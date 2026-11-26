@@ -11,7 +11,9 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { install } from '../../skills/tests/support'
+import { CanvasSaves } from '../src/CanvasSaves'
 import { Coordinator } from '../src/Coordinator'
+import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf } from '../src/plansAndReviews'
 import { Policies } from '../src/Policies'
@@ -528,6 +530,46 @@ describe('each section of the settings, as agents change it', () => {
       yield* settings.undo((yield* lineIds(coordinator.threadId)).at(-1) ?? '')
       assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.role, 'frontend')
       assert.strictEqual((yield* lines(coordinator.threadId)).at(-1)?.state, 'undone')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('project/code sets where the project’s artifacts go, by its repository’s name, changing only what it names', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      const name = (yield* (yield* Projects).repositories(projectId))[0]?.name ?? ''
+      const saves = yield* CanvasSaves
+      const change = (artifacts: unknown) => callTool(coordinator, 'change_settings', { section: 'project/code', change: { artifacts } })
+      const repositoryId = (yield* (yield* Projects).repositories(projectId))[0]?.id ?? ''
+      assert.isNull(yield* saves.home(projectId))
+      // With none yet, and no remote to read the repository's folders from, Althar's pick is a new design folder in it.
+      const guessed = (yield* saves.place(projectId)).guess
+      assert.include(guessed, { repositoryId, folder: 'design/', how: 'pr', follow: true })
+      assert.include(guessed?.why, 'A new design folder')
+      assert.match(yield* change({ how: 'main' }), /no place for artifacts yet: name the repository they go in/)
+      assert.match(yield* change({ repository: 'elsewhere' }), /^The project has no repository called elsewhere/)
+      assert.match(yield* change({ repository: name, folder: '../outside/' }), /^Pick a folder inside the repository/)
+      // The first names its repository; the rest is as the first save would make it.
+      assert.match(yield* change({ repository: name }), /^Changed Code and issues: Artifacts/)
+      assert.deepStrictEqual(yield* saves.home(projectId), { repositoryId, repository: name, folder: 'design/', how: 'pr', follow: true })
+      // A later one names only what it changes, and reads back as Settings shows it.
+      yield* change({ folder: 'docs/design/', how: 'main', follow: false })
+      assert.deepInclude(yield* saves.home(projectId), { folder: 'docs/design/', how: 'main', follow: false })
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/code' }), 'docs/design/')
+      // Undo puts back what that one named; undoing the first takes the place away again.
+      const settings = yield* SettingsTools
+      const [first, second] = yield* lineIds(coordinator.threadId)
+      yield* settings.undo(second ?? '')
+      assert.deepInclude(yield* saves.home(projectId), { folder: 'design/', how: 'pr', follow: true })
+      yield* settings.undo(first ?? '')
+      assert.isNull(yield* saves.home(projectId))
+
+      // What isn't there, or isn't inside the repository, is refused.
+      assert.instanceOf(yield* Effect.flip(saves.place('proj_gone')), NotFound)
+      assert.instanceOf(yield* Effect.flip(saves.folders(projectId, 'repo_gone')), NotFound)
+      const asked = { canvasId: 'cnv_gone', repositoryId, how: 'pr' as const, follow: true }
+      assert.instanceOf(yield* Effect.flip(saves.save({ ...asked, path: 'design/gone/' })), NotFound)
+      assert.include((yield* Effect.flip(saves.save({ ...asked, path: '../gone/' }))).message, 'Pick a folder of its own')
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -3,6 +3,8 @@ import { useState } from 'react'
 import type { ConnectionList, ProjectRepository, Runnable } from '@althar/contracts'
 import { RemoveProject, SettingsLayout, SettingsNav } from '@althar/ui'
 
+import { canCall } from '../../data/client'
+import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
 import { ConnectDialog, type Opening } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
@@ -68,6 +70,7 @@ export function ProjectSettingsPage({
   onConnections,
 }: ProjectSettingsPageProps) {
   const [connecting, setConnecting] = useState<Opening | null>(null)
+  const { client } = useServices()
   // Here, not in the rules' section, so a change on its way outlasts a look at another section.
   const rules = useRules(projectId)
   const open = projectSectionText[section]
@@ -93,7 +96,10 @@ export function ProjectSettingsPage({
               )}
               value={section}
               onChange={onSection}
-              action={{ title: text.remove, icon: 'close', danger: true, onSelect: model.askRemove }}
+              // Removed only where the home lets this window: another computer's home keeps its projects' removal to itself.
+              {...(canCall(client, 'RemoveProject')
+                ? { action: { title: text.remove, icon: 'close' as const, danger: true, onSelect: model.askRemove } }
+                : {})}
             />
           </>
         }

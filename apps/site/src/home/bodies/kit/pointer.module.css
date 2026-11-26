@@ -1,0 +1,51 @@
+/* A person's pointer on a screen at work (Pointer.tsx): an arrow, gliding from what it did to what it does next; pressing, it gives a little and rings. */
+
+.pointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transition: transform 560ms cubic-bezier(0.45, 0.05, 0.2, 1);
+}
+.arrow {
+  position: absolute;
+  left: -2px;
+  top: -1px;
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+  transform-origin: 2px 1px;
+  filter: drop-shadow(0 1px 1.5px rgba(10, 10, 20, 0.35));
+  transition: scale 120ms var(--ease);
+}
+.arrow path { fill: #111114; stroke: #fff; stroke-width: 1.4; stroke-linejoin: round; }
+.pointer[data-press] .arrow { scale: 0.86; }
+/* Each press rings out from where it pressed. */
+.ring {
+  position: absolute;
+  left: -15px;
+  top: -15px;
+  width: 30px;
+  height: 30px;
+  border: 2px solid rgba(43, 59, 255, 0.55);
+  border-radius: 50%;
+  opacity: 0;
+}
+.pointer[data-press] .ring { animation: ring 560ms var(--ease-out); }
+@keyframes ring {
+  from { opacity: 1; transform: scale(0.35); }
+  to { opacity: 0; transform: scale(1.45); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pointer { transition: none; }
+  .pointer[data-press] .ring { animation: none; }
+}
+
+/* On a phone, with nothing to point with, it is a tap: the ring where it presses, no arrow. In the carousel's views, which are the desktop's window there, it is the desktop's pointer. */
+@media (max-width: 699px) {
+  .arrow { display: none; }
+  :global([data-fit-box]) .arrow { display: block; }
+}

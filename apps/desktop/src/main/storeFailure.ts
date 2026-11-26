@@ -1,4 +1,4 @@
-import { shownAt } from './repositories'
+import { shownAt } from '@althar/runtime/repositories'
 
 /*
  * A store the runtime can't serve, as it says it: an update that couldn't

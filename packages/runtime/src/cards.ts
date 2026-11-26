@@ -46,8 +46,9 @@ export const offScratch = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     // Most tasks are on the board: one look at the task's own row, before anything that reads more.
-    const [shelf] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${taskId}`
-    if (shelf?.shelf !== 'scratch') return
+    const [shelf] = yield* sql<{ shelf: string | null; artifactChat: number }>`SELECT shelf, artifact_chat FROM tasks WHERE id = ${taskId}`
+    // An artifact's own chat is never a task on the board, whatever it writes (ADR-104, "Talking to an artifact").
+    if (shelf?.shelf !== 'scratch' || shelf.artifactChat === 1) return
     const [chat] = yield* sql<{ projectId: ProjectId; threadId: string | null; branched: number; linked: number; drafted: number }>`
       WITH shelved AS (
         SELECT coalesce(max(e.occurred_at), '') AS at FROM record_events e

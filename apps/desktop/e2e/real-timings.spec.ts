@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
-import { mainWindow, openFirstProject, say } from './support'
+import { displaySwitches, mainWindow, openFirstProject, say } from './support'
 
 /*
  * How long a plain "hi" and a short question about the code take, in the
@@ -203,7 +203,7 @@ test('a plain hi and a short code question, in the coordinator’s conversation 
     ),
   )
   const app = await electron.launch({
-    args: [process.env.ALTHAR_TIMINGS_APP ?? join(import.meta.dirname, '..')],
+    args: [process.env.ALTHAR_TIMINGS_APP ?? join(import.meta.dirname, '..'), ...displaySwitches],
     env: {
       ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),

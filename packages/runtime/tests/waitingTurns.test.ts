@@ -277,7 +277,7 @@ describe('a task under way whose next turn waits for a place', () => {
       assert.isUndefined(going?.place)
       // Its answer is held, so the turn still occupies the place the board just cleared it to take.
       assert.deepStrictEqual(
-        (yield* queries.board(projectId)).workPlaces?.holders.map((holder) => holder.taskId),
+        (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
         [first.taskId],
       )
     }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { holds: holds() } } }))),

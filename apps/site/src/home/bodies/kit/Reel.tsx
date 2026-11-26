@@ -8,8 +8,9 @@ import s from './Reel.module.css'
  * A few pictures on one screen, one after another while it is in view, the
  * way a short film plays: each stays its time, then the next comes in over
  * it. Under the screen, a line each with its name, filling while it plays;
- * any can be picked, and then it stays on that one. Pointing at it or
- * tabbing into it holds it. With motion reduced, or `?t=` in the address,
+ * any can be picked, and then it stays on that one. Pointing at the names
+ * or tabbing into them holds it; pointing at the screen doesn't, as large
+ * as it is, the pointer is often just resting there. With motion reduced, or `?t=` in the address,
  * it stands on the first.
  */
 
@@ -79,8 +80,6 @@ export function Reel({
   return (
     <div
       className={cx(s.reel, tone === 'ink' && s.ink, className)}
-      onPointerEnter={() => setPointed(true)}
-      onPointerLeave={() => setPointed(false)}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
@@ -93,7 +92,12 @@ export function Reel({
           </div>
         ))}
       </div>
-      <ol className={s.moments} style={{ '--n': moments.length } as CSSProperties}>
+      <ol
+        className={s.moments}
+        style={{ '--n': moments.length } as CSSProperties}
+        onPointerEnter={() => setPointed(true)}
+        onPointerLeave={() => setPointed(false)}
+      >
         {moments.map((m, i) => (
           <li key={m.label}>
             <button

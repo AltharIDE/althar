@@ -18,6 +18,7 @@ import {
   MVP_RULES,
   RULES,
   parseCommandLine,
+  refusesHostsUnder,
   pathsOf,
   type ProjectRuleSet,
   type RuleContext,
@@ -459,6 +460,16 @@ describe('the always-ask list', () => {
       assert.strictEqual(run('curl https://notexample.com/x', { project }).verdict, 'allow', pattern)
       assert.strictEqual(run('curl https://example.com.evil.test/x', { project }).verdict, 'allow', pattern)
     }
+  })
+
+  it('says a never kept exactly for a host refuses the hosts under it, as a host rule meets them', () => {
+    const project: ProjectRuleSet = { ...MVP_RULES, commands: [{ pattern: 'api.example.com', decision: 'never', match: 'exact' }] }
+    const network = (host: string) => request({ kind: 'other', title: host, rawInput: { host } })
+    assert.strictEqual(decide(network('child.api.example.com'), { ...context, project }).verdict, 'deny')
+    assert.strictEqual(refusesHostsUnder('api.example.com'), true)
+    // A command's exact never meets its own words only.
+    assert.strictEqual(refusesHostsUnder('git push origin main'), false)
+    assert.strictEqual(refusesHostsUnder('deploy.sh'), false)
   })
 
   it('reads a command rule naming a script as a command, not as a host a command names', () => {

@@ -30,6 +30,12 @@
   transition-duration: var(--slide);
   transition-timing-function: var(--ease-out);
 }
+/* an option drawn as its icon: square, so a pair of them reads as a switch */
+.iconOption {
+  flex: none;
+  width: 30px;
+  padding: 0;
+}
 /* the selection: one element behind the options, moved by transform */
 .indicator {
   position: absolute;

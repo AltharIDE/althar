@@ -203,7 +203,7 @@
 .sheet.lit > .tint { opacity: 1; }
 .sheet.ink > .tint { opacity: 0; }
 .sheet.ink > .graphite { opacity: 1; }
-/* A little more body than the bar, so the words stay readable on paper. The smoke covers it once the light or a dark section is behind the card. */
+/* A little more body than the bar. The smoke covers it once the light or a dark section is behind the card. */
 .sheet > .glass {
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.64));
   -webkit-backdrop-filter: blur(24px) saturate(1.8) brightness(1.04);
@@ -212,6 +212,8 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px rgba(20, 20, 28, 0.1),
     0 14px 32px -16px rgba(40, 32, 20, 0.32);
 }
+/* On paper, far more body still: the page's words and pictures are right under the card's, and through clearer glass the two ran together. Nearly paper, the glass's blur still under it. Under the smoke it stays the clearer glass, so the smoke keeps its depth. */
+.sheet:not(.lit) > .glass { background: linear-gradient(to bottom, rgba(253, 252, 249, 0.96), rgba(250, 249, 245, 0.93)); }
 /* On a short screen, a phone on its side, the pages scroll inside the card rather than run off it. */
 .sheet nav { position: relative; display: grid; max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
 .sheet a::after {
@@ -236,7 +238,8 @@
 .sheet a:active::before, .sheet a:focus-visible::before { opacity: 1; transition-duration: 40ms; }
 .sheet a:focus-visible { outline: none; }
 .sheet.lit a:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
-.sheet a[aria-current='page']::after { content: ''; width: 5px; height: 5px; margin-left: 2px; border-radius: 50%; background: var(--nav-point); }
+/* The page being read, as on the bar: a point of light under its name, in the row's middle. */
+.sheet a[aria-current='page']::after { content: ''; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--nav-point); }
 .open .sheet {
   pointer-events: auto; transform: none; clip-path: inset(0 0 0 0 round 18px);
   transition: transform var(--move), clip-path var(--move);
@@ -248,6 +251,8 @@
   .menu { display: inline-flex; align-items: center; }
   .sheet { display: block; }
   .row { padding-left: 16px; gap: 8px; }
+  /* With the menu's bar (a tablet, a phone), the download is its word alone: no point of light before it. */
+  .download i { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bar, .sheet, .open .sheet, .sheet a, .open .sheet a, .sheet a::before, .scrim, .open .scrim { transition: none; }

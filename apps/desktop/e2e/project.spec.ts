@@ -116,7 +116,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
 
     // On the home, by its new name.
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await expect(page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: /Refunds v2/ })).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
     await tabs.getByRole('button', { name: /^Refunds v2/ }).click()
 
     // Removed, from the foot of its settings' side: it says what happens first, then the window goes home, without its tab.
@@ -199,7 +199,8 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Scratch/ })).toHaveCount(0)
-    await expect(tabs.getByRole('listitem')).toHaveCount(3)
+    // Home's, Althar's own, and the projects': meridian and Northwind.
+    await expect(tabs.getByRole('listitem')).toHaveCount(4)
   } finally {
     await electronApp.close()
   }

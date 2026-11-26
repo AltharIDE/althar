@@ -5,13 +5,14 @@ import type { ConnectionList, ConnectionSummary, Product, RepositoryOwner, Servi
 import { type Brand, type HostedRepository, type SetupHost, type SetupStatus, type SetupWay } from '@althar/ui'
 import { repositoryFolder } from '@althar/ui/screens'
 
+import { canCall } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { device } from '../../shared/device'
 import { thingOf, useHostRepositories } from '../../shared/hostRepositories'
 import { productBrand } from '../../shared/products'
 import { changesOn, hostnameOf, remoteOf } from '../../shared/remotes'
 import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
+import { useHomeName } from '../homes/useHomes'
 import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type DraftPlan, type DraftStore, sameRepository } from './draft'
 
 /*
@@ -105,11 +106,19 @@ const nameOf = (connection: ConnectionSummary, all: ReadonlyArray<ConnectionSumm
 
 export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList | null): SetupModel & SetupActions => {
   const { client, host: system } = useServices()
+  // On another computer's home, a code host is connected there from this window, where the home allows it (an older home
+  // doesn't): those it isn't connected to are offered then, and only then. Its trackers stay with the person's own window.
+  const remoteHome = client.connection !== undefined
+  const connects = !remoteHome || canCall(client, 'ConnectToken')
+  const here = useHomeName()
+  // Put on a host, or given a tracker, only where this window may: a window on another computer's home may not yet.
+  const publishes = canCall(client, 'ListRepositoryOwners') && canCall(client, 'PublishRepository')
+  const tracks = canCall(client, 'ListContainers') && canCall(client, 'SetProjectTracker')
   const read = reads(client)
   const [connecting, setConnecting] = useState<Service | null>(null)
   const change = (next: (now: Draft) => Draft) => store.change(draft.id, next)
 
-  const trackers = ready(list, (service) => TRACKER_SERVICES.includes(service))
+  const trackers = tracks ? ready(list, (service) => TRACKER_SERVICES.includes(service)) : []
   // Folders chosen, or being read, start it on A folder; otherwise Clone.
   const way: SetupWay =
     draft.way ?? (draft.folders.some((folder) => folder.came === undefined) || draft.reading.length > 0 ? 'folder' : 'clone')
@@ -133,13 +142,15 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       : way === 'folder'
         ? mine.length === 1 && mine[0]?.remote === null
         : false
+  // The hosts it can be put on.
+  const homes = publishes ? codeHosts : []
   const homeConnection = (() => {
     if (draft.home?.kind === 'host') {
       const kept = draft.home.connectionId
-      if (codeHosts.some((one) => one.id === kept)) return kept
+      if (homes.some((one) => one.id === kept)) return kept
     }
     if (draft.home?.kind === 'here') return null
-    return codeHosts[0]?.id ?? null
+    return homes[0]?.id ?? null
   })()
   const owners = useQuery({
     ...read.repositoryOwners(homeConnection ?? ''),
@@ -170,7 +181,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     const connection = codeHosts.find((one) => hostnameOf(one.webUrl) === remote.host)
     return { product: connection?.product ?? null, connectionId: connection?.id ?? null, where: remote.path }
   })()
-  const hostIssues = codeProduct?.connectionId != null ? issuesOf(codeProduct.product) : null
+  const hostIssues = tracks && codeProduct?.connectionId != null ? issuesOf(codeProduct.product) : null
 
   const trackerChoice = (() => {
     const kept = draft.issues
@@ -218,15 +229,18 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       return {
         kind: 'picks',
         value: homeConnection ?? 'here',
-        connected: codeHosts.map((connection) => ({
+        connected: homes.map((connection) => ({
           id: connection.id,
-          name: nameOf(connection, codeHosts),
+          name: nameOf(connection, homes),
           brand: productBrand(connection.product),
           thing: thingOf(serviceOfProduct(connection.product)),
         })),
-        away: hosts
-          .filter((host) => !host.connected)
-          .map((host) => ({ service: host.id as Service, name: host.name, brand: host.brand, thing: host.thing })),
+        // Put on a host only where the window may publish: a home's window may not, so none is offered to connect for it.
+        away: !publishes
+          ? []
+          : hosts
+              .filter((host) => !host.connected)
+              .map((host) => ({ service: host.id as Service, name: host.name, brand: host.brand, thing: host.thing })),
         owners: ownerList,
         ownersFailed: owners.isError,
         retryOwners: () => void owners.refetch(),
@@ -269,12 +283,12 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
     }
     if (parts.length === 0) return null
     const line = parts.length === 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
-    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${device.this}.` : ''}`
+    return `Create ${line}.${local && plan.publish === null ? ` Its code stays on ${here.name}.` : ''}`
   })()
 
   return {
     way,
-    hosts,
+    hosts: connects ? hosts : hosts.filter((one) => one.connected),
     repositories,
     failed,
     pasted,
@@ -303,7 +317,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       containers: trackerChoice.kind === 'tracker' ? (containers.data?.map((one) => ({ id: one.id, name: one.name })) ?? null) : null,
       container: container?.id ?? null,
       away:
-        trackers.length > 0
+        trackers.length > 0 || remoteHome
           ? []
           : TRACKER_SERVICES.map((service) => ({ service, name: serviceName(service), brand: serviceBrand(service) })),
     },

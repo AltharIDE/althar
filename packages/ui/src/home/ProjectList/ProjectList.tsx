@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 
 import { modKey } from '../../foundations/keys'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -8,6 +8,7 @@ import type { RootProps } from '../../lib/props'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { Heading } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import type { ProjectRef } from '../ProjectWord/ProjectWord'
 import { WorkTicks } from '../WorkTicks/WorkTicks'
@@ -24,7 +25,9 @@ import s from './ProjectList.module.css'
  * for each task in progress. The row opens the project, where its tasks
  * are. Past QUIET_FOLD projects, the quiet ones fold into one line at the
  * end. The list scrolls on its own, so thirty projects are a longer list,
- * not a different page.
+ * not a different page. Hovered or focused, a row shows its menu at its
+ * end, over what it counts: its conversation, its settings, and apart, in
+ * red, taking it out of Althar, which asks first.
  */
 
 /** Past this many projects, the quiet ones fold away. */
@@ -43,6 +46,11 @@ export interface ProjectListText {
   /** Under a project's name, with nothing off: how many tasks are in progress in it. */
   inProgress: (n: number) => string
   quiet: (n: number) => string
+  /** The menu at a row's end, read with the project's name. */
+  menu: (project: string) => string
+  talk: string
+  settings: string
+  remove: string
 }
 
 export const projectListText: ProjectListText = {
@@ -55,6 +63,10 @@ export const projectListText: ProjectListText = {
   waiting: (n) => `${n} waiting`,
   inProgress: (n) => (n === 1 ? '1 task in progress' : `${n} tasks in progress`),
   quiet: (n) => (n === 1 ? '1 quiet project' : `${n} quiet projects`),
+  menu: (project) => `Manage ${project}`,
+  talk: 'Conversation',
+  settings: 'Project settings',
+  remove: 'Remove from Althar…',
 }
 
 /** A task in progress, as a tick in its project's row: still, when held or waiting. */
@@ -82,9 +94,22 @@ export type ProjectListProps = RootProps<
     onOpenProject?: (id: string) => void
     /** Start a new project, in a tab of its own. Without it, no way to from here. */
     onNewProject?: () => void
+    /** A row's menu: its conversation with its coordinator, its settings, and taking it out of Althar. Without any, no menu. */
+    onTalk?: (id: string) => void
+    onProjectSettings?: (id: string) => void
+    /** Asks first: it opens what confirms it, and nothing goes until that is pressed. */
+    onRemoveProject?: (id: string) => void
     text?: Partial<ProjectListText>
   }
 >
+
+/** What a row's menu does. */
+interface RowWays {
+  onOpenProject?: ((id: string) => void) | undefined
+  onTalk?: ((id: string) => void) | undefined
+  onProjectSettings?: ((id: string) => void) | undefined
+  onRemoveProject?: ((id: string) => void) | undefined
+}
 
 /** Only what is off, in a few words; nothing when all is well. */
 const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
@@ -98,7 +123,17 @@ const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
     .join(' · ')
 }
 
-export function ProjectList({ projects, onOpenProject, onNewProject, className, text, ...rest }: ProjectListProps) {
+export function ProjectList({
+  projects,
+  onOpenProject,
+  onNewProject,
+  onTalk,
+  onProjectSettings,
+  onRemoveProject,
+  className,
+  text,
+  ...rest
+}: ProjectListProps) {
   const t = { ...projectListText, ...text }
   const titleId = useId()
   const quietOf = (p: ProjectListItem) => p.yours === 0 && p.tasks.length === 0
@@ -106,7 +141,8 @@ export function ProjectList({ projects, onOpenProject, onNewProject, className, 
   const order = [...projects.filter((p) => p.yours > 0), ...projects.filter((p) => p.yours === 0 && p.tasks.length > 0)]
   const quiet = projects.filter(quietOf)
   const fold = projects.length > QUIET_FOLD
-  const row = (p: ProjectListItem) => <Row key={p.id} p={p} t={t} onOpenProject={onOpenProject} />
+  const ways: RowWays = { onOpenProject, onTalk, onProjectSettings, onRemoveProject }
+  const row = (p: ProjectListItem) => <Row key={p.id} p={p} t={t} ways={ways} />
   return (
     <aside aria-labelledby={titleId} className={cx(s.list, className)} {...rest}>
       <header className={s.head} data-arrive>
@@ -141,7 +177,11 @@ export function ProjectList({ projects, onOpenProject, onNewProject, className, 
   )
 }
 
-function Row({ p, t, onOpenProject }: { p: ProjectListItem; t: ProjectListText; onOpenProject?: ((id: string) => void) | undefined }) {
+function Row({ p, t, ways }: { p: ProjectListItem; t: ProjectListText; ways: RowWays }) {
+  const { onOpenProject, onTalk, onProjectSettings, onRemoveProject } = ways
+  // Held open while its menu is, so the row stays as it was hovered.
+  const [open, setOpen] = useState(false)
+  const menu = onTalk !== undefined || onProjectSettings !== undefined || onRemoveProject !== undefined
   const quiet = p.yours === 0 && p.tasks.length === 0
   const said = offOf(p.tasks, t) || (p.tasks.length > 0 ? t.inProgress(p.tasks.length) : p.note)
   const body = (
@@ -163,13 +203,43 @@ function Row({ p, t, onOpenProject }: { p: ProjectListItem; t: ProjectListText; 
     </>
   )
   return (
-    <li className={cx(s.item, quiet && s.quietItem)}>
+    <li className={cx(s.item, quiet && s.quietItem, menu && s.withMenu)} data-open={open || undefined}>
       {onOpenProject ? (
         <button type="button" className={s.row} onClick={() => onOpenProject(p.id)}>
           {body}
         </button>
       ) : (
         <span className={s.row}>{body}</span>
+      )}
+      {menu && (
+        <span className={s.more}>
+          <Menu
+            label={t.menu(p.project.name)}
+            align="end"
+            open={open}
+            onOpenChange={setOpen}
+            trigger={<IconButton icon="more" label={t.menu(p.project.name)} size="small" />}
+          >
+            {onTalk && (
+              <MenuItem icon="comment" onSelect={() => onTalk(p.id)}>
+                {t.talk}
+              </MenuItem>
+            )}
+            {onProjectSettings && (
+              <MenuItem icon="gear" onSelect={() => onProjectSettings(p.id)}>
+                {t.settings}
+              </MenuItem>
+            )}
+            {onRemoveProject && (
+              <>
+                {(onTalk || onProjectSettings) && <MenuSeparator />}
+                <MenuItem icon="close" tone="danger" onSelect={() => onRemoveProject(p.id)}>
+                  {t.remove}
+                </MenuItem>
+              </>
+            )}
+          </Menu>
+        </span>
       )}
     </li>
   )

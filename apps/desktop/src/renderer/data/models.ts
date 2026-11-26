@@ -60,8 +60,6 @@ interface Store {
   /* asked for while a read was on its way: read again after it */
   again: boolean
   readonly listeners: Set<() => void>
-  /* told of each read too, but not a picker: one alone doesn't keep asking agents still probing */
-  readonly followers: Set<() => void>
 }
 
 const stores = new WeakMap<Client, Store>()
@@ -77,7 +75,6 @@ const storeOf = (client: Client): Store => {
     reading: false,
     again: false,
     listeners: new Set(),
-    followers: new Set(),
   }
   stores.set(client, made)
   return made
@@ -104,7 +101,6 @@ const read = (client: Client, store: Store, again = false) => {
       // A change this read began after the runtime took is in it: from here the read says.
       for (const [key, change] of store.changes) if (change.after !== null && begun > change.after) store.changes.delete(key)
       show(store)
-      store.followers.forEach((listener) => listener())
       if (!done() && known.some((agent) => agent.probing) && store.listeners.size > 0) setTimeout(() => read(client, store), AGAIN)
     },
     // A picker without them offers each agent's own default.
@@ -202,13 +198,6 @@ export const readModelsAhead = (client: Client) => read(client, storeOf(client))
 export const readModelsAgain = (client: Client) => {
   const store = storeOf(client)
   if (store.reading || store.read !== null || store.listeners.size > 0) read(client, store, true)
-}
-
-/** Tells `listener` each time the models are read: an agent signed in or out, a model switched off or on. Until the returned stop. */
-export const onModelsRead = (client: Client, listener: () => void) => {
-  const store = storeOf(client)
-  store.followers.add(listener)
-  return () => void store.followers.delete(listener)
 }
 
 /** Every agent's models, as far as they are known; null until first read. */

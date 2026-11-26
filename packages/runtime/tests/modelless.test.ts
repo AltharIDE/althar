@@ -2,6 +2,7 @@ import { Ids } from '@althar/domain'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Schema } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
@@ -17,7 +18,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { fakeAgents, items, notices, repository, runtime, task, turns, until } from './support'
+import { fakeAgents, items, notices, onTestClock, repository, runtime, task, turns, until } from './support'
 
 /*
  * Agents that offer no choice of model, as some ACP agents don't: OpenCode
@@ -180,30 +181,34 @@ describe('an agent that offers no choice of model', () => {
 })
 
 describe('an agent that offers no choice of model, further on', () => {
-  it.live('compacts its coordinator session without choosing a model or effort', () =>
-    Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const coordinator = yield* Coordinator
-      const projects = yield* Projects
-      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-      const threadId = yield* coordinator.thread(project.projectId)
-      yield* sessions.start({ threadId, agentId: 'opencode' })
-      const say = (body: string) =>
-        Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) =>
-          coordinator.say({ envelope, threadId, body, disposition: 'after_current' }),
+  it.effect('compacts its coordinator session without choosing a model or effort', () =>
+    onTestClock(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const coordinator = yield* Coordinator
+        const projects = yield* Projects
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const threadId = yield* coordinator.thread(project.projectId)
+        yield* sessions.start({ threadId, agentId: 'opencode' })
+        const say = (body: string) =>
+          Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) =>
+            coordinator.say({ envelope, threadId, body, disposition: 'after_current' }),
+          )
+        yield* say('hello')
+        yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+        yield* say('Where are we? [context:85]')
+        yield* until(turns(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'completed')
+        yield* TestClock.adjust(Duration.minutes(61))
+        yield* until(turns(threadId), (rows) => rows.length === 3 && rows[2]?.state === 'completed')
+        yield* say('Go on.')
+        yield* until(turns(threadId), (rows) => rows.length === 4 && rows[3]?.state === 'completed')
+        assert.strictEqual((yield* turns(threadId))[2]?.prompt, '/compact')
+        assert.deepStrictEqual(
+          (yield* sessionsOn(threadId)).map((row) => [row.agentId, row.model, row.effort, row.state]),
+          [['opencode', null, null, 'active']],
         )
-      yield* say('hello')
-      yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
-      yield* say('Where are we? [context:85]')
-      yield* until(turns(threadId), (rows) => rows.length === 3 && rows[2]?.state === 'completed')
-      yield* say('Go on.')
-      yield* until(turns(threadId), (rows) => rows.length === 4 && rows[3]?.state === 'completed')
-      assert.strictEqual((yield* turns(threadId))[2]?.prompt, '/compact')
-      assert.deepStrictEqual(
-        (yield* sessionsOn(threadId)).map((row) => [row.agentId, row.model, row.effort, row.state]),
-        [['opencode', null, null, 'active']],
-      )
-    }).pipe(Effect.provide(withQueries())),
+      }).pipe(Effect.provide(withQueries())),
+    ),
   )
 
   it.live('is held for a usage limit where its project waits, on no model', () => {

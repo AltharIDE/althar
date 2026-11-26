@@ -164,6 +164,10 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
   const insteadOf = (run: RunRow, planned: PlanStep, step: keyof typeof outStep = planned.key, quiet = false) =>
     Effect.gen(function* () {
       if ((yield* usageLimitOfRun(run)) !== 'move') return undefined
+      // Its model turned off or gone on the planned agent and offered by another: it starts there as the lead, not as a
+      // stand-in for a way it can't take (Sessions' `routed`).
+      const way = yield* limits.route({ agentId: planned.agentId, model: planned.model ?? null, projectId: run.projectId })
+      if (way.kind === 'elsewhere') return undefined
       const out = yield* limits.out(planned.agentId, run.projectId)
       const low = Option.isSome(out)
         ? Option.none<Room>()
@@ -175,12 +179,13 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
         projectId: run.projectId,
         withRoom: Option.isSome(low),
         planned,
-        ...(other === undefined ? {} : { other }),
+        ...(other === undefined ? {} : { other, ...(planned.key === 'review' ? { reviewing: true } : {}) }),
       })
       if (next === undefined) return undefined
       const { model } = next
       const [from, to] = [yield* limits.named(planned.agentId, planned.model ?? null), yield* limits.named(next.agentId, model)]
-      const instead = { ...to, ownWork: next.ownWork }
+      // That it is another model is said where the line names the one before.
+      const instead = { ...to, ownWork: next.ownWork, ...(next.otherModel === true && from.model !== null ? { otherModel: true } : {}) }
       const now = yield* Clock.currentTimeMillis
       const said = Option.isSome(low)
         ? lowWords({ from: whoWords(from), room: low.value, now, step, to: instead })
@@ -411,7 +416,7 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
               projectId: on.run.projectId,
               ...(planned === undefined ? {} : { planned }),
               from: { agentId, model: currentModel },
-              ...(other === undefined ? {} : { other }),
+              ...(other === undefined ? {} : { other, ...(on.step === 'review' ? { reviewing: true } : {}) }),
             })
         if (next !== undefined) {
           const { model } = next
@@ -425,16 +430,19 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
                 })).id
               : null
           const step = on.step === 'publish' ? undefined : on.step
+          const fromNamed = yield* limits.named(agentId, currentModel, accountId)
           const said = outWords({
-            from: whoWords(yield* limits.named(agentId, currentModel, accountId)),
+            from: whoWords(fromNamed),
             resetsAt: out?.resetsAt ?? null,
             now: yield* Clock.currentTimeMillis,
             ...(step === undefined ? {} : { step }),
-            // Another lead stands in until this one's reset (standIn.ts); the same on another account just carries on.
+            // Another model stands in until this one's reset (standIn.ts); the same model, on another agent or account, just
+            // carries on as the lead, as a stand-in on the task's own model isn't one (`forTask`).
             to: {
               ...(yield* limits.named(next.agentId, model, to)),
               ownWork: next.ownWork,
-              standsIn: next.agentId !== agentId || model !== currentModel,
+              standsIn: !(yield* limits.sameModel)({ agentId: next.agentId, model }, { agentId, model: currentModel }),
+              ...('otherModel' in next && next.otherModel === true && fromNamed.model !== null ? { otherModel: true } : {}),
             },
           })
           // Held while the next agent takes over, so nothing it says before it is told the step counts for the step.
@@ -532,7 +540,8 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
       const currentModel = session?.model ?? (yield* limits.modelFor({ agentId, projectId: thread.projectId }))
       const out = Option.getOrNull(yield* accountId === null ? limits.out(agentId, thread.projectId) : limits.outAccount(accountId))
       const resetsAt = out?.resetsAt ?? null
-      const from = whoWords(yield* limits.named(agentId, currentModel, accountId))
+      const fromNamed = yield* limits.named(agentId, currentModel, accountId)
+      const from = whoWords(fromNamed)
       if (usageLimitOf((yield* policies.current(thread.projectId)).rules) === 'move') {
         // The same agent's next account first, where the project turned that on; then the next free agent.
         const next = (yield* nextAccount(agentId, thread.projectId))
@@ -562,8 +571,13 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
               from,
               resetsAt,
               now: yield* Clock.currentTimeMillis,
-              // Another lead stands in until this one's reset, and gives the thread back then (standIn.ts, `holds`).
-              to: { ...(yield* limits.named(next.agentId, model, to)), standsIn: next.agentId !== agentId || model !== currentModel },
+              // Another model stands in until this one's reset, and gives the thread back then (standIn.ts, `holds`); the
+              // same model elsewhere just carries on as the lead (`forTask`).
+              to: {
+                ...(yield* limits.named(next.agentId, model, to)),
+                standsIn: !(yield* limits.sameModel)({ agentId: next.agentId, model }, { agentId, model: currentModel }),
+                ...('otherModel' in next && next.otherModel === true && fromNamed.model !== null ? { otherModel: true } : {}),
+              },
             }),
             about: 'limit',
           })

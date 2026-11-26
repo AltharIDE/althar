@@ -47,6 +47,15 @@ const schema = `
 `
 
 type Active = { id: string; fence: string; state: 'queued' | 'offered' | 'claimed'; lease_until: number | null }
+/** A worker the home enrolled and hasn't revoked, and the projects it may work on. */
+export interface EnrolledWorker {
+  readonly workerId: string
+  readonly projectIds: ReadonlyArray<string>
+  /** As the person added it: the name of the computer, or its SSH address; none for one enrolled by command. */
+  readonly name?: string
+  /** The SSH address it was set up at, where it was: a window signs its agents in there. */
+  readonly ssh?: string
+}
 type Project = { projectId: string; commandName: string }
 const projectAttempt = (attemptId: string) => validWorkerProtocolId(attemptId, 'wpr_')
 
@@ -138,6 +147,12 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       CREATE TABLE IF NOT EXISTS agent_worker_withdrawn (
         run_id TEXT PRIMARY KEY REFERENCES agent_worker_run(id)
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS worker_profile (
+        worker_id TEXT PRIMARY KEY REFERENCES worker_enrollment(id),
+        name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 80),
+        ssh TEXT CHECK(ssh IS NULL OR length(ssh) BETWEEN 1 AND 255),
+        enrolled_at INTEGER NOT NULL
+      ) STRICT;
     `)
     const attempts = (table: 'diagnostic' | 'project_attempt', logs: 'diagnostic_log' | 'project_log') => {
       const appendLog = db.prepare(`
@@ -172,6 +187,12 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
     const project = attempts('project_attempt', 'project_log')
     const forAttempt = (attemptId: string) => (projectAttempt(attemptId) ? project : diagnostic)
     const enrolled = db.prepare('SELECT id FROM worker_enrollment WHERE fingerprint = ? AND revoked = 0')
+    const enrolledById = db.prepare('SELECT id FROM worker_enrollment WHERE id = ? AND revoked = 0')
+    const listed = db.prepare(`SELECT w.id AS workerId, p.project_id AS projectId, f.name AS name, f.ssh AS ssh FROM worker_enrollment w
+      LEFT JOIN agent_worker_project p ON p.worker_id = w.id LEFT JOIN worker_profile f ON f.worker_id = w.id
+      WHERE w.revoked = 0 ORDER BY w.rowid, p.project_id`)
+    const withdraw = db.prepare(`INSERT OR IGNORE INTO agent_worker_withdrawn SELECT id FROM agent_worker_run
+      WHERE worker_id = ? AND project_id = ? AND state = 'active'`)
     const projectDetails = db.prepare('SELECT project_id AS projectId, command_name AS commandName FROM project_attempt WHERE id = ?')
     const cancellable = db.prepare(
       "SELECT 1 FROM project_attempt WHERE worker_id = ? AND id = ? AND fence = ? AND state = 'claimed' AND cancel_requested = 1",
@@ -242,6 +263,79 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       agents,
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
+      /** Every worker enrolled and not revoked, in the order it was enrolled, with the projects it may work on. */
+      workers(): ReadonlyArray<EnrolledWorker> {
+        const byId = new Map<string, { projectIds: string[]; name: string | null; ssh: string | null }>()
+        for (const row of listed.all() as Array<{ workerId: string; projectId: string | null; name: string | null; ssh: string | null }>) {
+          const worker = byId.get(row.workerId) ?? { projectIds: [], name: row.name, ssh: row.ssh }
+          if (row.projectId !== null) worker.projectIds.push(row.projectId)
+          byId.set(row.workerId, worker)
+        }
+        return [...byId].map(([workerId, { projectIds, name, ssh }]) => ({
+          workerId,
+          projectIds,
+          ...(name === null ? {} : { name }),
+          ...(ssh === null ? {} : { ssh }),
+        }))
+      },
+      /**
+       * Enrolls a worker by its certificate, as the home signed it for the person adding it: named as they know it, with the
+       * SSH address it was set up at, where it was. Again with the same certificate, the same worker, renamed.
+       */
+      enrollNamed(fingerprint: string, name: string, ssh: string | null) {
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          // Removed before, and added again by the person: a new worker for the same key. The removed one keeps its
+          // history under a fingerprint no key matches, so it stays out.
+          db.prepare(
+            `UPDATE worker_enrollment SET fingerprint = 'removed:' || id || ':' || fingerprint WHERE fingerprint = ? AND revoked = 1`,
+          ).run(fingerprint)
+          db.prepare('INSERT INTO worker_enrollment (id, fingerprint) VALUES (?, ?) ON CONFLICT(fingerprint) DO NOTHING').run(
+            id('wrk'),
+            fingerprint,
+          )
+          const workerId = enrolled.get(fingerprint)?.id
+          if (typeof workerId !== 'string') throw invalid('This worker was removed. Add it again to make it a new key')
+          db.prepare(`INSERT INTO worker_profile (worker_id, name, ssh, enrolled_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(worker_id) DO UPDATE SET name = excluded.name, ssh = coalesce(excluded.ssh, worker_profile.ssh)`).run(
+            workerId,
+            name.slice(0, 80) || 'Worker',
+            ssh,
+            now(),
+          )
+          db.exec('COMMIT')
+          return workerId
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+      },
+      /** The projects a worker may work on, as the person picked them: those it loses stop their runs there, as `unassign` does. */
+      assign(workerId: string, projectIds: ReadonlyArray<string>) {
+        if (projectIds.some((projectId) => !validWorkerProtocolId(projectId, 'proj_'))) throw invalid('Choose projects of this home')
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          if (enrolledById.get(workerId) === undefined) throw invalid('No worker has that identity')
+          const had = (
+            db.prepare('SELECT project_id FROM agent_worker_project WHERE worker_id = ?').all(workerId) as Array<{
+              project_id: string
+            }>
+          ).map((row) => row.project_id)
+          for (const gone of had.filter((projectId) => !projectIds.includes(projectId))) {
+            withdraw.run(workerId, gone)
+            db.prepare('DELETE FROM agent_worker_project WHERE worker_id = ? AND project_id = ?').run(workerId, gone)
+          }
+          for (const projectId of projectIds)
+            db.prepare('INSERT INTO agent_worker_project (worker_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING').run(
+              workerId,
+              projectId,
+            )
+          db.exec('COMMIT')
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+      },
       enroll(fingerprint: string, projectId?: string) {
         db.exec('BEGIN IMMEDIATE')
         try {
@@ -266,8 +360,7 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       unassign(workerId: string, projectId: string) {
         db.exec('BEGIN IMMEDIATE')
         try {
-          db.prepare(`INSERT OR IGNORE INTO agent_worker_withdrawn SELECT id FROM agent_worker_run
-            WHERE worker_id = ? AND project_id = ? AND state = 'active'`).run(workerId, projectId)
+          withdraw.run(workerId, projectId)
           db.prepare('DELETE FROM agent_worker_project WHERE worker_id = ? AND project_id = ?').run(workerId, projectId)
           db.exec('COMMIT')
         } catch (error) {

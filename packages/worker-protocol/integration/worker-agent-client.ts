@@ -3,23 +3,37 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials } from '@grpc/grpc-js'
 
 import { runAgentMethod } from '../src/agentRuns.ts'
-import { AgentHomeFrameSchema, AgentWorkerFrameSchema, type AgentWorkerHello } from '../src/index.ts'
+import { AgentHomeFrameSchema, AgentWorkerFrameSchema, type AgentWorkerFrame, type AgentWorkerHello } from '../src/index.ts'
 
-export const testAgentWorker = (port: number, path: (file: string) => string, certificate = 'enrolled') => {
+/** A worker speaking the agent-run protocol to a home's listener, with the stream open for `open` milliseconds. */
+export const testAgentWorker = (
+  port: number,
+  path: (file: string) => string,
+  certificate = 'enrolled',
+  open = 10_000,
+  /** The name the home's certificate carries, where it isn't localhost: a home that is its own authority's. */
+  serverName?: string,
+) => {
   const read = (file: string) => readFileSync(path(file))
   const tls = credentials.createSsl(read('home-ca.pem'), read(certificate + '.key'), read(certificate + '.pem'))
-  const client = new Client('localhost:' + port, tls)
+  const client = new Client('localhost:' + port, tls, serverName === undefined ? {} : { 'grpc.ssl_target_name_override': serverName })
   const { path: method, requestSerialize, responseDeserialize } = runAgentMethod
-  const call = client.makeBidiStreamRequest(method, requestSerialize, responseDeserialize, { deadline: Date.now() + 10_000 })
+  const call = client.makeBidiStreamRequest(method, requestSerialize, responseDeserialize, { deadline: Date.now() + open })
   const messages = call[Symbol.asyncIterator]()
+  const send = (payload: AgentWorkerFrame['payload']) =>
+    call.write(Buffer.from(toBinary(AgentWorkerFrameSchema, create(AgentWorkerFrameSchema, { payload }))))
+  /** The home's next frame; undefined once it ends the stream. */
+  const next = async () => {
+    const message = await messages.next()
+    return message.done === true ? undefined : fromBinary(AgentHomeFrameSchema, message.value).payload
+  }
   return {
     hello: async (hello: AgentWorkerHello) => {
-      call.write(
-        Buffer.from(toBinary(AgentWorkerFrameSchema, create(AgentWorkerFrameSchema, { payload: { case: 'hello', value: hello } }))),
-      )
-      const message = await messages.next()
-      return message.done === true ? undefined : fromBinary(AgentHomeFrameSchema, message.value).payload
+      send({ case: 'hello', value: hello })
+      return next()
     },
+    send,
+    read: next,
     close: () => {
       call.cancel()
       client.close()

@@ -55,6 +55,12 @@ On a Mac, the end-to-end tests run quietly, so you can keep working while they r
 ALTHAR_E2E_FOREGROUND=1 bun run test:e2e
 ```
 
+On Linux, the end-to-end tests never open anything on your desktop: each run gets a display of its own that no one sees (`scripts/display.ts`). Where Xvfb is installed (Fedora `xorg-x11-server-Xvfb`, Debian and Ubuntu `xvfb`, Arch `xorg-server-xvfb`), the run starts it on a free display number, with a cookie only the run has, as `xvfb-run` does, and stops it when it ends. Where it isn't, or won't start, the app runs on Chromium's headless platform (`--ozone-platform=headless`, on a 1280 × 1024 screen), which needs nothing installed, still draws the window for screenshots, and puts no icon in a tray. Either way the run is off your session bus too, on a bare one of its own where `dbus-run-session` is installed, so no tray icon or notification reaches your desktop. CI's workflows, which run the tests under `xvfb-run` themselves, keep that display with `ALTHAR_E2E_DISPLAY=inherit`. `ALTHAR_E2E_DISPLAY` chooses: `xvfb` or `headless` for one of them, or `inherit` to run on the display and bus the shell has, to watch a run on your own desktop:
+
+```bash
+ALTHAR_E2E_DISPLAY=inherit bun run test:e2e e2e/home.spec.ts
+```
+
 ### On Linux
 
 `bun run package` makes an AppImage, a deb and an rpm of the app (Linux
@@ -97,6 +103,40 @@ first time: "Windows protected your PC". Choose **More info**, then **Run
 anyway**. Where the browser holds the download back too, keep it (Edge: …
 → Keep, then Keep anyway). Signing has its slot: `WINDOWS_SIGNING` in
 `scripts/package.ts`, and the skipped Sign step in `release.yml`.
+
+### Computer use
+
+A task can ask to use native apps on the computer running this desktop app.
+It asks once a turn, in the task's conversation, saying why. **Allow for
+this turn** lets it use any app or window, type and click in the
+foreground, and see the primary display, until the turn ends; a later
+request in the same turn finds what opened since without asking again.
+An app one task uses stays with it until its turn ends, so two tasks never
+drive the same app. Input to the whole display can reach any app, so it
+waits while another task holds one, and once sent, it keeps every app for
+that task until its turn ends. The task can show the window it observed,
+and keep screenshots in its conversation and step evidence.
+
+Use **Take over** to pause computer input and **Resume** to return it to
+the task. **Stop** ends that turn's computer session. The desktop shortcut
+is Command-Shift-Escape on a Mac and Ctrl-Shift-Escape elsewhere, where
+the desktop lets the app register it. Seeing the display can expose other
+open apps to the task's model.
+On Linux, seeing the primary display requires a single connected display;
+apps and windows work across connected displays.
+
+Use a signed-in graphical session. On macOS the system may require
+Accessibility and Screen Recording access. On Linux, accessibility and
+capture depend on the desktop session and, on Wayland, the compositor.
+Native input and capture are supplied by the bundled Cua Driver SDK.
+
+The normal desktop end-to-end spec uses a stand-in driver. To exercise
+native input on a test desktop with the required OS permissions, run the
+same spec with `ALTHAR_TEST_NATIVE_COMPUTER=portable`. It launches two
+fixture apps, exports a note from one, opens it in the other, and checks
+the saved file and the screenshot through Althar. Set
+`ALTHAR_E2E_FOREGROUND=1` on macOS as well. GitHub Actions runs the native
+spec on a dedicated X11 display and a Windows runner.
 
 ### The Flatpak
 

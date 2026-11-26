@@ -78,7 +78,8 @@ export const CODEX_SIGNED_OUT: PlanAgent = {
       id: 'codex-work',
       name: null,
       age: 'read 3 hours ago',
-      fault: 'Sign in to Codex to see its usage.',
+      fault: 'Signed out. Sign in again to read usage.',
+      stale: true,
       windows: [
         { id: 'five_hour', label: '5 hours', left: 80, until: '11:00' },
         { id: 'weekly', label: 'Week', left: 74, until: 'Sun 18:12' },
@@ -99,13 +100,71 @@ export const CLAUDE_UNREAD: PlanAgent = {
       id: 'claude-personal',
       name: null,
       age: 'read 2 days ago',
-      fault: 'Its sign-in has expired. Claude Code renews it the next time it runs on this account.',
+      fault: 'Sign-in expired. Claude Code renews it on its next run.',
       windows: [],
     },
   ],
 }
 
-/** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. */
+/**
+ * Both of Codex's accounts signed out the same way (its sign-in expired): said once, above them, and their last week drawn
+ * quieter, with how old it is.
+ */
+export const CODEX_EXPIRED: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 0,
+  limit: '',
+  until: null,
+  stopped: 'Signed out',
+  signIn: true,
+  fault: 'Signed out. Sign in again to read usage.',
+  accounts: ['Main', 'Pro'].map((name) => ({
+    id: `codex-${name.toLowerCase()}`,
+    name,
+    age: 'read 20m ago',
+    fault: null,
+    stale: true,
+    windows: [
+      { id: 'weekly', label: 'Week', left: 51, until: 'Mon 11:00', resets: 'in 3d 23h', resetsTitle: 'Resets Mon 11:00 · in 3d 23h' },
+    ],
+  })),
+}
+
+/** Both of Claude Code's accounts rate limited: its figure is the last one read, the line said once, each reading drawn quieter. */
+export const CLAUDE_RATE_LIMITED: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 58,
+  limit: 'five-hour limit',
+  until: '17:00',
+  account: 'Work',
+  fault: 'Rate limited. Tries again later.',
+  accounts: [
+    {
+      id: 'claude-work',
+      name: 'Work',
+      age: 'read 6m ago',
+      fault: null,
+      stale: true,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 58, until: '17:00', resets: 'in 2h 10m', resetsTitle: 'Resets 17:00 · in 2h 10m' },
+        { id: 'weekly', label: 'Week', left: 71, until: 'Mon 09:00', resets: 'in 3d 18h', resetsTitle: 'Resets Mon 09:00 · in 3d 18h' },
+      ],
+    },
+    {
+      id: 'claude-personal',
+      name: 'Personal',
+      age: 'read 6m ago',
+      fault: null,
+      stale: true,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 12, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
+        { id: 'weekly', label: 'Week', left: 40, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+      ],
+    },
+  ],
+}
+
+/** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. Personal's last read didn't answer: its numbers are the last good ones. */
 export const CLAUDE_TWO: PlanAgent = {
   ...CLAUDE_PLENTY,
   left: 41,
@@ -127,7 +186,8 @@ export const CLAUDE_TWO: PlanAgent = {
       id: 'claude-personal',
       name: 'Personal',
       age: 'read 2 hours ago',
-      fault: 'Claude Code didn’t answer when it was last asked; these are its last numbers.',
+      fault: 'No reply. Tries again soon.',
+      stale: true,
       windows: [
         { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
         { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },

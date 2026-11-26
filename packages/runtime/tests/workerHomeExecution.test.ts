@@ -59,6 +59,7 @@ it.live('keeps each repository’s own baseline and sends commands to the select
       const service = workerExecution(() => ({
         connect: () => assert.fail('No transport fixture needed'),
         connectPreview: () => assert.fail('No transport fixture needed'),
+        connected: () => [],
         openTools: () => undefined,
         list: () => [
           {
@@ -331,6 +332,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     const pool: AgentWorkerPool = {
       connect: () => assert.fail('No transport fixture needed'),
       connectPreview: () => assert.fail('No transport fixture needed'),
+      connected: () => [],
       openTools: () => undefined,
       list: () => [{ workerId: input.workerId, busy: false, capabilities: [{ projectId: input.projectId, providerId: input.providerId }] }],
       start: async (id, placement, options) => {
@@ -433,4 +435,63 @@ it.live('refuses a worker start when its network listener is unavailable', () =>
       assert.include(failure.reason, 'worker listener is unavailable')
     }),
   ),
+)
+
+it.live('lists the home’s enrolled workers, connected or not, and takes one out through its ledger', () =>
+  Effect.gen(function* () {
+    const online = 'wrk_' + '1'.repeat(32)
+    const offline = 'wrk_' + '9'.repeat(32)
+    const capacity = { platform: 'linux', architecture: 'arm64', cpuCores: 8, freeMemoryMib: 12_000, freeDiskMib: 90_000 } as const
+    const pool = {
+      connected: () => [
+        {
+          workerId: online,
+          busy: true,
+          capacity,
+          capabilities: [
+            { projectId: 'proj_a', providerId: 'codex' },
+            { projectId: 'proj_b', providerId: 'codex' },
+            { projectId: 'proj_b', providerId: 'claude-code' },
+          ],
+        },
+      ],
+    } as unknown as AgentWorkerPool
+    let enrolled = [
+      { workerId: online, projectIds: ['proj_a', 'proj_b'] },
+      { workerId: offline, projectIds: ['proj_a'] },
+    ]
+    const removed: string[] = []
+    const service = workerExecution(
+      () => pool,
+      () => ({
+        workers: () => enrolled,
+        revoke: (workerId) => {
+          if (!enrolled.some((one) => one.workerId === workerId)) throw new Error('No worker has that identity')
+          removed.push(workerId)
+          enrolled = enrolled.filter((one) => one.workerId !== workerId)
+        },
+      }),
+    )
+    assert.deepStrictEqual(service.enrolled?.(), [
+      { workerId: online, connected: true, busy: true, capacity, providers: ['codex', 'claude-code'], projectIds: ['proj_a', 'proj_b'] },
+      { workerId: offline, connected: false, busy: false, providers: [], projectIds: ['proj_a'] },
+    ])
+    yield* service.revoke!(offline)
+    assert.deepStrictEqual(removed, [offline])
+    assert.deepStrictEqual(
+      service.enrolled?.()?.map(({ workerId }) => workerId),
+      [online],
+    )
+    assert.strictEqual(yield* Effect.flip(service.revoke!(offline)), 'No worker has that identity')
+    // One at work keeps its task: it can't be taken out under it.
+    assert.strictEqual(yield* Effect.flip(service.revoke!(online)), 'It runs a task. Remove it once that finishes.')
+    assert.deepStrictEqual(removed, [offline])
+    // A home that isn't listening for workers has no list of them, and nothing to take out.
+    const off = workerExecution(
+      () => undefined,
+      () => undefined,
+    )
+    assert.isNull(off.enrolled?.())
+    assert.strictEqual(yield* Effect.flip(off.revoke!(online)), 'This home takes no workers.')
+  }),
 )

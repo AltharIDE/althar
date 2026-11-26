@@ -137,8 +137,11 @@ describe('opt-in HTTPS home configuration', () => {
         )
         yield* Deferred.await(ready)
         yield* runCommand({ ...options, command: 'pair', json: true }, io)
-        const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(JSON.parse(output.at(-1) ?? ''))
+        const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String, link: Schema.String }))(
+          JSON.parse(output.at(-1) ?? ''),
+        )
         const device = yield* createDeviceKey
+        assert.strictEqual(decodePairingCode(invitation.link).token, decodePairingCode(invitation.code).token)
         const target = yield* completeDevicePairing(decodePairingCode(invitation.code), device, 'Operator test')
         yield* runCommand({ ...options, command: 'devices' }, io)
         assert.include(output.at(-1) ?? '', `${target.deviceId}  Operator test  socket  active`)

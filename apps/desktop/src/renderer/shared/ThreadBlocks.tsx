@@ -7,6 +7,7 @@ import {
   CodeBlock,
   CommentExcerpt,
   FailedLogs,
+  logLines,
   CanvasLine,
   Gallery,
   glyphOf,
@@ -500,23 +501,6 @@ export const heardVerb = (arrival: ArrivalContent): string => {
     case 'ready':
       return text.heard.ready
   }
-}
-
-/** A GitHub Actions log line's time, which every line starts with: noise on a card. */
-const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /
-
-/**
- * A failed check's log as its card shows it: by its lines, without their
- * times, ending where GitHub Actions marked it failed (`##[error]`), not in
- * the job's cleanup after.
- */
-export const logLines = (log: string) => {
-  const lines = log
-    .trimEnd()
-    .split('\n')
-    .map((line) => line.replace(STAMP, ''))
-  const failed = lines.findLastIndex((line) => line.startsWith('##[error]'))
-  return failed === -1 ? lines : lines.slice(0, failed + 1)
 }
 
 /**

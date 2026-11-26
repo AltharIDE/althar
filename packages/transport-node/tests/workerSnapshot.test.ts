@@ -19,6 +19,72 @@ it('trims only trailing dots and prefixes names reserved by Windows', () => {
   expect(workerCopyFolder(internalDots)).toBe('repo-' + internalDots)
 })
 
+const snapshotOf = (payload: Buffer): WorkerSnapshot => ({
+  id: 'snap_' + '2'.repeat(32),
+  projectId: 'proj_' + '3'.repeat(32),
+  taskId: 'task_' + '4'.repeat(32),
+  source: 'worker',
+  repositories: [
+    {
+      name: 'project',
+      workspaceId: 'ws_' + '1'.repeat(32),
+      bytes: payload.length,
+      sha256: createHash('sha256').update(payload).digest('hex'),
+      head: 'a'.repeat(40),
+      tree: 'b'.repeat(40),
+      index: 'c'.repeat(40),
+    },
+  ],
+})
+
+it('cleans up the private transfer when chunk bytes, offsets or completion disagree with the manifest', async () => {
+  const destination = await mkdtemp(join(tmpdir(), 'althar-invalid-snapshot-'))
+  const bytes = Buffer.from('abc')
+  const snapshot = snapshotOf(bytes)
+  const complete = { bodyBase64: bytes.toString('base64'), nextOffset: bytes.length, done: true }
+  try {
+    for (const chunk of [
+      { ...complete, bodyBase64: '' },
+      { ...complete, bodyBase64: 'YWJjZA==' },
+      { ...complete, bodyBase64: 'YWJj\n' },
+      { ...complete, nextOffset: 2 },
+      { ...complete, done: false },
+    ]) {
+      await expect(installWorkerSnapshot(snapshot, destination, async () => chunk, new AbortController().signal)).rejects.toThrow(
+        'incomplete workspace chunk',
+      )
+      expect(await readdir(destination)).toEqual([])
+    }
+  } finally {
+    await rm(destination, { recursive: true, force: true })
+  }
+})
+
+it('rejects duplicate repositories and stops an aborted transfer before reading a chunk', async () => {
+  const destination = await mkdtemp(join(tmpdir(), 'althar-unstarted-snapshot-'))
+  const snapshot = snapshotOf(Buffer.from('abc'))
+  const repo = snapshot.repositories[0]!
+  const controller = new AbortController()
+  const read = async () => {
+    throw new Error('An invalid or aborted snapshot must not fetch a chunk.')
+  }
+  try {
+    for (const duplicate of [
+      { ...repo, name: 'other' },
+      { ...repo, workspaceId: 'ws_' + '2'.repeat(32) },
+    ]) {
+      await expect(
+        installWorkerSnapshot({ ...snapshot, repositories: [repo, duplicate] }, destination, read, controller.signal),
+      ).rejects.toThrow('invalid workspace snapshot')
+    }
+    controller.abort(new Error('Copy cancelled'))
+    await expect(installWorkerSnapshot(snapshot, destination, read, controller.signal)).rejects.toThrow('Copy cancelled')
+    expect(await readdir(destination)).toEqual([])
+  } finally {
+    await rm(destination, { recursive: true, force: true })
+  }
+})
+
 it('installs the exact committed, staged and working files without replacing a local folder', async () => {
   const root = await mkdtemp(join(tmpdir(), 'althar-local-snapshot-test-'))
   try {
