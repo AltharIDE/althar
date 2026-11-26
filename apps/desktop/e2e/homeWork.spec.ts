@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 
+import { artifactPath } from '@althar/runtime/artifacts'
 import { expect, test, type Page } from '@playwright/test'
 import { launch, openFirstProject, say, still, toConversation } from './support'
 import { repository } from '../tests/repository'
@@ -175,7 +176,7 @@ test('a home’s window shows its lead’s pictures, and says why its host refus
     await toConversation(remote)
     const stuck = remote.getByRole('region', { name: 'Thread' }).getByText(/^Couldn't open the pull request\./)
     await expect(stuck).toBeVisible()
-    await expect(stuck).toContainText('GitHub refused you’s token for meridian/api')
+    await expect(stuck).toContainText('GitHub refused a push to meridian/api with you’s token.')
     await expect(remote.getByText(/git push|unable to access/)).toHaveCount(0)
     await expect(remote.getByRole('button', { name: 'Open code hosts' })).toBeVisible()
 
@@ -187,6 +188,10 @@ test('a home’s window shows its lead’s pictures, and says why its host refus
     await shot.scrollIntoViewIfNeeded()
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     await expect(remote.getByText('Couldn’t show this image')).toHaveCount(0)
+    // Drawn from the window's own store of the home's pictures, fetched there through the home's connection: not this
+    // computer's artifact store, which a window on a home never reads.
+    const digest = /^althar-picture:\/\/shot\/([0-9a-f]{64})/.exec((await shot.getAttribute('src')) ?? '')?.[1] ?? ''
+    expect(existsSync(artifactPath(join(profile, 'home-pictures', endpoint.homeId), digest))).toBe(true)
     await shoot(remote, 'home-work-thread')
     await remote
       .getByRole('button', { name: /View The retry button after a failed checkout full size/ })

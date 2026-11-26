@@ -612,6 +612,8 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         taskId,
         why: known.why,
         remote: `${repository.path.join('/')}/${branch}`,
+        // The host's own line, where it gave one: what says why, where a bare status doesn't.
+        ...(known.said === undefined ? {} : { said: known.said }),
         ...(info === undefined ? {} : { host: info.name }),
         detail: pushDetailOf(failed),
         ...(info === undefined
@@ -622,6 +624,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
                 kind: info.auth === 'device_flow' ? ('app' as const) : ('token' as const),
                 product: info.product,
                 repository: repository.path.join('/'),
+                canPush: repository.canPush,
               },
             }),
       })

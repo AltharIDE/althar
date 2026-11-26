@@ -331,7 +331,14 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
    * pasted or taken from gh or glab, or Althar's app), and the repository it was refused for, as its host names it.
    */
   signIn: Schema.optional(
-    Schema.Struct({ account: Schema.String, kind: Schema.Literals(['token', 'app']), product: Schema.String, repository: Schema.String }),
+    Schema.Struct({
+      account: Schema.String,
+      kind: Schema.Literals(['token', 'app']),
+      product: Schema.String,
+      repository: Schema.String,
+      /** Whether the host says the account itself may push there, where it says: false is a role, not a token, to put right. */
+      canPush: Schema.optional(Schema.Boolean),
+    }),
   ),
 }) {}
 

@@ -72,6 +72,13 @@ export type AccessReason =
   /** It couldn't be asked: the service's own words. */
   | { readonly kind: 'failed'; readonly message: string }
 
+/** What a line found of one repository, where it asks each on its own: pushing, say. */
+export interface RepositoryAccess {
+  readonly path: string
+  readonly state: AccessState
+  readonly reason: AccessReason | null
+}
+
 export interface AccessLine {
   readonly need: AccessNeed
   readonly state: AccessState
@@ -80,6 +87,11 @@ export interface AccessLine {
   /** How many, where the fact is a count: boards, teams, projects. */
   readonly count: number | null
   readonly reason: AccessReason | null
+  /**
+   * Each repository it was asked of, where the line asks them one by one, with its own outcome and reason: a project's card
+   * says what its own repositories can do, not what another project's can.
+   */
+  readonly repositories?: ReadonlyArray<RepositoryAccess>
 }
 
 export interface AccessReport {
@@ -104,6 +116,11 @@ export interface AccessInput {
   readonly auth: 'device_flow' | 'pkce' | 'token'
   /** The projects' repositories on this instance, by their paths. */
   readonly repositories: ReadonlyArray<ReadonlyArray<string>>
+  /**
+   * Those a task's work is pushed to, where it is known: a fork's own, not the repository it came from, which is only read.
+   * Every repository where it isn't given.
+   */
+  readonly pushes?: ReadonlyArray<ReadonlyArray<string>>
   /** Althar's GitHub App, by its slug, for where it is installed. */
   readonly appSlug?: string
 }
@@ -118,4 +135,5 @@ export const line = (need: AccessNeed, state: AccessState, more: Partial<Omit<Ac
   fact: more.fact ?? null,
   count: more.count ?? null,
   reason: more.reason ?? null,
+  ...(more.repositories === undefined ? {} : { repositories: more.repositories }),
 })

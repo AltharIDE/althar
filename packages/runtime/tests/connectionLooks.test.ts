@@ -456,6 +456,43 @@ describe('a connection’s check', () => {
   })
 })
 
+describe('whether a connection can push where a project’s work goes', () => {
+  it.live('asks a fork’s own repository, never the one it came from, which is only read', () => {
+    const repo = (path: string) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        { json: { id: 1, full_name: path, default_branch: 'main', html_url: `${GITHUB}/${path}`, permissions: { push: true } } },
+      ] as const
+    const receive = (path: string) => `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`
+    const { fetch, sent } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      repo('you/api'),
+      repo('northwind/api'),
+      ['GET', receive('you/api'), { status: 403, json: {} }],
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const path = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/you/api.git`], { cwd: path })
+      execFileSync('git', ['remote', 'add', 'upstream', `${GITHUB}/northwind/api.git`], { cwd: path })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const connection = yield* signedIn
+      const check = yield* connections.check(connection.id)
+      const push = check.lines.find((line) => line.need === 'push')
+      assert.deepStrictEqual(
+        push?.repositories?.map((one) => [one.path, one.state]),
+        [['you/api', 'no']],
+      )
+      assert.isDefined(sent.find((request) => request.url === receive('you/api')))
+      assert.isUndefined(sent.find((request) => request.url === receive('northwind/api')))
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+})
+
 describe('the guide to connecting a code host', () => {
   it.live('lists a repository on GitHub as a place for GitHub, and none for GitLab', () => {
     const { fetch } = stub([])

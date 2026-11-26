@@ -57,11 +57,13 @@ export const CantPush: Story = {
   args: {
     host: undefined,
     trackers: [],
-    cantPush: {
-      service: GITHUB,
-      names: ['AltharIDE/althar'],
-      why: 'GitHub took sam’s token, but it may only read there. Give it write access on GitHub, or connect again with one that can push.',
-    },
+    cantPush: [
+      {
+        service: GITHUB,
+        names: ['AltharIDE/althar'],
+        why: 'GitHub won’t take a push there with sam’s token. Give it write access on GitHub, or connect again with one that can push.',
+      },
+    ],
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)

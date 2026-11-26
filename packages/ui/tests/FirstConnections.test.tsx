@@ -66,7 +66,7 @@ describe('a new project’s card for its code host and tracker', () => {
     const onConnect = vi.fn()
     const why = 'GitHub took sam’s token, but it may only read there.'
     const { rerender } = render(
-      <FirstConnections cantPush={{ service: GITHUB, names: ['northwind/meridian'], why }} onConnect={onConnect} onHide={vi.fn()} />,
+      <FirstConnections cantPush={[{ service: GITHUB, names: ['northwind/meridian'], why }]} onConnect={onConnect} onHide={vi.fn()} />,
     )
     // Its code isn't ready for a pull request: the card is the code's, though its host is connected.
     expect(screen.getByRole('region', { name: 'Before the first pull request' })).toBeInTheDocument()
@@ -77,13 +77,25 @@ describe('a new project’s card for its code host and tracker', () => {
     // Several, named two at a time and the rest counted.
     rerender(
       <FirstConnections
-        cantPush={{ service: GITHUB, names: ['a/one', 'a/two', 'a/three', 'a/four'], why }}
+        cantPush={[{ service: GITHUB, names: ['a/one', 'a/two', 'a/three', 'a/four'], why }]}
         onConnect={onConnect}
         onHide={vi.fn()}
       />,
     )
     expect(screen.getByText('Can’t push to a/one, a/two and 2 more')).toBeInTheDocument()
-    rerender(<FirstConnections cantPush={{ service: GITHUB, names: ['a/one', 'a/two'], why }} onConnect={onConnect} onHide={vi.fn()} />)
+    rerender(
+      <FirstConnections
+        cantPush={[
+          { service: GITHUB, names: ['a/one', 'a/two'], why },
+          { service: { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab }, names: ['b/one'], why: 'GitLab too.' },
+        ]}
+        onConnect={onConnect}
+        onHide={vi.fn()}
+      />,
+    )
     expect(screen.getByText('Can’t push to a/one or a/two')).toBeInTheDocument()
+    // A host of its own, its own row.
+    expect(screen.getByText('Can’t push to b/one')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Connect again' })).toHaveLength(2)
   })
 })

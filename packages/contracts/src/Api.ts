@@ -1646,6 +1646,12 @@ export const AccessLine = Schema.Struct({
   /** How many, where the fact is a count: boards, teams, projects. */
   count: Schema.NullOr(Schema.Number),
   reason: Schema.NullOr(AccessReason),
+  /** Each repository it asked on its own, with its outcome and why: what a project's card says of its own repositories. */
+  repositories: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ path: Schema.String, state: Schema.Literals(['ok', 'no', 'unknown']), reason: Schema.NullOr(AccessReason) }),
+    ),
+  ),
 })
 export type AccessLine = typeof AccessLine.Type
 

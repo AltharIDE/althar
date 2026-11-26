@@ -93,7 +93,7 @@ export type FirstConnectionsProps = RootProps<
      * Its host, connected, but whose sign-in may not push to these of its repositories, and why in a line: Connect again
      * (`onConnect`) signs in with one that may.
      */
-    cantPush?: { readonly service: FirstConnectionsService; readonly names: readonly string[]; readonly why: string }
+    cantPush?: readonly { readonly service: FirstConnectionsService; readonly names: readonly string[]; readonly why: string }[]
     /** Where the project's code is, on a host not connected yet: the host, and the place there. */
     host?: { readonly service: FirstConnectionsService; readonly where?: string }
     /** The code hosts to choose from, where the project's code names none and none is connected. */
@@ -114,7 +114,7 @@ export type FirstConnectionsProps = RootProps<
 
 /** What a new project's tasks will need later, to connect now or not: its code host, and a tracker. */
 export function FirstConnections({
-  cantPush,
+  cantPush = [],
   host,
   hosts = [],
   trackers = [],
@@ -127,7 +127,7 @@ export function FirstConnections({
   ...rest
 }: FirstConnectionsProps) {
   const t = { ...firstConnectionsText, ...text }
-  const code = host !== undefined || hosts.length > 0 || cantPush !== undefined
+  const code = host !== undefined || hosts.length > 0 || cantPush.length > 0
   if (!code && trackers.length === 0 && rows.length === 0) return null
   return (
     <section aria-label={code ? t.title : t.issuesTitle} className={cx(s.card, className)} {...rest}>
@@ -151,22 +151,22 @@ export function FirstConnections({
                 {row.end !== undefined && <span className={s.end}>{row.end}</span>}
               </li>
             ))}
-            {cantPush !== undefined && (
-              <li className={cx(s.row, s.problem)}>
+            {cantPush.map((one) => (
+              <li key={one.service.id} className={cx(s.row, s.problem)}>
                 <span className={s.marks}>
-                  <Mark service={cantPush.service} />
+                  <Mark service={one.service} />
                 </span>
                 <span className={s.said}>
-                  <span className={s.name}>{t.cantPush(cantPush.names)}</span>
-                  <span className={s.why}>{cantPush.why}</span>
+                  <span className={s.name}>{t.cantPush(one.names)}</span>
+                  <span className={s.why}>{one.why}</span>
                 </span>
                 <span className={s.end}>
-                  <Button size="small" onClick={() => onConnect(cantPush.service.id)}>
+                  <Button size="small" onClick={() => onConnect(one.service.id)}>
                     {t.connectAgain}
                   </Button>
                 </span>
               </li>
-            )}
+            ))}
             {host !== undefined && (
               <li className={s.row}>
                 <span className={s.marks}>

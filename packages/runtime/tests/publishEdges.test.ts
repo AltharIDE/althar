@@ -221,7 +221,7 @@ describe('opening a task’s pull request', () => {
       assert.deepStrictEqual([call.step, call.why], ['publish', 'push_refused'])
       assert.strictEqual(
         call.detail,
-        'GitHub refused you’s token for meridian/api: it can read the repository but not push to it. Give the token write access to meridian/api (a fine-grained token’s Contents: Read and write, made for meridian), or connect GitHub with one that can push there, then try again.',
+        'GitHub refused a push to meridian/api with you’s token. Give the token write access to meridian/api (a fine-grained token’s Contents: Read and write, made for meridian), or connect GitHub with one that can push there, then try again.',
       )
       assert.notInclude(call.detail ?? '', 'git push')
       // As the window reads the call: the way on it offers is the host's connection, then trying again.

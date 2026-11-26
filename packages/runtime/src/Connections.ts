@@ -42,6 +42,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { contained } from './Failures'
 import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
+import { forkOf } from './forks'
 import { git, namedRemotes } from './git'
 import { reachedRemote } from './sshHosts'
 import { Instance } from './Instance'
@@ -1178,8 +1179,8 @@ export class Connections extends Context.Service<
       /** Each repository of every project, with its stored remotes, and where it is on this device. */
       const bindings = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        return yield* sql<{ project: string; remotes: string; path: string | null }>`
-          SELECT p.name AS project, b.remote_fingerprints AS remotes, l.path
+        return yield* sql<{ project: string; remotes: string; path: string | null; changeTarget: string | null }>`
+          SELECT p.name AS project, b.remote_fingerprints AS remotes, l.path, b.change_target
           FROM repository_bindings b JOIN projects p ON p.id = b.project_id
           LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
           WHERE b.detached_at IS NULL AND p.archived_at IS NULL
@@ -1263,7 +1264,16 @@ export class Connections extends Context.Service<
                 const reachedUrls = yield* Effect.forEach(remotes, (remote) =>
                   Effect.map(reachedRemote(remote.url, knows), (url) => ({ name: remote.name, url })),
                 )
-                return { project: binding.project, path: binding.path, remotes: reachedUrls }
+                // Where its work is pushed: origin (a fork's own), else its first remote; and where the project sends branches to the
+                // repository it was forked from, that one too, as publishing does.
+                const origin = reachedUrls.find((remote) => remote.name === 'origin') ?? reachedUrls[0]
+                const fork =
+                  binding.changeTarget === 'upstream_branch'
+                    ? forkOf(remotes.flatMap((r) => (r.name === null ? [] : [{ name: r.name, url: r.url }])))
+                    : null
+                const upstream = fork === null ? undefined : reachedUrls.find((remote) => remote.name === fork.upstream.remote)
+                const pushes = [origin, upstream].flatMap((remote) => (remote === undefined ? [] : [remote.url]))
+                return { project: binding.project, path: binding.path, remotes: reachedUrls, pushes }
               }),
             { concurrency: 4 },
           )
@@ -1286,7 +1296,10 @@ export class Connections extends Context.Service<
             )
           }
           const candidates = [...new Map(known.filter((at) => fits(at.product)).map((at) => [`${at.product} ${at.webUrl}`, at])).values()]
-          const places = new Map<string, { place: Place & { repositories: Array<string> }; paths: Array<string> }>()
+          const places = new Map<
+            string,
+            { place: Place & { repositories: Array<string> }; paths: Array<string>; pushes: Array<ReadonlyArray<string>> }
+          >()
           for (const binding of read)
             for (const remote of binding.remotes) {
               const ref = parseRemote(remote.url)
@@ -1297,10 +1310,13 @@ export class Connections extends Context.Service<
               const entry = places.get(key) ?? {
                 place: { product: at.product, webUrl: at.webUrl, project: binding.project, remote: remote.name, repositories: [] },
                 paths: [],
+                pushes: [],
               }
               // The repository's path as its code host knows it: under the instance's own path, as its page reads it.
-              const path = pageOf(at.product, at.webUrl, ref.path).path.join('/')
+              const page = pageOf(at.product, at.webUrl, ref.path).path
+              const path = page.join('/')
               if (!entry.place.repositories.includes(path)) entry.place.repositories.push(path)
+              if (binding.pushes.includes(remote.url) && !entry.pushes.some((one) => one.join('/') === path)) entry.pushes.push(page)
               if (binding.path !== null && !entry.paths.includes(binding.path)) entry.paths.push(binding.path)
               places.set(key, entry)
             }
@@ -1335,6 +1351,7 @@ export class Connections extends Context.Service<
         credential: Credential,
         auth: ConnectionInfo['auth'],
         repositories: ReadonlyArray<ReadonlyArray<string>>,
+        pushes?: ReadonlyArray<ReadonlyArray<string>>,
       ) =>
         Effect.gen(function* () {
           const info = infoOf(product)
@@ -1366,6 +1383,7 @@ export class Connections extends Context.Service<
             credential,
             auth,
             repositories,
+            ...(pushes === undefined ? {} : { pushes }),
             ...(connectors.appSlug === undefined ? {} : { appSlug: connectors.appSlug }),
           })
         })
@@ -1573,12 +1591,12 @@ export class Connections extends Context.Service<
           const info = infoOf(row.product)
           const kept = yield* stored(row).pipe(Effect.mapError(refusedFor(row)))
           const now = yield* credential(connectionId).pipe(Effect.mapError(refusedFor(row)))
-          const places = (yield* placesOf(false)).map((entry) => entry.place)
-          const repositories = places
-            .filter((place) => place.product === row.product && place.webUrl === row.webUrl)
-            .flatMap((place) => place.repositories.map((path) => path.split('/')))
+          // Its remotes by name, as git has them: which of them a project's work is pushed to, and which it only reads.
+          const here = (yield* placesOf(true)).filter((entry) => entry.place.product === row.product && entry.place.webUrl === row.webUrl)
+          const repositories = here.flatMap((entry) => entry.place.repositories.map((path) => path.split('/')))
           const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
-          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
+          const pushes = [...new Map(here.flatMap((entry) => entry.pushes).map((path) => [path.join('/'), path])).values()]
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique, pushes)
           if (report.account?.workspace !== undefined && report.account.id === row.accountId)
             yield* learnWorkspace(row, report.account.workspace)
           return {
