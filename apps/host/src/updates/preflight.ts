@@ -26,10 +26,12 @@ export const verifyBundledPrograms = async (entry: string) => {
       if (value.version !== metadata.dependencies[name])
         throw updateError('ReleaseRejected', 'The bundled adapter versions do not match this host release.')
     }
+    let codex: string | null = null
     for (const id of ['claude-code', 'codex'] as const) {
       const program = agents[id].cli?.bundled?.()
       if (program === undefined || program === null)
         throw updateError('UpdateFailed', 'The release is missing its native provider CLI for this platform.')
+      if (id === 'codex') codex = program
       await promisify(execFile)(program, ['--version'], {
         env: {
           HOME: probe,
@@ -49,7 +51,7 @@ export const verifyBundledPrograms = async (entry: string) => {
     // A release that carries the worker carries what its agents' sandbox needs too: Codex's bubblewrap and ripgrep, its socat.
     const release = resolve(dirname(entry), '..')
     if (await executable(join(release, 'althar-worker'))) {
-      const shipped = shippedSandbox(release)
+      const shipped = shippedSandbox(release, codex)
       for (const name of ['bwrap', 'rg', 'socat'] as const) {
         const program = shipped[name]
         if (program === undefined || !(await executable(program)))

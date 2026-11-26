@@ -727,6 +727,55 @@ describe('its check, and letting its sandbox start', () => {
     expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toContain('fix\tsudo sh -c')
   })
 
+  it('asks nothing of sudo where its sandbox starts, and says where nothing it knows lets it, or it still can’t', async () => {
+    const asked: string[] = []
+    const machine = ubuntu()
+    const using = (check: CheckSystem) => {
+      restore()
+      restore = withWorkerSystem({
+        systemctl: async () => '',
+        signedIn: async () => false,
+        agents: () => [],
+        check,
+        shipped: () => ({}),
+        // It may, but what it runs changes nothing.
+        sudo: async (script) => {
+          asked.push(script)
+          return true
+        },
+      })
+    }
+    await install(release(), out)
+    using(checking)
+    expect(await workerMain(['sandbox'], out)).toBe(0)
+    expect(asked).toEqual([])
+    using({ ...checking, executable: () => false })
+    expect(await workerMain(['sandbox'], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'sandbox', state: 'failed', code: 'SandboxUnfixable' })
+    using(machine.system)
+    expect(await workerMain(['sandbox'], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'sandbox', state: 'failed', code: 'SandboxStillFails' })
+    expect(asked).toHaveLength(1)
+  })
+
+  it('links what the release ships for the sandbox through current, and only what it ships', async () => {
+    restore()
+    restore = withWorkerSystem({
+      systemctl: async () => '',
+      signedIn: async () => false,
+      agents: () => [],
+      check: checking,
+      shipped: (running) => ({ bwrap: join(running, 'tools', 'bin', 'bwrap'), rg: undefined, socat: '/opt/socat' }),
+      sudo: async () => false,
+    })
+    await install(release(), out)
+    await enroll(await grantFor(keyOf()), out)
+    const bin = join(data, 'althar-worker', 'bin')
+    expect(readlinkSync(join(bin, 'bwrap'))).toBe(join(data, 'althar-worker-program', 'current', 'tools', 'bin', 'bwrap'))
+    expect(readlinkSync(join(bin, 'socat'))).toBe('/opt/socat')
+    expect(existsSync(join(bin, 'rg'))).toBe(false)
+  })
+
   it('installs only the tools a worker installs itself, saying why not in a plain line', async () => {
     const lines: string[] = []
     expect(await workerMain(['tools', 'cargo@1'], (text) => lines.push(text))).toBe(1)

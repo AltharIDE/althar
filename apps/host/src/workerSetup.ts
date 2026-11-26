@@ -373,7 +373,7 @@ export const check = async (out: (text: string) => void) => {
 export const allowSandbox = async (out: (text: string) => void) => {
   const before = await check(out)
   if (before.sandbox.starts) return
-  const fix = before.sandbox.starts ? undefined : before.sandbox.fix
+  const fix = before.sandbox.fix
   // The check's own command, as `sudo sh -c '<script>'`: the script alone goes to sudo.
   const script = fix === undefined ? undefined : /^sudo sh -c '(.*)'$/u.exec(fix)?.[1]
   if (script === undefined) throw failed('SandboxUnfixable', 'Nothing Althar knows lets the sandbox start on this computer.')

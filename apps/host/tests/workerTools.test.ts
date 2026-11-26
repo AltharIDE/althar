@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { c } from 'tar'
 import { describe, expect, it } from 'vitest'
 
-import { installTool, installTools, satisfies, type ToolFetch, type ToolPlatform } from '../src/workerTools'
+import { installTool, installTools, platformHere, satisfies, type ToolFetch, type ToolPlatform } from '../src/workerTools'
 import { temporary } from './support'
 
 /*
@@ -154,6 +154,106 @@ describe('installing a tool', () => {
     })
     await expect(installTool(root, 'bun', '1.3.5', () => undefined, fetcher, linux)).rejects.toThrow('didn’t match its digest')
     expect(existsSync(join(root, 'bun', '1.3.5'))).toBe(false)
+  })
+
+  it('finds uv’s newest of a minor from GitHub’s releases, and its build for this computer', async () => {
+    const root = temporary()
+    const uv = await archive({ uv: 'uv' }, 'uv-aarch64-unknown-linux-musl')
+    const url = 'https://github.com/astral-sh/uv/releases/download/0.13.10/uv-aarch64-unknown-linux-musl.tar.gz'
+    const { fetcher } = servers({
+      'https://api.github.com/repos/astral-sh/uv/releases?per_page=100': JSON.stringify([
+        { tag_name: '0.14.0' },
+        { tag_name: '0.13.10' },
+        { tag_name: '0.13.9' },
+        { tag_name: '0.13.11-rc1' },
+        {},
+      ]),
+      [url]: uv,
+      [`${url}.sha256`]: sha256(uv),
+    })
+    await installTool(root, 'uv', '0.13', () => undefined, fetcher, { arch: 'arm64', musl: true, avx2: false })
+    expect(readFileSync(join(root, 'uv', '0.13.10', 'bin', 'uv'), 'utf8')).toBe('uv')
+    await expect(installTool(temporary(), 'uv', '0.12', () => undefined, fetcher, linux)).rejects.toThrow('uv has no release 0.12.')
+  })
+
+  it('says where a maker’s answer won’t do: no latest, no build, an error, or too much', async () => {
+    const big = new Response('{}', { headers: { 'content-length': String(64 * 1024 * 1024) } })
+    const fails = async (name: 'bun' | 'node' | 'pnpm' | 'uv', asked: string, fetcher: ToolFetch, platform = linux) =>
+      installTool(temporary(), name, asked, () => undefined, fetcher, platform).then(
+        () => '',
+        (error: Error) => error.message,
+      )
+    expect(
+      await fails('uv', 'latest', servers({ 'https://github.com/astral-sh/uv/releases/latest': { location: '/elsewhere' } }).fetcher),
+    ).toBe('GitHub didn’t say which uv is the latest.')
+    expect(
+      await fails(
+        'uv',
+        '0.13.10',
+        servers({ 'https://github.com/astral-sh/uv/releases/download/0.13.10/uv-x86_64-unknown-linux-gnu.tar.gz.sha256': 'nothing' })
+          .fetcher,
+      ),
+    ).toBe('uv 0.13.10 has no build for this computer.')
+    expect(await fails('node', '24', servers({}).fetcher, { arch: 'x64', musl: true, avx2: true })).toBe(
+      'Node publishes no build for this system’s C library.',
+    )
+    expect(await fails('node', '24', servers({}).fetcher)).toBe('nodejs.org answered with HTTP 404.')
+    expect(await fails('node', '24', async () => big)).toBe('nodejs.org sent more than a tool takes.')
+    const index = JSON.stringify([{ version: 'v25.1.0', lts: false }])
+    expect(await fails('node', '24', servers({ 'https://nodejs.org/dist/index.json': index }).fetcher)).toBe('Node has no release 24.')
+    // More than it said, or with nothing said: counted as it comes.
+    const sums = {
+      'https://nodejs.org/dist/index.json': index,
+      'https://nodejs.org/dist/v25.1.0/SHASUMS256.txt': 'x'.repeat(2 * 1024 * 1024),
+    }
+    expect(await fails('node', '25', servers(sums).fetcher)).toBe('nodejs.org sent more than a tool takes.')
+    expect(
+      await fails(
+        'node',
+        'latest',
+        servers({ 'https://nodejs.org/dist/index.json': index, 'https://nodejs.org/dist/v25.1.0/SHASUMS256.txt': 'x  y\n' }).fetcher,
+        { arch: 'arm64', musl: false, avx2: false },
+      ),
+    ).toBe('Node 25.1.0 has no build for this computer.')
+    const pnpm = { 'https://registry.npmjs.org/pnpm': npm('pnpm', { '10.4.1': Buffer.from('') }, '10.4.1') }
+    expect(await fails('pnpm', '9', servers(pnpm).fetcher)).toBe('No 9 of pnpm on npm.')
+    // An integrity by a digest it doesn't know matches nothing.
+    const unknown = JSON.stringify({
+      'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { dist: { tarball: 'https://x.test/a.tgz', integrity: 'md5-x' } } },
+    })
+    expect(
+      await fails(
+        'bun',
+        'latest',
+        servers({ 'https://registry.npmjs.org/@oven/bun-linux-aarch64': unknown, 'https://x.test/a.tgz': 'a' }).fetcher,
+        {
+          arch: 'arm64',
+          musl: false,
+          avx2: false,
+        },
+      ),
+    ).toBe('The download of Bun 1.0.0 didn’t match its digest.')
+  })
+
+  it('takes npm’s latest where asked, and one there already as it is', async () => {
+    const root = temporary()
+    mkdirSync(join(root, 'pnpm', '10.4.1', 'bin'), { recursive: true })
+    const { fetcher, asked } = servers({ 'https://registry.npmjs.org/pnpm': npm('pnpm', { '10.4.1': Buffer.from('') }, '10.4.1') })
+    const said: string[] = []
+    await installTool(root, 'pnpm', 'latest', (text) => said.push(text), fetcher, linux)
+    expect(said).toEqual([`path\t${join(root, 'pnpm', '10.4.1', 'bin')}\n`])
+    expect(asked).toEqual(['https://registry.npmjs.org/pnpm'])
+  })
+
+  it('installs each asked in turn on this computer as it is', async () => {
+    const root = temporary()
+    mkdirSync(join(root, 'bun', '1.3.5', 'bin'), { recursive: true })
+    mkdirSync(join(root, 'uv', '0.13.10', 'bin'), { recursive: true })
+    const said: string[] = []
+    await installTools(root, ['bun@1.3', 'uv@0.13.10'], (text) => said.push(text))
+    expect(said).toEqual([`path\t${join(root, 'bun', '1.3.5', 'bin')}\n`, `path\t${join(root, 'uv', '0.13.10', 'bin')}\n`])
+    expect(platformHere()).toMatchObject({ arch: process.arch === 'arm64' ? 'arm64' : 'x64' })
   })
 
   it('stops at the first it can’t install, saying which and why', async () => {

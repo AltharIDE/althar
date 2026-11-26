@@ -1,11 +1,13 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { agents, BWRAP_TRY } from '@althar/provider-adapters'
+import { agents, BWRAP_TRY, type AgentDefinition } from '@althar/provider-adapters'
+import { fakeAgentMain } from '@althar/provider-adapters/testing'
 import { describe, expect, it } from 'vitest'
 
 import {
   apparmorRule,
+  checkHere,
   checkSandbox,
   checkTools,
   checkWorker,
@@ -80,6 +82,10 @@ describe('its agents’ sandbox', () => {
       fix: expect.stringContaining('user.max_user_namespaces=15000'),
     })
     expect(await checkSandbox(PATH, '/p', refused({}))).toEqual({ starts: false, problem: 'Failed' })
+    // No rule for a folder it can't say safely: the problem alone.
+    expect(await checkSandbox(PATH, "/home/o'brien/x", refused({ '/proc/sys/kernel/apparmor_restrict_unprivileged_userns': '1' }))).toEqual(
+      { starts: false, problem: 'NoUserNamespaces' },
+    )
   })
 
   it('gives AppArmor’s rule for this worker’s own bubblewrap alone, one line to copy, and none for a path it can’t say safely', () => {
@@ -124,6 +130,19 @@ describe('what it ships and finds', () => {
     expect(() => lstatSync(join(folder, 'bin', 'bwrap'))).toThrow()
   })
 
+  it('runs, reads and looks at this computer’s own programs and files', async () => {
+    const folder = temporary()
+    const script = join(folder, 'script')
+    writeFileSync(script, '#!/bin/sh\nprintf out; printf err >&2\n[ "$1" = ok ]\n', { mode: 0o700 })
+    writeFileSync(join(folder, 'plain'), 'words', { mode: 0o600 })
+    expect(await checkHere.run(script, ['ok'])).toEqual({ ok: true, stdout: 'out', stderr: 'err' })
+    expect(await checkHere.run(script, ['no'], { timeout: 5000, env: { PATH: '/usr/bin:/bin' } })).toMatchObject({ ok: false })
+    expect(checkHere.read(join(folder, 'plain'))).toBe('words')
+    expect(checkHere.read(join(folder, 'missing'))).toBeUndefined()
+    expect(checkHere.executable(script)).toBe(true)
+    expect(checkHere.executable(join(folder, 'plain'))).toBe(false)
+  })
+
   it('puts its sandbox’s programs first and its own Node last, as the worker does', () => {
     expect(workerPath('/w', '/r', { HOME: '/home/althar' })).toBe(
       '/w/bin:/home/althar/.local/bin:/home/althar/.bun/bin:/home/althar/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/r/node/bin',
@@ -166,6 +185,12 @@ describe('its agents, started once', () => {
       { id: 'opus', name: 'Claude Opus 5.5' },
       { id: 'sonnet', name: 'Claude Sonnet 5.5' },
     ])
+    // An agent whose option is by another id is read by its category; one with no names, by its values.
+    const elsewhere = [{ id: 'llm', name: 'Model', category: 'model', values: ['gpt-6.2'] }]
+    expect(offeredModels({ ...agents.codex, options: { ...agents.codex.options, model: 'model' } }, elsewhere as never)).toEqual([
+      { id: 'gpt-6.2', name: 'gpt-6.2' },
+    ])
+    expect(offeredModels(agents.codex, [options[0]] as never)).toEqual([])
   })
 
   it('starts each signed-in agent with the sandbox as found, keeps why one couldn’t, and writes what it found', async () => {
@@ -204,6 +229,68 @@ describe('its agents, started once', () => {
     expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
       'sandbox\tstarts\nmodel\tclaude-code\topus\tClaude Opus 5.5\nagent\tclaude-code\tstarts\nagent\tcodex\tfails\tNot signed in.\n',
     )
+  })
+
+  it('starts an agent on this computer as a run does, in a folder of its own it then removes, and says the models it offers', async () => {
+    const folder = temporary()
+    const program = join(folder, 'agent')
+    writeFileSync(program, `#!/bin/sh\nprintf '%s' "$PWD" > '${join(folder, 'cwd')}'\nexec bun '${fakeAgentMain}'\n`, { mode: 0o700 })
+    // An agent as the fake: its own mode and model options, by the ids a session asks for them by.
+    const asFake = (definition: AgentDefinition) => ({
+      ...definition,
+      modes: { ...definition.modes, ask: 'ask' },
+      options: { ...definition.options, mode: 'mode', model: 'model' },
+    })
+    const env = { PATH: process.env.PATH ?? '/usr/bin:/bin' }
+    // Claude Code sends more as its session starts (its sandbox, as found); Codex nothing.
+    expect(agents['claude-code'].sessionMeta).toBeDefined()
+    expect(await checkHere.startAgent(asFake(agents['claude-code']), program, env, false)).toEqual([
+      { id: 'small', name: 'Small' },
+      { id: 'large', name: 'Large' },
+    ])
+    expect(agents.codex.sessionMeta).toBeUndefined()
+    expect(await checkHere.startAgent(asFake(agents.codex), program, env, true)).toHaveLength(2)
+    const cwd = readFileSync(join(folder, 'cwd'), 'utf8')
+    expect(cwd).toContain('althar-worker-check-')
+    expect(existsSync(cwd)).toBe(false)
+    await expect(checkHere.startAgent(asFake(agents.codex), join(folder, 'missing'), env, false)).rejects.toBeDefined()
+  })
+
+  it('says why an agent couldn’t start in a line of its own words, and writes what it found only where it changed', async () => {
+    const folder = temporary()
+    const file = join(folder, 'readiness')
+    const why: Readonly<Record<string, unknown>> = {
+      'claude-code': 'Plain words.',
+      codex: { not: 'an error' },
+      opencode: new Error(`\n${'x'.repeat(400)}\nmore`),
+    }
+    let kept: string | undefined
+    const here = {
+      ...machine({
+        startAgent: async (definition) => Promise.reject(why[definition.id]),
+        read: (path) => (path === file ? kept : undefined),
+      }),
+      executable: (path: string) => /\/(bwrap|socat)$/u.test(path) && path.startsWith(join(folder, 'bin')),
+    }
+    const input = {
+      folder,
+      current: '/r',
+      program: '/p',
+      agents: (['claude-code', 'codex', 'opencode'] as const).map((id) => ({ id, name: id, definition: agents[id], signedIn: true })),
+    }
+    const found = await checkWorker(input, here)
+    expect(found.agents.map((agent) => agent.message)).toEqual(['Plain words.', 'It couldn’t start.', `${'x'.repeat(299)}…`])
+    kept = readFileSync(file, 'utf8')
+    rmSync(file)
+    await checkWorker(input, here)
+    expect(existsSync(file)).toBe(false)
+    expect(
+      readinessLines({
+        sandbox: { starts: true, bwrap: '/w/bin/bwrap' },
+        tools: [],
+        agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: false, models: [] }],
+      }),
+    ).toBe('sandbox\tstarts\nagent\tcodex\tfails\tIt couldn’t start.\n')
   })
 
   it('keeps tabs and new lines out of what it writes', () => {
