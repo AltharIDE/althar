@@ -41,6 +41,7 @@ export const keys = {
   containers: (connectionId: string) => ['containers', connectionId] as const,
   /** A code host connection's repositories, to clone one. */
   hostRepositories: (connectionId: string) => ['host-repositories', connectionId] as const,
+  hostReach: (connectionId: string) => ['host-reach', connectionId] as const,
   /** Where a code host connection can make a repository. */
   repositoryOwners: (connectionId: string) => ['repository-owners', connectionId] as const,
   settings: ['settings'] as const,
@@ -170,6 +171,14 @@ export const reads = (client: Client) => ({
     queryOptions({
       queryKey: keys.hostRepositories(connectionId),
       queryFn: () => client.listHostRepositories(connectionId),
+      staleTime: 60_000,
+      retry: false,
+    }),
+  // Asked beside its list, and kept as long: what a connection was let reach changes only as it is changed on its host.
+  hostReach: (connectionId: string) =>
+    queryOptions({
+      queryKey: keys.hostReach(connectionId),
+      queryFn: () => client.readHostReach(connectionId),
       staleTime: 60_000,
       retry: false,
     }),

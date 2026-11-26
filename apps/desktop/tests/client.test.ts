@@ -269,6 +269,7 @@ describe('the client', () => {
           MakeRepository: () => Effect.die('unused'),
           PrepareFolder: () => Effect.die('unused'),
           ListHostRepositories: () => Effect.die('unused'),
+          ReadHostReach: () => Effect.die('unused'),
           ListRepositoryOwners: () => Effect.die('unused'),
           CloneRepository: () => Effect.die('unused'),
           PublishRepository: () => Effect.die('unused'),

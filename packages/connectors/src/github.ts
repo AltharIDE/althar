@@ -800,9 +800,21 @@ const ReachedRepository = Schema.Struct({
   pushed_at: Schema.optional(Schema.NullOr(Schema.String)),
   html_url: Schema.String,
   archived: Schema.optional(Schema.Boolean),
-  // Disabled by GitHub's staff, as for a billing or legal hold: still listed, never pushed to.
+  // Disabled by GitHub's staff, as for a billing or legal hold: not listed to clone, as it can't be.
   disabled: Schema.optional(Schema.Boolean),
 })
+
+/** How many repositories the account has of its own, as GitHub says to it: private ones only where the token may know. */
+const OwnCounts = Schema.Struct({
+  public_repos: Schema.Number,
+  owned_private_repos: Schema.optional(Schema.NullOr(Schema.Number)),
+})
+
+/** One of the account's own, as a list of them says: whether it is private is all that is counted. */
+const OwnRepository = Schema.Struct({ private: Schema.Boolean })
+
+/** A repository a token reaches, by its owner: a fine-grained token's are all one owner's. */
+const OwnedRepository = Schema.Struct({ owner: Schema.Struct({ login: Schema.String }) })
 
 /** An organization the account is a member of. */
 const Organization = Schema.Struct({ login: Schema.String })
@@ -2084,7 +2096,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         (comment) => commentOf(comment, false),
       ),
     pushTarget,
-    // Its own, its collaborations and its organizations', last pushed to first; a page short of a hundred is the last.
+    // Its own, its collaborations and its organizations', last pushed to first; a page short of a hundred is the last. One
+    // disabled by GitHub's staff, as for a billing or legal hold, can't be cloned, and isn't listed; one archived can, and is.
     repositories: () =>
       paged(1, (page) =>
         Effect.map(
@@ -2094,18 +2107,73 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             `${api}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=${page}`,
           ),
           (repositories) => ({
-            items: repositories.map((found): ListedRepository => ({
-              path: found.full_name.split('/'),
-              description: found.description == null || found.description === '' ? null : found.description,
-              private: found.private,
-              pushedAt: found.pushed_at ?? null,
-              webUrl: found.html_url,
-              archived: found.archived === true || found.disabled === true,
-            })),
+            items: repositories.flatMap((found): ReadonlyArray<ListedRepository> =>
+              found.disabled === true
+                ? []
+                : [
+                    {
+                      path: found.full_name.split('/'),
+                      description: found.description == null || found.description === '' ? null : found.description,
+                      private: found.private,
+                      pushedAt: found.pushed_at ?? null,
+                      webUrl: found.html_url,
+                      archived: found.archived === true,
+                    },
+                  ],
+            ),
             next: repositories.length < 100 ? undefined : page + 1,
           }),
         ),
       ),
+    /*
+     * Whether it lists all the account reaches. A classic token, or an OAuth
+     * app's, says its scopes, and without `repo` reaches the public ones
+     * alone. A fine-grained token reaches one owner's repositories, those it
+     * was given, and Althar's app those it is installed on: never all an
+     * account in organizations or on others' repositories has, so they say
+     * so, the token with the owner it is for. Any other says nothing of what
+     * it was given: the account's own it lists are counted against those
+     * GitHub says it has, public ones always, private ones where it says.
+     */
+    reach: () =>
+      Effect.gen(function* () {
+        const credential = yield* options.credential
+        const web = withoutTrailingSlashes(options.webUrl)
+        if (credential.token.startsWith('ghu_'))
+          return { limited: { by: 'app' as const, url: `${web}/settings/installations`, owner: null } }
+        if (credential.token.startsWith('github_pat_')) {
+          // Whose it is says more, where it can be read; limited all the same where it can't.
+          const [first] = yield* http
+            .json(Schema.Array(OwnedRepository), 'GET', `${api}/user/repos?per_page=1`)
+            .pipe(Effect.orElseSucceed((): ReadonlyArray<typeof OwnedRepository.Type> => []))
+          return { limited: { by: 'token' as const, url: `${web}/settings/personal-access-tokens`, owner: first?.owner.login ?? null } }
+        }
+        const limited = { by: 'token' as const, url: `${web}/settings/tokens`, owner: null }
+        const me = yield* http.request('GET', `${api}/user`)
+        const said = me.headers.get('x-oauth-scopes')
+        if (said !== null)
+          return {
+            limited: said
+              .split(',')
+              .map((scope) => scope.trim())
+              .includes('repo')
+              ? null
+              : limited,
+          }
+        const counts = Schema.decodeUnknownOption(OwnCounts)(me.body)
+        if (counts._tag === 'None') return { limited: null }
+        const own = yield* paged(1, (page) =>
+          Effect.map(
+            http.json(Schema.Array(OwnRepository), 'GET', `${api}/user/repos?per_page=100&affiliation=owner&page=${page}`),
+            (repositories) => ({ items: repositories, next: repositories.length < 100 ? undefined : page + 1 }),
+          ),
+        )
+        const hidden = own.filter((one) => one.private).length
+        const fewer =
+          own.length - hidden < counts.value.public_repos ||
+          (counts.value.owned_private_repos != null && hidden < counts.value.owned_private_repos)
+        return { limited: fewer ? limited : null }
+      }),
     /*
      * The account, then each organization it is a member of. Whether a member
      * may make repositories is the organization's setting, which GitHub says

@@ -1111,15 +1111,19 @@ export const handlers = apiLayer(
             return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
           }),
         ),
+      // A host that can't tell lists all it says it does.
+      ReadHostReach: ({ connectionId }) =>
+        api(Effect.flatMap(codeHostOf(connectionId), (host) => host.reach?.() ?? Effect.succeed({ limited: null }))),
       ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
-      CloneRepository: ({ commandId, grant, from }) =>
+      CloneRepository: ({ commandId, grant, from, folder }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
-              const path = yield* cloneRepository({ parent, ...source })
+              // A name of the window's, in place of the repository's: refused, as one taken is, where it is anything but a name.
+              const path = yield* cloneRepository({ parent, ...source, ...(folder === undefined ? {} : { folder }) })
               return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
