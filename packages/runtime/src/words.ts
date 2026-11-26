@@ -250,13 +250,18 @@ export const agentSaid = (error: unknown, whose?: Whose): string | undefined => 
 }
 
 /** A git failure, summed up: the subcommand and git's most telling line, `git rev-parse: gitfile does not point to a valid repository: ~/….` */
+/** A push refused, in the words the window gives it. */
+const pushFailed = (error: unknown): string | undefined => (tagOf(error) === 'PushRefused' ? words(error, (id) => id).message : undefined)
+
 const gitFailed = (error: unknown): string | undefined =>
   tagOf(error) === 'GitFailed' ? sentence(gitSummary(error as GitFailure)) : undefined
 
 /** A cause, summed up for a person: what the agent said, what the host said no to, or the first line of what went wrong. */
 export const summarize = (cause: Cause.Cause<unknown>, whose?: Whose): string => {
   const error = Cause.findErrorOption(cause)
-  const said = Option.isSome(error) ? (agentSaid(error.value, whose) ?? hostFailed(error.value) ?? gitFailed(error.value)) : undefined
+  const said = Option.isSome(error)
+    ? (agentSaid(error.value, whose) ?? hostFailed(error.value) ?? pushFailed(error.value) ?? gitFailed(error.value))
+    : undefined
   if (said !== undefined) return said
   const first = lastLine(Cause.pretty(cause).split('\n')[0] ?? '').replace(/^\w*Error: /, '')
   return first === '' ? '' : sentence(first)
@@ -488,6 +493,13 @@ export const words = (
         if (why === 'no_push_address')
           return `This clone’s push address for ${remote} is ‘${said}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
         if (why === 'refused') return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
+        // Pushed with a connection's sign-in: whose, for which repository, and what puts it right.
+        const signIn = fieldOf(error, 'signIn')
+        if ((why === 'forbidden' || why === 'denied') && typeof signIn === 'object' && signIn !== null) {
+          const { account, kind, product, repository } = signIn as Record<string, string>
+          const service = redacted(text(error, 'host')) || 'The code host'
+          return refusedSignIn(why, service, product ?? '', account ?? '', kind === 'app' ? 'app' : 'token', repository ?? '')
+        }
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
         const host = redacted(text(error, 'host'))
         const where = host === '' ? remote : host
@@ -632,6 +644,32 @@ export const words = (
 }
 
 /** What a code host or tracker said no to, when that is what the error is: in the person's words, not the error's name. */
+/**
+ * A push with a connection's sign-in, refused: whose sign-in, for which repository, and what to do about it, in a line. A
+ * sign-in the host didn't take is connected again; one it took but that may not write there is given write access, or swapped
+ * for one that has it. Never git's own words, which stay under Details.
+ */
+export const refusedSignIn = (
+  why: 'forbidden' | 'denied',
+  service: string,
+  product: string,
+  account: string,
+  kind: 'token' | 'app',
+  repository: string,
+): string => {
+  const whose = kind === 'app' ? `Althar’s ${service} app, signed in as ${account},` : `${account}’s token`
+  if (why === 'denied')
+    return `${service} no longer takes ${whose.replace(/,$/, '')}. Connect ${service} again in Settings › Code hosts, then try again.`
+  const owner = repository.split('/')[0] ?? repository
+  const fix =
+    kind === 'app'
+      ? `Give Althar’s app access to ${repository} on ${owner}`
+      : product === 'github'
+        ? `Give the token write access to ${repository} (a fine-grained token’s Contents: Read and write, made for ${owner}), or connect ${service} with one that can push there`
+        : `Give the token write access to ${repository}, or connect ${service} with one that can push there`
+  return `${service} refused ${whose} for ${repository}: it can read the repository but not push to it. ${fix}, then try again.`
+}
+
 const hostFailed = (error: unknown): string | undefined =>
   tagOf(error) === 'ConnectorFailed'
     ? hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))

@@ -17,6 +17,7 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  PICTURE_BYTES,
   SOCKET_CALLS,
   SOCKET_CODE_HOSTS,
   SOCKET_CODE_SERVICES,
@@ -54,6 +55,7 @@ import { SqlClient } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
+import { pictureType } from './artifactFiles'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
 import {
@@ -3000,6 +3002,17 @@ export const handlers = apiLayer(
       ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
       WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
       CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      // A picture a thread shows, by its digest, for a window on another computer or a phone: only what a window draws.
+      ReadPicture: ({ digest }) =>
+        api(
+          Effect.gen(function* () {
+            const bytes = yield* artifacts.read(digest)
+            const type = bytes === null ? null : pictureType(bytes)
+            if (bytes === null || type === null || bytes.byteLength > PICTURE_BYTES)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This picture isn’t kept here.' })
+            return { mediaType: type, bodyBase64: Buffer.from(bytes).toString('base64') }
+          }),
+        ),
       ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
         api(
           Effect.gen(function* () {

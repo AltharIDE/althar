@@ -263,3 +263,38 @@ describe('what a push that failed says, in its parts', () => {
     ])
   })
 })
+
+describe('a push with a connection’s sign-in, refused', () => {
+  const said = (why: 'forbidden' | 'denied', kind: 'token' | 'app', product = 'github', host = 'GitHub') =>
+    words(
+      new PushRefused({
+        taskId: 'task_1',
+        why,
+        remote: 'AltharIDE/althar/feature',
+        host,
+        detail: "git push: unable to access 'https://github.com/AltharIDE/althar.git/': The requested URL returned error: 403",
+        signIn: { account: 'sam', kind, product, repository: 'AltharIDE/althar' },
+      }),
+      (id) => id,
+    ).message
+
+  it('says whose sign-in, for which repository, and what puts it right, never git’s own line', () => {
+    assert.strictEqual(
+      said('forbidden', 'token'),
+      'GitHub refused sam’s token for AltharIDE/althar: it can read the repository but not push to it. Give the token write access to AltharIDE/althar (a fine-grained token’s Contents: Read and write, made for AltharIDE), or connect GitHub with one that can push there, then try again.',
+    )
+    assert.strictEqual(
+      said('forbidden', 'app'),
+      'GitHub refused Althar’s GitHub app, signed in as sam, for AltharIDE/althar: it can read the repository but not push to it. Give Althar’s app access to AltharIDE/althar on AltharIDE, then try again.',
+    )
+    assert.strictEqual(
+      said('forbidden', 'token', 'gitlab', 'GitLab'),
+      'GitLab refused sam’s token for AltharIDE/althar: it can read the repository but not push to it. Give the token write access to AltharIDE/althar, or connect GitLab with one that can push there, then try again.',
+    )
+    assert.strictEqual(
+      said('denied', 'token'),
+      'GitHub no longer takes sam’s token. Connect GitHub again in Settings › Code hosts, then try again.',
+    )
+    for (const why of ['forbidden', 'denied'] as const) assert.notInclude(said(why, 'token'), 'unable to access')
+  })
+})
