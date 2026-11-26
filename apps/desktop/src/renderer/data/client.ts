@@ -1616,12 +1616,9 @@ export const receivePort = (
  * A call the window's home doesn't take from it, refused before it goes: in plain words, and with a reason of its own,
  * so a screen can say calmly what isn't shown here rather than an error.
  */
-export const HOME_KEEPS = 'HomeKeeps'
+const HOME_KEEPS = 'HomeKeeps'
 export const refusedHere = (tag: string) =>
   new ApiError({ reason: HOME_KEEPS, message: 'This home doesn’t take that from a window on another computer yet.', detail: tag })
-
-/** Whether an error is the window's home not taking a call from it. */
-export const keptByHome = (error: unknown) => error instanceof ApiError && error.reason === HOME_KEEPS
 
 /**
  * Whether this window may make a call: any, on this computer's own runtime;

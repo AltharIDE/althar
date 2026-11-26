@@ -904,6 +904,16 @@ describe('connecting GitHub', () => {
       opens: 'https://github.com/octocat/Hello-World/fork',
     },
     {
+      // Several of one owner's: each owner said once, and no single fork to offer.
+      check: lacking('push', { kind: 'role', role: null, names: ['octocat/Hello-World', 'octocat/Spoon-Knife'] }),
+      title: 'You can’t push to 2 of these repositories',
+      says: [
+        'Your account can only read octocat’s repositories.',
+        'Fork them to work on your own copy, or ask octocat for write access. Connected as it is, Althar only reads them.',
+      ],
+      press: 'Check again',
+    },
+    {
       check: lacking('push', { kind: 'permission', permission: 'Contents', url: null }),
       title: 'This token can’t push',
       says: ['Contents isn’t allowed on this token.', 'Set Contents to Read and write, then Update.'],

@@ -8,7 +8,7 @@ import { ApiError, type AgentTools, type ToolRow } from '@althar/contracts'
 import type { Section } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
-import { agentTools, fakeClient, installedSkill, skillCard } from './fixtures'
+import { agentTools, fakeClient, installedSkill, remoteConnection, skillCard } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -113,6 +113,42 @@ describe('Settings › MCP servers', () => {
     expect(main().getByText('~/.claude.json')).toBeTruthy()
     await userEvent.click(main().getByRole('button', { name: 'Back' }))
     await waitFor(() => expect(document.activeElement).toBe(main().getByRole('button', { name: /^linear/ })))
+  })
+
+  it('offers a server’s sign-in on this computer, and none on another computer’s home, where it would open a browser there', async () => {
+    const signedOut = (connection: ReturnType<typeof remoteConnection> | undefined) =>
+      fakeClient({
+        ...(connection === undefined ? {} : { connection }),
+        getAgentTools: vi.fn(async () => tools({ servers: [row('linear', { about: 'https://mcp.linear.app/mcp', way: 'address' })] })),
+        getServerDetail: vi.fn(async (name: string) => ({
+          name,
+          runs: 'https://mcp.linear.app/mcp',
+          files: [
+            {
+              agent: 'claude' as const,
+              where: '~/.claude.json',
+              state: 'yours' as const,
+              lines: ['"linear": {', '}'],
+              runs: 'https://mcp.linear.app/mcp',
+              why: null,
+              signIn: 'no' as const,
+            },
+          ],
+          tools: null,
+          toolsWhy: null,
+        })),
+      })
+    const here = signedOut(undefined)
+    const { unmount } = withServices(<Settings at="mcp-servers" />, here.client)
+    await userEvent.click(await main().findByRole('button', { name: /^linear/ }))
+    await userEvent.click(await main().findByRole('button', { name: /^Sign in/ }))
+    expect(here.client.signInToolServer).toHaveBeenCalledWith('claude', 'linear')
+    unmount()
+    const away = signedOut(remoteConnection())
+    withServices(<Settings at="mcp-servers" />, away.client)
+    await userEvent.click(await main().findByRole('button', { name: /^linear/ }))
+    expect(await main().findByText('~/.claude.json')).toBeTruthy()
+    expect(main().queryByRole('button', { name: /^Sign in/ })).toBeNull()
   })
 
   it('says in words where an opened server’s files couldn’t be read, and reads them again on request', async () => {

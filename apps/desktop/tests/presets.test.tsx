@@ -183,4 +183,78 @@ describe('presets in Settings', () => {
     expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
   })
+
+  it('opens a tuned one with its own lead, and sets a reviewer where one was picked for each task', async () => {
+    const tuned: Preset = {
+      ...builtIn,
+      tuned: true,
+      parts: { ...builtIn.parts, lead: 'codex/default', effort: 'high', reviewer: null, reviewerEffort: null },
+    }
+    const { client } = fakeClient({ listPresets: vi.fn(async () => [tuned]) })
+    withServices(<PresetsSection agents={agents} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Tune' }))
+    // Its reviewer is picked for each task, until one is set.
+    expect(screen.getAllByText('Picked for each task')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a model' }))
+    expect(screen.queryByText('Picked for each task')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.tunePreset).toHaveBeenCalledWith('builtin:change', {
+        lead: 'codex/default',
+        effort: 'high',
+        reviewer: `${agents[0]!.id}/default`,
+        reviewerEffort: null,
+        brief: '',
+      }),
+    )
+  })
+
+  it('keeps a tuning the runtime refused open, saying why, and leaves it as it was on Cancel', async () => {
+    const { client } = fakeClient({
+      listPresets: vi.fn(async () => [builtIn]),
+      tunePreset: vi.fn(async () => Promise.reject(new Error('That model isn’t on this computer.'))),
+    })
+    withServices(<PresetsSection agents={agents} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Tune' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That model isn’t on this computer.')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('edits where one works, how it ends and where it sits, back to the project’s own ending, for a preset saved anywhere', async () => {
+    const anywhere: Preset = { ...own, keptTo: undefined, from: undefined, parts: { ...own.parts, end: 'draft' } }
+    const { client } = fakeClient({ listPresets: vi.fn(async () => [anywhere]) })
+    withServices(<PresetsSection />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    // Saved from no project: nothing to keep it to.
+    expect(screen.queryByRole('switch')).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: 'Local' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Scratch' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Here' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'As the project says' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.editPreset).toHaveBeenCalledTimes(1))
+    const [sent] = vi.mocked(client.editPreset).mock.calls[0]!
+    expect(sent).toEqual({
+      id: 'pst_1',
+      name: 'Quick change',
+      parts: { ...own.parts, workspace: 'local', shelf: 'scratch', end: undefined },
+    })
+    expect('end' in sent.parts).toBe(false)
+    expect('projectOnly' in sent).toBe(false)
+  })
+
+  it('keeps an edit the runtime refused open, saying why, and closes it on Cancel', async () => {
+    const { client } = fakeClient({
+      listPresets: vi.fn(async () => [own]),
+      editPreset: vi.fn(async () => Promise.reject(new Error('Another preset is called that.'))),
+    })
+    withServices(<PresetsSection />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('Another preset is called that.')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Name')).toBeNull()
+  })
 })

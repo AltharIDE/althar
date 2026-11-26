@@ -49,7 +49,9 @@ const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): ReadonlyArray<stri
 }
 
 /** A repository's owner, from its owner/name. */
-const ownerName = (path: string) => path.split('/')[0] ?? path
+const ownerName = (path: string) => path.split('/', 1).join('')
+/** The owners of some repositories, each once. */
+const ownersOf = (paths: ReadonlyArray<string>) => and([...new Set(paths.map(ownerName))])
 
 /** Repositories by name, two at most; more, as a count. */
 const named = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `${paths.length} repositories`)
@@ -269,7 +271,7 @@ export const text = {
   roleCantPush: 'Your account can’t push there',
   /** Where the service says which repositories the account may only read. */
   cantPushTo: (names: ReadonlyArray<string>) =>
-    names.length === 1 ? `You can’t push to ${names[0]}` : `You can’t push to ${names.length} of these repositories`,
+    names.length === 1 ? `You can’t push to ${and(names)}` : `You can’t push to ${names.length} of these repositories`,
   cantOpen: (noun: string) => `This token can’t open ${noun}`,
   cantReadRuns: 'This token can’t read check runs',
   cantReadChecks: 'This token can’t read checks',
@@ -333,8 +335,8 @@ export const text = {
     /** Repositories the account may only read: someone else's, as a project cloned from another's repository is. */
     readOnly: (names: ReadonlyArray<string>) =>
       names.length === 1
-        ? `It’s ${ownerName(names[0] ?? '')}’s repository, and your account can only read it.`
-        : `Your account can only read ${and(names.map(ownerName))}’s repositories.`,
+        ? `It’s ${ownersOf(names)}’s repository, and your account can only read it.`
+        : `Your account can only read ${ownersOf(names)}’s repositories.`,
     unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${named(names)}.`,
     notInstalled: (owner: string) => `Althar isn’t installed on ${owner} yet.`,
     restricted: (owner: string) => `${owner} keeps out apps that sign in with OAuth, gh among them, until its owners approve one.`,
@@ -353,7 +355,7 @@ export const text = {
     role: 'Its owners can give your account write access there.',
     /** For repositories the account may only read: work on a fork of your own, or ask for access; or only read. */
     readOnly: (names: ReadonlyArray<string>) =>
-      `Fork ${names.length === 1 ? 'it' : 'them'} to work on your own copy, or ask ${and([...new Set(names.map(ownerName))])} for write access. Connected as it is, Althar only reads ${names.length === 1 ? 'it' : 'them'}.`,
+      `Fork ${names.length === 1 ? 'it' : 'them'} to work on your own copy, or ask ${ownersOf(names)} for write access. Connected as it is, Althar only reads ${names.length === 1 ? 'it' : 'them'}.`,
     fork: 'Fork it on GitHub',
     changeOn: (service: string) => `Change it on ${service}`,
     checkAgain: 'Check again',
@@ -1344,11 +1346,12 @@ function Fix({
     case 'role': {
       const names = reason.names ?? []
       if (names.length === 0) return row(text.fix.role, checkAgain, asItIs)
-      const web = model.instance?.webUrl ?? null
+      const [only, ...more] = names
+      const web = model.instance?.webUrl
       // One repository on GitHub: its own fork page, a press away.
       const fork =
-        product === 'github' && names.length === 1 && web !== null ? (
-          <Button key="fork" trailingIcon="external" onClick={() => model.open(`${web}/${names[0] ?? ''}/fork`)}>
+        product === 'github' && more.length === 0 && only !== undefined && web !== undefined ? (
+          <Button key="fork" trailingIcon="external" onClick={() => model.open(`${web}/${only}/fork`)}>
             {text.fix.fork}
           </Button>
         ) : null

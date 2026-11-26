@@ -43,11 +43,11 @@ const stop = (event: SyntheticEvent) => {
  * A part shown as it stands, with nothing in it to change: its native controls disabled, and every press and key that
  * would reach one of its own (a slider drawn from a div, a row dragged into place) kept from it before it arrives.
  */
-export function Held({ children, className }: { children: ReactNode; className?: string }) {
+export function Held({ children }: { children: ReactNode }) {
   return (
     <fieldset
       disabled
-      className={className === undefined ? s.held : `${s.held} ${className}`}
+      className={s.held}
       onPointerDownCapture={stop}
       onClickCapture={stop}
       onKeyDownCapture={(event: KeyboardEvent) => {
@@ -88,6 +88,3 @@ export function HomeHolds({
     </div>
   )
 }
-
-/** Whether the window's home lets it make a call: every call, in this computer's own window. */
-export const useHomeAllows = (tag: string): boolean => canCall(useServices().client, tag)

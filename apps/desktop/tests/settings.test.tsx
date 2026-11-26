@@ -875,6 +875,13 @@ describe('the Settings tab', () => {
       fakeHost({ homes: studio.homes }),
     )
     expect(await screen.findByText('Update studio to show its skills here')).toBeTruthy()
+    cleanup()
+    withServices(
+      <Settings at="mcp-servers" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to show its MCP servers here')).toBeTruthy()
     expect(screen.queryByText(/couldn’t be read/)).toBeNull()
     cleanup()
     // Work on this Mac holds only this Mac's: the home's agents at once and automations are the home's.

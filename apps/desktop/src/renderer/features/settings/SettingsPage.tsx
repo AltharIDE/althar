@@ -301,7 +301,7 @@ function SectionBody({
           onOpen={onComputer}
           onTask={onTask}
           // A home's finished tasks' folders are on its disk: under it, with its agents at once.
-          {...(home.remote ? { folders: <HomeFolders home={home.name} lit={lit} {...(onTask === undefined ? {} : { onTask })} /> } : {})}
+          {...(home.remote ? { folders: <HomeFolders home={home.name} lit={lit} onTask={onTask} /> } : {})}
         />
       )
     case 'this-mac':
@@ -340,8 +340,7 @@ function SectionBody({
       return (
         <AboutSection
           start={start}
-          // This computer's own storage is measured by its own runtime, which a home's window doesn't reach: it shows there only.
-          storageHere={!home.remote}
+          // This computer's storage is measured by its own runtime, which a home's window doesn't reach: it shows here only.
           {...(home.remote ? {} : { onFreeUp })}
           {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
         />
@@ -561,7 +560,7 @@ function Folders({ folders, lit, home }: { folders: NonNullable<ReturnType<typeo
 }
 
 /** A home's finished tasks' folders, on its disk, under it in Computers. */
-function HomeFolders({ home, lit, onTask }: { home: string; lit: boolean; onTask?: (threadId: string) => void }) {
+function HomeFolders({ home, lit, onTask }: { home: string; lit: boolean; onTask: ((threadId: string) => void) | undefined }) {
   const folders = useTaskFolders(onTask)
   if (folders === null) return null
   return (
@@ -917,7 +916,7 @@ function BrowserSection() {
 /* ---- about ------------------------------------------------------------------------ */
 
 /** Where this computer's Althar keeps its data, and how much each place takes: from its own runtime. */
-function StorageRows({ onFreeUp }: { onFreeUp: (() => void) | undefined }) {
+function StorageRows({ onFreeUp }: { onFreeUp: () => void }) {
   const storage = useStorage()
   return (
     <Storage
@@ -930,7 +929,7 @@ function StorageRows({ onFreeUp }: { onFreeUp: (() => void) | undefined }) {
       }))}
       onShow={(id) => storage.show(id as StoragePlace)}
       onMeasureAgain={storage.measureAgain}
-      {...(onFreeUp === undefined ? {} : { freeUp: { id: 'worktrees', onFreeUp } })}
+      freeUp={{ id: 'worktrees', onFreeUp }}
       text={{ show: text.storage.show }}
     />
   )
@@ -943,18 +942,7 @@ function StorageRows({ onFreeUp }: { onFreeUp: (() => void) | undefined }) {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({
-  start,
-  storageHere,
-  onFreeUp,
-  onWhatsNew,
-}: {
-  start: StartModel
-  /** This computer's own window: its storage, measured by its own runtime, shows. */
-  storageHere: boolean
-  onFreeUp?: () => void
-  onWhatsNew?: () => void
-}) {
+function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp?: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { client, host } = useServices()
@@ -975,7 +963,8 @@ function AboutSection({
         community={COMMUNITY}
         {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
       />
-      {storageHere && <StorageRows onFreeUp={onFreeUp} />}
+      {/* This computer's storage, measured by its own runtime: in its own window, where freeing space goes to its task folders. */}
+      {onFreeUp !== undefined && <StorageRows onFreeUp={onFreeUp} />}
       <HelpImprove
         usage={preferences.usageData}
         onUsage={(on) => set('usageData', on)}

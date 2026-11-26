@@ -122,7 +122,7 @@ export function ServersSection({ start, whose = 'Your agents’' }: { start: Sta
         projects={people.projects}
         sync={tools === undefined ? { on: false, targets: [] } : syncOf(tools.serverSync)}
         loading={tools === undefined && !model.loadFailed}
-        error={model.loadFailed ? text.serversUnread(whose, model.loadError) : null}
+        error={model.loadError === null ? null : text.serversUnread(whose, model.loadError)}
         onRetry={model.reload}
         open={open}
         onOpenChange={setOpen}
@@ -186,6 +186,8 @@ export function SkillsSection({ start, whose = 'Your' }: { start: StartModel; wh
   }, [skills.added, model])
   if (tools !== undefined && !tools.enabled && !skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
   const tiles = (tools?.skills ?? []).map((row) => skillTileOf(row, skills.available.includes(row.name)))
+  // Why the skills couldn't be read: the store's own words, else the agents' settings'.
+  const unread = skills.loadError ?? model.loadError
   // Reviewing a newer version, or finding one to add, takes the dialog; it shuts once the skill is added.
   const reviewing = adding || skills.card !== null
   return (
@@ -201,7 +203,7 @@ export function SkillsSection({ start, whose = 'Your' }: { start: StartModel; wh
         projects={people.projects}
         sync={tools === undefined ? { on: false, targets: [] } : syncOf(tools.skillSync)}
         loading={(tools === undefined && !model.loadFailed) || (!skills.loaded && !skills.loadFailed)}
-        error={model.loadFailed || skills.loadFailed ? text.skillsUnread(whose, skills.loadError ?? model.loadError) : null}
+        error={unread === null ? null : text.skillsUnread(whose, unread)}
         onRetry={() => {
           model.reload()
           skills.reload()

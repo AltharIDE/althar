@@ -146,6 +146,11 @@ describe('how many agents run at once, in words', () => {
     expect(words.note(9, machine)).toBe('May run hot')
   })
 
+  it('says a home’s held folder keeps its commits there, by its name', () => {
+    expect(text.keptOn('runner-1', 1)).toBe('Its commit stays on its branch, on runner-1.')
+    expect(text.keptOn('runner-1', 3)).toBe('Its commits stay on its branch, on runner-1.')
+  })
+
   it('names the machine it is about: a home by its name, never this Mac', () => {
     const words = text.atOnce('runner-1')
     expect(words.note(4, machine)).toBe('Default for runner-1’s 16 GB and 10 cores')
