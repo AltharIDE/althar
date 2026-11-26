@@ -19,6 +19,14 @@ def tearDownModule():
 
 MAIN_MIGRATIONS = ['0001_initial', '0002_threads', '0003_tags']
 MAIN_ROWS = '| 001 | First | [x](x.md) |\n| 002 | Second | [y](y.md) |\n| [003](proposed/003-pools.md) | Pools | Proposed |\n'
+# 0001 in parts, as the store's is, with a helper later migrations import too.
+COLUMNS = "export const at = (name: string) => `${name} TEXT NOT NULL`\n"
+INITIAL = "import { at } from './0001_initial/columns'\n\nexport const statements = [`CREATE TABLE devices (${at('created_at')}) STRICT`]\n"
+LOADER = "export const migrations = import.meta.glob('./[0-9][0-9][0-9][0-9]_*.ts', { eager: true })\n"
+
+
+def migration(key):
+    return f"export const statements = ['CREATE TABLE {key[5:]} (id TEXT) STRICT']\n"
 
 
 class Tree:
@@ -27,29 +35,32 @@ class Tree:
     def __init__(self):
         self.root = tempfile.mkdtemp()
         FOLDERS.append(self.root)
-        self.keys = list(MAIN_MIGRATIONS)
+        self.files = {'index.ts': LOADER, '0001_initial.ts': INITIAL, '0001_initial/columns.ts': COLUMNS}
+        self.files.update({f'{key}.ts': migration(key) for key in MAIN_MIGRATIONS[1:]})
+        self.main = {path: numbers.blob_id(text.encode()) for path, text in self.files.items()}
         self.rows = MAIN_ROWS
         self.proposals = ['003-pools.md']
 
-    def add_migration(self, key, listed=True, checksum=True):
-        self.keys.append((key, listed, checksum))
+    @property
+    def keys(self):
+        return [path[:-3] for path in self.files if numbers.MIGRATION.match(path)]
+
+    @keys.setter
+    def keys(self, keys):
+        # Main's migrations under other numbers, or none: the loader and 0001's parts stay.
+        self.files = {path: text for path, text in self.files.items() if not numbers.MIGRATION.match(path)}
+        self.files.update({f'{key}.ts': INITIAL if key.endswith('_initial') else migration(key) for key in keys})
+
+    def add_migration(self, key, text=None):
+        self.files[f'{key}.ts'] = migration(key) if text is None else text
         return self
 
     def write(self):
         folder = os.path.join(self.root, numbers.MIGRATIONS)
-        os.makedirs(folder)
-        os.makedirs(os.path.join(folder, '0001_initial'))
-        entries = [entry if isinstance(entry, tuple) else (entry, True, True) for entry in self.keys]
-        for key, _, _ in entries:
-            open(os.path.join(folder, f'{key}.ts'), 'w').close()
-        with open(os.path.join(folder, 'index.ts'), 'w') as index:
-            index.write('export const migrations = [\n')
-            index.writelines(f"  {{ key: '{key}', statements: s }},\n" for key, listed, _ in entries if listed)
-            index.write(']\n')
-        with open(os.path.join(folder, 'checksums.ts'), 'w') as checksums:
-            checksums.write('export const checksums = {\n')
-            checksums.writelines(f"  '{key}': 'abc',\n" for key, _, checksum in entries if checksum)
-            checksums.write('}\n')
+        for path, text in self.files.items():
+            os.makedirs(os.path.dirname(os.path.join(folder, path)), exist_ok=True)
+            with open(os.path.join(folder, path), 'w') as file:
+                file.write(text)
         proposed = os.path.join(self.root, numbers.PROPOSED)
         os.makedirs(proposed)
         for name in self.proposals:
@@ -59,7 +70,7 @@ class Tree:
         return numbers.WorkingTree(self.root)
 
     def check(self):
-        return numbers.check(self.write(), [f'{key}.ts' for key in MAIN_MIGRATIONS] + ['index.ts', 'checksums.ts'], ['003-pools.md'])
+        return numbers.check(self.write(), self.main, ['003-pools.md'])
 
 
 class Migrations(unittest.TestCase):
@@ -77,7 +88,7 @@ class Migrations(unittest.TestCase):
         self.assertEqual(problems, [numbers.Problem(
             f'{numbers.MIGRATIONS}/0003_labels.ts',
             'Migration 0003 is taken: main already has 0003_tags. Renumber 0003_labels to 0004: '
-            'rename the file, its key in index.ts and its line in checksums.ts.',
+            'rename the file, and its folder if it has one.',
         )])
 
     def test_two_pull_requests_with_one_number_are_refused_together(self):
@@ -85,8 +96,8 @@ class Migrations(unittest.TestCase):
         messages = self.messages(Tree().add_migration('0004_labels').add_migration('0004_colours'))
         self.assertEqual(messages, [
             'Migration 0004 is claimed by 0004_colours and 0004_labels, none of them on main yet: two pull requests took the '
-            'same number. Only one keeps it; the one queued later renumbers to 0005: rename the file, its key in index.ts '
-            'and its line in checksums.ts.',
+            'same number. Only one keeps it; the one queued later renumbers to 0005: rename the file, and its folder if it '
+            'has one.',
         ])
 
     def test_a_migration_main_has_cannot_move_to_another_number(self):
@@ -130,11 +141,55 @@ class Migrations(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn('skip 0004', messages[0])
 
-    def test_a_migration_left_out_of_the_list_or_its_checksums_is_refused(self):
-        messages = self.messages(Tree().add_migration('0004_labels', listed=False, checksum=False))
-        self.assertEqual(len(messages), 2)
-        self.assertIn('0004_labels.ts is not in the migrations list', messages[0])
-        self.assertIn('0004_labels has no checksum', messages[1])
+    def test_a_migration_main_has_cannot_change(self):
+        # A store that ran 0002 never runs it again: only a new store would have the column.
+        tree = Tree()
+        tree.files['0002_threads.ts'] = migration('0002_threads').replace('(id TEXT)', '(id TEXT, title TEXT)')
+        self.assertEqual(tree.check(), [numbers.Problem(
+            f'{numbers.MIGRATIONS}/0002_threads.ts',
+            "0002_threads.ts is main's, changed here. A store runs a migration once, so one that ran main's keeps what it made, "
+            'and only a new store would have this. Put it back as main has it, and make the change in a new migration, 0004.',
+        )])
+
+    def test_what_a_migration_main_has_imports_cannot_change_or_go(self):
+        tree = Tree()
+        tree.files['0001_initial/columns.ts'] = COLUMNS.replace('NOT NULL', 'NOT NULL DEFAULT ""')
+        # A file main hasn't is a new migration's to use.
+        tree.files['0001_initial/more.ts'] = COLUMNS
+        messages = self.messages(tree)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("0001_initial/columns.ts is main's, changed here.", messages[0])
+
+        tree = Tree()
+        del tree.files['0001_initial/columns.ts']
+        messages = self.messages(tree)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("0001_initial/columns.ts is part of main's migrations, gone here.", messages[0])
+
+    def test_the_loader_may_change(self):
+        tree = Tree()
+        tree.files['index.ts'] = LOADER + '// Sorted by number.\n'
+        self.assertEqual(tree.check(), [])
+
+    def test_what_sat_beside_main_s_migrations_may_go(self):
+        # Main still lists its migrations and their checksums; this change finds them by name instead.
+        tree = Tree()
+        tree.main['checksums.ts'] = numbers.blob_id(b"export const checksums = { '0001_initial': 'abc' }\n")
+        self.assertEqual(tree.check(), [])
+
+    def test_a_migration_imports_only_from_the_migrations(self):
+        # What it imports could change under it, unseen: types alone, and the SQL's own `from`, are no import.
+        text = (
+            "import { at } from './0001_initial/columns'\n"
+            "import type { Word } from '@althar/domain'\n"
+            "import { WORDS } from '@althar/domain'\n"
+            "export { more } from '../maintenance'\n"
+            "export const statements = [`ALTER TABLE devices ADD COLUMN ${at('seen_at')}`, 'SELECT 1 from x']\n"
+        )
+        messages = self.messages(Tree().add_migration('0004_labels', text))
+        self.assertEqual([message.split(',')[0] for message in messages], [
+            '0004_labels.ts imports @althar/domain', '0004_labels.ts imports ../maintenance',
+        ])
 
     def test_a_file_named_otherwise_is_refused(self):
         tree = Tree()
@@ -143,6 +198,14 @@ class Migrations(unittest.TestCase):
         problems = numbers.check(numbers.WorkingTree(root))
         self.assertEqual(len(problems), 1)
         self.assertIn('96_labels.ts is not named as a migration', problems[0].message)
+
+    def test_checksums_come_back_is_refused(self):
+        # The hand-kept list of checksums is gone: this check compares the migrations with main's instead.
+        tree = Tree()
+        tree.files['checksums.ts'] = "export const checksums = { '0001_initial': 'abc' }\n"
+        messages = self.messages(tree)
+        self.assertEqual(len(messages), 1)
+        self.assertIn('checksums.ts is not named as a migration', messages[0])
 
 
 class Proposals(unittest.TestCase):

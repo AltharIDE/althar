@@ -1,21 +1,23 @@
-"""Refuses a migration or ADR number that is taken already.
+"""Refuses a migration or ADR number that is taken already, and a change to a migration main has.
 
 Two pull requests that each pass alone can claim the same number. Run on a
 pull request as merged with main, and on a merge-queue group as it will land,
 this refuses the second one before it merges (docs/decisions/foundations.md,
-"Numbers that can't collide"). It reads only the tree and, for its messages,
-the names main has.
+"Numbers that can't collide"). It reads only the tree and, for its messages
+and to hold main's migrations as they are, what main has.
 
   python3 .github/scripts/numbers.py [--base REV] [--pr NUMBER]
 
 --base is main as it is (in the queue, the group's base): a number main has
-already is said to be main's, so the message names the one to renumber.
+already is said to be main's, so the message names the one to renumber, and a
+migration main has must be here byte for byte.
 --pr, with GH_REPO and GH_TOKEN, also warns of an open pull request that adds
 the same number, without failing: whichever of the two merges second is refused
 here then.
 """
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -26,15 +28,17 @@ from dataclasses import dataclass
 MIGRATIONS = 'packages/persistence-sqlite/src/migrations'
 PROPOSED = 'docs/decisions/proposed'
 DECISIONS = 'docs/decisions/README.md'
+# What finds the migrations by their names; not a migration itself.
+LOADER = 'index.ts'
 
 MIGRATION = re.compile(r'^(\d{4})_([a-z0-9_]+)\.ts$')
 PROPOSAL = re.compile(r'^(\d{3})-.+\.md$')
 # A row of the README's table: `| 042 |` or `| [103](proposed/103-....md) |`.
 ROW = re.compile(r'^\|\s*(?:\[(\d{3})\]\(([^)\s]+)\)|(\d{3}))\s*\|', re.M)
-INDEX_KEY = re.compile(r"\bkey:\s*'(\d{4}_[a-z0-9_]+)'")
-CHECKSUM_KEY = re.compile(r"^\s*'(\d{4}_[a-z0-9_]+)':", re.M)
+# An import or re-export at the start of a line, with `type` when it imports types alone, and what it imports.
+IMPORT = re.compile(r'''^[ \t]*(?:import|export)\b(\s+type\b)?(?:[^'"`;]*?\bfrom)?\s*['"]([^'"\n]+)['"]''', re.M)
 
-RENUMBER_MIGRATION = 'rename the file, its key in index.ts and its line in checksums.ts'
+RENUMBER_MIGRATION = 'rename the file, and its folder if it has one'
 RENUMBER_PROPOSAL = f'rename the file and its row in {DECISIONS}'
 
 
@@ -58,6 +62,21 @@ class WorkingTree:
         with open(os.path.join(self.root, file), encoding='utf-8') as handle:
             return handle.read()
 
+    def files(self, folder):
+        """Every file under `folder`, by its path from there."""
+        top = os.path.join(self.root, folder)
+        found = [os.path.relpath(os.path.join(where, name), top) for where, _, names in os.walk(top) for name in names]
+        return sorted(path.replace(os.sep, '/') for path in found)
+
+    def blob(self, file):
+        """The id git gives the file's contents."""
+        with open(os.path.join(self.root, file), 'rb') as handle:
+            return blob_id(handle.read())
+
+
+def blob_id(data):
+    return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+
 
 def names_at(rev, folder):
     """The names in `folder` at a git revision; none where it has no such folder."""
@@ -66,17 +85,32 @@ def names_at(rev, folder):
     return sorted(out.stdout.split()) if out.returncode == 0 else []
 
 
+def files_at(rev, folder):
+    """Every file under `folder` at a git revision, by its path from there, with its blob's id; none where it has no such folder."""
+    subprocess.run(['git', 'rev-parse', '--verify', '--quiet', f'{rev}^{{commit}}'], capture_output=True, check=True)
+    out = subprocess.run(['git', 'ls-tree', '-r', '-z', f'{rev}:{folder}'], capture_output=True, text=True)
+    if out.returncode != 0:
+        return {}
+    entries = (entry.partition('\t') for entry in out.stdout.split('\0') if entry)
+    return {path: meta.split()[2] for meta, _, path in entries}
+
+
+def made_of(path):
+    """Whether a file in the migrations folder is a migration or part of one: anything but what sits beside them."""
+    return '/' in path or MIGRATION.match(path) is not None
+
+
 def check_migrations(tree, on_main):
-    """Each number once, one after another from 0001, each listed in index.ts and checksums.ts."""
+    """Each number once, one after another from 0001; main's migrations as main has them, made only of files here."""
     problems = []
-    files = [name for name in tree.names(MIGRATIONS) if name.endswith('.ts') and name not in ('index.ts', 'checksums.ts')]
+    files = [name for name in tree.names(MIGRATIONS) if name.endswith('.ts') and name != LOADER]
     keys = []
     for name in files:
-        match = MIGRATION.match(name)
-        if match is None:
-            problems.append(Problem(f'{MIGRATIONS}/{name}', f'{name} is not named as a migration: `<4-digit number>_<name>.ts`, such as 0096_task_tags.ts.'))
-        else:
+        if MIGRATION.match(name):
             keys.append(name[:-3])
+        # One main has was let in before: checksums.ts, beside the migrations until they were found by their names.
+        elif name not in on_main:
+            problems.append(Problem(f'{MIGRATIONS}/{name}', f'{name} is not named as a migration: `<4-digit number>_<name>.ts`, such as 0096_task_tags.ts.'))
     main_keys = {name[:-3] for name in on_main if MIGRATION.match(name)}
     # A store that ran a migration main has never runs it again, nor anything numbered below it: main's stay as they are.
     for key in sorted(main_keys - set(keys)):
@@ -115,22 +149,32 @@ def check_migrations(tree, on_main):
             'a store records only the numbers it ran, so one that has run a later number never runs one that lands below it.',
         ))
 
-    listed = INDEX_KEY.findall(tree.read(f'{MIGRATIONS}/index.ts'))
-    files_by_key = set(keys)
-    for key in sorted(files_by_key - set(listed)):
-        problems.append(Problem(f'{MIGRATIONS}/index.ts', f'{key}.ts is not in the migrations list in index.ts: add it at the end.'))
-    for key in sorted(set(listed) - files_by_key):
-        problems.append(Problem(f'{MIGRATIONS}/index.ts', f'index.ts lists {key}, which has no file {key}.ts.'))
-    if listed != sorted(listed, key=lambda key: int(key[:4])):
-        problems.append(Problem(f'{MIGRATIONS}/index.ts', 'The migrations list in index.ts is out of order: list them by number.'))
-    if len(listed) != len(set(listed)):
-        problems.append(Problem(f'{MIGRATIONS}/index.ts', 'index.ts lists a migration twice.'))
-
-    recorded = CHECKSUM_KEY.findall(tree.read(f'{MIGRATIONS}/checksums.ts'))
-    for key in sorted(files_by_key - set(recorded)):
-        problems.append(Problem(f'{MIGRATIONS}/checksums.ts', f'{key} has no checksum in checksums.ts: the schema test prints the line to add.'))
-    for key in sorted(set(recorded) - files_by_key):
-        problems.append(Problem(f'{MIGRATIONS}/checksums.ts', f'checksums.ts records {key}, which has no file {key}.ts.'))
+    # A store that ran one of main's migrations never runs it again: changed, it would keep what main's made, and only
+    # a new store would have the change. What a migration imports is part of it, so it imports only from here.
+    here = set(tree.files(MIGRATIONS))
+    for path in sorted(path for path in on_main if made_of(path)):
+        if path not in here:
+            if '/' in path:
+                problems.append(Problem(
+                    f'{MIGRATIONS}/{path}',
+                    f'{path} is part of main\'s migrations, gone here. Put it back as main has it: a migration main has never changes.',
+                ))
+        elif tree.blob(f'{MIGRATIONS}/{path}') != on_main[path]:
+            problems.append(Problem(
+                f'{MIGRATIONS}/{path}',
+                f'{path} is main\'s, changed here. A store runs a migration once, so one that ran main\'s keeps what it made, '
+                f'and only a new store would have this. Put it back as main has it, and make the change in a new migration, '
+                f'{following}.',
+            ))
+    for path in sorted(path for path in here if path.endswith('.ts') and path != LOADER):
+        for types, imported in IMPORT.findall(tree.read(f'{MIGRATIONS}/{path}')):
+            inside = os.path.normpath(os.path.join(MIGRATIONS, os.path.dirname(path), imported)).startswith(f'{MIGRATIONS}/')
+            if not types and not (imported.startswith('.') and inside):
+                problems.append(Problem(
+                    f'{MIGRATIONS}/{path}',
+                    f'{path} imports {imported}, from outside {MIGRATIONS}. A migration is made only of files here, which this '
+                    'check holds to main\'s, so that nothing elsewhere can change one: copy what it needs into it.',
+                ))
     return problems
 
 
@@ -198,8 +242,9 @@ def collisions(kind, by_number, main_names, following, how, path_of, label):
     return problems
 
 
-def check(tree, migrations_on_main=(), proposals_on_main=()):
-    return check_migrations(tree, migrations_on_main) + check_proposals(tree, proposals_on_main)
+def check(tree, migrations_on_main=None, proposals_on_main=()):
+    """`migrations_on_main`: each file main has under the migrations folder, by its path there, with its blob's id."""
+    return check_migrations(tree, migrations_on_main or {}) + check_proposals(tree, proposals_on_main)
 
 
 def gh(*args):
@@ -257,7 +302,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     tree = WorkingTree()
-    migrations_on_main = names_at(args.base, MIGRATIONS) if args.base else ()
+    migrations_on_main = files_at(args.base, MIGRATIONS) if args.base else {}
     proposals_on_main = names_at(args.base, PROPOSED) if args.base else ()
     problems = check(tree, migrations_on_main, proposals_on_main)
     for problem in problems:
@@ -276,7 +321,7 @@ def main(argv=None):
     if problems:
         print(f'{len(problems)} number problem(s): see above.', file=sys.stderr)
         return 1
-    print('Migration and ADR numbers: each taken once.')
+    print('Migration and ADR numbers: each taken once, and main\'s migrations as main has them.')
     return 0
 
 
