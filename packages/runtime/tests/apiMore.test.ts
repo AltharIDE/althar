@@ -25,9 +25,10 @@ import { Folders } from '../src/Folders'
 import { git as gitOf, treeOf, untouched } from '../src/git'
 import { Helpers } from '../src/Helpers'
 import { Secrets } from '../src/Secrets'
+import type { ToolAccess } from '../src/ToolServer'
 import type { WorkerExecution } from '../src/workerExecution'
 
-import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
 /*
  * More of the API, as the app's window has it: an agent Althar can download
@@ -92,7 +93,7 @@ const connected = (
       const instance = Context.get(context, Instance)
       return yield* connect('socket', { homeId: instance.homeId, actorId: instance.personId, deviceId: paired.deviceId, role: 'socket' })
     })
-    return { client, grant, connect, separateDevice, helpers: Context.get(context, Helpers) }
+    return { client, grant, connect, separateDevice, helpers: Context.get(context, Helpers), context }
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
@@ -1071,7 +1072,7 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           // A checkpoint brings what the worker changed home, as the real one lands its patch (workerWorkspace.ts); one may fail.
           let checkpointFails = false
           const changedOn = new Map<string, string>()
-          const { client, grant } = yield* connected({
+          const { client, grant, context } = yield* connected({
             workers: {
               list: () => [
                 listed(runner1, 'runner-1', checked(['small', 'large'])),
@@ -1119,6 +1120,10 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           writeFileSync(join(worktree, 'made-at-home.txt'), 'home\n')
           const move = (to: string, more: { readonly lead?: { readonly model: string }; readonly fromLastTurn?: boolean } = {}) =>
             client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to, ...more })
+          // Its lead moves it too, by where it runs as the person says it (change_part runs_on).
+          const lead: ToolAccess = { role: 'lead', projectId: project.id, threadId: task.threadId, sessionId: 'none', taskId: task.id }
+          const runsOn = (args: Record<string, unknown>) =>
+            callTool(lead, 'change_part', { part: 'workspace', why: 'Elsewhere.', ...args }).pipe(Effect.provideContext(context))
           const placedOn = (workerId: string | null) =>
             until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => (thread.task.workerId ?? null) === workerId)
           const said = (place: string) => `Moved to ${place}: its lead carries on there.`
@@ -1135,6 +1140,10 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           // runner-3's sandbox can't start, and runner-2 doesn't offer the large model its lead is on.
           assert.include((yield* Effect.flip(move(unready))).message, 'runner-3 can’t start its agents’ sandbox')
           assert.strictEqual((yield* Effect.flip(move(runner2))).message, 'runner-2 doesn’t offer large. Pick a model it has.')
+          assert.strictEqual(
+            yield* runsOn({ runs_on: 'nowhere' }),
+            'No worker of this project is called nowhere. Its workers: runner-1, runner-2, runner-3; or the home.',
+          )
           // To runner-1, which does: once its turn has ended, with what the home's worktree has.
           const first = yield* move(runner1)
           if (first.kind === 'waits') assert.strictEqual(first.why, 'Moves to runner-1 once its lead’s turn ends.')
@@ -1155,7 +1164,7 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           yield* answered('On runner-1 now.')
           // Worker to worker, on the small model runner-2 offers: what runner-1 changed comes home first, then goes on to runner-2.
           changedOn.set(runner1, 'made-on-runner-1.txt')
-          assert.deepStrictEqual(yield* move(runner2, { lead: { model: 'small' } }), { kind: 'placed', said: said('runner-2') })
+          assert.match(yield* runsOn({ runs_on: 'Runner-2', model: 'small' }), /: Moved to runner-2: its lead carries on there\.$/u)
           assert.strictEqual(readFileSync(join(worktree, 'made-on-runner-1.txt'), 'utf8'), `written on ${runner1}\n`)
           yield* placedOn(runner2)
           yield* client.Send({
@@ -1180,11 +1189,12 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           assert.isFalse(existsSync(join(worktree, 'made-on-runner-2.txt')))
           // Once it can, home it comes, with what runner-2 changed.
           checkpointFails = false
-          assert.deepStrictEqual(yield* move('home'), { kind: 'placed', said: said('this home') })
+          assert.match(yield* runsOn({ runs_on: 'This Mac' }), /: Moved to this home: its lead carries on there\.$/u)
           yield* placedOn(null)
           assert.strictEqual(readFileSync(join(worktree, 'made-on-runner-2.txt'), 'utf8'), `written on ${runner2}\n`)
           assert.includeMembers(readdirSync(worktree), ['made-at-home.txt', 'made-on-runner-1.txt', 'made-on-runner-2.txt'])
           assert.deepStrictEqual(yield* move('home'), { kind: 'same' })
+          assert.match(yield* runsOn({ runs_on: 'home' }), / runs there already\.$/u)
         }),
       ),
   )
@@ -1204,7 +1214,7 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           const release = yield* Deferred.make<void>()
           let opening = 0
           let checkpointFails = false
-          const { client, grant } = yield* connected({
+          const { client, grant, context } = yield* connected({
             workers: {
               list: () => [
                 {
@@ -1281,6 +1291,13 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           const waiting = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: runner2 })
           assert.deepStrictEqual(waiting, { kind: 'waits', why: 'Moves to runner-2 once its lead’s turn ends.' })
           assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.placing?.to, runner2)
+          // Back where it runs, the move that waited is called off; asked again, with the lead's model for there, it waits again.
+          assert.deepStrictEqual(yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: runner1 }), { kind: 'same' })
+          assert.isUndefined((yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.placing)
+          assert.strictEqual(
+            (yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: runner2, lead: { model: 'small' } })).kind,
+            'waits',
+          )
           yield* Deferred.succeed(release, undefined)
           yield* until(
             client.GetThread({ threadId: task.threadId, fresh: true }),
@@ -1289,10 +1306,12 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           // runner-2 can't bring its work home: the person said to move from what its last turn brought home.
           yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) => thread.session?.turnRunning !== true)
           checkpointFails = true
-          const back = yield* client.MoveTaskTo({ commandId: commandId(), taskId: task.id, to: 'home', fromLastTurn: true })
-          assert.strictEqual(
-            back.kind === 'placed' ? back.said : back.kind,
-            'Moved to this home: its lead carries on there. Its work came along as its last turn on runner-2 brought it home, as asked.',
+          const lead: ToolAccess = { role: 'lead', projectId: project.id, threadId: task.threadId, sessionId: 'none', taskId: task.id }
+          assert.match(
+            yield* callTool(lead, 'change_part', { part: 'workspace', runs_on: 'home', from_last_turn: true, why: 'Home.' }).pipe(
+              Effect.provideContext(context),
+            ),
+            /: Moved to this home: its lead carries on there\. Its work came along as its last turn on runner-2 brought it home, as asked\.$/u,
           )
         }),
       ),
