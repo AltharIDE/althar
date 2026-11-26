@@ -32,12 +32,25 @@ type Step = Record<string, unknown> & { readonly key: string; readonly waits: Re
 /** A fake GitHub with the project's repository, its pull requests' links on the test host. */
 const github = (options: FakeServiceOptions = {}) => {
   const raw = makeFakeService(options)
+  /** Whether the host says yet which commit a merge landed: the connector's contract lets it not. */
+  let landing = true
   const host: FakeService = {
     ...raw,
-    change: (...args) => Effect.map(raw.change(...args), (change) => ({ ...change, url: change.url.replace('https://github.com', HOST) })),
+    change: (...args) =>
+      Effect.map(raw.change(...args), (change) => ({
+        ...change,
+        url: change.url.replace('https://github.com', HOST),
+        ...(landing ? {} : { mergeCommit: null }),
+      })),
   }
   const repository = host.addRepository(PATH)
-  return { host, repository }
+  return {
+    host,
+    repository,
+    landing: (says: boolean) => {
+      landing = says
+    },
+  }
 }
 const setup = Effect.sync(() => github())
 
@@ -209,13 +222,20 @@ describe('a held errand whose wait has come', () => {
       const { host, repository } = yield* setup
       return yield* Effect.gen(function* () {
         const s = yield* inProject(host)
+        // As kept on 15 Nov: "tag v0.9.0 once merged", naming no commit, so the merge's.
         const id = yield* s.legacy({ tool: 'push_tag', target: 'meridian/api tag v0.9.0', request: { tag: 'v0.9.0' } }, [
-          { kind: 'merged', target: 'release-prep' },
+          { kind: 'merged', target: s.slug },
         ])
         // Nothing has happened yet: it stays held.
         yield* s.sweep
         assert.strictEqual(yield* s.state(id), 'paused')
-        host.tagByHand(PATH, 'v0.9.0', yield* host.commitOf(repository, 'main'))
+        const pull = yield* s.open()
+        yield* host.merge(repository, pull)
+        // A v0.9.0 on another commit than that merge is not this tag.
+        host.tagByHand(PATH, 'v0.9.0', 'abcdef0123456789abcdef0123456789abcdef01')
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(id), 'paused')
+        host.tagByHand(PATH, 'v0.9.0', (yield* host.change(repository, pull.number)).mergeCommit!)
         yield* s.sweep
         assert.strictEqual(yield* s.state(id), 'done')
         assert.strictEqual((yield* s.lines).at(-1), 'Errand done: v0.9.0 is tagged already')
@@ -485,14 +505,15 @@ describe('a held errand closes only on what proves it', () => {
       return yield* clock.run(
         Effect.gen(function* () {
           const s = yield* inProject(host)
-          const id = yield* s.legacy({ tool: 'push_tag', target: 'meridian/api tag v0.9.0', request: { tag: 'v0.9.0' } }, [
+          const head = yield* host.commitOf(repository, 'main')
+          const id = yield* s.legacy({ tool: 'push_tag', target: 'meridian/api tag v0.9.0', request: { tag: 'v0.9.0', commit: head } }, [
             { kind: 'merged', target: 'release-prep' },
           ])
           const reads = () => host.calls.filter((call) => call === 'tag').length
           yield* s.tick
           const first = reads()
           assert.isAbove(first, 0)
-          host.tagByHand(PATH, 'v0.9.0', yield* host.commitOf(repository, 'main'))
+          host.tagByHand(PATH, 'v0.9.0', head)
           for (let sweep = 0; sweep < 5; sweep++) yield* s.tick
           assert.strictEqual(reads(), first, 'not read again within the hour')
           assert.strictEqual(yield* s.state(id), 'paused')
@@ -502,6 +523,88 @@ describe('a held errand closes only on what proves it', () => {
           assert.strictEqual(yield* s.state(id), 'done')
         }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github: host }) }))),
       )
+    }),
+  )
+
+  it.live('a tag naming no commit is proved on the default branch’s head, as push_tag takes it', () =>
+    Effect.gen(function* () {
+      const { host, repository } = yield* setup
+      return yield* Effect.gen(function* () {
+        const s = yield* inProject(host)
+        const errands = yield* Errands
+        const head = yield* host.commitOf(repository, 'main')
+        const id = yield* errands.keep(s.access, yield* s.say('tag v0.9.0 once the checks after the merge pass'), [
+          {
+            key: 'tag',
+            tool: 'push_tag',
+            target: 'meridian/api tag v0.9.0',
+            request: { tag: 'v0.9.0' },
+            waits: [{ kind: 'post-merge', target: head }],
+          },
+        ])
+        yield* errands.pause(s.access, id, 'The person said to wait.')
+        host.tagByHand(PATH, 'v0.9.0', head)
+        host.moveBranch(PATH, 'main', 'feedface0123456789abcdef0123456789abcdef')
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(id), 'paused', 'v0.9.0 is on an older commit than main’s head')
+        host.tagByHand(PATH, 'v0.9.0', 'feedface0123456789abcdef0123456789abcdef')
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(id), 'done')
+      }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github: host }) })))
+    }),
+  )
+
+  it.live('a task’s merge whose landed commit the host hasn’t said proves no tag of it', () =>
+    Effect.gen(function* () {
+      const { host, repository, landing } = github()
+      return yield* Effect.gen(function* () {
+        const s = yield* inProject(host)
+        const id = yield* s.legacy(
+          { tool: 'push_tag', target: 'meridian/api tag v0.9.0', request: { tag: 'v0.9.0', commit: `task:${s.slug}` } },
+          [{ kind: 'merged', target: s.slug }],
+        )
+        const pull = yield* s.open()
+        yield* host.merge(repository, pull)
+        const landed = (yield* host.change(repository, pull.number)).mergeCommit!
+        host.tagByHand(PATH, 'v0.9.0', landed)
+        landing(false)
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(id), 'paused', 'merged, but on no commit Althar knows of')
+        landing(true)
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(id), 'done')
+      }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github: host }) })))
+    }),
+  )
+
+  it.live('a wait for another pull request, or of a kind that isn’t an opening or a merge, closes nothing', () =>
+    Effect.gen(function* () {
+      const { host, repository } = yield* setup
+      return yield* Effect.gen(function* () {
+        const s = yield* inProject(host)
+        const merge = {
+          tool: 'merge_pull_request',
+          target: `meridian/api pull request from althar/${s.slug}`,
+          request: { pull_request: `the one opened from althar/${s.slug}` },
+        }
+        // Merge this task's pull request once another one opens.
+        const other = yield* s.legacy(merge, [{ kind: 'pull_request_opened', target: '#999' }])
+        const elsewhere = yield* s.legacy({ ...merge, says: 'Merge it' }, [
+          { kind: 'pull_request_opened', target: 'althar/another-branch' },
+        ])
+        const own = yield* s.legacy({ ...merge, says: 'Merge it now' }, [{ kind: 'pull_request_opened', target: `althar/${s.slug}` }])
+        const notMerged = yield* s.legacy({ tool: 'push_tag', target: 'meridian/api tag v0.9.0', request: { tag: 'v0.9.0' } }, [
+          { kind: 'not_merged', target: s.slug },
+        ])
+        const pull = yield* s.open()
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(other), 'paused')
+        assert.strictEqual(yield* s.state(elsewhere), 'paused')
+        assert.strictEqual(yield* s.state(own), 'cancelled', 'its own pull request opened')
+        yield* host.merge(repository, pull)
+        yield* s.sweep
+        assert.strictEqual(yield* s.state(notMerged), 'paused', '“not merged” is not a merge')
+      }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github: host }) })))
     }),
   )
 })

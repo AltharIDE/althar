@@ -1,3 +1,4 @@
+import type { ChangeRequest } from '@althar/connectors'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -56,31 +57,48 @@ const taskPull = (projectId: string, taskId: string, errandId: string) =>
   errandTaskPull(projectId, taskId, errandId).pipe(Effect.orElseSucceed(() => null))
 
 /**
- * A merge: done where its pull request merged. Met where it is open, not a draft, and every wait the step has is one an open
- * pull request proves ("once it's open"); a wait on its checks, its review or anything else, an open one doesn't.
+ * The kinds of wait, as older versions kept them, a pull request read now proves: by name, never by a word inside one
+ * ("not_merged" is not a merge). A kind of today's is its watcher's to read, and never one of these.
+ */
+const OPENED = ['pull_request_opened', 'pr_opened', 'pull_request_open', 'opened', 'open']
+const MERGED = ['merged', 'pr_merged', 'pull_request_merged', 'task_merged']
+
+/**
+ * A merge: done where its pull request merged. Met where it is open, not a draft, and every wait of the step is an opening
+ * of that same pull request: named by its link, number or branch, or by the task it is of. A wait on its checks, its review,
+ * or another pull request, an open one doesn't prove.
  */
 const mergeNow = (projectId: string, errandId: string, step: Held) =>
   Effect.gen(function* () {
-    let change: { readonly url: string; readonly number: number; readonly state: string; readonly draft: boolean } | null = null
+    let change: ChangeRequest | null = null
+    let task: string | undefined
     if (/^https?:\/\//.test(step.target)) {
       const place = yield* placeOf(projectId, step.target)
       change = yield* viaHost(place.host.change(place.repository, place.number))
     } else {
-      const task = (yield* taskOf(projectId, step.taskId)) ?? (yield* taskOf(projectId, step.target))
+      task = (yield* taskOf(projectId, step.taskId)) ?? (yield* taskOf(projectId, step.target))
       if (task !== undefined) change = (yield* taskPull(projectId, task, errandId))?.change ?? null
     }
     if (change === null) return NOT
     const link = pullSaid(change)
     if (change.state === 'merged') return { state: 'done', happened: { said: `${link.label} merged already`, links: [link] } } as const
-    if (change.state === 'open' && !change.draft && waitsOf(step).every((wait) => /open/.test(kindOf(wait))))
-      return { state: 'met', happened: { said: `${link.label} is open`, links: [link] } } as const
-    return NOT
+    if (change.state !== 'open' || change.draft) return NOT
+    const names = new Set([change.url, `#${change.number}`, String(change.number), change.source].map((one) => one.toLowerCase()))
+    const waits = waitsOf(step)
+    for (const wait of waits) {
+      if (!OPENED.includes(kindOf(wait))) return NOT
+      const target = wait.target.trim().toLowerCase()
+      if (names.has(target)) continue
+      if (task === undefined || (yield* taskOf(projectId, wait.target)) !== task) return NOT
+    }
+    return waits.length === 0 ? NOT : ({ state: 'met', happened: { said: `${link.label} is open`, links: [link] } } as const)
   })
 
 /**
- * A tag: done only where the tag is on the commit the step asked for, as push_tag itself proves it: a task's landed merge
- * commit, a commit or branch named, or, where it named none, any commit. Met where it isn't tagged and every wait it has is
- * on a merge, of a task whose pull request merged.
+ * A tag: done only where the tag is on the commit the step asks for, as push_tag proves it: a task's landed merge commit,
+ * once the host says which; a commit or branch named; or, named none, the default branch's head. An errand kept by an older
+ * version as "tag it once <task> merged", naming no commit, asks for that merge's commit. Met where it isn't tagged and every
+ * wait is a merge of a task whose pull request merged.
  */
 const tagNow = (projectId: string, errandId: string, step: Held) =>
   Effect.gen(function* () {
@@ -90,29 +108,39 @@ const tagNow = (projectId: string, errandId: string, step: Held) =>
     const { host, repository } = yield* repositoryOf(projectId, step.target.split(' tag ')[0])
     const where = repository.path.join('/')
     const named = typeof request.commit === 'string' && request.commit.trim() !== '' ? request.commit.trim() : null
+    const waits = waitsOf(step)
     const landed = (taskId: string) =>
       Effect.gen(function* () {
         const pull = yield* taskPull(projectId, taskId, errandId)
         if (pull?.change.state !== 'merged' || pull.host.product !== host.product || pull.repository.path.join('/') !== where) return null
         return pull
       })
+    /** The commit a task's merge landed: undefined until the host says which, as push_tag refuses to guess. */
+    const landedCommit = (name: string) =>
+      Effect.gen(function* () {
+        const task = yield* taskOf(projectId, name)
+        return task === undefined ? undefined : ((yield* landed(task))?.change.mergeCommit ?? undefined)
+      })
     const tag = yield* viaHost(host.tag(repository, request.tag))
     if (tag !== null) {
-      let wanted: string | null | undefined = undefined
-      if (named === null) wanted = null
-      else if (named.startsWith('task:')) {
-        const task = yield* taskOf(projectId, named)
-        wanted = task === undefined ? undefined : (yield* landed(task))?.change.mergeCommit
-      } else wanted = yield* viaHost(host.commitOf(repository, named))
+      const legacy =
+        named === null ? waits.find((wait) => MERGED.includes(kindOf(wait)) && !errandWaitKinds.includes(wait.kind)) : undefined
+      const wanted =
+        named?.startsWith('task:') === true
+          ? yield* landedCommit(named)
+          : named !== null
+            ? yield* viaHost(host.commitOf(repository, named))
+            : legacy !== undefined
+              ? yield* landedCommit(legacy.target)
+              : yield* viaHost(host.commitOf(repository, repository.defaultBranch))
       // On another commit, or one Althar can't tell yet: not what was asked for, and the step stays.
-      if (wanted === undefined || (wanted !== null && tag.commit !== wanted)) return NOT
+      if (wanted === undefined || tag.commit !== wanted) return NOT
       return {
         state: 'done',
         happened: { said: `${request.tag} is tagged already`, links: tag.url === null ? [] : [{ label: request.tag, url: tag.url }] },
       } as const
     }
-    const waits = waitsOf(step)
-    if (waits.length === 0 || !waits.every((wait) => /merged/.test(kindOf(wait)))) return NOT
+    if (waits.length === 0 || !waits.every((wait) => MERGED.includes(kindOf(wait)))) return NOT
     let seen: Happened | undefined
     for (const wait of waits) {
       const task = yield* taskOf(projectId, wait.target)
