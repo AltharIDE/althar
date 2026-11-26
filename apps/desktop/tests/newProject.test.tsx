@@ -949,6 +949,60 @@ describe('a new project on a home on another computer', () => {
     )
   })
 
+  /** A home connected to two Bitbucket Data Center servers on one host, each at a base path of its own, the mirror first. */
+  const twoServers = (onMac: ReadonlyArray<'bitbucket' | 'mirror'>, listing: ReadonlyArray<HostRepository>) => {
+    const { homes } = onLinuxHome('runner-1')
+    const remotes = onMac.map((base) => ({
+      url: `https://git.acme.com/${base}/projects/PLAT/repos/tide/browse`,
+      product: 'bitbucket_dc',
+      host: 'git.acme.com',
+      path: 'PLAT/tide',
+    }))
+    const local = { live: true, list: [{ id: 'p_here', name: 'Tide', ink: 'teal', working: 0, yours: 0, remotes }] }
+    const host = { ...fakeHost(), homes: { ...homes, overview: vi.fn(async () => ({ ...(await homes.overview()), projects: { local } })) } }
+    const server = (id: string, name: string, base: string) => ({
+      ...githubConnection,
+      id,
+      product: 'bitbucket_dc' as const,
+      name,
+      webUrl: `https://git.acme.com/${base}`,
+    })
+    return onHome(
+      {
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          connections: [server('conn_mirror', 'Mirror', 'mirror'), server('conn_dc', 'Bitbucket', 'bitbucket')],
+        })),
+        listHostRepositories: vi.fn(async () => listing),
+      },
+      SOCKET_CALLS,
+      host as unknown as Host,
+    )
+  }
+
+  it('says this Mac has the one of two servers’ repositories of the same path on one host that is its own, and clones that one', async () => {
+    const at = twoServers(['bitbucket'], [listed('PLAT/tide')])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })).toHaveLength(2))
+    // The mirror's, listed first, is another repository: not this Mac's.
+    const mine = screen.getAllByRole('button', { name: 'Clone PLAT/tide' }).filter((row) => within(row).queryByText('On this Mac'))
+    expect(mine).toHaveLength(1)
+    await userEvent.click(mine[0]!)
+    await create('Tide')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_dc', path: ['PLAT', 'tide'] }),
+    )
+  })
+
+  it('offers this Mac’s repositories of the same path on two servers on one host each, cloned from its own server', async () => {
+    const at = twoServers(['bitbucket', 'mirror'], [])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })).toHaveLength(2))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Clone PLAT/tide' })[1]!)
+    await create('Tide')
+    await waitFor(() =>
+      expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { connectionId: 'conn_mirror', path: ['PLAT', 'tide'] }),
+    )
+  })
+
   it('offers a home that can’t connect a host from this window none to connect, and a clone by its address alone', async () => {
     onHome(
       { listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })) },

@@ -11,7 +11,7 @@ import { useServices } from '../data/services'
 import { serviceBrand, serviceName, serviceOfProduct } from '../features/connections/ways'
 import { device } from './device'
 import { useFound } from './found'
-import { cloneFromHere, useProjectsHere } from './projectsHere'
+import { cloneFromHere, type ProjectHere, servesHere, useProjectsHere } from './projectsHere'
 import { hostnameOf, remoteOf } from './remotes'
 import { ago } from './time'
 
@@ -154,15 +154,15 @@ export const useHostRepositories = (
   // rest are cloned by their address, with the home's own sign-in to that host where it has one.
   const projectsHere = useProjectsHere(list)
   const onHere = `On ${device.this}`
-  const homeHas = (one: { readonly host: string; readonly path: string }) =>
+  // Listed through the home's connection to that very server, for its product, by the same path: another server on the same
+  // host, at a base path of its own, may list a repository of the same path that isn't it.
+  const homeHas = (one: ProjectHere) =>
     all.findIndex((listed) => {
       const connection = codeHosts.find((connection) => listed.id.startsWith(`${connection.id}:`))
       return (
         connection !== undefined &&
-        sameRepository(
-          { host: hostnameOf(connection.webUrl), remote: `${listed.owner}/${listed.name}` },
-          { host: one.host, remote: one.path },
-        )
+        servesHere(connection, one) &&
+        sameRepository({ host: one.host, remote: `${listed.owner}/${listed.name}` }, { host: one.host, remote: one.path })
       )
     })
   for (const one of projectsHere) {
