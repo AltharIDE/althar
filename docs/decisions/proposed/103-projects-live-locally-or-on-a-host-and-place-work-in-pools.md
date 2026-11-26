@@ -225,16 +225,20 @@ namespaces to programs AppArmor names, a root login writes one rule for the
 worker's own bubblewrap; otherwise Add a worker offers one press with `sudo -n`,
 or the command to copy. The worker repeats its check after each sign-in and
 hourly, and reports it with its heartbeats. Placement reads it with the
-project's own files: a worker whose sandbox can't start (it takes no work, and
-says why), whose lead's agent isn't signed in there, with too little disk or no
-git is greyed out with why; Bun, Node, pnpm and uv it installs itself into its
+project's own files: work goes only to a worker whose check finished, found its
+sandbox starts and started the lead's agent there; one that hasn't checked (an
+older release, or a check still running), whose sandbox can't start, whose lead's
+agent isn't signed in or couldn't start there, with too little disk or no git is
+greyed out with why, and refuses a run with the same words; Bun, Node, pnpm and uv it installs itself into its
 own folder before a task's setup; anything else its lead installs into its own
 folders, asking the person before root, and records as the project's setup for
 workers. A worker task's model picker offers that worker's models only. A
 running task moves between the home and its workers, or between workers, from
 its menu, between its lead's turns: the worker's work comes home first, its
 lead starts afresh where it runs now with a handover, and where its model
-isn't offered there the person picks one that is. This is the handoff above,
+isn't offered there the person picks one that is. Where the worker can't bring
+its work home, the task stays where it runs unless the person says to move
+from what its last turn brought home. This is the handoff above,
 between turns rather than mid-attempt.
 
 Pools express placement. Confidentiality also needs separate credentials,
