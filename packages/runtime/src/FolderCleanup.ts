@@ -34,7 +34,9 @@ import { addItem } from './threads'
  * suits how it ended, as the person chose: Smart to start, a review's at
  * once, a merged change's after 3 days, a done task's after a week, an
  * abandoned one's after 2 weeks, and any of them sooner when the disk runs
- * low; or one wait for all; or only when the person cleans up. The wait
+ * low (each disk on its own: only what is on the disk that ran low goes,
+ * until that disk is roomy); or one wait for all; or only when the person
+ * cleans up. The wait
  * runs from the latest of when it settled, when its screen was opened and
  * when its folder was opened from Althar.
  *
@@ -66,7 +68,7 @@ const WAITS: Readonly<Record<Exclude<FolderWait, 'smart'>, number>> = { day: 1, 
 /** How long a folder waits, in days, for a task that ended so. */
 export const waitDays = (wait: FolderWait, kind: FolderKind) => (wait === 'smart' ? SMART[kind] : WAITS[wait])
 
-/** Below this share of the disk free, Smart removes finished tasks' folders whatever their wait, the oldest first, until there is this much. */
+/** Below this share of a disk free, Smart removes finished tasks' folders on it whatever their wait, the oldest first, until there is this much. */
 export const LOW = 0.1
 export const ROOMY = 0.15
 
@@ -133,6 +135,19 @@ interface Facts {
   /** A merged change with commits after its pull request: it waits in Needs you, not Settled. */
   readonly unshipped: boolean
   readonly at: number
+}
+
+/**
+ * A disk finished tasks' folders are on: by its device, where it is read, the
+ * folder task folders were made in on it (the root, on the root's disk; else
+ * the earlier root its first folder was made in, before the person moved it),
+ * and the folders on it.
+ */
+interface Disk {
+  readonly id: string
+  readonly at: string
+  readonly folder: string
+  readonly candidates: Array<Candidate>
 }
 
 /** What would be lost with a folder, the gravest first: files not committed, then what git can't read, then commits pushed nowhere. */
@@ -228,18 +243,24 @@ export const diskOf = (path: string) =>
     ),
   )
 
-/** The device a path is on: that of its nearest parent that exists; null where none can be read. */
+/** The nearest of a path and its parents that is there: where its disk is still read once a folder on it went. */
+const nearest = (path: string) => {
+  let at = path
+  while (!existsSync(at) && dirname(at) !== at) at = dirname(at)
+  return at
+}
+
+/** The device a path is on: that of its nearest parent that exists; null where it can't be read. */
 export const deviceOf = (path: string): Effect.Effect<number | null> =>
-  Effect.promise(async () => {
-    for (let at = path; ; at = dirname(at)) {
-      const found = await stat(at).then(
-        (stats) => stats.dev,
-        () => null,
-      )
-      if (found !== null) return found
-      if (dirname(at) === at) return null
-    }
-  })
+  Effect.promise(() =>
+    stat(nearest(path)).then(
+      (stats) => stats.dev,
+      () => null,
+    ),
+  )
+
+/** The folder a task's worktree was made in (root/project/task/repository): where task folders were, when it was made. */
+const rootOf = (worktree: string) => dirname(dirname(dirname(worktree)))
 
 /** A size for the thread: 2.3 GB, 14 GB, 640 MB, under 1 MB. */
 export const sizeWords = (bytes: number) => {
@@ -517,14 +538,40 @@ export class FolderCleanup extends Context.Service<
           )
         })
 
+      /**
+       * The disks `all` are on, by device, each with its folders in the order given: the root's first, there even with none on
+       * it, as new tasks' folders go there. A folder made under an earlier root, before the person moved it, is on that root's.
+       */
+      const disksOf = (all: ReadonlyArray<Candidate>) =>
+        Effect.gen(function* () {
+          const root = config.worktreeRoot
+          const keyOf = (device: number | null, path: string) => (device === null ? `path:${path}` : `device:${device}`)
+          const rootKey = keyOf(yield* deviceAt(root), root)
+          const disks = new Map<string, Disk>([[rootKey, { id: rootKey, at: root, folder: root, candidates: [] }]])
+          for (const candidate of all) {
+            // One with no folder here counts on the root's disk, as the root is read there.
+            const at = candidate.workspaces[0]?.path ?? root
+            const key = keyOf(yield* deviceAt(at), at)
+            const disk = disks.get(key) ?? { id: key, at, folder: rootOf(at), candidates: [] }
+            disks.set(key, disk)
+            disk.candidates.push(candidate)
+          }
+          return [...disks.values()]
+        })
+
+      /** How full a disk is now, read where it is: a folder on it may have gone since. */
+      const readDisk = (disk: Disk) => diskAt(nearest(disk.at))
+
       const list = Effect.gen(function* () {
         const all = yield* candidates
         yield* measureLater(all)
-        const disk = yield* diskAt(config.worktreeRoot)
+        const listed = all.filter((candidate) => facts.get(candidate.taskId)?.unshipped !== true)
+        // The root's disk, and each other one a folder listed is on.
+        const disks = yield* disksOf(listed)
+        const onDisk = new Map(disks.flatMap((disk) => disk.candidates.map((candidate) => [candidate.taskId, disk.id] as const)))
         const folders = []
-        for (const candidate of all) {
+        for (const candidate of listed) {
           const known = facts.get(candidate.taskId)
-          if (known?.unshipped === true) continue
           folders.push({
             taskId: candidate.taskId,
             threadId: candidate.threadId ?? '',
@@ -534,10 +581,17 @@ export class FolderCleanup extends Context.Service<
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
             held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, yield* openedLately(candidate)),
+            // Every folder listed is on one of the disks.
+            disk: onDisk.get(candidate.taskId)!,
           })
         }
+        const shown = []
+        for (const disk of disks) {
+          const read = yield* readDisk(disk)
+          if (read !== null) shown.push({ id: disk.id, folder: disk.folder, total: read.total, used: read.used })
+        }
         return {
-          disk: disk === null ? null : { total: disk.total, used: disk.used },
+          disks: shown,
           folders,
           measuring,
         } satisfies TaskFolders
@@ -669,7 +723,18 @@ export class FolderCleanup extends Context.Service<
        */
       const removeAll = (chosen: ReadonlyArray<Chosen>, actorId: ActorId, enough?: () => Effect.Effect<boolean>) =>
         Effect.gen(function* () {
-          const before = yield* diskAt(config.worktreeRoot)
+          // What is free on the disks they are on, together, before and after; null where one can't be read.
+          const disks = (yield* disksOf(chosen.map((one) => one.candidate))).filter((disk) => disk.candidates.length > 0)
+          const freeNow = Effect.gen(function* () {
+            let sum = 0
+            for (const disk of disks) {
+              const read = yield* readDisk(disk)
+              if (read === null) return null
+              sum += read.free
+            }
+            return sum
+          })
+          const before = yield* freeNow
           let failed = 0
           let measured = 0
           let unknown = false
@@ -689,8 +754,8 @@ export class FolderCleanup extends Context.Service<
             }
           }
           if (!unknown) return { freed: measured, failed } satisfies FoldersFreed
-          const after = yield* diskAt(config.worktreeRoot)
-          const onDisk = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
+          const after = yield* freeNow
+          const onDisk = before === null || after === null ? 0 : Math.max(0, after - before)
           return { freed: Math.max(measured, onDisk), failed } satisfies FoldersFreed
         })
 
@@ -703,22 +768,17 @@ export class FolderCleanup extends Context.Service<
           const up = oldest.filter((candidate) => candidate.clock + waitDays(chosen, candidate.kind) * DAY <= now)
           yield* removeAll(yield* free(up, 'wait', chosen), instance.systemId)
           if (chosen !== 'smart') return
-          // Smart makes room when the disk runs low: the oldest finished folders first, whatever their wait, until there is enough.
-          const disk = yield* diskAt(config.worktreeRoot)
-          if (disk === null || disk.free / disk.total >= LOW) return
+          // Smart makes room when a disk runs low, each disk on its own: the oldest finished folders on it first, whatever their wait,
+          // until it is roomy. Only what is on the disk that ran low frees it; a roomy disk's folders keep their wait.
           const tried = new Set(up.map((candidate) => candidate.taskId))
-          // Only what is on the disk that ran low frees it: a folder on another device (a root moved in Settings leaves earlier ones behind) keeps its wait.
-          const here = yield* deviceAt(config.worktreeRoot)
-          const onHere: Candidate[] = []
-          for (const candidate of oldest) {
-            if (tried.has(candidate.taskId)) continue
-            const first = candidate.workspaces[0]
-            if (here === null || first === undefined || (yield* deviceAt(first.path)) === here) onHere.push(candidate)
+          for (const disk of yield* disksOf(oldest.filter((candidate) => !tried.has(candidate.taskId)))) {
+            if (disk.candidates.length === 0) continue
+            const read = yield* readDisk(disk)
+            if (read === null || read.free / read.total >= LOW) continue
+            yield* removeAll(yield* free(disk.candidates, 'low', chosen), instance.systemId, () =>
+              readDisk(disk).pipe(Effect.map((now) => now === null || now.free / now.total >= ROOMY)),
+            )
           }
-          const rest = yield* free(onHere, 'low', chosen)
-          yield* removeAll(rest, instance.systemId, () =>
-            diskAt(config.worktreeRoot).pipe(Effect.map((now) => now === null || now.free / now.total >= ROOMY)),
-          )
         }),
       )
 

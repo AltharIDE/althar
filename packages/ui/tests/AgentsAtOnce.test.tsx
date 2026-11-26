@@ -131,10 +131,12 @@ describe('TaskFolders where only the person removes them', () => {
     const { TaskFolders } = await import('../src/setup/TaskFolders/TaskFolders')
     const held = [{ id: 't1', title: 'Fix the login', kind: 'done' as const, when: '2d', bytes: 10, why: 'uncommitted' as const, count: 2 }]
     const goes = [{ id: 't2', title: 'Old change', kind: 'merged' as const, when: '5d', bytes: 20 }]
-    const { unmount } = render(<TaskFolders wait="smart" onWait={vi.fn()} disk={{ total: 100, used: 50 }} goes={goes} held={held} />)
+    const { unmount } = render(
+      <TaskFolders wait="smart" onWait={vi.fn()} disks={[{ id: 'd', folder: '~/Althar', total: 100, used: 50 }]} goes={goes} held={held} />,
+    )
     expect(screen.queryByRole('button', { name: 'Clean up' })).toBeNull()
     unmount()
-    render(<TaskFolders wait="week" onWait={vi.fn()} disk={null} goes={[]} held={[]} listed={false} />)
+    render(<TaskFolders wait="week" onWait={vi.fn()} disks={[]} goes={[]} held={[]} listed={false} />)
     expect(screen.queryByText(/No finished tasks’ folders yet/)).toBeNull()
     expect(screen.getByText('Remove finished tasks’ folders')).toBeTruthy()
   })

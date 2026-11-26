@@ -137,6 +137,8 @@ export interface TaskFolderState {
   readonly defaultFolder?: string
   /** Why the folder can't be used now (it was chosen, and has gone missing or can't be written), in a line. */
   readonly problem?: string
+  /** In the Flatpak, where every pick comes through the file portal, which task folders can't use: there is no Change (ADR-027). */
+  readonly sandboxed?: true
 }
 
 /** What choosing a task folder came to: the state as it now stands, a refusal in a line, or nothing where the person cancelled. */

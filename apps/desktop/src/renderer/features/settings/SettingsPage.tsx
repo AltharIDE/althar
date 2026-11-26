@@ -533,6 +533,7 @@ function ThisMacSection({ home, lit, onTask }: { home: SettingsHome; lit: boolea
           <TaskFolderLocation
             folder={taskFolder.folder}
             from={taskFolder.from}
+            sandboxed={taskFolder.sandboxed === true}
             {...(taskFolder.defaultFolder === undefined ? {} : { defaultFolder: taskFolder.defaultFolder })}
             onChange={taskFolder.change}
             onUseDefault={taskFolder.useDefault}
@@ -558,7 +559,7 @@ function Folders({ folders, lit, home }: { folders: NonNullable<ReturnType<typeo
     <TaskFolders
       wait={folders.wait}
       onWait={folders.setWait}
-      disk={folders.disk}
+      disks={folders.disks}
       goes={folders.goes}
       held={folders.held}
       {...(folders.cleanUp === undefined ? {} : { onCleanUp: folders.cleanUp })}

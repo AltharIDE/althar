@@ -195,6 +195,13 @@ inside it, while the agents Althar bundles are.
 - **The profile is the app's own,** at `~/.var/app/dev.althar.app/data/althar`,
   with the worktrees beside it. Projects reach the app through the document
   portal.
+- **Where task folders go can't be changed in the Flatpak.** Settings › Task
+  folders shows `<profile>/worktrees` and one line saying why, with no Change.
+  A folder picked there comes through the file portal as
+  `/run/flatpak/doc/<id>/…`, which isn't the same path on the device, so the
+  worktrees would no longer be at the same path on both sides; the check
+  refuses a portal path too. A folder chosen before (by hand, in
+  `desktop.json`) can still go back to the default.
 - **The device bridge is an ordinary command for agents.** The rules read
   `flatpak-spawn` as a wrapper and read the command it runs, which meets the
   irreversible list as any other does

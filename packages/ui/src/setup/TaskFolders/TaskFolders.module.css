@@ -5,6 +5,28 @@
   gap: 9px;
 }
 
+/* several disks: a bar each, named by the folder task folders are in on it */
+.disks {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.disk {
+  display: contents;
+}
+
+.where {
+  max-width: 220px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bar {
   display: flex;
   height: 8px;
