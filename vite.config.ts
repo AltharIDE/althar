@@ -110,6 +110,16 @@ export default defineConfig({
         files: ['packages/*/tests/**/*.{ts,tsx}', 'apps/*/tests/**/*.{ts,tsx}', 'apps/*/e2e/**/*.ts', 'brand/tests/**/*.{ts,tsx}'],
         rules: { 'althar/no-future-dates': 'error' },
       },
+      /* A task's status and the board's lanes are said in the kit's words wherever the window, the site or the kit shows them (lint/words.js). */
+      {
+        files: ['apps/*/src/**/*.{ts,tsx}', 'packages/ui/src/**/*.{ts,tsx}'],
+        rules: { 'althar/status-words': 'error' },
+      },
+      /* But where those words are written. */
+      {
+        files: ['packages/ui/src/foundations/vocabularyText.ts'],
+        rules: { 'althar/status-words': 'off' },
+      },
     ],
   },
   fmt: {

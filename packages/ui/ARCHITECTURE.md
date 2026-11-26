@@ -81,6 +81,7 @@ The same holds for formatting: dates, durations, counts and file sizes arrive fo
 - **Where a protocol has a vocabulary, ours covers all of it.** `ToolKind` has every ACP tool kind, and `ToolState` adds Declined and Cancelled to ACP's statuses.
 - **Open-ended sets stay strings.** A runtime id is one, because consumers add runtimes.
 - **A vocabulary offered as a choice in more than one place has its words once,** in `src/foundations/vocabularyText.ts`, so a setting reads the same wherever it is changed.
+- **So do where a task stands and the board's lanes,** `taskStatusText` and `boardLaneText` there, so a task reads the same on every card. A card that says one differently spreads the table and passes its word by a name, with why; lint refuses one written out anywhere else (`althar/status-words`, `lint/words.js`).
 - **Visual options stay string-literal unions:** `variant`, `tone`, `size`, `placement`, `align`. They read naturally in JSX (`variant="signal"`), and are the component's own business.
 - **Branch on a vocabulary with an exhaustive `switch`,** ending in `default: return unreachable(value)`, so a new member fails the build wherever it isn't handled. No chained ternaries, and no lookup tables whose keys can drift from the type.
 - **A `Record<Enum, …>` is fine for a pure table** where the compiler checks every key, like per-state copy in a `text` object.

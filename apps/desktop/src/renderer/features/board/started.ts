@@ -1,5 +1,5 @@
 import type { BoardCall, BoardTask, ChangeSummary } from '@althar/contracts'
-import { TaskStatus, type StartedTone } from '@althar/ui'
+import { TaskStatus, taskStatusText, type StartedTone } from '@althar/ui'
 
 import { callKindOf } from '../../shared/calls'
 import { factsOf } from '../../shared/standing'
@@ -26,7 +26,7 @@ export const startedText = {
   /** A held plan starts only when the person says. */
   held: 'Held',
   heldWhy: 'Starts when you say',
-  needsYou: 'Needs you',
+  needsYou: taskStatusText[TaskStatus.Yours],
   merged: 'Merged',
   kept: 'Kept for later',
   /** Stopped, its work gone on in another task. */

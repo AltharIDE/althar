@@ -70,6 +70,9 @@ export const NeedsYou: Story = {
   },
 }
 
+/** The app's word for a ready change with something in its way, which its card says in place of Needs you. */
+const NOT_READY = 'Not ready to accept'
+
 /**
  * Its failing checks brought to you by its lead, as nothing the change can fix: violet, it waits on you, in the board's word,
  * with its lead's line. Nothing asks a question, so the button opens it rather than answering.
@@ -88,11 +91,11 @@ export const ChecksHandedBack: Story = {
     pr: 'MR !89',
     steps: ['Implement', 'Review'],
     at: 1,
-    text: { status: { ...taskCardText.status, [TaskStatus.Yours]: 'Not ready to accept' } },
+    text: { status: { ...taskCardText.status, [TaskStatus.Yours]: NOT_READY } },
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Not ready to accept')).toBeVisible()
+    await expect(c.getByText(NOT_READY)).toBeVisible()
     await expect(c.queryByRole('button', { name: /Answer/ })).toBeNull()
     await userEvent.click(c.getByRole('button', { name: /Open task/ }))
     await expect(args.onOpen).toHaveBeenCalledWith('433')

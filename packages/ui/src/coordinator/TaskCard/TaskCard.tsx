@@ -3,6 +3,7 @@ import { useId, type ReactNode, type Ref } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
+import { stoppedByYou, taskStatusText } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
@@ -29,14 +30,7 @@ export interface TaskCardText {
 }
 
 export const taskCardText: TaskCardText = {
-  status: {
-    [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Needs you',
-    [TaskStatus.Done]: 'Done',
-    [TaskStatus.Paused]: 'Paused',
-    [TaskStatus.Queued]: 'Waiting',
-    [TaskStatus.Stopped]: 'Stopped by you',
-  },
+  status: { ...taskStatusText, [TaskStatus.Stopped]: stoppedByYou },
   lead: 'Lead',
   answeredBy: 'Answered by',
   open: 'Open task',
