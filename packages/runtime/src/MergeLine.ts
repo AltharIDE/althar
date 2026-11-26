@@ -23,6 +23,7 @@ import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
 import { taskWaitStatus } from './errandTaskWaits'
 import { taskWaitsReady } from './errandWaits'
+import { settleHeldErrands } from './errandSettle'
 import { watchReleaseErrands } from './errandWatch'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
@@ -1512,6 +1513,7 @@ export class MergeLine extends Context.Service<
                 )
               }
               yield* watchReleaseErrands(projectId, errands, taskNews.ready, (threadId, said) => wakeOf(threadId).push(said))
+              yield* settleHeldErrands(projectId, errands)
               for (const [threadId, said] of wakes) yield* wake(threadId, said)
             }),
           ),
