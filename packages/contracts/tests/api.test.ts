@@ -951,7 +951,8 @@ describe('the calls a socket may make', () => {
     // The home's own settings change from its window; a project's rules stay with the project's own settings.
     for (const tag of ['SetAgentsAtOnce', 'SetPlansAndReviews', 'SetPostTeamReviews', 'ListPresets', 'SetFolderWait', 'GetTaskFolders'])
       assert.include(SOCKET_CALLS, tag)
-    assert.notInclude(SOCKET_CALLS, 'SetProjectRules')
+    for (const tag of ['SetProjectRules', 'SetRunOutside', 'CleanUpFolders', 'RemoveTaskFolder', 'RemovePreset'])
+      assert.notInclude(SOCKET_CALLS, tag)
     // Its MCP servers and skills show and change there too; a server's sign-in opens a browser where it runs, so stays.
     for (const tag of ['GetAgentTools', 'ListSkills', 'AddServer', 'ApproveSkill']) assert.include(SOCKET_CALLS, tag)
     assert.notInclude(SOCKET_CALLS, 'SignInToolServer')

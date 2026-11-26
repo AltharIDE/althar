@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -895,6 +895,34 @@ describe('the Settings tab', () => {
     expect(await screen.findAllByText('Update studio to change these from here')).toHaveLength(1)
     const held = screen.getByRole('main').querySelector('fieldset')
     expect(held?.disabled).toBe(true)
+    cleanup()
+    // Its agents at once, as it has them: no focus, key or press sends a number it would refuse; nor from the quick settings.
+    const before = studio.connection.calls.filter((call) => !['SetPlansAndReviews', 'SetAgentsAtOnce', 'GetTaskFolders'].includes(call))
+    const old = fakeClient({ connection: { ...studio.connection, calls: before } })
+    withServices(<Settings at="computers" />, old.client, fakeHost({ homes: studio.homes }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^studio/ }))
+    const slider = await screen.findByRole('slider', { name: 'Agents at once' })
+    expect(slider.getAttribute('aria-disabled')).toBe('true')
+    expect(slider.hasAttribute('tabindex')).toBe(false)
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    expect(old.client.setAgentsAtOnce).not.toHaveBeenCalled()
+    // Its folders it doesn't list: when they go, as it keeps it, and nothing it would refuse to read or remove.
+    expect(screen.getByText('Remove finished tasks’ folders')).toBeTruthy()
+    expect(old.client.getTaskFolders).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Clean up' })).toBeNull()
+  })
+
+  it('on another computer’s home, leaves trusting outside code and removing folders to the person', async () => {
+    const studio = onLinuxHome('studio')
+    const { client } = fakeClient({ connection: studio.connection })
+    withServices(<Settings at="pull-requests" />, client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByRole('switch', { name: /Post reviews of my team/ })).toBeTruthy()
+    expect(screen.queryByText('When I say Run it on code from outside the team')).toBeNull()
+    // About is this Mac's, under its heading; its storage is measured by this Mac's own runtime, which this window doesn't reach.
+    const here = within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('list', { name: 'This Mac' })
+    await userEvent.click(within(here).getByRole('button', { name: 'About Althar' }))
+    expect(await screen.findByRole('heading', { name: 'About Althar', level: 1 })).toBeTruthy()
+    expect(client.getStorageSize).not.toHaveBeenCalled()
   })
 
   it('on a home paired over the network, offers no sign-in over SSH for its workers', async () => {

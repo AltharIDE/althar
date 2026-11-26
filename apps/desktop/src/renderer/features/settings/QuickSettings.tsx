@@ -86,6 +86,7 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
               machine={atOnce.atOnce.machine}
               most={MOST_AT_ONCE}
               onChange={atOnce.set}
+              disabled={!atOnce.canSet}
               fewer={places === null ? null : fewerOf(places)}
               text={{ value: text.atOnce(home.name).value }}
             />

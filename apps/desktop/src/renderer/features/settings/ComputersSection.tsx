@@ -165,6 +165,7 @@ export function ComputersSection({
                     machine={atOnce.atOnce.machine}
                     most={MOST_AT_ONCE}
                     onChange={atOnce.set}
+                    disabled={!atOnce.canSet}
                     fewer={places === null ? null : fewerOf(places)}
                     // Named by the home it's about: This Mac's, or runner-1's.
                     text={text.atOnce(here.standalone ? here.name : device.this)}

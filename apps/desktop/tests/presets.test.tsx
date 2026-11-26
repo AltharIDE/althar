@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Preset } from '@althar/contracts'
 
 import { PresetsSection } from '../src/renderer/features/settings/PresetsSection'
-import { agents, fakeClient } from './fixtures'
+import { agents, fakeClient, remoteConnection } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -173,5 +173,14 @@ describe('presets in Settings', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     expect((await screen.findByRole('alert')).textContent).toBe('That preset is in use by a running automation.')
     expect(screen.getByText('Quick change')).toBeTruthy()
+  })
+
+  it('on another computer’s home, resets a tuned preset there and leaves removing one of the person’s own to them', async () => {
+    const tuned = { ...builtIn, tuned: true }
+    const { client } = fakeClient({ connection: remoteConnection(), listPresets: vi.fn(async () => [tuned, own]) })
+    withServices(<PresetsSection />, client)
+    expect(await screen.findByRole('button', { name: 'Reset' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
   })
 })

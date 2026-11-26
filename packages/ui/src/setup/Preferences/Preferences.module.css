@@ -555,3 +555,9 @@
 .state[data-state='allowed'] {
   color: var(--t-1);
 }
+
+/* Unchangeable from here: quieter, and nothing to grab. */
+.track[data-disabled] {
+  cursor: default;
+  opacity: 0.6;
+}

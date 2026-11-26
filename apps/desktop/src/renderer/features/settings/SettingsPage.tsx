@@ -340,7 +340,8 @@ function SectionBody({
       return (
         <AboutSection
           start={start}
-          // This computer's task folders are with its own window's settings: a home's window has the home's instead.
+          // This computer's own storage is measured by its own runtime, which a home's window doesn't reach: it shows there only.
+          storageHere={!home.remote}
           {...(home.remote ? {} : { onFreeUp })}
           {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
         />
@@ -545,8 +546,9 @@ function Folders({ folders, lit, home }: { folders: NonNullable<ReturnType<typeo
       disk={folders.disk}
       goes={folders.goes}
       held={folders.held}
-      onCleanUp={folders.cleanUp}
-      onRemove={folders.remove}
+      {...(folders.cleanUp === undefined ? {} : { onCleanUp: folders.cleanUp })}
+      {...(folders.remove === undefined ? {} : { onRemove: folders.remove })}
+      listed={folders.listed}
       {...(folders.open === undefined ? {} : { onOpen: folders.open })}
       measuring={folders.measuring}
       freed={folders.freed}
@@ -914,6 +916,26 @@ function BrowserSection() {
 
 /* ---- about ------------------------------------------------------------------------ */
 
+/** Where this computer's Althar keeps its data, and how much each place takes: from its own runtime. */
+function StorageRows({ onFreeUp }: { onFreeUp: (() => void) | undefined }) {
+  const storage = useStorage()
+  return (
+    <Storage
+      places={PLACES.map((place) => ({
+        id: place,
+        title: text.storage[place],
+        path: storage.paths[place] ?? '',
+        figure: storage.figures[place],
+        ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
+      }))}
+      onShow={(id) => storage.show(id as StoragePlace)}
+      onMeasureAgain={storage.measureAgain}
+      {...(onFreeUp === undefined ? {} : { freeUp: { id: 'worktrees', onFreeUp } })}
+      text={{ show: text.storage.show }}
+    />
+  )
+}
+
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
  * ready to install; Report a problem (DEV-61), where the app can report;
@@ -921,11 +943,21 @@ function BrowserSection() {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp?: () => void; onWhatsNew?: () => void }) {
+function AboutSection({
+  start,
+  storageHere,
+  onFreeUp,
+  onWhatsNew,
+}: {
+  start: StartModel
+  /** This computer's own window: its storage, measured by its own runtime, shows. */
+  storageHere: boolean
+  onFreeUp?: () => void
+  onWhatsNew?: () => void
+}) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { client, host } = useServices()
-  const storage = useStorage()
   // This app's, on whichever home the window is: a home's runtime says its own release.
   const own = useAppVersion()
   const version = client.connection === undefined ? (own ?? start.status?.appVersion) : own
@@ -943,19 +975,7 @@ function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFr
         community={COMMUNITY}
         {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
       />
-      <Storage
-        places={PLACES.map((place) => ({
-          id: place,
-          title: text.storage[place],
-          path: storage.paths[place] ?? '',
-          figure: storage.figures[place],
-          ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
-        }))}
-        onShow={(id) => storage.show(id as StoragePlace)}
-        onMeasureAgain={storage.measureAgain}
-        {...(onFreeUp === undefined ? {} : { freeUp: { id: 'worktrees', onFreeUp } })}
-        text={{ show: text.storage.show }}
-      />
+      {storageHere && <StorageRows onFreeUp={onFreeUp} />}
       <HelpImprove
         usage={preferences.usageData}
         onUsage={(on) => set('usageData', on)}

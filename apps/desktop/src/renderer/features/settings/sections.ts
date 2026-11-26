@@ -58,7 +58,7 @@ export type SectionGroup =
 
 /**
  * The groups down the side. In a window on another computer's home, that home's sections under its name and what it
- * runs, then this computer's under This Mac, then About; in this computer's own window, as GROUPS has them.
+ * runs, then this computer's under This Mac, About among them; in this computer's own window, as GROUPS has them.
  */
 export const groupsFor = (home: {
   readonly remote: boolean
@@ -68,8 +68,8 @@ export const groupsFor = (home: {
   home.remote
     ? [
         { title: home.name, ...(home.system === null ? {} : { note: home.system }), sections: HOME_SECTIONS },
-        { title: device.This, sections: CLIENT_SECTIONS },
-        ['about'],
+        // Which Althar this is, its updates and what it reports are this computer's own too.
+        { title: device.This, sections: [...CLIENT_SECTIONS, 'about'] },
       ]
     : GROUPS
 

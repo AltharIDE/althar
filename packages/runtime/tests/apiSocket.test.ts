@@ -230,10 +230,19 @@ describe('the authenticated private API', () => {
       assert.strictEqual(settings.agentsAtOnce.count, 3)
       assert.isTrue(settings.postTeamReviews)
       yield* api.GetTaskFolders({})
+      const refused = (effect: Effect.Effect<unknown, unknown>) =>
+        Effect.map(Effect.flip(effect), (error) => (error as { readonly reason?: string }).reason)
       assert.strictEqual(
-        (yield* Effect.flip(api.SetProjectRules({ commandId: commandId(), projectId: 'proj_x', allowEverything: true }))).reason,
+        yield* refused(api.SetProjectRules({ commandId: commandId(), projectId: 'proj_x', allowEverything: true })),
         'PersonRequired',
       )
+      // What only the person decides stays theirs: trusting outside code fully, removing folders and what they hold, a preset.
+      assert.strictEqual(yield* refused(api.SetRunOutside({ commandId: commandId(), to: 'full' })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.CleanUpFolders({ commandId: commandId() })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemoveTaskFolder({ commandId: commandId(), taskId: 'task_x', seen: null })), 'PersonRequired')
+      assert.strictEqual(yield* refused(api.RemovePreset({ commandId: commandId(), id: 'preset_x' })), 'PersonRequired')
+      assert.notInclude(calls, 'SetRunOutside')
+      assert.notInclude(calls, 'RemoveTaskFolder')
     }).pipe(Effect.scoped, Effect.provide(environment)),
   )
 

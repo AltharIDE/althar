@@ -5416,7 +5416,9 @@ const socketCalls = new Set<string>([
   'CancelAccountSignIn',
   // The home's own settings, changed from its window as Settings shows them under the home's name: how its tasks go, its
   // pull requests, its presets, how many agents work there at once, its automations and its finished tasks' folders.
-  // What a project's rules give stays with the project's own settings.
+  // What a project's rules give stays with the project's own settings, and what only the person decides with the person:
+  // trusting outside code fully (SetRunOutside), removing finished tasks' folders and what they hold (CleanUpFolders,
+  // RemoveTaskFolder), and removing a preset of their own (RemovePreset).
   'SetPlansAndReviews',
   'SetSendMidTurn',
   'SetNewProjectDefaults',
@@ -5424,8 +5426,8 @@ const socketCalls = new Set<string>([
   'ListPresets',
   'EditPreset',
   'TunePreset',
+  'ResetPreset',
   'SetPostTeamReviews',
-  'SetRunOutside',
   'SetCoAuthor',
   'SetReviewSeal',
   'SetReviewSealStyle',
@@ -5433,8 +5435,6 @@ const socketCalls = new Set<string>([
   'SetAgentsAtOnce',
   'GetTaskFolders',
   'SetFolderWait',
-  'CleanUpFolders',
-  'RemoveTaskFolder',
   // The home's MCP servers and skills, its agents' own (ADR-097): read, given to roles and projects, synced, added and
   // removed from its window. A server's sign-in runs the agent's own command where it is, opening a browser on the home,
   // so it stays with a window on that computer.
