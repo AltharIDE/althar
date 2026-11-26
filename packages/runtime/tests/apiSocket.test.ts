@@ -215,6 +215,28 @@ describe('the authenticated private API', () => {
     )
   })
 
+  it.live('lets a socket change its home’s own settings, never a project’s rules', () =>
+    Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const calls = (yield* api.GetConnectionInfo({})).calls ?? []
+      for (const tag of ['SetAgentsAtOnce', 'SetPostTeamReviews', 'GetTaskFolders']) assert.include(calls, tag)
+      yield* api.SetAgentsAtOnce({ commandId: commandId(), count: 3 })
+      yield* api.SetPostTeamReviews({ commandId: commandId(), on: true })
+      const settings = yield* api.GetSettings({})
+      assert.strictEqual(settings.agentsAtOnce.count, 3)
+      assert.isTrue(settings.postTeamReviews)
+      yield* api.GetTaskFolders({})
+      assert.strictEqual(
+        (yield* Effect.flip(api.SetProjectRules({ commandId: commandId(), projectId: 'proj_x', allowEverything: true }))).reason,
+        'PersonRequired',
+      )
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
   it.live('authenticates a device key, records the client device, and revokes its live connection', () =>
     Effect.gen(function* () {
       const identities = yield* ClientIdentities
