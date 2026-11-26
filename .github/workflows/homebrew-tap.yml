@@ -4,7 +4,8 @@ name: homebrew-tap
 # release (Linear DEV-72). It runs when a release is PUBLISHED, never when one is drafted, takes the sha256 of each of
 # the published dmgs itself, Apple silicon's (arm64) and Intel's (x64), fills packaging/homebrew/althar.rb in with them
 # and pushes Casks/althar.rb to the tap, making the file the first time. Prereleases, and releases that aren't the latest, are skipped. A run for a version the tap
-# has already changes nothing.
+# has already changes nothing. Host releases (host-v…) publish releases too: the job is skipped for any release whose
+# tag doesn't start with v.
 #
 # It creates and publishes no release: releases come from release.yml alone. Its one secret, HOMEBREW_TAP_TOKEN (Contents
 # read & write on the tap alone), is in the `release` environment, as apps/desktop/README.md ("The packaged app") says.
@@ -23,13 +24,15 @@ on:
 permissions:
   contents: read
 
-# One at a time, so two publishes in quick succession can't push over each other.
-concurrency:
-  group: homebrew-tap
-  cancel-in-progress: false
-
 jobs:
   cask:
+    # A release of something else, such as the host's (host-v0.2.1), shows as skipped. A run by hand has its tag checked below.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    # One at a time, so two publishes in quick succession can't push over each other. On the job, not the workflow: a
+    # skipped release must not take the place of a desktop run waiting its turn.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
