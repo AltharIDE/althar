@@ -952,5 +952,8 @@ describe('the calls a socket may make', () => {
     for (const tag of ['SetAgentsAtOnce', 'SetPlansAndReviews', 'SetPostTeamReviews', 'ListPresets', 'SetFolderWait', 'GetTaskFolders'])
       assert.include(SOCKET_CALLS, tag)
     assert.notInclude(SOCKET_CALLS, 'SetProjectRules')
+    // Its MCP servers and skills show and change there too; a server's sign-in opens a browser where it runs, so stays.
+    for (const tag of ['GetAgentTools', 'ListSkills', 'AddServer', 'ApproveSkill']) assert.include(SOCKET_CALLS, tag)
+    assert.notInclude(SOCKET_CALLS, 'SignInToolServer')
   })
 })

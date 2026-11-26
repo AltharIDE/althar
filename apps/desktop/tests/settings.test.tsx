@@ -854,10 +854,28 @@ describe('the Settings tab', () => {
     const here = within(nav).getByRole('list', { name: 'This Mac' })
     for (const name of ['Work on this Mac', 'Notifications', 'Appearance', 'Editor and browser'])
       expect(within(here).getByRole('button', { name })).toBeTruthy()
-    // What the home can't show a window yet is said calmly, not as an error.
+    // The home's own servers, as it has them; where they can't be read, why, in the home's words.
     const page = screen.getByRole('main')
-    expect(within(page).getByText('studio’s MCP servers don’t show in a window yet')).toBeTruthy()
     expect(within(page).queryByText(/couldn’t be read/)).toBeNull()
+    cleanup()
+    const failing = fakeClient({
+      connection: studio.connection,
+      getAgentTools: vi.fn(async () => {
+        throw new ApiError({ reason: 'Unavailable', message: 'The agents’ settings folder isn’t there.' })
+      }),
+    })
+    withServices(<Settings at="mcp-servers" />, failing.client, fakeHost({ homes: studio.homes }))
+    expect(await screen.findByText('studio’s MCP servers couldn’t be read: The agents’ settings folder isn’t there.')).toBeTruthy()
+    cleanup()
+    // An older home, which doesn't show its window its servers: its update, calmly, not an error.
+    const older = studio.connection.calls.filter((call) => call !== 'GetAgentTools' && call !== 'ListSkills')
+    withServices(
+      <Settings at="skills" />,
+      fakeClient({ connection: { ...studio.connection, calls: older } }).client,
+      fakeHost({ homes: studio.homes }),
+    )
+    expect(await screen.findByText('Update studio to show its skills here')).toBeTruthy()
+    expect(screen.queryByText(/couldn’t be read/)).toBeNull()
     cleanup()
     // Work on this Mac holds only this Mac's: the home's agents at once and automations are the home's.
     withServices(<Settings at="this-mac" />, fakeClient({ connection: studio.connection }).client, fakeHost({ homes: studio.homes }))

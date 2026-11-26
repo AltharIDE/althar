@@ -29,6 +29,14 @@ export const behindText = {
     update: (home: string) => `Update ${home} to connect GitHub or GitLab there from here`,
     coming: (home: string) => `Connecting GitHub or GitLab on ${home} from here comes with its next update`,
   },
+  servers: {
+    update: (home: string) => `Update ${home} to show its MCP servers here`,
+    coming: (home: string) => `${home}’s MCP servers show here with its next update`,
+  },
+  skills: {
+    update: (home: string) => `Update ${home} to show its skills here`,
+    coming: (home: string) => `${home}’s skills show here with its next update`,
+  },
   settings: {
     update: (home: string) => `Update ${home} to change these from here`,
     coming: (home: string) => `Changing these from here comes with ${home}’s next update`,

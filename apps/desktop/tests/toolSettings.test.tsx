@@ -219,7 +219,7 @@ describe('Settings › MCP servers', () => {
   it('shows its place while the servers are read, and says in words where they couldn’t be, with a way to try again', async () => {
     const { client } = fakeClient({ getAgentTools: vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValue(tools()) })
     withServices(<Settings at="mcp-servers" />, client)
-    expect(await main().findByText('Your agents’ MCP servers couldn’t be read.')).toBeTruthy()
+    expect(await main().findByText(/^Your agents’ MCP servers couldn’t be read: Althar's runtime didn't answer/)).toBeTruthy()
     await userEvent.click(main().getByRole('button', { name: 'Try again' }))
     expect(await main().findByRole('heading', { name: 'No MCP servers yet' })).toBeTruthy()
   })
@@ -355,7 +355,7 @@ describe('Settings › Skills', () => {
   it('says in words where the skills couldn’t be read, with a way to try again', async () => {
     const { client } = fakeClient({ getAgentTools: vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValue(tools()) })
     withServices(<Settings at="skills" />, client)
-    expect(await main().findByText('Your skills couldn’t be read.')).toBeTruthy()
+    expect(await main().findByText(/^Your skills couldn’t be read: /)).toBeTruthy()
     await userEvent.click(main().getByRole('button', { name: 'Try again' }))
     expect(await main().findByRole('heading', { name: 'No skills yet' })).toBeTruthy()
   })
@@ -367,7 +367,7 @@ describe('Settings › Skills', () => {
       listSkills: vi.fn().mockRejectedValueOnce(new Error('installs.json is unreadable')).mockResolvedValue({ enabled: true, skills: [] }),
     })
     withServices(<Settings at="skills" />, client)
-    expect(await main().findByText('Your skills couldn’t be read.')).toBeTruthy()
+    expect(await main().findByText(/^Your skills couldn’t be read: /)).toBeTruthy()
     await userEvent.click(main().getByRole('button', { name: 'Try again' }))
     expect(await main().findByRole('button', { name: /^impeccable/ })).toBeTruthy()
   })

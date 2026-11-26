@@ -237,6 +237,35 @@ describe('the authenticated private API', () => {
     }).pipe(Effect.scoped, Effect.provide(environment)),
   )
 
+  it.live('shows a socket its home’s own MCP servers and skills, as a home set up with althar-host has them', () => {
+    // As apps/host sets a home up: its skills' store in its profile, and its agents' settings in its user's own folder.
+    const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+    const home = mkdtempSync(join(tmpdir(), 'althar-socket-user-'))
+    return Effect.gen(function* () {
+      const endpoint = yield* listenLocalApi(profile)
+      const port = yield* openApiSocket(endpoint.address)
+      assert.strictEqual((yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })).role, 'socket')
+      const api = yield* client(port)
+      const tools = yield* api.GetAgentTools({ projectId: null })
+      assert.isTrue(tools.enabled)
+      assert.isTrue((yield* api.ListSkills({})).enabled)
+      // A server's sign-in opens a browser where its agent runs: not from another computer's window.
+      assert.strictEqual(
+        (yield* Effect.flip(api.SignInToolServer({ commandId: commandId(), agent: 'claude', name: 'linear' }))).reason,
+        'PersonRequired',
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        services({
+          ...options,
+          skills: { root: join(profile, 'skills') },
+          agentConfigs: { homeDir: home, folder: join(profile, 'agent-sync') },
+        }),
+      ),
+    )
+  })
+
   it.live('authenticates a device key, records the client device, and revokes its live connection', () =>
     Effect.gen(function* () {
       const identities = yield* ClientIdentities

@@ -126,13 +126,11 @@ export const text = {
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
   agentToolsOff: 'This Althar doesn’t read your agents’ settings, so their MCP servers and skills aren’t listed.',
-  serversUnread: 'Your agents’ MCP servers couldn’t be read.',
-  skillsUnread: 'Your skills couldn’t be read.',
-  /** On another computer's home, whose MCP servers and skills a window can't show yet. */
-  serversAway: (home: string) => `${home}’s MCP servers don’t show in a window yet`,
-  serversAwayLine: 'Its agents still use the servers in their own settings there.',
-  skillsAway: (home: string) => `${home}’s skills don’t show in a window yet`,
-  skillsAwayLine: 'Its agents still use the skills in their own folders there.',
+  /** Why the servers or skills couldn't be read, as the runtime said it, after whose they are: your agents', or a home's. */
+  serversUnread: (whose: string, why: string | null) =>
+    `${whose} MCP servers couldn’t be read${why === null ? '.' : `: ${why.replace(/\.$/, '')}.`}`,
+  skillsUnread: (whose: string, why: string | null) =>
+    `${whose} skills couldn’t be read${why === null ? '.' : `: ${why.replace(/\.$/, '')}.`}`,
   /** A home's finished tasks keep their commits there. */
   keptOn: (home: string, n: number) => `Its ${n === 1 ? 'commit stays' : 'commits stay'} on its branch, on ${home}.`,
   skillsOff: 'Skills aren’t set up in this copy of Althar, so each lead starts without them.',

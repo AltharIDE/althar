@@ -15,7 +15,6 @@ import {
   CoAuthorFace,
   DictationSettings,
   DockPreview,
-  EmptyState,
   EdgeHere,
   EdgeMini,
   EdgePlaces,
@@ -54,6 +53,7 @@ import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { useAppVersion } from '../../shared/appVersion'
+import { LAST_WITHOUT_HOME_SETTINGS } from '../../../homes'
 import { behindText, HomeBehind } from '../homes/HomeBehind'
 import { useHomeName } from '../homes/useHomes'
 import { device, platform } from '../../shared/device'
@@ -274,20 +274,22 @@ function SectionBody({
   computer: string | null
   onComputer: (id: string | null) => void
 }) {
+  const { client } = useServices()
   switch (section) {
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
     case 'mcp-servers':
-      return home.remote ? (
-        <EmptyState variant="flush" icon="plug" title={text.serversAway(home.name)} line={text.serversAwayLine} />
+      // A home's own, where it shows them to its window; an older one offers its update in their place.
+      return home.remote && !canCall(client, 'GetAgentTools') ? (
+        <HomeBehind line={behindText.servers} since={LAST_WITHOUT_HOME_SETTINGS} />
       ) : (
-        <ServersSection start={start} />
+        <ServersSection start={start} {...(home.remote ? { whose: `${home.name}’s` } : {})} />
       )
     case 'skills':
-      return home.remote ? (
-        <EmptyState variant="flush" icon="knowledge" title={text.skillsAway(home.name)} line={text.skillsAwayLine} />
+      return home.remote && !canCall(client, 'ListSkills') ? (
+        <HomeBehind line={behindText.skills} since={LAST_WITHOUT_HOME_SETTINGS} />
       ) : (
-        <SkillsSection start={start} />
+        <SkillsSection start={start} {...(home.remote ? { whose: `${home.name}’s` } : {})} />
       )
     case 'code-hosts':
       return <CodeHostsSection model={connections} />

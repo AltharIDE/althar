@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentTools, NewServer, SyncedAgent, ToolRole } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
+import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
 
 /*
@@ -20,6 +21,8 @@ import { useServices } from '../../data/services'
 export interface AgentToolsModel {
   readonly tools: AgentTools | undefined
   readonly loadFailed: boolean
+  /** Why they couldn't be read, in the runtime's words; null where they were. */
+  readonly loadError: string | null
   readonly reload: () => void
   readonly error: string | null
   /** A call to a command under way that the person waits on: adding or removing a server. */
@@ -112,6 +115,7 @@ export const useAgentTools = (options: { readonly check?: boolean } = {}): Agent
   return {
     tools: query.data,
     loadFailed: query.isError,
+    loadError: query.isError ? messageOf(query.error) : null,
     reload,
     error,
     busy,

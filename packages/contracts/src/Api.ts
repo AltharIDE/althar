@@ -5434,6 +5434,27 @@ const socketCalls = new Set<string>([
   'SetFolderWait',
   'CleanUpFolders',
   'RemoveTaskFolder',
+  // The home's MCP servers and skills, its agents' own (ADR-097): read, given to roles and projects, synced, added and
+  // removed from its window. A server's sign-in runs the agent's own command where it is, opening a browser on the home,
+  // so it stays with a window on that computer.
+  'GetAgentTools',
+  'GetServerDetail',
+  'CheckServers',
+  'SetToolRoles',
+  'SetToolInProject',
+  'SetToolSync',
+  'SetToolKeptOut',
+  'PickToolWay',
+  'UndoToolSync',
+  'AddServer',
+  'RemoveServer',
+  'ListSkills',
+  'FindSkills',
+  'StageSkill',
+  'ApproveSkill',
+  'CheckSkillUpdates',
+  'RollBackSkill',
+  'UninstallSkill',
 ])
 
 /**
