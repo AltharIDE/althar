@@ -4,21 +4,21 @@ name: queue
 # both are in. Queued, a pull request is checked again on main as it will be, with the pull requests ahead of it. Up to
 # three entries build at once, each on main and the entries ahead of it. When the build at a group's head passes, the
 # whole group merges, an entry ahead whose own build failed or hasn't finished with it: the head's build tested exactly
-# what lands. So each build here covers what its entry and those ahead of it change against main, not its entry alone.
+# what lands. So each build here covers every entry up to its own, not its entry alone.
 # A pull request goes back to its branch only when its own build fails and none behind it passes.
 #
-# The queue runs a pull request's own checks (desktop.yml, harness.yml and the rest), for the paths the group changes,
-# as its pull request did, and each runs what that change reaches: the checks and unit tests on Linux, and for a change
-# that reaches the app, its end-to-end run (desktop.yml calls e2e.yml). Not the stress run of changed tests or Windows'
-# smoke test, which the pull request ran on the same change, but a build fails if either failed on the head of a pull
-# request in its group. A change that reaches the runtime runs its coverage gate here too (harness.yml). Windows' unit
-# tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
+# A pull request is queued only once its own checks have all passed on its head (`merge queue`, below): every workflow
+# its files call for, the stress run of its changed tests and Windows' smoke test. So the queue doesn't run them again.
+# It tests what its entries could break together: for each, the checks and unit tests on Linux that both what it
+# changes and what landed beneath it since it branched reach (.github/scripts/queue-entries.py, and queuePlan in
+# packages/testing/src/select.ts), through the same workflows a pull request runs, for the paths the group changes.
+# A test only one of them reaches already passed with nothing of the other in its way. Not the end-to-end run, the
+# coverage gates or Windows: a pull request runs them, and post-merge.yml runs them in full after merge, before any
+# release. When the entries can't be told apart, the queue runs what the whole group changes against main instead.
 #
-# Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
-# has (or it has none), the Windows smoke test hasn't failed and its migration and ADR numbers are free (`numbers`):
-# waited for here, on the pull request, a stress run no longer holds the queue, where every entry behind a waiting one
-# waited too. In the queue, it passes once every check that ran there did, and the stress run it reads again has long
-# finished.
+# Main's rules require one check, `merge queue`. On a pull request it passes once every one of the pull request's own
+# checks has, on its head, and its migration and ADR numbers are free (`numbers`). In the queue, it passes once every
+# check that ran there did, and each entry's own checks, read again, still say they passed on its head.
 on:
   pull_request:
     # And when a draft is ready for review, which is when its stress run starts (stress.yml).
@@ -41,6 +41,9 @@ jobs:
     if: github.event_name == 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       desktop: ${{ steps.paths.outputs.desktop }}
       harness: ${{ steps.paths.outputs.harness }}
@@ -49,7 +52,6 @@ jobs:
       site: ${{ steps.paths.outputs.site }}
       brand: ${{ steps.paths.outputs.brand }}
       report: ${{ steps.paths.outputs.report }}
-      windows: ${{ steps.paths.outputs.windows }}
       worker: ${{ steps.paths.outputs.worker }}
     steps:
       - uses: actions/checkout@v5
@@ -66,12 +68,28 @@ jobs:
         run: |
           bun -e '
             const changed = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
-            for (const name of ["desktop", "harness", "host", "ui", "site", "brand", "report", "windows", "worker"]) {
+            for (const name of ["desktop", "harness", "host", "ui", "site", "brand", "report", "worker"]) {
               const workflow = Bun.YAML.parse(await Bun.file(`.github/workflows/${name}.yml`).text())
               const globs = workflow.on.pull_request.paths.map((path) => new Bun.Glob(path))
               console.log(`${name}=${changed.some((file) => globs.some((glob) => glob.match(file)))}`)
             }
           ' | tee -a "$GITHUB_OUTPUT"
+      # What each entry changes and what landed beneath it since it branched, for desktop, harness and ui to plan from.
+      # When it can't say, they find no entries and run what the whole group changes.
+      - continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/queue"
+          python3 .github/scripts/queue-entries.py "$RUNNER_TEMP/queue/entries.json"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: queue-entries
+          path: ${{ runner.temp }}/queue
+          if-no-files-found: ignore
+          retention-days: 1
 
   desktop:
     needs: changes
@@ -87,11 +105,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host == 'true'
     uses: ./.github/workflows/host.yml
-
-  windows:
-    needs: changes
-    if: needs.changes.outputs.windows == 'true'
-    uses: ./.github/workflows/windows.yml
 
   ui:
     needs: changes
@@ -152,15 +165,17 @@ jobs:
   # runs.
   merge-queue:
     name: merge queue
-    needs: [changes, numbers, desktop, harness, host, ui, site, brand, report, windows, worker]
+    needs: [changes, numbers, desktop, harness, host, ui, site, brand, report, worker]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.
+    # Long enough to wait out a pull request's own checks still going, whose longest jobs take 75 minutes at most.
     timeout-minutes: 80
     permissions:
       actions: read
       checks: read
       contents: read
+      # When a pull request became ready for review, from its timeline.
+      issues: read
       pull-requests: read
     steps:
       - env:
@@ -173,25 +188,24 @@ jobs:
               exit 1
               ;;
           esac
-      # Stress and Windows' smoke test run on the pull request alone, so one that failed on a pull request's own head
-      # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine; a
-      # stress run still going is waited for, read again every 30 s, as its failure would come after the group merged.
+      # Each pull request's own checks, on its head: every workflow its files call for, its stress run and Windows'
+      # smoke test (.github/scripts/queue-gate.py). On a pull request they are waited for, read again every 30 s, so
+      # auto-merge queues it only once they have all passed; in the queue, each entry's are read again.
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      # The queue's own scripts, on every pull request too, so one that breaks them fails where it was made.
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
-        run: |
-          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
-          python3 .github/scripts/queue-stress.py
-      # On the pull request, its own stress run is waited for here, so auto-merge queues it only once that has passed.
+        run: python3 .github/scripts/queue-gate.py
       - if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-        run: python3 .github/scripts/queue-stress.py "$PR"
+        run: python3 .github/scripts/queue-gate.py "$PR"
