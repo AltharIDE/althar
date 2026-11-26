@@ -1,3 +1,4 @@
+import type { PlaceTo, TaskPlaced } from './taskPlaces'
 import { readGoal } from './threadGoals'
 import { createHash } from 'node:crypto'
 import { type CheckoutAnswer, type MessageSender, PLANS_AND_REVIEWS, ShipRoute } from '@althar/contracts'
@@ -87,7 +88,6 @@ export {
   type Place,
   PlanParameters,
   PlanStep,
-  RESTART_GRACE,
   type ReviewerChange,
   type StuckAnswer,
   type StuckInfo,
@@ -97,7 +97,6 @@ export {
   type TeamChanged,
   beforeFirstStep,
   checkoutWaitOf,
-  endingOf,
   mayPass,
   planWaits,
   reviewerChange,
@@ -322,6 +321,17 @@ export class Runs extends Context.Service<
     }): Effect.Effect<Moved, unknown>
     /** Calls off a move that waits: the task stays where it works. */
     dropMove(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Moves a running task between the home and its workers, or between workers (taskPlaces.ts): between its lead's turns,
+     * with its work, and its lead started afresh there, on the model picked for there where its own isn't offered.
+     */
+    place(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly to: PlaceTo
+      readonly lead?: { readonly model?: string; readonly effort?: string }
+      readonly fromLastTurn?: boolean
+    }): Effect.Effect<TaskPlaced, unknown>
     /**
      * Points a running task at another branch to work toward (a task is a conversation plus parts, "Changing the branch a
      * task works toward"), or its default with null: between its lead's turns, the person's word waiting for one under way;
@@ -2500,7 +2510,7 @@ export class Runs extends Context.Service<
         stuck,
         usageLimitOfRun,
       })
-      const { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, placeFirst, workToward, worksInOf } =
+      const { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, place, placeFirst, workToward, worksInOf } =
         yield* makeRunCheckouts({ busy, changes, currentRun, instance, notYetStopped, sessions, stepsOf, stuck, waitForPlace })
 
       yield* Effect.forkScoped(
@@ -3099,6 +3109,16 @@ export class Runs extends Context.Service<
             ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
           ),
         workToward: (input) => provide(workToward(input)),
+        place: (input) =>
+          provide(
+            place({
+              taskId: input.taskId,
+              to: input.to,
+              ...(input.lead === undefined ? {} : { lead: input.lead }),
+              ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
+              actorId: input.envelope.actorId,
+            }),
+          ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
         dropMove: (input) =>
           provide(
             Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, within } from 'storybook/test'
 
 import { SkillInstall, SkillReview, type SkillReviewModel } from './Skills'
 

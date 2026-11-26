@@ -28,6 +28,8 @@ const release: HostRelease = {
   sha256: 'a'.repeat(64),
   bytes: 40_000_000,
   unpackedBytes: 120_000_000,
+  apiVersion: 1,
+  storage: 'c'.repeat(64),
 }
 const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
 const looked = (more: Record<string, unknown> = {}) =>
@@ -546,6 +548,8 @@ const manifest = {
   publishedAt: '2025-11-01T00:00:00.000Z',
   expiresAt: '2026-05-01T00:00:00.000Z',
   platform: 'linux',
+  apiVersion: 1,
+  storage: 'c'.repeat(64),
   arch: 'x64',
   archive: { url: 'https://example.test/a.tar.gz', sha256: 'b'.repeat(64), bytes: 40_000_000 },
   unpackedBytes: 120_000_000,

@@ -30,8 +30,12 @@ use crate::{
     agent_capacity::worker_capacity,
     agent_files::send_file,
     agent_managed::ManagedCommands,
+    agent_readiness::readiness_from,
     agent_reservation::{agent_service, reserve},
-    agent_setup::{DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, WorkspaceSetup, worker_environment},
+    agent_setup::{
+        DESCRIPTOR_BYTES, OUTPUT_BYTES, SetupPlan, TOOLS_VARIABLE, WorkspaceSetup, tools_of,
+        worker_environment,
+    },
     agent_skills::{MAX_BYTES as MAX_SKILL_BYTES, SkillDirectory},
     agent_tools::forward_tools,
     agent_workspace::{WorkspaceTransfer, workspace_patch},
@@ -45,9 +49,9 @@ use crate::{
         AgentHomeFrame, AgentRunAccepted, AgentRunBytes, AgentRunExit, AgentRunOutcome,
         AgentRunReady, AgentRunStart, AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest,
         AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat,
-        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
-        AgentWorkspaceSetupSource, agent_home_frame::Payload as HomeMessage,
-        agent_worker_frame::Payload as WorkerMessage,
+        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkerReadiness, AgentWorkspaceSetup,
+        AgentWorkspaceSetupResult, AgentWorkspaceSetupSource,
+        agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
@@ -91,6 +95,31 @@ pub struct AgentConfig {
     root: PathBuf,
     providers: Vec<Provider>,
     mcp: HashMap<String, Vec<AgentWorkerMcpCommand>>,
+    /// Where a worker its home set up keeps which of its agents are signed in, read again at each hello.
+    signed_in: Option<PathBuf>,
+    /// The Althar release it runs, where it was installed from one.
+    release: String,
+}
+
+/// The agents of `providers` that the setup's file says are signed in, once each, in order; none where it can't be read.
+fn signed_in_from(path: &Path, providers: &[String]) -> Vec<String> {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    let mut found: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|id| providers.iter().any(|provider| provider == id))
+        .map(str::to_owned)
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// An agent entry for any project its home grants it: a worker its home set up offers its agents so.
+pub const ANY_PROJECT: &str = "*";
+
+fn project_or_any(id: &str) -> bool {
+    id == ANY_PROJECT || valid_id(id, "proj_")
 }
 
 impl AgentConfig {
@@ -134,7 +163,7 @@ impl AgentConfig {
                 return Err(invalid("An agent entry needs a provider ID"));
             };
             if providers.len() == MAX_CAPABILITIES
-                || !valid_id(project_id, "proj_")
+                || !project_or_any(project_id)
                 || !executable.is_absolute()
                 || !executable.is_file()
                 || providers.iter().any(|provider| {
@@ -185,7 +214,54 @@ impl AgentConfig {
             root,
             providers,
             mcp,
+            signed_in: None,
+            release: String::new(),
         })
+    }
+
+    /// Says, in each hello, which agents are signed in (one provider ID a line, in `signed_in`) and the release it runs.
+    pub fn with_status(mut self, signed_in: PathBuf, release: String) -> Self {
+        self.signed_in = Some(signed_in);
+        self.release = release.chars().take(64).collect();
+        self
+    }
+
+    fn any_project(&self) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.capability.project_id == ANY_PROJECT)
+    }
+
+    /// What the worker's own check found, kept beside `signed-in`; none where it hasn't checked.
+    fn readiness(&self) -> Option<AgentWorkerReadiness> {
+        let path = self.signed_in.as_ref()?.with_file_name("readiness");
+        let providers: Vec<String> = self
+            .providers
+            .iter()
+            .map(|provider| provider.capability.provider_id.clone())
+            .collect();
+        readiness_from(&path, &providers)
+    }
+
+    /// The configured agents signed in now, as the file the setup keeps says; none where it can't be read.
+    fn signed_in(&self) -> Vec<String> {
+        let Some(path) = &self.signed_in else {
+            return Vec::new();
+        };
+        let providers: Vec<String> = self
+            .providers
+            .iter()
+            .map(|provider| provider.capability.provider_id.clone())
+            .collect();
+        signed_in_from(path, &providers)
+    }
+
+    fn mcp_for(&self, project: &str) -> Vec<AgentWorkerMcpCommand> {
+        self.mcp
+            .get(project)
+            .or_else(|| self.mcp.get(ANY_PROJECT))
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn register_mcp<'a>(
@@ -196,7 +272,7 @@ impl AgentConfig {
         let project = fields.next().unwrap_or_default();
         let name = fields.next().unwrap_or_default();
         let executable = Path::new(fields.next().unwrap_or_default());
-        if !valid_id(project, "proj_")
+        if !project_or_any(project)
             || name.is_empty()
             || name.len() > 64
             || !name
@@ -235,7 +311,9 @@ impl AgentConfig {
         self.providers
             .iter()
             .find(|one| {
-                one.capability.project_id == project && one.capability.provider_id == provider
+                one.capability.provider_id == provider
+                    && (one.capability.project_id == project
+                        || (one.capability.project_id == ANY_PROJECT && valid_id(project, "proj_")))
             })
             .ok_or_else(|| invalid("This agent was not configured for this project"))
     }
@@ -420,6 +498,8 @@ struct Slot {
     until: Instant,
     workspace_root: PathBuf,
     reserve_before_transfer: bool,
+    /// Where it keeps which agents are signed in, and the agents it has: said again with its capacity.
+    sign_ins: Option<(PathBuf, Vec<String>)>,
 }
 
 impl Slot {
@@ -441,6 +521,19 @@ impl Slot {
                     capacity: (self.sequence.is_multiple_of(4))
                         .then(|| worker_capacity(&self.workspace_root))
                         .flatten(),
+                    reports_sign_in: self.sign_ins.is_some() && self.sequence.is_multiple_of(4),
+                    signed_in: match &self.sign_ins {
+                        Some((path, providers)) if self.sequence.is_multiple_of(4) => {
+                            signed_in_from(path, providers)
+                        }
+                        _ => Vec::new(),
+                    },
+                    readiness: match &self.sign_ins {
+                        Some((path, providers)) if self.sequence.is_multiple_of(4) => {
+                            readiness_from(&path.with_file_name("readiness"), providers)
+                        }
+                        _ => None,
+                    },
                 }),
             ),
         )
@@ -490,11 +583,12 @@ impl AgentUnit {
         cwd: &Path,
         journal: &DiagnosticJournal,
         setup: Option<&SetupPlan>,
+        tools: &[String],
     ) -> Result<Self, Failure> {
         let mut args = setup.map_or_else(|| vec!["--agent-unit".into()], SetupPlan::guardian_args);
         args.push(provider.executable.clone().into_os_string());
         args.extend(provider.args.iter().map(OsString::from));
-        let unit = Self::open(agent_service(&run.run_id), cwd, &args, None).await?;
+        let unit = Self::open_with(agent_service(&run.run_id), cwd, &args, None, tools).await?;
         let recorded = unit
             .group
             .strip_prefix("/sys/fs/cgroup")
@@ -510,6 +604,17 @@ impl AgentUnit {
         cwd: &Path,
         args: &[OsString],
         parent: Option<&str>,
+    ) -> Result<Self, Failure> {
+        Self::open_with(name, cwd, args, parent, &[]).await
+    }
+
+    /// A unit whose guardian installs `tools` (`name@version`) before its setup runs.
+    async fn open_with(
+        name: String,
+        cwd: &Path,
+        args: &[OsString],
+        parent: Option<&str>,
+        tools: &[String],
     ) -> Result<Self, Failure> {
         let mut command = Command::new("/usr/bin/systemd-run");
         command.args([
@@ -528,6 +633,9 @@ impl AgentUnit {
             "--property=NoNewPrivileges=yes",
             "--property=UMask=0077",
         ]);
+        if !tools.is_empty() {
+            command.arg(format!("--setenv={TOOLS_VARIABLE}={}", tools.join(" ")));
+        }
         if let Some(parent) = parent {
             command.arg(format!("--property=Requisite={parent}"));
             command.arg(format!("--property=PartOf={parent}"));
@@ -702,7 +810,7 @@ async fn serve_agent(
                 tools_port: u32::from(tools_port),
                 setup,
                 skills_path: skills_path.into(),
-                mcp_commands: config.mcp.get(&run.project_id).cloned().unwrap_or_default(),
+                mcp_commands: config.mcp_for(&run.project_id),
             }),
         ),
     )
@@ -917,6 +1025,11 @@ pub async fn watch_agent_slot(
                     .iter()
                     .map(|provider| provider.capability.clone())
                     .collect(),
+                any_project: config.any_project(),
+                reports_sign_in: config.signed_in.is_some(),
+                signed_in: config.signed_in(),
+                release: config.release.clone(),
+                readiness: config.readiness(),
             }),
         )
         .await?;
@@ -950,6 +1063,16 @@ pub async fn watch_agent_slot(
             lease,
             until: Instant::now() + lease,
             workspace_root: config.root.clone(),
+            sign_ins: config.signed_in.as_ref().map(|path| {
+                (
+                    path.clone(),
+                    config
+                        .providers
+                        .iter()
+                        .map(|provider| provider.capability.provider_id.clone())
+                        .collect(),
+                )
+            }),
             reserve_before_transfer: hello.reserve_before_transfer,
         })
     })
@@ -1154,14 +1277,29 @@ async fn execute(
         .map(SkillDirectory::as_str)
         .transpose()?
         .unwrap_or_default();
-    let mut unit =
-        match AgentUnit::start(run, provider, &workspace.root, journal, setup.as_ref()).await {
-            Ok(unit) => unit,
-            Err(error) => {
-                eprintln!("Could not prepare the agent unit: {error}");
-                return Ok((AgentRunOutcome::StartFailed, None));
-            }
-        };
+    // Checked with the plan above: a setup asking for a tool it doesn't install never got here.
+    let tools = descriptor
+        .as_ref()
+        .map(tools_of)
+        .transpose()
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut unit = match AgentUnit::start(
+        run,
+        provider,
+        &workspace.root,
+        journal,
+        setup.as_ref(),
+        &tools,
+    )
+    .await
+    {
+        Ok(unit) => unit,
+        Err(error) => {
+            eprintln!("Could not prepare the agent unit: {error}");
+            return Ok((AgentRunOutcome::StartFailed, None));
+        }
+    };
     let result = match run.tools {
         true => {
             // The listener stays on worker loopback. The home checks both
@@ -1332,6 +1470,39 @@ mod config_tests {
         std::os::unix::fs::symlink(&checked_out, &local)?;
         set_config(entry)?;
         assert!(AgentConfig::read(&config).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn an_agent_for_any_project_runs_for_each_the_home_sends_and_says_who_is_signed_in()
+    -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().join("workspaces");
+        crate::agent_workspace::private_directory(&root)?;
+        let binary = std::env::current_exe()?.canonicalize()?;
+        let config = temp.path().join("agents.conf");
+        fs::write(
+            &config,
+            format!(
+                "{}\n*\tcodex\t{}\n*\tclaude\t{}\n",
+                root.display(),
+                binary.display(),
+                binary.display()
+            ),
+        )?;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o600))?;
+        let signed_in = temp.path().join("signed-in");
+        let loaded = AgentConfig::read(&config)?.with_status(signed_in.clone(), "0.11.0".into());
+        assert!(loaded.any_project());
+        let project = format!("proj_{}", "1".repeat(32));
+        assert!(loaded.provider(&project, "codex").is_ok());
+        assert!(loaded.provider(&project, "opencode").is_err());
+        assert!(loaded.provider("not-a-project", "codex").is_err());
+        // Nothing said yet: none signed in. Then only the agents it has, once each.
+        assert!(loaded.signed_in().is_empty());
+        fs::write(&signed_in, "codex\nunknown\ncodex\n")?;
+        assert_eq!(loaded.signed_in(), vec!["codex".to_owned()]);
+        assert_eq!(loaded.release, "0.11.0");
         Ok(())
     }
 }

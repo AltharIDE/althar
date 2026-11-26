@@ -128,5 +128,3 @@ export interface Driver {
   /** Takes the lead's outlines away at once, so a picture of the page shows the page alone; how many there were. */
   unmark(): number
 }
-
-export const isDriving = (value: unknown): value is Driver => typeof value === 'object' && value !== null

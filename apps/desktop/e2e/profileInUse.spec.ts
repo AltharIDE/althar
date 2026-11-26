@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
-import { launch, mainWindow, pastTheTour } from './support'
+import { displaySwitches, launch, mainWindow, pastTheTour } from './support'
 
 /*
  * A profile another runtime has open (DEV-115): the CLI, or another Althar.
@@ -97,7 +97,7 @@ test('a second launch on the same profile brings the first forward and ends, whi
 
     // The app as a person starts it again: on the same profile and window folder, it asks the first to come forward and exits.
     const code = await new Promise<number | null>((resolve, reject) => {
-      const second = execFile(electronPath, [app], {
+      const second = execFile(electronPath, [app, ...displaySwitches], {
         env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_QUIET: '1' },
       })
       second.on('error', reject)

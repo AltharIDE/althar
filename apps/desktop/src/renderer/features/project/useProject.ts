@@ -22,6 +22,7 @@ import { messageOf, type RunRef } from '../../data/client'
 import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import { useProjectWorkers } from '../../shared/useProjectWorkers'
 import type { OutputSoFar } from '../../shared/handed'
 import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
@@ -197,13 +198,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const readNow = thread.data ?? null
-  const workers =
-    useQuery({
-      queryKey: ['project-workers', projectId],
-      queryFn: () => client.listProjectWorkers(projectId),
-      retry: false,
-      refetchInterval: 5000,
-    }).data ?? []
+  const workers = useProjectWorkers(projectId)
   // What a clear or a forgotten conversation takes from the thread, gone from the press until the thread is read rewritten:
   // the view's version as it was pressed on, and what goes, by id.
   const [rewriting, setRewriting] = useState<{ readonly version: number; readonly gone: ReadonlySet<string> } | null>(null)
@@ -266,28 +261,6 @@ export const useProject = (projectId: string): ProjectModel => {
   )
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
-
-  /**
-   * Items read or heard join the thread the window shows, by its view: not one of the conversation before a clear while the
-   * view is cleared, nor one after it while the earlier conversation is open. `version` is the view's when the read began: a
-   * read that outlived a clear, a wipe or an undo is of another thread, and is dropped.
-   */
-  const arrived = useCallback(
-    (items: ReadonlyArray<ThreadItem>, version?: number) => {
-      setCoordinator((current) =>
-        version !== undefined && current.view.version !== version
-          ? current
-          : {
-              ...current,
-              items: mergeItems(
-                current.items,
-                items.filter((item) => inView(current.view, current.items, item)),
-              ),
-            },
-      )
-    },
-    [setCoordinator],
-  )
 
   /** The version of the view the window holds now, for a read that lands later. */
   const viewVersion = useCallback(

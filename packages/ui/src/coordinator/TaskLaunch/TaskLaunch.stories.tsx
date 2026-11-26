@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState, type ComponentProps } from 'react'
+import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
@@ -15,11 +15,7 @@ import { BlockerStands, TaskEnd, WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchPlace, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
-function usePicker(
-  steps: readonly LaunchStep[],
-  setSteps: (s: readonly LaunchStep[]) => void,
-  room?: ComponentProps<typeof ModelPick>['room'],
-) {
+function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
@@ -29,7 +25,6 @@ function usePicker(
         variant="field"
         placement="below"
         owner={owner}
-        room={room}
         model={agent}
         pinned={prefs.pinned}
         effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
@@ -55,11 +50,10 @@ function Launch({
   plan = PLAN_432,
   wait,
   onStart = () => {},
-  room,
   ...rest
-}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[]; room?: ComponentProps<typeof ModelPick>['room'] }) {
+}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[] }) {
   const [steps, setSteps] = useState<readonly LaunchStep[]>(plan)
-  const picker = usePicker(steps, setSteps, room)
+  const picker = usePicker(steps, setSteps)
   return (
     <TaskLaunch
       task="432"
@@ -194,6 +188,51 @@ export const WorkersOpen: Story = {
   },
 }
 
+const CHECKED: readonly LaunchPlace[] = [
+  { value: 'home', label: 'This Mac', kind: 'home' },
+  { value: 'auto', label: 'Any free worker', kind: 'any' },
+  { value: 'wrk_runner1', label: 'runner-1', kind: 'worker', hint: '12 GB free · Installs Bun first' },
+  { value: 'wrk_runner2', label: 'runner-2', kind: 'worker', hint: 'Sandbox can’t start', disabled: true },
+  { value: 'wrk_runner3', label: 'runner-3', kind: 'worker', hint: 'Claude Code signed out', disabled: true },
+]
+
+/** Workers as their own checks found them: one ready, installing Bun first for this project; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
+export const WorkersChecked: Story = {
+  render: function Render() {
+    const [place, choose] = useState('home')
+    return (
+      <Launch
+        held
+        estimate={undefined}
+        worksIn={WorksIn.Worktree}
+        runsOn={{ value: place, places: CHECKED, onChange: choose, note: 'The setup and lead run on the worker, the review on This Mac.' }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Runs on: This Mac' }))
+    await expect(await within(document.body).findByRole('menuitemradio', { name: 'runner-2' })).toHaveAttribute('aria-disabled', 'true')
+  },
+}
+
+/** Set to run on a worker whose agent doesn't offer the lead's model: Start waits until the picker has one it does. */
+export const ModelNotOnTheWorker: Story = {
+  render: () => (
+    <Launch
+      held
+      estimate={undefined}
+      worksIn={WorksIn.Worktree}
+      runsOn={{
+        value: 'wrk_runner1',
+        places: CHECKED,
+        onChange: fn(),
+        problem: 'runner-1 doesn’t offer Claude Opus 5. Pick a model it has.',
+      }}
+      startDisabled
+    />
+  ),
+}
+
 /** Set to run on any free worker. */
 export const OnAnyFreeWorker: Story = {
   ...HeldWithWorkers,
@@ -283,17 +322,6 @@ export const AReview: Story = {
     await expect(reviewStarted).not.toHaveBeenCalled()
   },
 }
-
-/** The reviewer's usage stays out of its model picker. */
-const reviewerNearly = (left: number): Story => ({
-  render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
-  play: async ({ canvasElement }) => {
-    const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
-    await expect(within(canvasElement).queryByText(said)).toBeNull()
-  },
-})
-export const ReviewerNearlyOut: Story = reviewerNearly(4)
-export const ReviewerOut: Story = reviewerNearly(0)
 
 const heldChanged = fn()
 const startedHeld = fn()

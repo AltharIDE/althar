@@ -55,20 +55,3 @@ export const AGENTS: readonly AgentInfo[] = [
     runs: { code: 'agy_acp_server.par', whose: 'yours' },
   },
 ]
-
-const NAMED: Record<Agent, string> = {
-  [Agent.Claude]: 'Claude Code',
-  [Agent.Codex]: 'Codex',
-  [Agent.Gemini]: 'Gemini',
-  [Agent.OpenCode]: 'OpenCode',
-  [Agent.Copilot]: 'GitHub Copilot',
-  [Agent.Cursor]: 'Cursor',
-  [Agent.Qwen]: 'Qwen Code',
-  [Agent.Kimi]: 'Kimi Code',
-  [Agent.Mistral]: 'Mistral Vibe',
-  [Agent.Junie]: 'Junie',
-  [Agent.Grok]: 'Grok Build',
-  [Agent.Antigravity]: 'Google Antigravity',
-}
-
-export const agentName = (id: Agent): string => NAMED[id]

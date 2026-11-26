@@ -7,7 +7,7 @@ import { KIND_WORD, SHIFTS, ShiftKind, UPCOMING, type Shift, type Upcoming } fro
 import { useHash, useToday } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import { byMonth, countByKind, daysCovered, newestFirst, onlyKind, shortDate, soonestFirst, stillAhead, untilWord } from './group'
 import s from './Shifts.module.css'
@@ -163,7 +163,7 @@ export function Shifts() {
 
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
       <Night>
         <Window
           deck={

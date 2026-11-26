@@ -189,6 +189,18 @@ describe('a task’s parts where it has little or several kinds of work', () => 
     expect(waiting?.detail).toBe('Another task has the checkout.')
     waiting?.actions?.find((one) => one.label === 'Call it off')?.onClick?.()
     expect(dropMove).toHaveBeenCalledOnce()
+    // A move between the home and a worker that waits for its lead's turn says why, and is called off there too.
+    const dropPlace = vi.fn()
+    const placing = partsOf(thread({ placing: { to: 'home', why: 'Moves to This Mac once its lead’s turn ends.' } }), {
+      ...act,
+      dropPlace,
+    }).find((one) => one.id === 'worktree')
+    expect(placing?.detail).toBe('Moves to This Mac once its lead’s turn ends.')
+    placing?.actions?.find((one) => one.label === 'Call it off')?.onClick?.()
+    expect(dropPlace).toHaveBeenCalledOnce()
+    // Going there at once, before the runtime's word: no reason yet, nothing to call off.
+    const going = partsOf(thread({ placing: { to: 'home', why: '' } }), { ...act, dropPlace }).find((one) => one.id === 'worktree')
+    expect(going?.actions?.map((one) => one.label)).toEqual(['Move to Local'])
     expect(partsText.uncommitted(1)).toBe('1 file isn’t committed. They’d be lost.')
     expect(partsText.uncommitted(2)).toBe('2 files aren’t committed. They’d be lost.')
   })

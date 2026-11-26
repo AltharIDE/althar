@@ -1,14 +1,16 @@
 /*
  * Why an agent couldn't start, or couldn't be reached, in the few classes a
  * person can act on (DEV-196): it isn't installed, it isn't signed in, its
- * sign-in ended, or the network is in the way. Read from what the agent or
+ * sign-in ended, the network is in the way, its program and what drives it
+ * are different versions, a part of it is missing, or it crashed on the way.
+ * Read from what the agent or
  * the system said: a spawn's error, what the agent wrote before it stopped,
  * or a request it refused. Anything else is no class here, and its own first
  * error line says it. The texts are what the agents said, as the tests'
  * fixtures record them (tests/startFailure.test.ts).
  */
 
-export type StartFailure = 'not_installed' | 'signed_out' | 'sign_in_ended' | 'unreachable'
+export type StartFailure = 'not_installed' | 'signed_out' | 'sign_in_ended' | 'unreachable' | 'version_mismatch' | 'incomplete' | 'crashed'
 
 /** A command that isn't there: Node's spawn error, a shell's, or Windows' own. */
 const notInstalled =
@@ -32,6 +34,48 @@ const ended =
  */
 const signedOut =
   /auth(?:entication)? required|not (?:logged|signed) in|please (?:log|sign) ?in|(?:log|sign) ?in to continue|please run \/login|\b(?:status|error|code|http\/[\d.]+)\W{0,3}401\b|invalid api key|no api key|not authenticated|missing (?:api key|credentials)/i
+
+/**
+ * A program refusing what it was started with, as a version older or newer
+ * than what drives it does: an option, a command or an argument it doesn't
+ * know, in the words of each agent's own command-line parser, and the agents'
+ * own words for it. Commander (Claude Code, Copilot): `error: unknown option
+ * '--initialize-fields=settings'`, as Claude Code 2.1.326 said it to Agent
+ * SDK 0.3.330 on 24 November 2026; clap (Codex, Grok Build): `error:
+ * unexpected argument '--acp' found`, `unrecognized subcommand`; yargs
+ * (Gemini CLI, Qwen Code): `Unknown argument: acp`; OpenCode 2.3.0's `Unrecognized
+ * flag: --acp in command opencode`; Click and
+ * Typer (Kimi Code): `No such option: --acp`, `No such command 'acp'`;
+ * argparse (Mistral Vibe): `unrecognized arguments`; cobra: `unknown flag`;
+ * picocli (Junie): `Unknown option: '--acp'`. And Claude Code's "too old to
+ * read MCP servers from the initialize request", an ACP protocol version an
+ * agent doesn't speak, "requires a newer version", and Althar's own check
+ * before it starts one (`bundledProblem`).
+ */
+const mismatch =
+  /\bunknown (?:option|flag|command|subcommand|argument)s?\b|\bunexpected argument\b|\bunrecognized (?:subcommand|argument|option|flag)s?\b|\bno such (?:option|command)\b|\bunmatched argument\b|\btoo old to\b|\brequires? (?:a )?newer (?:version|release)\b|\bversion mismatch\b|\bunsupported (?:acp |protocol )+version\b|\bprotocol version\b.{0,40}\bnot supported\b|\bincompatible (?:version|protocol)\b|\bown program is version \S+, and its adapter needs\b/i
+
+/** An agent saying it is too old for what drives it. */
+const tooOld = /\b(?:is|are) too old to\b/i
+
+/**
+ * A program that comes with an agent's adapter, missing: Claude Code's Agent
+ * SDK and its adapter (`Native CLI binary for darwin-arm64 not found`,
+ * `Claude native binary not found`, `The Claude CLI is missing`), Codex's
+ * launcher (`Missing optional dependency @openai/codex-darwin-arm64`), and
+ * Althar's own check before it starts one (`bundledProblem`).
+ */
+const incomplete =
+  /\bnative (?:cli )?binary (?:for \S+ )?not found\b|\bnative binary not found\b|\bthe claude cli is missing\b|\bmissing optional dependency\b|without --omit=optional|\bown program for this computer\b.{0,80}\bis missing\b/i
+
+/**
+ * An adapter whose agent stopped under it while it started: Claude Code's
+ * SDK (`Claude Code process exited with code 1`, `Query closed before
+ * response received`), claude-agent-acp's "The Claude Agent process exited
+ * unexpectedly", and a signal or a crash, said by any.
+ */
+const crashed =
+  /\bprocess exited (?:unexpectedly|with code -?\d+)|\bexited unexpectedly\b|\bterminated by signal\b|\bkilled by signal\b|\bSIG(?:KILL|SEGV|ABRT|BUS|ILL)\b|\bsegmentation fault\b|\bquery closed before response received\b|\bpanicked at\b/i
 
 /** A spawn the adapter made of its agent's command, the one "isn't installed" an agent that started can still say. */
 const spawnMissing = /\bspawn \S+ ENOENT\b|\bENOENT\b.{0,40}\bspawn\b/i
@@ -60,11 +104,17 @@ const unreachable =
  * tool's. Lines about an MCP server, a hook or a plugin name no class.
  */
 export const startFailureOf = (said: string, authRequired = false, started = false): StartFailure | undefined => {
+  // The agent saying it is too old is about itself, whatever it is too old for ("to read MCP servers from the initialize request").
+  if (tooOld.test(said)) return 'version_mismatch'
   if (!authRequired && aside.test(said)) return undefined
+  if (incomplete.test(said)) return 'incomplete'
   if (started ? spawnMissing.test(said) : notInstalled.test(said)) return 'not_installed'
   if (ended.test(said)) return 'sign_in_ended'
   if (authRequired || signedOut.test(said)) return 'signed_out'
+  // After the sign-in: a program that stopped for its sign-in says so as it stops, and it is the sign-in to put right.
+  if (mismatch.test(said)) return 'version_mismatch'
   if (unreachable.test(said)) return 'unreachable'
+  if (crashed.test(said)) return 'crashed'
   return undefined
 }
 

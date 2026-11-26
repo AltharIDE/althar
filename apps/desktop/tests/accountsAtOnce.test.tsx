@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type Status } from '@althar/contracts'
 
+import { useModels } from '../src/renderer/data/models'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -11,7 +12,7 @@ import { connectionList, fakeClient, githubConnection, status, usual } from './f
 import { servicesFor } from './render'
 
 /*
- * An account renamed, moved or removed, and a connection disconnected, show so from the press, before the runtime has
+ * An account renamed, moved, signed out or removed, and a connection disconnected, show so from the press, before the runtime has
  * them (docs/decisions/foundations.md, The UI is instant), and come back, saying why, where they didn't go through.
  */
 
@@ -75,6 +76,37 @@ describe('an account changed', () => {
     act(() => void press(result.current))
     expect(accountsOf(result.current.status)).toEqual(shown)
     await act(async () => answer.resolve())
+  })
+
+  it('shows the usual folder’s account signed out from the press, and its agent’s models are read again once it is', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => withTwo) })
+    const answer = later()
+    vi.mocked(client.signOutAccount).mockReturnValue(answer.promise)
+    // A picker shows the models meanwhile, as Settings' agent page does.
+    const { result } = render(() => ({ start: useStart(), models: useModels() }), client)
+    await waitFor(() => expect(result.current.start.status).not.toBeNull())
+    await waitFor(() => expect(result.current.models).not.toBeNull())
+    const signedIn = (shown: Status | null) =>
+      shown?.agents.find((agent) => agent.id === 'claude-code')?.accounts.map((account) => [account.id, account.signIn])
+    act(() => void result.current.start.signOutAccount('acc_claude'))
+    expect(signedIn(result.current.start.status)).toEqual([
+      ['acc_claude', 'signed_out'],
+      ['acc_work', 'signed_in'],
+    ])
+    expect(client.signOutAccount).toHaveBeenCalledWith('acc_claude')
+    const read = vi.mocked(client.getModels).mock.calls.length
+    await act(async () => answer.resolve())
+    await waitFor(() => expect(vi.mocked(client.getModels).mock.calls.length).toBeGreaterThan(read))
+  })
+
+  it('reads the models again once an account is moved, as they follow the accounts’ order', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => withTwo) })
+    const { result } = render(() => ({ start: useStart(), models: useModels() }), client)
+    await waitFor(() => expect(result.current.start.status).not.toBeNull())
+    await waitFor(() => expect(result.current.models).not.toBeNull())
+    const read = vi.mocked(client.getModels).mock.calls.length
+    await act(() => result.current.start.moveAccount('claude-code', 'acc_work', 'up'))
+    await waitFor(() => expect(vi.mocked(client.getModels).mock.calls.length).toBeGreaterThan(read))
   })
 
   it('holds a rename over a read begun before it, as a recheck on focus is, until a read after its answer', async () => {

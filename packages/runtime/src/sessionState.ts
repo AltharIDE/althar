@@ -414,6 +414,8 @@ export interface Running {
    * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
    */
   moved: boolean
+  /** The model and effort its lead starts on where it moved, as the person picked them for where it went. */
+  movedLead?: { readonly model?: string; readonly effort?: string }
   /**
    * Where the next turn's time went before it was delivered (turnTimes.ts):
    * how long its session took to start or be handed over, and its folder's

@@ -19,6 +19,7 @@ export const HomeScreen = memo(function HomeScreen() {
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
       onTalk={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
+      onSettings={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Settings } })}
       onSignIn={ways.signIn}
     />
   )

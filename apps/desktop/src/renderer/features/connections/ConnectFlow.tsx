@@ -358,14 +358,6 @@ export const text = {
   done: 'Done',
 }
 
-/** What the header beside the card says: the service, and the projects it is for, or the connection's site. */
-export const connectHead = (model: ConnectModel): { readonly title: string; readonly aside?: string } => {
-  const title = serviceName(model.service)
-  if (model.again !== null) return { title, aside: hostOf(model.again.webUrl) }
-  const projects = projectsIn(model.guide?.places ?? [])
-  return projects.length === 0 ? { title } : { title, aside: text.for(projects) }
-}
-
 /** The line under the card's heading on the ways in: what it is for. */
 const forLine = (service: Service, places: ReadonlyArray<ConnectPlace>): string => {
   if (places.length === 0) return hostsCode(service) ? text.hostsFor : text.trackersFor

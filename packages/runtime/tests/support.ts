@@ -365,6 +365,8 @@ export const runtime = (
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
     readonly betweenAgents?: Duration.Duration
+    /** How a start waits for an agent's own program that isn't there yet: a moment unless a test says. */
+    readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
     /** How long cards are kept between reads at most, until their task moves: none unless a test says, as most write the store by hand. */
     readonly keptFor?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
@@ -446,6 +448,7 @@ export const runtime = (
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
+    programWait: more.programWait ?? { every: Duration.millis(10), within: Duration.millis(100) },
     // Cards worked out afresh on every read, as most tests write the store by hand; `ALTHAR_TEST_KEEP_CARDS=1` keeps them as
     // Althar does, to run any test on the cache production reads through.
     keptFor: more.keptFor ?? (process.env.ALTHAR_TEST_KEEP_CARDS === '1' ? KEPT_FOR : Duration.zero),

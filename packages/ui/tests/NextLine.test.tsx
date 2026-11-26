@@ -139,6 +139,29 @@ describe('the line up next, moving as a whole', () => {
   })
 })
 
+describe('the line up next, its first rows apart by their place', () => {
+  const split = (onMove: (id: string, to: number) => void | Promise<unknown>) => (
+    <NextLine
+      rows={['a', 'b', 'c'].map((id) => ({ id, title: `Task ${id}`, group: 'waiting' }))}
+      render={(id, place) => <p>{`${place}: Task ${id}`}</p>}
+      onMove={onMove}
+      heads={{ after: <span>After</span> }}
+      split={{ group: 'waiting', first: 2, rest: 'after' }}
+    />
+  )
+  const headed = () => screen.getAllByRole('listitem').flatMap((item) => (within(item).queryByText('After') === null ? [] : [item]))
+
+  it('heads the rows past the first ones, and the heading stays at that place when a row is moved past it', async () => {
+    const move = pending()
+    render(split(move.onMove))
+    expect(headed().map((item) => item.querySelector('p')?.textContent)).toEqual(['3: Task c'])
+    // The last put first: the row that was second goes past the first two, under the heading.
+    await moveFromMenu('c', 'Move to the front of the line')
+    expect(shown()).toEqual(['1: Task c', '2: Task a', '3: Task b'])
+    expect(headed().map((item) => item.querySelector('p')?.textContent)).toEqual(['3: Task b'])
+  })
+})
+
 describe('the line up next, across its groups', () => {
   const grouped = (onMove: (id: string, to: number) => void, more?: (id: string) => ReactNode) => (
     <NextLine

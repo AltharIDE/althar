@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import type { BehindText, BehindWait, Heard, ListenSource } from '@althar/ui'
+import { type BehindText, type BehindWait, freesUpWords, type Heard, type ListenSource } from '@althar/ui'
 
 import { productBrand } from '../../shared/products'
 import type { ArrivalContent } from '../../shared/thread'
@@ -24,7 +24,7 @@ export const listeningText: Partial<BehindText> = { sources: (n) => (n === 1 ? '
 
 /**
  * Why it waits, where it does (ADR-032): where it stands in its project's
- * line, and the tasks that hold the places, those kept only by what they left
+ * line, held back for now until what frees it, and the tasks that hold the places, those kept only by what they left
  * running by its names, which can be stopped from here where its thread is
  * known. Null where it doesn't wait.
  */
@@ -33,6 +33,8 @@ export const waitOf = (task: ThreadSnapshot['task'], placeWords: (place: number)
     ? null
     : {
         ...(task.place === undefined ? {} : { place: placeWords(task.place) }),
+        // Held back for now: until what frees it.
+        ...(task.queued?.held === undefined ? {} : { held: freesUpWords(task.queued.held) }),
         holders: (task.queued?.holders ?? []).map((holder) => ({
           id: holder.taskId,
           title: holder.title,

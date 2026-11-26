@@ -1,6 +1,6 @@
 import { createServer } from 'node:https'
 import { randomBytes, X509Certificate } from 'node:crypto'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse, STATUS_CODES } from 'node:http'
 import type { Duplex } from 'node:stream'
 
 import { API_VERSION, ApiError, ClientChallenge, ClientDeviceId, ClientSignature, HomeId, PairingRegistration } from '@althar/contracts'
@@ -104,6 +104,12 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
       if (response.destroyed || response.writableEnded) return
       response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
       response.end(JSON.stringify(value))
+    }
+    /** Turns a WebSocket upgrade down with a status rather than a dropped connection, which reads as an unreachable home. */
+    const refuse = (socket: Duplex, status: 403 | 429 | 503) => {
+      if (socket.destroyed || !socket.writable) return void socket.destroy()
+      // Closed once it's written: a few bytes, so that is at once.
+      socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`, () => socket.destroy())
     }
     const authenticate = (request: IncomingMessage) =>
       Effect.gen(function* () {
@@ -254,17 +260,25 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
     server.on('tlsClientError', () => undefined)
     const ws = webSocketServer()
     server.on('upgrade', (request, socket, head) => {
-      if (!allowed(request) || request.url !== '/v1/api' || request.method !== 'GET' || inFlight >= 16 || active.size >= MAX_CONNECTIONS) {
-        socket.destroy()
-        return
-      }
+      if (!allowed(request) || request.url !== '/v1/api' || request.method !== 'GET') return refuse(socket, 403)
+      if (inFlight >= 16 || active.size >= MAX_CONNECTIONS) return refuse(socket, 503)
       inFlight++
       let upgraded = false
+      // Said before the socket closes, so a phone can tell a refusal from a lost network.
+      let status: 403 | 429 | 503 = 403
       run(
         Effect.gen(function* () {
-          if (!(yield* admit(request))) return yield* rejected()
+          if (!(yield* admit(request))) {
+            status = 429
+            return yield* rejected()
+          }
           const identity = yield* authenticate(request)
-          if (socket.destroyed || active.size >= MAX_CONNECTIONS) return yield* rejected()
+          if (socket.destroyed) return yield* rejected()
+          // Full by now: the phone was let in, so it's told to come back, as at the door.
+          if (active.size >= MAX_CONNECTIONS) {
+            status = 503
+            return yield* rejected()
+          }
           ws.handleUpgrade(request, socket, head, (webSocket) => {
             upgraded = true
             request.socket.setTimeout(0)
@@ -293,7 +307,7 @@ export const listenNetworkApi = (given: NetworkApiOptions): Effect.Effect<{ port
           Effect.ensuring(
             Effect.sync(() => {
               inFlight--
-              if (!upgraded) socket.destroy()
+              if (!upgraded) refuse(socket, status)
             }),
           ),
         ),
