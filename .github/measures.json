@@ -18,7 +18,7 @@
     },
     "runtime-json-extract": {
       "what": "json_extract in packages/runtime/src, in any case: a read of a JSON column's inside, which no index or schema checks. Counted in code and comments alike.",
-      "baseline": 372
+      "baseline": 375
     },
     "runtime-code-host-names": {
       "what": "Comparisons of a code host's product name in packages/runtime/src: 'github', 'gitlab' or 'bitbucket' beside ===, !==, == or !=, on either side, or as a case. A feature for every host reads its adapter's capabilities instead (foundations.md, A feature ships for every service that can have it). A comparison through a constant or a set isn't seen.",
@@ -32,7 +32,7 @@
       "what": "Runtime tests on the real clock that sleep: an `it.live` in packages/runtime/tests whose body, up to the next `it.live` or `it.effect`, calls Effect.sleep, sleep( or setTimeout(. What waits for time to pass belongs on the test's clock (`it.effect` with onTestClock). Not every `it.live`: a test of real processes and git needs the real clock, and a new one would raise it. detail counts each kind of test.",
       "baseline": 166,
       "detail": {
-        "it.live": 2646,
+        "it.live": 2648,
         "it.effect": 466
       }
     },
