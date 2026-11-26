@@ -657,6 +657,42 @@ describe('a project’s settings', () => {
     )
   })
 
+  it('takes back one repository’s settings in Rules, leaving the others’ as they were, and says why where it didn’t save', async () => {
+    const of = (repositoryId: string, name: string, command: string, trusted: boolean) => ({
+      repositoryId,
+      name,
+      files: [
+        {
+          agent: 'claude-code' as const,
+          agentName: 'Claude Code',
+          file: '.claude/settings.json',
+          hash: `h-${repositoryId}`,
+          runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command }],
+          trusted,
+          changed: false,
+          loadsAnyway: false,
+        },
+      ],
+    })
+    const refunds = of('rb_1', 'refunds', './notify.sh', true)
+    const ledger = of('rb_2', 'ledger', './lint.sh', false)
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [refunds, ledger]),
+      decideAgentSettings: vi.fn(async () => {
+        throw new Error('The project is gone.')
+      }),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const first = within(part.getByRole('region', { name: 'refunds' }))
+    const second = within(part.getByRole('region', { name: 'ledger' }))
+    expect(second.getByText('Leads start without them')).toBeTruthy()
+    await userEvent.click(first.getByRole('button', { name: 'Take back' }))
+    expect(await first.findByRole('alert')).toBeTruthy()
+    expect(second.queryByRole('alert')).toBeNull()
+    expect(second.getByRole('button', { name: 'Trust these settings' })).toBeTruthy()
+    expect(client.decideAgentSettings).toHaveBeenCalledTimes(1)
+  })
+
   it('shows in Rules what was trusted of a version the checkout here doesn’t have, and takes it back', async () => {
     const branch = {
       agent: 'claude-code' as const,

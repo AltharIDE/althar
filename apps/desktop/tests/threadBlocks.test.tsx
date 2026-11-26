@@ -108,6 +108,19 @@ describe('a lead that started without its repository’s agent settings', () => 
     expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
     expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: true, files: offer.files })
   })
+
+  it('says at once that its leads start without them, and where that didn’t save, offers Review again with why', async () => {
+    const client = show([items.notice({ source: 'runtime', role: 'aside', title, offer }, 'claude-code')])
+    let fail: (error: Error) => void = () => {}
+    vi.mocked(client.decideAgentSettings).mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run without them' }))
+    expect(screen.getByText('Its leads start without them.')).toBeTruthy()
+    expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: offer.files })
+    fail(new Error('The project is gone.'))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Review' })).toBeTruthy()
+  })
 })
 
 describe('the merge line', () => {

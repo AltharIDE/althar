@@ -52,14 +52,13 @@ export const decidedOf = (files: RepositoryAgentSettings['files']): TrustDecided
         ? 'undecided'
         : 'declined'
 
-export const useAgentSettings = (projectId: string | null): AgentSettingsModel => {
+export const useAgentSettings = (projectId: string): AgentSettingsModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const repositories = useQuery({ ...read.agentSettings(projectId ?? ''), enabled: projectId !== null }).data ?? null
+  const repositories = useQuery(read.agentSettings(projectId)).data ?? null
   const [failed, setFailed] = useState<AgentSettingsModel['failed']>(null)
   const decide = useCallback(
     async (repository: RepositoryAgentSettings, trusted: boolean, files: RepositoryAgentSettings['files'] = repository.files) => {
-      if (projectId === null) return undefined
       const key = keys.agentSettings(projectId)
       const deciding = (file: AgentSettingsFile) => files.some((one) => one.file === file.file && one.hash === file.hash)
       // One that couldn't be read is never trusted, so shows as it was.
