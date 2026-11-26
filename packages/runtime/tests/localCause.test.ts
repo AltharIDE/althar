@@ -13,7 +13,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries, stuckOf } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { askToFix, codexHomeOf } from '../src/startCause'
+import { askToFix, codexHomeOf, diagnose } from '../src/startCause'
 import { items, repository, runtime, until } from './support'
 
 /*
@@ -209,6 +209,21 @@ describe('a step whose agent fails for a reason on this computer', () => {
       // A call that isn't there fails out loud, so the card offers it again.
       const missing = yield* Effect.flip(askToFix('att_missing', yield* Runtime.envelope('attention.fix_with_coordinator', {})))
       assert.strictEqual(missing._tag, 'NotFound')
+      // One that kept no cause, detail or agent is still asked about, in plainer words.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE attention_requests SET payload = ${JSON.stringify({ step: 'implement', why: 'local_cause', round: 1, open: 0 })} WHERE id = ${call?.id ?? ''}`
+      const plain = yield* askToFix(call?.id ?? '', yield* Runtime.envelope('attention.fix_with_coordinator', {}))
+      assert.include(plain?.body ?? '', "its agent can't start on")
+      // And one that isn't for a local cause isn't, so the card offers it again.
+      yield* sql`UPDATE attention_requests SET payload = ${JSON.stringify({ step: 'implement', why: 'transient', round: 1, open: 0 })} WHERE id = ${call?.id ?? ''}`
+      const closed = yield* Effect.flip(askToFix(call?.id ?? '', yield* Runtime.envelope('attention.fix_with_coordinator', {})))
+      assert.strictEqual(closed._tag, 'AttentionClosed')
+      // Another agent's own words are read without Codex's log, and a task with no checkout here keeps the path it said.
+      const homeOf = () => Effect.succeed(path)
+      const said = "Error: ENOTDIR: not a directory, open '/elsewhere/.claude/settings.json'"
+      const claude = yield* diagnose({ taskId: task.taskId, agentId: 'claude-code', deviceId: 'dev_elsewhere', said, homeOf })
+      assert.isDefined(claude)
+      assert.isUndefined(yield* diagnose({ taskId: 'task_none', agentId: 'codex', deviceId: 'dev_elsewhere', said: 'boom', homeOf }))
     }).pipe(Effect.provide(layer))
   })
 
