@@ -91,6 +91,7 @@ import {
   type Machine,
   type MadeRepository,
   type PreparedFolder,
+  type HostReach,
   type HostRepository,
   type RepositoryOwner,
   type ClonedRepository,
@@ -207,6 +208,8 @@ export interface Client {
   readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
   /** Every repository a code host's connection reaches, last pushed to first. */
   readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  readonly readHostReach: (connectionId: string) => Promise<HostReach>
   /** Where a code host's connection can make a repository. */
   readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
   /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
@@ -1144,6 +1147,7 @@ export const connect = async (
     prepareFolder: (grant, path) =>
       command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
     listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    readHostReach: (connectionId) => settle(api.ReadHostReach({ connectionId })),
     listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
     cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
     publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),

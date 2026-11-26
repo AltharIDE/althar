@@ -1,5 +1,6 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostReach,
   HostRepository,
   RepositoryOwner,
   AccountSignInState,
@@ -1130,6 +1131,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       files: 1,
     })),
     listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    readHostReach: vi.fn(async (): Promise<HostReach> => ({ limited: null })),
     listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
     cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
       const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')

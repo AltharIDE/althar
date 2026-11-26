@@ -122,7 +122,7 @@ it.each(['grant-refused', 'read-refused', 'not-repository', 'no-remote', 'differ
       },
       { grantFound: vi.fn(async () => (why === 'grant-refused' ? null : 'grant_found')) },
     )
-    at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone }))
+    at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [clone] }))
     await at.actions.create('clay', plan)
     expect(at.client.cloneRepository).toHaveBeenCalledOnce()
     expect(at.client.openProject).toHaveBeenCalledOnce()
@@ -140,7 +140,7 @@ it('prepares a discovered unborn repository at its own path and opens it without
       project: { id: 'existing', name: 'Existing' },
     })),
   })
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [clone] }))
   await at.actions.create('clay', plan)
   expect(at.client.cloneRepository).not.toHaveBeenCalled()
   expect(at.client.prepareFolder).toHaveBeenCalledWith(expect.any(String), '/existing/repo')
@@ -149,7 +149,7 @@ it('prepares a discovered unborn repository at its own path and opens it without
 
 it('cancels cloning if neither a usual place nor a chosen place exists, and clears busy state', async () => {
   const at = fixture({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone: { ...clone, here: null } }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
   expect(await at.actions.create('clay', plan)).toBeNull()
   expect(at.store.get()).toMatchObject({ creating: false, steps: { source: 'idle', home: 'idle', issues: 'idle' } })
   expect(at.client.cloneRepository).not.toHaveBeenCalled()
@@ -188,8 +188,38 @@ it('keeps the chosen clone place after a cancelled picker, and clones there inst
   await at.actions.chooseCloneInto()
   await at.actions.chooseCloneInto()
   expect(at.store.get()?.cloneInto).toEqual(place)
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone: { ...clone, here: null } }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
   await at.actions.create('clay', plan)
   expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_place', clone.from)
   expect(at.host.clonePlace).not.toHaveBeenCalled()
+})
+
+it('clones each chosen into one place, asked for once, makes the project of them all, and clones only those left on Create again', async () => {
+  const other: DraftClone = { ...clone, id: 'other', remote: 'ada/web', from: { connectionId: 'github', path: ['ada', 'web'] }, here: null }
+  const at = fixture({
+    cloneRepository: vi
+      .fn()
+      .mockResolvedValueOnce({ grant: 'grant_repo', path: '/Users/ada/code/repo' })
+      .mockRejectedValueOnce(new ApiError({ reason: 'CloneRefused', why: 'denied', message: 'Denied' }))
+      .mockResolvedValue({ grant: 'grant_web', path: '/Users/ada/code/web' }),
+  })
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }, other] }))
+  // The second refused: the first stays cloned, said as such, and the project isn't made.
+  expect(await at.actions.create('clay', plan)).toBeNull()
+  expect(at.store.get()?.error).toEqual({ said: 'Denied' })
+  expect(at.store.get()?.folders).toMatchObject([{ path: '/Users/ada/code/repo', came: 'clone', clone: 'clone' }])
+  expect(at.client.openProject).not.toHaveBeenCalled()
+  // Again: only the one left is cloned, and the project is made of both, in the order chosen.
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(vi.mocked(at.client.cloneRepository).mock.calls.map(([, from]) => from)).toEqual([clone.from, other.from, other.from])
+  expect(at.host.clonePlace).toHaveBeenCalledTimes(2)
+  expect(at.client.openProject).toHaveBeenCalledWith(
+    'grant_repo',
+    expect.objectContaining({
+      repositories: [
+        { grant: 'grant_repo', path: '/Users/ada/code/repo' },
+        { grant: 'grant_web', path: '/Users/ada/code/web' },
+      ],
+    }),
+  )
 })

@@ -1,10 +1,10 @@
 import { useQueries } from '@tanstack/react-query'
 
-import type { Client } from '../data/client'
+import { canCall, type Client } from '../data/client'
 import type { Host } from '../data/services'
 
 import type { ConnectionList, ConnectionSummary, Product, Service } from '@althar/contracts'
-import type { HostedRepository, SetupHost } from '@althar/ui'
+import type { HostedRepository, SetupHost, SetupLimited } from '@althar/ui'
 
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
@@ -76,6 +76,10 @@ export interface HostRepositories {
   readonly repositories: ReadonlyArray<HostedRepository> | null
   /** The hosts whose repositories couldn't be read, by service. */
   readonly failed: ReadonlyArray<string>
+  /** The hosts that list fewer than their account has, as their connection was let reach them, and where it is let reach more. */
+  readonly limited: ReadonlyArray<SetupLimited>
+  /** A host's page for letting it reach more was opened: its repositories are read again once the window is back. */
+  readonly widened: (host: string) => void
   readonly pasted: HostedRepository | null
   /** Reads those that couldn't be read again. */
   readonly retry: () => void
@@ -99,6 +103,11 @@ export const useHostRepositories = (
   const found = useFound()
   const codeHosts = readyHosts(list)
   const listed = useQueries({ queries: codeHosts.map((connection) => ({ ...read.hostRepositories(connection.id), enabled })) })
+  // Asked of a home only where it answers it: an older one lists what it lists, and says nothing of what it leaves out.
+  const reaches = canCall(client, 'ReadHostReach')
+  const reach = useQueries({
+    queries: codeHosts.map((connection) => ({ ...read.hostReach(connection.id), enabled: enabled && reaches })),
+  })
 
   const hosts: ReadonlyArray<SetupHost> = HOST_SERVICES.map((service) => {
     const option = list?.products.find((product) => product.service === service && product.hostedUrl !== null)
@@ -192,6 +201,10 @@ export const useHostRepositories = (
   all.unshift(...fromHere)
   const reading = listed.some((one) => one.data === undefined && !one.isError)
   const failed = codeHosts.flatMap((connection, at) => (listed[at]?.isError === true ? [serviceOfProduct(connection.product)] : []))
+  const limited = codeHosts.flatMap((connection, at): ReadonlyArray<SetupLimited> => {
+    const said = reach[at]?.data?.limited
+    return said == null || listed[at]?.isError === true ? [] : [{ host: serviceOfProduct(connection.product), ...said }]
+  })
 
   // A URL pasted: the repository it names, on a host connected where one is; else cloned with the person's own git sign-in.
   const ref = pastedOf(query)
@@ -231,6 +244,17 @@ export const useHostRepositories = (
     hosts,
     repositories: reading && all.length === 0 ? null : all,
     failed,
+    limited,
+    widened: (service) => {
+      const again = () => {
+        codeHosts.forEach((connection, at) => {
+          if (serviceOfProduct(connection.product) !== service) return
+          void listed[at]?.refetch()
+          void reach[at]?.refetch()
+        })
+      }
+      window.addEventListener('focus', again, { once: true })
+    },
     pasted,
     retry: () => {
       for (const one of listed) if (one.isError) void one.refetch()

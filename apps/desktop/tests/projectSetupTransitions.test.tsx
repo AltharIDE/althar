@@ -123,7 +123,7 @@ it('falls back from a disconnected host and tracker and names multiple connectio
   expect(at.result.current.issues.value).toBe('none')
 })
 
-it('does not discard a completed clone when reselecting the same remote, and removes it when choosing another', async () => {
+it('chooses several to clone, keeping one cloned already, and leaves out one chosen again with what it cloned', async () => {
   const repositories = [
     { path: ['ada', 'repo'], webUrl: 'https://github.com/ada/repo', description: null, private: false, pushedAt: null, archived: false },
     { path: ['ada', 'other'], webUrl: 'https://github.com/ada/other', description: null, private: false, pushedAt: null, archived: false },
@@ -137,16 +137,25 @@ it('does not discard a completed clone when reselecting the same remote, and rem
     host: 'github.com',
     here: null,
   }
-  const at = setup({ name: '', way: 'clone', folders: [{ ...folder, came: 'clone' }], clone }, connected, {
+  const at = setup({ name: '', way: 'clone', folders: [{ ...folder, came: 'clone', clone: clone.id }], clones: [clone] }, connected, {
     listHostRepositories: vi.fn(async () => repositories),
   })
   await waitFor(() => expect(at.result.current.repositories).toHaveLength(2))
-  act(() => at.result.current.choose('conn1:ada/repo'))
+  act(() => at.result.current.choose('conn1:ada/other'))
+  expect(at.store.get()?.clones.map((one) => one.remote)).toEqual(['ada/repo', 'ada/other'])
+  expect(at.result.current.chosen).toEqual(['conn1:ada/repo', 'conn1:ada/other'])
   expect(at.store.get()?.folders).toHaveLength(1)
   expect(at.store.get()?.name).toBe('Repo')
-  act(() => at.result.current.choose('conn1:ada/other'))
+  // The one cloned is where it went; the other goes where clones go, and Create clones only it.
+  expect(at.result.current.footNote).toBe('Create clones ada/other.')
+  expect(at.result.current.home).toMatchObject({
+    kind: 'fixed',
+    said: 'On GitHub, at ada/repo and ada/other. Tasks open pull requests there.',
+  })
+  act(() => at.result.current.choose('conn1:ada/repo'))
   expect(at.store.get()?.folders).toEqual([])
-  expect(at.store.get()?.clone?.remote).toBe('ada/other')
+  expect(at.store.get()?.clones.map((one) => one.remote)).toEqual(['ada/other'])
+  expect(at.store.get()?.name).toBe('Repo')
   const before = at.store.get()
   act(() => at.result.current.choose('missing'))
   expect(at.store.get()).toBe(before)
@@ -170,11 +179,11 @@ it.each(['https://github.com/ada/unlisted', 'https://git.example.com/ada/unliste
     const pasted = at.result.current.pasted!
     expect(pasted.name).toBe('unlisted')
     act(() => at.result.current.choose(pasted.id))
-    const picked = at.store.get()?.clone
+    const [picked] = at.store.get()?.clones ?? []
     expect(picked?.remote).toBe('ada/unlisted')
     const github = new URL(url).hostname === 'github.com'
     expect(picked?.from).toEqual(github ? { connectionId: 'conn1', path: ['ada', 'unlisted'] } : { url })
-    expect(at.result.current.clone?.brand === null).toBe(!github)
+    expect(at.result.current.clones[0]?.brand === null).toBe(!github)
     act(() => at.result.current.connect('gitlab'))
     expect(at.result.current.connecting).toBe('gitlab')
     act(() => at.result.current.endConnect())

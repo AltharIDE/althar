@@ -665,6 +665,70 @@ describe('a new project cloned from its host', () => {
     )
   })
 
+  it('clones several chosen, each into where you keep code, and makes the project of them all; one pressed again is left out', async () => {
+    const { client, onCreated } = opened({ listConnections: vi.fn(async () => connected) })
+    await named('Tidepool')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone you/tidepool' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clone charrette/althar' }))
+    expect(screen.getByRole('button', { name: 'Chosen you/tidepool' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Chosen charrette/althar' })).toBeTruthy()
+    expect(screen.getByText('On GitHub, at you/tidepool and charrette/althar. Tasks open pull requests there.')).toBeTruthy()
+    expect(screen.getByText('Create clones you/tidepool and charrette/althar.')).toBeTruthy()
+    // Found again by searching, it stays chosen; pressed again, it is left out.
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find a repository, or paste its URL' }), 'alth')
+    await userEvent.click(screen.getByRole('button', { name: 'Chosen charrette/althar' }))
+    expect(screen.getByText('Create clones you/tidepool.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Clone charrette/althar' }))
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(vi.mocked(client.cloneRepository).mock.calls).toEqual([
+      ['grant_code', { connectionId: 'conn1', path: ['you', 'tidepool'] }],
+      ['grant_code', { connectionId: 'conn1', path: ['charrette', 'althar'] }],
+    ])
+    expect(client.openProject).toHaveBeenCalledWith(
+      'grant_tidepool',
+      expect.objectContaining({
+        repositories: [
+          { grant: 'grant_tidepool', path: '/Users/ada/code/tidepool' },
+          { grant: 'grant_althar', path: '/Users/ada/code/althar' },
+        ],
+      }),
+    )
+  })
+
+  it('says a token lists only the repositories it was given, opens where it is given more, and reads them again once back', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const url = 'https://github.com/settings/personal-access-tokens'
+    const readHostReach = vi
+      .fn()
+      .mockResolvedValueOnce({ limited: { by: 'token', url } })
+      .mockResolvedValue({ limited: null })
+    const listHostRepositories = vi
+      .fn()
+      .mockResolvedValueOnce([listed('you/tidepool')])
+      .mockResolvedValue(HOSTED)
+    opened({ listConnections: vi.fn(async () => connected), listHostRepositories, readHostReach })
+    expect(await screen.findByText('Only the repositories your GitHub token was given are listed.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Clone charrette/althar' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Give it more' }))
+    expect(open).toHaveBeenCalledWith(url, '_blank')
+    window.dispatchEvent(new Event('focus'))
+    expect(await screen.findByRole('button', { name: 'Clone charrette/althar' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText(/token was given/)).toBeNull())
+    open.mockRestore()
+  })
+
+  it('says an app installed on only some lists only those, and nothing where the host lists all it has', async () => {
+    const readHostReach = vi.fn(async () => ({ limited: { by: 'app' as const, url: 'https://github.com/settings/installations' } }))
+    const at = opened({ listConnections: vi.fn(async () => connected), readHostReach })
+    expect(await screen.findByText('Only the repositories Althar’s GitHub app is installed on are listed.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Install it on more' })).toBeTruthy()
+    at.view.unmount()
+    opened({ listConnections: vi.fn(async () => connected) })
+    expect(await screen.findByRole('button', { name: 'Clone you/tidepool' })).toBeTruthy()
+    expect(screen.queryByText(/are listed\./)).toBeNull()
+  })
+
   it('says a host’s repositories couldn’t be read, with a way to read them again', async () => {
     const listHostRepositories = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(HOSTED)
     opened({ listConnections: vi.fn(async () => connected), listHostRepositories })
@@ -846,6 +910,29 @@ describe('a new project on a home on another computer', () => {
     await userEvent.click(row)
     await create('Site')
     await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_code', { url: 'https://github.com/acme/site' }))
+  })
+
+  it('lists every repository the home’s connection reaches, several cloned there at once, and says where its token reaches only some', async () => {
+    const readHostReach = vi.fn(async () => ({
+      limited: { by: 'token' as const, url: 'https://github.com/settings/personal-access-tokens' },
+    }))
+    const at = onHome({ listConnections: vi.fn(async () => connected), listHostRepositories: vi.fn(async () => HOSTED), readHostReach })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone you/tidepool' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clone charrette/althar' }))
+    expect(screen.getByText('Only the repositories your GitHub token was given are listed.')).toBeTruthy()
+    await create('Tidepool')
+    await waitFor(() => expect(at.client.cloneRepository).toHaveBeenCalledTimes(2))
+    expect(at.client.cloneRepository).toHaveBeenLastCalledWith('grant_code', { connectionId: 'conn1', path: ['charrette', 'althar'] })
+  })
+
+  it('asks an older home, which can’t say what its connection leaves out, only for its repositories', async () => {
+    const readHostReach = vi.fn(async () => ({ limited: null }))
+    onHome(
+      { listConnections: vi.fn(async () => connected), listHostRepositories: vi.fn(async () => HOSTED), readHostReach },
+      SOCKET_CALLS.filter((call) => call !== 'ReadHostReach'),
+    )
+    expect(await screen.findByRole('button', { name: 'Clone you/tidepool' })).toBeTruthy()
+    expect(readHostReach).not.toHaveBeenCalled()
   })
 
   it('clones a Bitbucket Data Center project of this Mac’s through the home’s own connection to that server, and offers none it can’t reach', async () => {

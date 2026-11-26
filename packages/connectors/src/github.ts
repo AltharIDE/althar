@@ -803,6 +803,15 @@ const ReachedRepository = Schema.Struct({
   disabled: Schema.optional(Schema.Boolean),
 })
 
+/** How many repositories the account has of its own, as GitHub says to it: private ones only where the token may know. */
+const OwnCounts = Schema.Struct({
+  public_repos: Schema.Number,
+  owned_private_repos: Schema.optional(Schema.NullOr(Schema.Number)),
+})
+
+/** One of the account's own, as a list of them says: whether it is private is all that is counted. */
+const OwnRepository = Schema.Struct({ private: Schema.Boolean })
+
 /** An organization the account is a member of. */
 const Organization = Schema.Struct({ login: Schema.String })
 
@@ -2105,6 +2114,49 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           }),
         ),
       ),
+    /*
+     * Whether it lists all the account's own: a classic token, or an OAuth
+     * app's, says its scopes, and without `repo` reaches the public ones
+     * alone. A fine-grained token or Althar's app says nothing of what it
+     * was given, so the account's own it lists are counted against those
+     * GitHub says it has: public ones always, private ones where it says.
+     */
+    reach: () =>
+      Effect.gen(function* () {
+        const credential = yield* options.credential
+        const by = credential.token.startsWith('ghu_') ? ('app' as const) : ('token' as const)
+        const web = withoutTrailingSlashes(options.webUrl)
+        const url =
+          by === 'app'
+            ? `${web}/settings/installations`
+            : credential.token.startsWith('github_pat_')
+              ? `${web}/settings/personal-access-tokens`
+              : `${web}/settings/tokens`
+        const me = yield* http.request('GET', `${api}/user`)
+        const said = me.headers.get('x-oauth-scopes')
+        if (said !== null)
+          return {
+            limited: said
+              .split(',')
+              .map((scope) => scope.trim())
+              .includes('repo')
+              ? null
+              : { by, url },
+          }
+        const counts = Schema.decodeUnknownOption(OwnCounts)(me.body)
+        if (counts._tag === 'None') return { limited: null }
+        const own = yield* paged(1, (page) =>
+          Effect.map(
+            http.json(Schema.Array(OwnRepository), 'GET', `${api}/user/repos?per_page=100&affiliation=owner&page=${page}`),
+            (repositories) => ({ items: repositories, next: repositories.length < 100 ? undefined : page + 1 }),
+          ),
+        )
+        const hidden = own.filter((one) => one.private).length
+        const fewer =
+          own.length - hidden < counts.value.public_repos ||
+          (counts.value.owned_private_repos != null && hidden < counts.value.owned_private_repos)
+        return { limited: fewer ? { by, url } : null }
+      }),
     /*
      * The account, then each organization it is a member of. Whether a member
      * may make repositories is the organization's setting, which GitHub says

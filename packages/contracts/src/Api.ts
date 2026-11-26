@@ -1151,6 +1151,21 @@ export const HostRepository = Schema.Struct({
 })
 export type HostRepository = typeof HostRepository.Type
 
+/**
+ * Whether a code host's connection lists every repository its account has,
+ * or fewer, as it was let reach them: a token made for some, an app
+ * installed on some. `url` is where it is let reach more, where known.
+ */
+export const HostReach = Schema.Struct({
+  limited: Schema.NullOr(
+    Schema.Struct({
+      by: Schema.Literals(['token', 'app']),
+      url: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type HostReach = typeof HostReach.Type
+
 /** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
 export const RepositoryOwner = Schema.Struct({
   id: Schema.String,
@@ -5382,6 +5397,7 @@ const socketCalls = new Set<string>([
   'GetMachine',
   'ListConnections',
   'ListHostRepositories',
+  'ReadHostReach',
   'GetRepositories',
   'ReadFolder',
   'PlaceRepository',
@@ -5528,6 +5544,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  call('ReadHostReach', { connectionId: Schema.String }, HostReach),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
   call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
   /**

@@ -110,6 +110,21 @@ export const ListedRepository = Schema.Struct({
 export type ListedRepository = typeof ListedRepository.Type
 
 /**
+ * Whether a connection lists every repository its account has, or fewer:
+ * a token made for some of them, or one without the scope for private
+ * ones; an app installed on some. `url` is where it is let reach more.
+ */
+export const RepositoryReach = Schema.Struct({
+  limited: Schema.NullOr(
+    Schema.Struct({
+      by: Schema.Literals(['token', 'app']),
+      url: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type RepositoryReach = typeof RepositoryReach.Type
+
+/**
  * Where the account can make a repository: itself, an organization, a group
  * (GitLab's, nested ones by their full path), a workspace (Bitbucket Cloud's)
  * or a project (Bitbucket Data Center's, by its key). `id` is what
@@ -712,6 +727,11 @@ export interface CodeHost extends HostReleases {
    * `paged` follows: its own, its organizations', groups' or workspaces'.
    */
   repositories(): Effect.Effect<ReadonlyArray<ListedRepository>, ConnectorFailed>
+  /**
+   * Whether `repositories` lists all the account has, or fewer, as the
+   * connection was let reach them; a host that can't tell leaves it out.
+   */
+  reach?(): Effect.Effect<RepositoryReach, ConnectorFailed>
   /** Where the account can make a repository: itself first, where it can, then each it may make one in. */
   owners(): Effect.Effect<ReadonlyArray<RepositoryOwner>, ConnectorFailed>
   /**

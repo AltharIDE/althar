@@ -70,6 +70,15 @@ export interface HostedRepository {
   readonly brand?: Brand
 }
 
+/** A host that lists fewer repositories than its account has: a token made for some of them, or an app installed on some. */
+export interface SetupLimited {
+  /** The host, by its id among those offered. */
+  readonly host: string
+  readonly by: 'token' | 'app'
+  /** Where it is let reach more; null where that isn't known. */
+  readonly url: string | null
+}
+
 export interface ProjectSetupText {
   ways: string
   clone: string
@@ -96,6 +105,9 @@ export interface ProjectSetupText {
   reading: string
   readFailed: (host: string) => string
   tryAgain: string
+  /** A host's list is short of what its account has, by what limits it. */
+  limited: (host: string, by: SetupLimited['by']) => string
+  widen: (by: SetupLimited['by']) => string
   privately: string
   drop: string
   choose: string
@@ -137,6 +149,11 @@ export const projectSetupText: ProjectSetupText = {
   reading: 'Reading your repositories…',
   readFailed: (host) => `${host}’s repositories couldn’t be read.`,
   tryAgain: 'Try again',
+  limited: (host, by) =>
+    by === 'app'
+      ? `Only the repositories Althar’s ${host} app is installed on are listed.`
+      : `Only the repositories your ${host} token was given are listed.`,
+  widen: (by) => (by === 'app' ? 'Install it on more' : 'Give it more'),
   privately: 'Private',
   drop: 'Drop a folder here',
   choose: 'Choose a folder…',
@@ -440,6 +457,8 @@ export function SetupRepositories({
   repositories,
   failed = [],
   onRetry,
+  limited = [],
+  onWiden,
   query,
   onQuery,
   pasted,
@@ -457,11 +476,16 @@ export function SetupRepositories({
   /** The hosts whose repositories couldn't be read, by id. */
   failed?: readonly string[]
   onRetry?: () => void
+  /** The hosts that list fewer than their account has: said under the list, with where each is let reach more. */
+  limited?: readonly SetupLimited[]
+  /** Where a host is let reach more was asked for: its page opens, and its list is read again. */
+  onWiden?: (limited: SetupLimited) => void
   query: string
   onQuery: (query: string) => void
   /** A repository a pasted URL names: shown alone, in place of those found. */
   pasted?: HostedRepository | null
-  chosen: string | null
+  /** The one chosen, or each of several: a row pressed again where several can be leaves it out. */
+  chosen: string | readonly string[] | null
   onChoose: (id: string) => void
   onConnect: (host: string) => void
   /** A host being connected, in place: its walk, in the room the list had. */
@@ -508,6 +532,7 @@ export function SetupRepositories({
     }
   }
   const failedNames = failed.flatMap((id) => hostOf(id)?.name ?? [])
+  const picked = chosen === null ? [] : typeof chosen === 'string' ? [chosen] : chosen
   // With no host connected, repositories listed are from elsewhere (your projects on another computer): the hosts are offered beside them.
   const listing = connected.length > 0 || (repositories ?? []).length > 0
   const body = (() => {
@@ -550,7 +575,7 @@ export function SetupRepositories({
         {shown.map((one) => {
           const host = hostOf(one.host)
           const mark = host?.brand ?? one.brand
-          const on = chosen === one.id
+          const on = picked.includes(one.id)
           const act = on ? t.chosen : one.here === null ? t.cloneRow : t.add
           return (
             <li key={one.id}>
@@ -661,6 +686,20 @@ export function SetupRepositories({
           {t.readFailed(listOr(failedNames))} {onRetry !== undefined && <LinkButton onClick={onRetry}>{t.tryAgain}</LinkButton>}
         </Problem>
       )}
+      {!walking &&
+        limited.flatMap((one) => {
+          const host = hostOf(one.host)
+          if (host === undefined || !host.connected) return []
+          return [
+            <p key={one.host} className={s.limited}>
+              <Icon name="info" size={13} />
+              <span>
+                {t.limited(host.name, one.by)}{' '}
+                {one.url !== null && onWiden !== undefined && <LinkButton onClick={() => onWiden(one)}>{t.widen(one.by)}</LinkButton>}
+              </span>
+            </p>,
+          ]
+        })}
     </div>
   )
 }

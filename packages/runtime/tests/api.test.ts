@@ -4306,9 +4306,15 @@ describe('a project set up where it starts, through the API', () => {
   it.live('lists the host’s repositories and owners, and clones one into the folder chosen, to open as a project', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant, connectionId } = yield* setUp()
+        const { client, grant, github, connectionId } = yield* setUp()
         const listed = yield* client.ListHostRepositories({ connectionId })
         assert.deepInclude(listed[0], { path: ['you', 'tidepool'], description: 'Tide tables', private: true })
+        // Whether that is all the account has, as the host says: fewer where its token was given some.
+        assert.deepStrictEqual(yield* client.ReadHostReach({ connectionId }), { limited: null })
+        github.limitReach({ by: 'token', url: `${HOST}/settings/personal-access-tokens` })
+        assert.deepStrictEqual(yield* client.ReadHostReach({ connectionId }), {
+          limited: { by: 'token', url: `${HOST}/settings/personal-access-tokens` },
+        })
         assert.deepStrictEqual(yield* client.ListRepositoryOwners({ connectionId }), [{ id: 'you', name: 'You', kind: 'user' }])
         const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-code-')))
         const cloned = yield* client.CloneRepository({
