@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { SOCKET_CALLS } from '@althar/contracts'
-import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
@@ -12,7 +12,7 @@ import { HomeOpening } from '../src/renderer/features/homes/HomeOpening'
 import { HomeReport } from '../src/renderer/features/homes/HomeReport'
 import { homeProblem, homesUi, keyOf, livenessOf, openedAgo, useHomeState, useHomesOverview } from '../src/renderer/features/homes/useHomes'
 import { foldersOnHome, hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
-import { fakeClient, fakeHost, home as snapshot, project } from './fixtures'
+import { fakeClient, fakeHost, home as snapshot, project, remoteConnection } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { reads } from '../src/renderer/data/reads'
@@ -542,6 +542,8 @@ it('reports the project snapshot and live attention counts, and sends only chang
   const { client } = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, working: 2 }, second] })),
     getHome: vi.fn(async () => snapshot({ calls: [call] })),
+    // Where their code is is told too: none here, for what this test is about.
+    getRepositories: vi.fn(async () => []),
   })
   const services = servicesFor(client, fakeHost({ homes: at.homes }))
   render(
@@ -567,6 +569,32 @@ it('reports the project snapshot and live attention counts, and sends only chang
   await waitFor(() =>
     expect(at.homes.report).toHaveBeenLastCalledWith([{ id: project.id, name: project.name, ink: project.ink, working: 3, yours: 1 }]),
   )
+})
+
+it('tells main where this computer’s projects’ code is, by each one’s page on its host, and nothing of another home’s', async () => {
+  const at = fixture()
+  const repositories = await fakeClient().client.getRepositories(project.id)
+  const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })) })
+  render(
+    <ServicesProvider value={servicesFor(client, fakeHost({ homes: at.homes }))}>
+      <HomeReport />
+    </ServicesProvider>,
+  )
+  const pages = repositories.flatMap((one) => (one.host?.url?.startsWith('https://') === true ? [one.host.url] : []))
+  expect(pages.length).toBeGreaterThan(0)
+  await waitFor(() => expect(at.homes.report.mock.lastCall?.[0]?.[0]?.remotes?.map((one: { url: string }) => one.url)).toEqual(pages))
+  cleanup()
+  // A window on another computer's home: its projects are there already, and their code isn't asked for.
+  const away = fixture()
+  const remote = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })), connection: remoteConnection() })
+  render(
+    <ServicesProvider value={servicesFor(remote.client, fakeHost({ homes: away.homes }))}>
+      <HomeReport />
+    </ServicesProvider>,
+  )
+  await waitFor(() => expect(away.homes.report).toHaveBeenCalled())
+  expect(away.homes.report.mock.lastCall?.[0]?.[0]?.remotes).toBeUndefined()
+  expect(remote.client.getRepositories).not.toHaveBeenCalled()
 })
 
 it('does not publish an unread project list, and reports an empty home without asking for a task snapshot', async () => {

@@ -63,13 +63,13 @@ export const answeredIn = (task: string) =>
 export const asideIn = (task: string) => `coalesce(${task}.shelf, '') = 'scratch'`
 
 /**
- * Whether the task `task` (a table alias) waits on the person in a way a kept row doesn't show, as SQL: a pull request of its
- * own open, to accept, or commits of a worktree of its held for Ship. Such a task isn't kept for later, nor read as kept.
+ * Whether the task `task` (a table alias) has a pull request of its own open, as SQL: it waits on the person there, to accept
+ * on its host, which a kept row doesn't show, so such a task isn't kept for later, nor read as kept. Commits held for Ship
+ * don't stop it: kept, they stay held on its branch, and Accept or Ship are there when it is opened.
  */
 export const keepWaitsIn = (task: string) =>
-  `(EXISTS (SELECT 1 FROM external_links kl WHERE kl.task_id = ${task}.id AND kl.kind = 'change'
-      AND coalesce(json_extract(kl.snapshot, '$.state'), 'open') = 'open')
-    OR EXISTS (SELECT 1 FROM workspaces kw WHERE kw.task_id = ${task}.id AND kw.held_at IS NOT NULL))`
+  `EXISTS (SELECT 1 FROM external_links kl WHERE kl.task_id = ${task}.id AND kl.kind = 'change'
+      AND coalesce(json_extract(kl.snapshot, '$.state'), 'open') = 'open')`
 
 /**
  * Whether the task `task` (a table alias) is a quick task still, as SQL:

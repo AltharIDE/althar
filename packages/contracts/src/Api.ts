@@ -19,7 +19,7 @@ import { SocketAllowed } from './api/rpc'
 import { SearchApi } from './api/search'
 import { SessionsApi } from './api/sessions'
 import { SettingsApi } from './api/settings'
-import { AccountStrategy, AlwaysScope, ApiError, CommandId, Holder, Queued, RuleKind } from './api/shared'
+import { AccountStrategy, AlwaysScope, ApiError, CommandId, Holder, Product, Queued, RuleKind } from './api/shared'
 import { SkillsApi } from './api/skills'
 import { TasksApi } from './api/tasks'
 import { ThreadsApi } from './api/threads'
@@ -144,6 +144,12 @@ export type WorkPlaces = typeof WorkPlaces.Type
 
 /** Items to a page, when a client doesn't say. */
 export const PAGE = 100
+
+/**
+ * The code hosts a socket sets its home up with, by product and by service: connected, checked or removed there. A
+ * tracker's connection, like a project's tracker, stays with the person's own window.
+ */
+export const SOCKET_CODE_HOSTS: ReadonlySet<string> = new Set<Product>(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'])
 
 export const Api = HomeApi.merge(
   DevicesApi,

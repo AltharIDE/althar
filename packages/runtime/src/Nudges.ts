@@ -14,9 +14,10 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { field, text } from './changeSnapshot'
 import { Agents } from './Config'
 import { outStep } from './Limits'
-import { field, Queries, stuckOf, text } from './Queries'
+import { Queries, stuckOf } from './Queries'
 import { Sessions } from './Sessions'
 import { programOf } from './shellCommands'
 

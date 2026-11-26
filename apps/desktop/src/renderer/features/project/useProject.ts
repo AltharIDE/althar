@@ -142,7 +142,8 @@ export interface ProjectModel {
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly workers: ReadonlyArray<ProjectWorker>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<boolean>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<boolean>
   /** Stops a task waiting for another (tasks wait for their blockers). */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
@@ -150,6 +151,8 @@ export interface ProjectModel {
   /** Discards a task, from its card: the card shows it discarded at once, and as it was again where this fails, the line saying why. */
   readonly discardTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Where a planned task runs once it starts: whether that went through. */
+  readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
@@ -698,6 +701,14 @@ export const useProject = (projectId: string): ProjectModel => {
         throw failure
       }),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    placePlan: async (planId, workerId, chosenAt) => {
+      let placed = false
+      await act(async () => {
+        await client.placePlan(planId, workerId, chosenAt)
+        placed = true
+      })
+      return placed
+    },
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
     holdDraft: (threadId, key) =>
       client.holdDraft(threadId, key).catch((failure: unknown) => {

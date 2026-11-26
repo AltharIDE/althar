@@ -5,6 +5,7 @@ import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 import { messageOf, type OnePress, type StuckAnswer } from '../../data/client'
 import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
+import { unmovedWhy } from '../../shared/calls'
 import { headsOf } from '../../shared/mergeHere'
 import { planIt } from '../../shared/planIt'
 
@@ -99,11 +100,6 @@ type Settling = Extract<BoardTask['phase'], 'settled' | 'kept'>
 interface Moved {
   readonly to: Settling
   readonly state?: 'abandoned'
-}
-
-/** What the window says where the runtime answered Done or Keep for later but the task didn't move. */
-export const workText = {
-  stillOpen: 'Something of it opened meanwhile, so it stays as it was.',
 }
 
 /**
@@ -207,7 +203,8 @@ export const useWorkActions = (
         if (to !== undefined) {
           // Read afresh after the answer, as an aside's Clear is: one the runtime answered without moving comes back, saying so.
           const now = after?.find((task) => task.taskId === taskId)
-          if (now !== undefined && now.phase !== to.to) throw new ApiError({ reason: 'Unchanged', message: workText.stillOpen })
+          if (now !== undefined && now.phase !== to.to)
+            throw new ApiError({ reason: 'Unchanged', message: unmovedWhy({ phase: now.phase, pullOpen: now.change?.state === 'open' }) })
         }
         return true
       } catch (failure) {

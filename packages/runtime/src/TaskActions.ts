@@ -536,12 +536,10 @@ export class TaskActions extends Context.Service<
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
             }
             case 'keep': {
-              // Any kind keeps, a prototype or a chat ending on its branch included; one with its pull request open, or commits held
-              // for Ship, waits on that.
+              // Any kind keeps, a prototype or a chat ending on its branch included, commits held for Ship too; one with its pull
+              // request open waits on that.
               if (task.pullOpen === 1)
-                return nothing(
-                  `${task.slug} has its pull request open, or commits waiting for Ship: it waits on that, so there is nothing to keep.`,
-                )
+                return nothing(`${task.slug} has its pull request open: it waits on that, so there is nothing to keep.`)
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
                 ? did(`Kept ${task.slug} for later: out of Needs you as it is, under Kept for later. Writing to it brings it back.`)
@@ -2111,7 +2109,7 @@ export class TaskActions extends Context.Service<
         {
           ...tool(
             'settle_task',
-            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done is for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. keep is for any task, a prototype or a chat ending on its branch included, except one with its pull request open or commits waiting for Ship, which wait on those. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
+            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done is for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. keep is for any task, a prototype or a chat ending on its branch included, and one with commits waiting for Ship (they stay held, and Ship is there when it is opened), except one with its pull request open, which waits on that. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
             {
               type: 'object',
               properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] }, why },

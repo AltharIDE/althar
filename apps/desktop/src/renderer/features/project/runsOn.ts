@@ -18,7 +18,7 @@ import {
 import type { LaunchPlace } from '@althar/ui'
 
 /*
- * Where a held plan runs (ADR-103), as its card offers it: the home, any free
+ * Where a plan runs (ADR-103), as its card offers it while it counts down or is held: the home, any free
  * worker, or one of the home's workers, each with where it stands; and what
  * keeps it from starting where it is set to run. The runtime checks the same
  * rules (`@althar/contracts`, workerPlacement) as it starts it.

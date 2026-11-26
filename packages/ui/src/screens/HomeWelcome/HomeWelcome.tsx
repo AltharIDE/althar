@@ -68,6 +68,8 @@ export type WelcomeNeed = {
   | { readonly state: 'missing'; readonly guide?: string }
   /** Couldn't be checked, and why, in a sentence. */
   | { readonly state: 'unchecked'; readonly why: string }
+  /** A code host it isn't connected to, connected from the window. */
+  | { readonly state: 'connect' }
 )
 
 /**
@@ -107,8 +109,8 @@ export interface HomeUpdateOffer {
 export const olderLine = (t: Pick<HomeWelcomeText, 'older' | 'unreleased'>, name: string, update: HomeUpdateOffer) =>
   update.release === 'unreleased' ? t.unreleased.arrival(name) : t.older(name)
 
-/** A way a new project's code comes in. */
-export type HomeDoor = 'clone' | 'folder' | 'fresh'
+/** A way a new project's code comes in: `here`, one of this computer's projects, cloned on the home. */
+export type HomeDoor = 'clone' | 'here' | 'folder' | 'fresh'
 
 export interface HomeWelcomeText {
   label: string
@@ -137,6 +139,10 @@ export interface HomeWelcomeText {
   /** Its sign-in, started in Settings. */
   signIn: string
   signInLabel: (agent: string, home: string) => string
+  /** A code host it isn't connected to, and its press. */
+  notConnected: string
+  connect: string
+  connectLabel: (host: string, home: string) => string
   missing: string
   copy: string
   copyLabel: (name: string) => string
@@ -146,9 +152,13 @@ export interface HomeWelcomeText {
   arrivalLine: (name: string) => string
   doors: string
   clone: { title: string; line: string }
+  /** This computer's projects, each cloned on the home from where its code is. */
+  here: { title: string; line: (name: string) => string }
   folder: { title: (name: string) => string; line: (found: number | 'failed' | null, name: string) => string }
   fresh: { title: string; line: (name: string) => string }
   older: (name: string) => string
+  /** Over a newer release's update, for a home whose agents and code hosts can't be set up from here yet. */
+  behind: (name: string) => string
   /** Where no published release makes projects from a window yet. */
   unreleased: { arrival: (name: string) => string; title: string; line: (name: string) => string }
   /** While the newest release is looked for. */
@@ -215,6 +225,9 @@ export const homeWelcomeText: HomeWelcomeText = {
   signedOut: 'Signed out',
   signIn: 'Sign in',
   signInLabel: (agent, home) => `Sign ${agent} in on ${home}`,
+  notConnected: 'Not connected',
+  connect: 'Connect',
+  connectLabel: (host, home) => `Connect ${host} on ${home}`,
   missing: 'Not installed',
   copy: 'Copy',
   copyLabel: (name) => `Copy ${name}’s sign-in command`,
@@ -224,6 +237,7 @@ export const homeWelcomeText: HomeWelcomeText = {
   arrivalLine: (name) => `Bring it a project. Its tasks run on ${name}, and keep going with ${device.this} asleep.`,
   doors: 'Ways in',
   clone: { title: 'Clone a repository', line: 'From GitHub, GitLab or any address' },
+  here: { title: `From ${device.this}`, line: (name) => `One of its projects, cloned on ${name}` },
   folder: {
     title: (name) => `A folder on ${name}`,
     line: (found, name) =>
@@ -237,6 +251,7 @@ export const homeWelcomeText: HomeWelcomeText = {
   },
   fresh: { title: 'Start empty', line: (name) => `A new repository, made on ${name}` },
   older: (name) => `${name} runs an older Althar. Once it’s updated, you can bring it projects from here.`,
+  behind: (name) => `Update ${name} to sign its agents in and connect GitHub or GitLab from here.`,
   unreleased: {
     arrival: (name) => `${name} runs an Althar host from before projects could be made from here.`,
     title: 'No newer release yet',
@@ -292,6 +307,8 @@ export interface HomeWelcomeProps {
   needs: readonly WelcomeNeed[] | null
   /** The newest of your repositories on the code hosts it's connected to, drawn on the clone door; none where it has none. */
   repositories: readonly { readonly id: string; readonly ink: ProjectInk }[]
+  /** This computer's projects whose code is on a host, to clone there: their door, drawn with their marks; none, no door. */
+  here?: readonly { readonly id: string; readonly ink: ProjectInk }[]
   /** Where the repositories found on it are (~/code/site), drawn on the folder door; null while they're looked for, `failed` where they couldn't be. */
   found: readonly string[] | 'failed' | null
   /**
@@ -301,6 +318,11 @@ export interface HomeWelcomeProps {
    * it isn't (`known` where it's sure, as by default).
    */
   update?: HomeUpdateOffer
+  /**
+   * The home makes projects, but is older than setting it up from the window (signing its agents in, connecting its code
+   * hosts there): its update, offered under what it has, once a release would help.
+   */
+  behind?: HomeUpdateOffer
   /** Update pressed, or Try again: the window updates the home itself (`update.run`), or asks first (`confirm`). */
   onUpdate?: () => void
   /** Not now, asked before a release that moves the home's data (`confirm`). */
@@ -309,6 +331,8 @@ export interface HomeWelcomeProps {
   onCheckAgain?: () => void
   /** Sign in pressed on an agent signed out on the home, by its id: its sign-in, started. Without it, its command is copied. */
   onSignIn?: (id: string) => void
+  /** Connect pressed on a code host it isn't connected to, by its id: its walk, started. Without it, no host is offered. */
+  onConnect?: (id: string) => void
   /** A way in pressed, from the door pressed. */
   onDoor: (door: HomeDoor, from: HTMLElement) => void
   /** Something pasted anywhere but a field: true where it was a repository's address, taken in as a clone. */
@@ -372,12 +396,15 @@ export function HomeWelcome({
   git,
   needs,
   repositories,
+  here = [],
   found,
   update,
+  behind,
   onUpdate,
   onCancelUpdate,
   onCheckAgain,
   onSignIn,
+  onConnect,
   onDoor,
   onPaste,
   toured,
@@ -577,8 +604,10 @@ export function HomeWelcome({
       titleRef={arrivalTitle}
       needs={needs}
       repositories={repositories}
+      here={here}
       found={found}
       update={update}
+      behind={behind}
       onUpdate={onUpdate}
       onCancelUpdate={onCancelUpdate}
       onCheckAgain={onCheckAgain}
@@ -587,6 +616,7 @@ export function HomeWelcome({
       onCopy={copy}
       onGuide={onGuide}
       onSignIn={onSignIn}
+      onConnect={onConnect}
       t={t}
     />
   )
@@ -657,7 +687,16 @@ export function HomeWelcome({
                     </p>
                   </div>
                   <div className={s.scene}>
-                    <NeedList name={name} needs={needs} copied={copied} onCopy={copy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
+                    <NeedList
+                      name={name}
+                      needs={needs}
+                      copied={copied}
+                      onCopy={copy}
+                      onGuide={onGuide}
+                      onSignIn={onSignIn}
+                      onConnect={onConnect}
+                      t={t}
+                    />
                   </div>
                 </>
               )}
@@ -767,7 +806,7 @@ function HomeFacts({
 const markOf = (need: WelcomeNeed, size: number) =>
   need.brand === undefined ? <Icon name={need.icon ?? 'plug'} size={size} /> : <BrandMark brand={need.brand} size={size} />
 
-/** What a need that isn't ready takes: its sign-in, started (or its command to copy, where it can't be), or its maker's page. */
+/** What a need that isn't ready takes: its sign-in, started (or its command to copy, where it can't be), its walk to connect it, or its maker's page. */
 function Fix({
   home,
   need,
@@ -775,6 +814,7 @@ function Fix({
   onCopy,
   onGuide,
   onSignIn,
+  onConnect,
   t,
 }: {
   home: string
@@ -783,8 +823,15 @@ function Fix({
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
   onSignIn: ((id: string) => void) | undefined
+  onConnect: ((id: string) => void) | undefined
   t: HomeWelcomeText
 }) {
+  if (need.state === 'connect' && onConnect !== undefined)
+    return (
+      <Button size="small" onClick={() => onConnect(need.id)} aria-label={t.connectLabel(need.name, home)}>
+        {t.connect}
+      </Button>
+    )
   if (need.state === 'signedOut' && onSignIn !== undefined)
     return (
       <Button size="small" onClick={() => onSignIn(need.id)} aria-label={t.signInLabel(need.name, home)}>
@@ -818,6 +865,7 @@ const noteOf = (need: WelcomeNeed, t: HomeWelcomeText) => {
   if (need.state === 'signedOut') return t.signedOut
   if (need.state === 'missing') return t.missing
   if (need.state === 'unchecked') return need.why
+  if (need.state === 'connect') return t.notConnected
   return need.note
 }
 
@@ -829,6 +877,7 @@ function NeedList({
   onCopy,
   onGuide,
   onSignIn,
+  onConnect,
   t,
 }: {
   name: string
@@ -837,6 +886,7 @@ function NeedList({
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
   onSignIn: ((id: string) => void) | undefined
+  onConnect: ((id: string) => void) | undefined
   t: HomeWelcomeText
 }) {
   return (
@@ -844,29 +894,40 @@ function NeedList({
       {needs === null ? (
         <li className={s.checking}>{t.checking}</li>
       ) : (
-        needs.map((need, i) => (
-          <li key={need.id} data-state={need.state} style={cssVars({ '--i': i })}>
-            <span className={s.needMark}>{markOf(need, 16)}</span>
-            <span className={s.needName}>{need.name}</span>
-            {need.state === 'signedOut' && onSignIn === undefined ? (
-              <span className={s.needNote} data-code title={need.command}>
-                <span className={s.needState}>{t.signedOut}</span>
-                <code>{need.command}</code>
-              </span>
-            ) : (
-              <span className={s.needNote} title={noteOf(need, t)}>
-                {noteOf(need, t)}
-              </span>
-            )}
-            <span className={s.needEnd}>
-              {need.state === 'ready' ? (
-                <Icon name="check" size={14} className={s.needTick} />
+        needs
+          .filter((need) => need.state !== 'connect' || onConnect !== undefined)
+          .map((need, i) => (
+            <li key={need.id} data-state={need.state} style={cssVars({ '--i': i })}>
+              <span className={s.needMark}>{markOf(need, 16)}</span>
+              <span className={s.needName}>{need.name}</span>
+              {need.state === 'signedOut' && onSignIn === undefined ? (
+                <span className={s.needNote} data-code title={need.command}>
+                  <span className={s.needState}>{t.signedOut}</span>
+                  <code>{need.command}</code>
+                </span>
               ) : (
-                <Fix home={name} need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
+                <span className={s.needNote} title={noteOf(need, t)}>
+                  {noteOf(need, t)}
+                </span>
               )}
-            </span>
-          </li>
-        ))
+              <span className={s.needEnd}>
+                {need.state === 'ready' ? (
+                  <Icon name="check" size={14} className={s.needTick} />
+                ) : (
+                  <Fix
+                    home={name}
+                    need={need}
+                    copied={copied}
+                    onCopy={onCopy}
+                    onGuide={onGuide}
+                    onSignIn={onSignIn}
+                    onConnect={onConnect}
+                    t={t}
+                  />
+                )}
+              </span>
+            </li>
+          ))
       )}
     </ul>
   )
@@ -880,8 +941,10 @@ function Arrival({
   titleRef,
   needs,
   repositories,
+  here,
   found,
   update,
+  behind,
   onUpdate,
   onCancelUpdate,
   onCheckAgain,
@@ -890,6 +953,7 @@ function Arrival({
   onCopy,
   onGuide,
   onSignIn,
+  onConnect,
   t,
 }: {
   name: string
@@ -898,8 +962,10 @@ function Arrival({
   titleRef: RefObject<HTMLHeadingElement | null>
   needs: readonly WelcomeNeed[] | null
   repositories: HomeWelcomeProps['repositories']
+  here: NonNullable<HomeWelcomeProps['here']>
   found: HomeWelcomeProps['found']
   update: HomeWelcomeProps['update']
+  behind: HomeWelcomeProps['behind']
   onUpdate: HomeWelcomeProps['onUpdate']
   onCancelUpdate: HomeWelcomeProps['onCancelUpdate']
   onCheckAgain: HomeWelcomeProps['onCheckAgain']
@@ -908,8 +974,10 @@ function Arrival({
   onCopy: (id: string, command: string) => void
   onGuide: (url: string) => void
   onSignIn: HomeWelcomeProps['onSignIn']
+  onConnect: HomeWelcomeProps['onConnect']
   t: HomeWelcomeText
 }) {
+  const strip = (needs ?? []).filter((need) => need.state !== 'connect' || onConnect !== undefined)
   return (
     <div className={s.arrival} data-morph-root>
       <div className={s.arrivalHead}>
@@ -936,7 +1004,7 @@ function Arrival({
         </p>
       </div>
       {update === undefined ? (
-        <Doors name={name} repositories={repositories} found={found} onDoor={onDoor} t={t} />
+        <Doors name={name} repositories={repositories} here={here} found={found} onDoor={onDoor} t={t} />
       ) : (
         <UpdateHome
           name={name}
@@ -950,9 +1018,9 @@ function Arrival({
         />
       )}
       {/* An older home takes nothing else until it's updated: what it has shows once it can take a project. */}
-      {update === undefined && needs !== null && needs.length > 0 && (
+      {update === undefined && strip.length > 0 && (
         <ul className={s.strip} aria-label={t.readyLabel(name)}>
-          {needs.map((need) => (
+          {strip.map((need) => (
             <li key={need.id} data-state={need.state}>
               {markOf(need, 13)}
               <span className={s.stripName}>{need.name}</span>
@@ -960,15 +1028,37 @@ function Arrival({
                 <Icon name="check" size={12} className={s.stripTick} />
               ) : (
                 <>
-                  <span className={s.stripState}>
-                    {need.state === 'signedOut' ? t.signedOut : need.state === 'missing' ? t.missing : need.why}
-                  </span>
-                  <Fix home={name} need={need} copied={copied} onCopy={onCopy} onGuide={onGuide} onSignIn={onSignIn} t={t} />
+                  <span className={s.stripState}>{noteOf(need, t)}</span>
+                  <Fix
+                    home={name}
+                    need={need}
+                    copied={copied}
+                    onCopy={onCopy}
+                    onGuide={onGuide}
+                    onSignIn={onSignIn}
+                    onConnect={onConnect}
+                    t={t}
+                  />
                 </>
               )}
             </li>
           ))}
         </ul>
+      )}
+      {update === undefined && behind !== undefined && (
+        <div className={s.behind}>
+          <p className={s.behindLine}>{t.behind(name)}</p>
+          <UpdateHome
+            name={name}
+            update={behind}
+            onUpdate={onUpdate}
+            onCancelUpdate={onCancelUpdate}
+            onCheckAgain={onCheckAgain}
+            copied={copied === 'update'}
+            onCopy={() => onCopy('update', behind.command)}
+            text={t}
+          />
+        </div>
       )}
     </div>
   )
@@ -1140,19 +1230,23 @@ export function UpdateHome({
 
 /**
  * The ways in, as doors, each drawn as what's behind it: a clone, with your
- * repositories fanned over it; a folder already on the home, its places
- * stacked; a new one, whose mark is drawn as you reach for it. Where the
- * home found no repositories, there's no folder door.
+ * repositories fanned over it; this computer's projects, their marks fanned,
+ * each cloned there from where its code is; a folder already on the home, its
+ * places stacked; a new one, whose mark is drawn as you reach for it. Where
+ * this computer has no project on a host, or the home found no repositories,
+ * there's no door for it.
  */
 function Doors({
   name,
   repositories,
+  here,
   found,
   onDoor,
   t,
 }: {
   name: string
   repositories: HomeWelcomeProps['repositories']
+  here: NonNullable<HomeWelcomeProps['here']>
   found: HomeWelcomeProps['found']
   onDoor: HomeWelcomeProps['onDoor']
   t: HomeWelcomeText
@@ -1177,6 +1271,24 @@ function Doors({
           </span>
         ),
     },
+    ...(here.length === 0
+      ? []
+      : [
+          {
+            key: 'here' as const,
+            title: t.here.title,
+            line: t.here.line(name),
+            art: (
+              <span className={s.fan}>
+                {here.slice(0, 5).map((one, i, all) => (
+                  <span key={one.id} className={s.fanCard} style={cssVars({ '--i': i - (all.length - 1) / 2 })}>
+                    <ProjectMark seed={one.id} ink={one.ink} size={42} />
+                  </span>
+                ))}
+              </span>
+            ),
+          },
+        ]),
     ...(Array.isArray(found) && found.length === 0
       ? []
       : [

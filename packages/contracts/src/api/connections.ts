@@ -199,6 +199,8 @@ export const SignInState = Schema.Union([
 ])
 export type SignInState = typeof SignInState.Type
 
+export const SOCKET_CODE_SERVICES: ReadonlySet<string> = new Set<Service>(['github', 'gitlab', 'bitbucket'])
+
 /**
  * Connections to code hosts and trackers: listing them, signing in, a pasted token, the CLI, checking and disconnecting.
  * What connecting a service starts from, and finding which product answers at an address.

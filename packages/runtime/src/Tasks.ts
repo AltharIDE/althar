@@ -244,9 +244,10 @@ export class Tasks extends Context.Service<
     }): Effect.Effect<boolean, unknown>
     /**
      * Keeps a finished task for later, as the person said: out of Needs you
-     * as it is, with nothing stopped, not settled. Any kind, open, with no
-     * pull request of its own open. The person writing to it brings it back
-     * (`bringBack`). Whether it was kept now.
+     * as it is, with nothing stopped, not settled. Any kind, open, commits
+     * held for Ship included: they stay held. Refused (`TaskRefused`,
+     * `pull_open`) where a pull request of its own is open. The person
+     * writing to it brings it back (`bringBack`). Whether it was kept now.
      */
     keep(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
     /**
@@ -735,11 +736,14 @@ export class Tasks extends Context.Service<
             Effect.gen(function* () {
               const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; open: number }>`
                 SELECT k.project_id, k.state, k.kept_at,
-                  -- Any kind keeps, a prototype or a chat ending on its branch included: only a pull request of its own still open,
-                  -- or commits held for Ship, wait on the person in their own ways (accepting, Ship).
+                  -- Any kind keeps, a prototype or a chat ending on its branch included, commits held for Ship too (they stay held,
+                  -- and Ship is there when it is opened): only a pull request of its own still open waits on the person, on its host.
                   ${sql.unsafe(keepWaitsIn('k'))} AS open
                 FROM tasks k WHERE k.id = ${input.taskId}`
-              if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.open === 1) return false
+              // Its pull request open, it waits there, on its host: refused, saying so, rather than nothing said.
+              if (task !== undefined && task.state === 'open' && task.keptAt === null && task.open === 1)
+                return yield* new TaskRefused({ taskId: input.taskId, why: 'pull_open' })
+              if (task === undefined || task.state !== 'open' || task.keptAt !== null) return false
               const revision = yield* change('tasks', input.taskId, { keptAt: at })
               yield* fact({
                 projectId: task.projectId,

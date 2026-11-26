@@ -306,7 +306,8 @@ export function Outputs({
   // What it used of each account its agents ran on, closed until the person opens it, then open on every task (ADR-084).
   const usage = usageLines(snapshot.usage, named, nameProvider)
   const [usageOpen, setUsageOpen] = useUsageOpen()
-  const ready = task.phase === 'ready'
+  // Finished: waiting in Needs you, or kept for later, where what waits to be accepted or shipped stays offered.
+  const ready = task.phase === 'ready' || task.phase === 'kept'
   const review = reviewOf(snapshot, named)
   // Its latest pull request in each repository, the open one else the newest; the others came before them.
   const { latest, earlier } = latestOf(task.changes)
@@ -683,8 +684,7 @@ export function Outputs({
   const branchOnly = first === undefined && task.merged.length === 0 && (task.files.length > 0 || task.commits > 0)
   // Its draft pull request opens whenever no agent is at work on it: done, kept, stopped however, or waiting with no turn running.
   // At work, its run opens it as it ends.
-  const idle =
-    (ready || task.phase === 'kept' || task.phase === 'stopped' || task.phase === 'waiting') && snapshot.session?.turnRunning !== true
+  const idle = (ready || task.phase === 'stopped' || task.phase === 'waiting') && snapshot.session?.turnRunning !== true
   const opening = idle && first === undefined && task.commits > 0
   const host = snapshot.host
   // Opened by Althar on its host, connected; else connecting it is what to do, where Althar knows the host: by its name.

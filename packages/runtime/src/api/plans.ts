@@ -152,6 +152,7 @@ export const plansHandlers = ({ sender, actorId, api, envelope, issueFor }: ApiK
         ),
       StartPlan: ({ planId, workerId }) => api(Effect.asVoid(plans.start(planId, actorId, workerId))),
       HoldPlan: ({ planId }) => api(plans.hold(planId, actorId)),
+      PlacePlan: ({ planId, workerId, chosenAt }) => api(plans.place(planId, workerId, actorId, chosenAt)),
       HoldDraft: ({ threadId, key }) => api(coordinator.holdDraft(threadId, key, actorId)),
       ChangePlan: ({ planId, steps, end, worksIn, toward }) => api(plans.change(planId, steps, actorId, end, worksIn, toward)),
       ChangeIssueDraft: ({ draftId, title, body, labels, priority }) =>

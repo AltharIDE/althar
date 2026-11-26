@@ -1507,6 +1507,10 @@ export const TaskCard = Schema.Struct({
       worksIn: Schema.optional(WorksIn),
       /** Facts the home reads before offering a worker for the lead. Absent on earlier homes. */
       workerRequirements: Schema.optional(WorkerPlanRequirements),
+      /** Where it runs once it starts, as chosen before (PlacePlan): a worker or any free one; absent for the home. */
+      runsOn: Schema.optional(Schema.String),
+      /** When that choice was made, as PlacePlan's `chosenAt` said: a window's own choice is through once this reaches it. */
+      runsOnChosenAt: Schema.optional(Schema.Number),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
       /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
@@ -1663,7 +1667,10 @@ export const TaskCard = Schema.Struct({
    * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
    */
   conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
-  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  /**
+   * When the person kept it for later, as the store has it, whatever phase it reads in (one kept whose pull request opened
+   * since reads ready): its kept row says when, and a saved card is checked by it. Null or absent where it isn't kept.
+   */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),

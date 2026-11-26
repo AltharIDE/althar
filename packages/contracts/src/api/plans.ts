@@ -48,9 +48,31 @@ export const PlansApi = RpcGroup.make(
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
-  command('StartPlan', { planId: Schema.String, workerId: Schema.optional(WorkerSelection) }, Schema.Void),
+  command(
+    'StartPlan',
+    {
+      planId: Schema.String,
+      /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started (PlacePlan). */
+      workerId: Schema.optional(Schema.NullOr(WorkerSelection)),
+    },
+    Schema.Void,
+  ),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
   command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
+  /**
+   * Where a planned task runs once it starts (ADR-103), chosen as it counts down or is held: a worker, any free worker, or null
+   * for the home. Its countdown starts it there. Whether it was held: one counting down that the place can't take now is.
+   */
+  command(
+    'PlacePlan',
+    {
+      planId: Schema.String,
+      workerId: Schema.NullOr(WorkerSelection),
+      /** When the person chose it, in milliseconds: one chosen before the plan's last choice reaches it late and changes nothing. */
+      chosenAt: Schema.optional(Schema.Number),
+    },
+    Schema.Boolean,
+  ),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
   command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */

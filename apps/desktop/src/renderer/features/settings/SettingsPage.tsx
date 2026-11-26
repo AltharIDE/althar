@@ -46,10 +46,14 @@ import {
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
+import { canCall } from '../../data/client'
 import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
+import { useAppVersion } from '../../shared/appVersion'
+import { behindText, HomeBehind } from '../homes/HomeBehind'
+import { useHomeName } from '../homes/useHomes'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
@@ -145,6 +149,10 @@ export function SettingsPage({
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
+  const { client } = useServices()
+  const catalog = canCall(client, 'GetAgentCatalog')
+  // An older home doesn't let this window sign its agents in: a link to an agent's sign-in opens its tab, with its update.
+  const signsIn = canCall(client, 'StartAccountSignIn')
   // Here, and not in the agents' section, so a sign-in lasts from one section to another.
   const accounts = useAccountSignIn(start)
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
@@ -155,7 +163,7 @@ export function SettingsPage({
   if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
-  const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
+  const wanted = signsIn && start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
@@ -215,9 +223,12 @@ export function SettingsPage({
         computer={worker ?? null}
         onComputer={onComputer ?? (() => onSection('computers'))}
       />
-      <div hidden={section !== 'agents'}>
-        <AgentCatalogSection start={start} active={section === 'agents'} />
-      </div>
+      {/* More agents, where the home lets this window read them: another computer's home doesn't, so they aren't offered. */}
+      {catalog && (
+        <div hidden={section !== 'agents'}>
+          <AgentCatalogSection start={start} active={section === 'agents'} />
+        </div>
+      )}
     </SettingsLayout>
   )
 }
@@ -267,7 +278,7 @@ function SectionBody({
     case 'skills':
       return <SkillsSection start={start} />
     case 'code-hosts':
-      return <ConnectionsView model={connections} columns />
+      return <CodeHostsSection model={connections} />
     case 'computers':
       return <ComputersSection start={start} opened={computer} onOpen={onComputer} onTask={onTask} />
     case 'this-mac':
@@ -307,6 +318,17 @@ function Failed({ when, children = text.failed }: { when: boolean; children?: st
   return <Problem className={s.failed}>{children}</Problem>
 }
 
+/**
+ * The code hosts and trackers. On another computer's home, its code hosts alone, connected there from here: its trackers stay
+ * the person's own window's. An older home that can't connect one from here offers its update in their place.
+ */
+function CodeHostsSection({ model }: { model: ConnectionsModel }) {
+  const { client } = useServices()
+  if (client.connection === undefined) return <ConnectionsView model={model} columns />
+  if (!canCall(client, 'ConnectToken')) return <HomeBehind line={behindText.hosts} />
+  return <ConnectionsView model={model} only="hosts" />
+}
+
 /* ---- the agents ------------------------------------------------------------------- */
 
 /** An agent as a tab: a dot on one with an account signed out. */
@@ -327,6 +349,12 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // The agents of the home the window is on: this computer's, or another's, by its name; on an older one, shown only, with its
+  // update in place of signing them in.
+  const { name: where } = useHomeName()
+  const { client } = useServices()
+  const signsIn = canCall(client, 'StartAccountSignIn')
+  const installs = canCall(client, 'InstallAgent')
   // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
   const [checking, setChecking] = useState(false)
   const checkAgain = () => {
@@ -347,13 +375,13 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
     return (
       <>
         <StartError model={start} />
-        <p className={s.quiet}>{text.connecting}</p>
+        <p className={s.quiet}>{text.connecting(where)}</p>
       </>
     )
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${where}` }} />
       <StartError model={start} />
       {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
       <AgentTabPanel
@@ -364,11 +392,14 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          <>
+            {!signsIn && <HomeBehind line={behindText.agents} />}
+            <AgentAccounts agent={chosen} start={start} signIn={accounts} readOnly={!signsIn} />
+          </>
         ) : (
           <AgentInstall
             name={chosen.name}
-            text={{ missing: text.agentHere }}
+            text={{ missing: (name: string) => text.agentHere(name, where) }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
             {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
@@ -379,7 +410,8 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
                   ? { kind: 'idle' }
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
-            onInstall={() => void start.install(chosen.id)}
+            // Downloaded where the home lets this window: another computer's home is told its guide instead.
+            {...(installs ? { onInstall: () => void start.install(chosen.id) } : {})}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
             onCheck={checkAgain}
             checking={checking}
@@ -808,9 +840,11 @@ function BrowserSection() {
 function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
-  const { host } = useServices()
+  const { client, host } = useServices()
   const storage = useStorage()
-  const version = start.status?.appVersion
+  // This app's, on whichever home the window is: a home's runtime says its own release.
+  const own = useAppVersion()
+  const version = client.connection === undefined ? (own ?? start.status?.appVersion) : own
   const report = host.reportProblem
   return (
     <>

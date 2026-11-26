@@ -892,6 +892,27 @@
 .strip li:not([data-state='ready']):not(:has(button)) {
   padding-right: 10px;
 }
+/* a home that makes projects, older than setting it up from here: its update, under what it has */
+.behind {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(560px, 100%);
+  animation: blur-in 440ms linear 720ms backwards;
+}
+.behindLine {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-2);
+  text-align: center;
+  text-wrap: balance;
+}
+/* its press is a pill inside the pill, the same curve 4px in */
+.strip li button {
+  height: 22px;
+  padding-inline: 9px;
+  border-radius: 999px;
+}
 
 /* the narrowest window: the doors one under another, each a row */
 @container (max-width: 620px) {

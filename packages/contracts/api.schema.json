@@ -3916,6 +3916,30 @@
                     }
                   ]
                 },
+                "runsOn": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runsOnChosenAt": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "enum": ["Infinity", "-Infinity", "NaN"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "startsAfter": {
                   "anyOf": [
                     {
@@ -10658,6 +10682,30 @@
                   "anyOf": [
                     {
                       "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runsOn": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runsOnChosenAt": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "enum": ["Infinity", "-Infinity", "NaN"],
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -20284,6 +20332,30 @@
                     }
                   ]
                 },
+                "runsOn": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runsOnChosenAt": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "enum": ["Infinity", "-Infinity", "NaN"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "startsAfter": {
                   "anyOf": [
                     {
@@ -24507,7 +24579,7 @@
         "required": ["commandId", "agentId", "name"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/AccountStatus"
       }
@@ -25128,7 +25200,7 @@
         "required": ["commandId", "flowId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -25152,7 +25224,7 @@
         "required": ["commandId", "flowId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -25461,7 +25533,7 @@
         "required": ["connectionId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ConnectionCheck"
       }
@@ -25801,7 +25873,7 @@
         "required": ["commandId", "product", "webUrl"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ConnectionSummary"
       }
@@ -25868,7 +25940,7 @@
         "required": ["commandId", "product", "token"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ConnectionSummary"
       }
@@ -26195,7 +26267,7 @@
         "required": ["commandId", "connectionId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -26446,7 +26518,7 @@
         "required": ["agentId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "additionalProperties": true,
         "properties": {
@@ -26569,7 +26641,7 @@
         "required": ["service", "webUrl"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/FoundServer"
       }
@@ -26679,7 +26751,7 @@
         "required": ["flowId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/AccountSignInState"
       }
@@ -26870,7 +26942,7 @@
         "required": ["service"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ConnectGuide"
       }
@@ -27562,7 +27634,7 @@
         "required": ["flowId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/SignInState"
       }
@@ -29697,7 +29769,7 @@
         "required": ["commandId", "agentId", "accountIds"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -29754,7 +29826,7 @@
         "required": ["commandId", "flowId", "code"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -29813,6 +29885,54 @@
       "socket": false,
       "success": {
         "type": "null"
+      }
+    },
+    "PlacePlan": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "command",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "chosenAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "enum": ["Infinity", "-Infinity", "NaN"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commandId": {
+            "$ref": "#/$defs/CommandId"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "workerId": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WorkerSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["commandId", "planId", "workerId"],
+        "type": "object"
+      },
+      "socket": true,
+      "success": {
+        "type": "boolean"
       }
     },
     "PlaceRepository": {
@@ -30588,7 +30708,7 @@
         "required": ["commandId", "accountId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -30778,7 +30898,7 @@
         "required": ["commandId", "accountId", "name"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33456,7 +33576,7 @@
         "required": ["commandId", "accountId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "additionalProperties": true,
         "properties": {
@@ -33517,7 +33637,7 @@
         "required": ["commandId", "accountId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -33606,7 +33726,7 @@
         "required": ["commandId", "accountId", "way"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "additionalProperties": true,
         "properties": {
@@ -33664,6 +33784,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/WorkerSelection"
+              },
+              {
+                "type": "null"
               },
               {
                 "type": "null"
@@ -33765,7 +33888,7 @@
         "required": ["commandId", "product"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/SignInStart"
       }

@@ -30,7 +30,8 @@ import {
   withIssues,
 } from '../src/pullRequestWords'
 import { listenDue } from '../src/changeRecords'
-import { changeOf, itemOf, stuckOf } from '../src/Queries'
+import { itemOf, stuckOf } from '../src/Queries'
+import { changeOf } from '../src/changeSnapshot'
 
 const dana = { id: 'u2', login: 'dana', name: 'Dana', bot: false }
 const comment = (more: Partial<Comment> = {}): Comment => ({

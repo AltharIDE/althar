@@ -19,8 +19,8 @@ export const text = {
   all: 'All settings',
   allKbd: chord(keys.mod, keys.shift, ','),
   agents: 'Agents',
-  connecting: `Looking at the agents on ${device.this}…`,
-  agentHere: (name: string) => `${name} isn’t on ${device.this}`,
+  connecting: (where: string) => `Looking at the agents on ${where}…`,
+  agentHere: (name: string, where: string) => `${name} isn’t on ${where}`,
   version: (version: string) => `Althar ${version}`,
   /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
   report: 'Report a problem',
