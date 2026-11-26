@@ -38,6 +38,7 @@ import {
   SettingSwitch,
   HelpImprove,
   Storage,
+  TaskFolderLocation,
   TaskFolders,
   taskFoldersText,
   UpdateReady,
@@ -94,6 +95,7 @@ import { PresetsSection, presetsText } from './PresetsSection'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { PLACES, useStorage } from './useStorage'
 import { type RunOutside, useRunOutside } from './useRunOutside'
+import { useTaskFolderLocation } from './useTaskFolderLocation'
 import { useTaskFolders } from './useTaskFolders'
 import { ServersSection, SkillsSection } from './ToolSections'
 import { AgentCatalogSection } from './AgentCatalogSection'
@@ -477,6 +479,7 @@ function ThisMacSection({ home, lit, onTask }: { home: SettingsHome; lit: boolea
   const places = usePlaces(!home.remote)
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
+  const taskFolder = useTaskFolderLocation()
   const own = !home.remote
   const words = text.atOnce(home.name)
   return (
@@ -523,6 +526,19 @@ function ThisMacSection({ home, lit, onTask }: { home: SettingsHome; lit: boolea
             glyph={<Icon name="hold" size={15} />}
             checked={paused.on}
             onChange={paused.set}
+          />
+        )}
+        {/* Where new tasks' folders go; those already made stay where they are. */}
+        {taskFolder !== null && (
+          <TaskFolderLocation
+            folder={taskFolder.folder}
+            from={taskFolder.from}
+            {...(taskFolder.defaultFolder === undefined ? {} : { defaultFolder: taskFolder.defaultFolder })}
+            onChange={taskFolder.change}
+            onUseDefault={taskFolder.useDefault}
+            {...(taskFolder.problem === undefined ? {} : { problem: taskFolder.problem })}
+            busy={taskFolder.busy}
+            {...(taskFolder.refusal === null ? {} : { refusal: taskFolder.refusal })}
           />
         )}
         {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
