@@ -3,7 +3,8 @@ name: e2e
 # The desktop app's end-to-end run: the built app, with the fake agent, in four parts by file, each on a machine of its
 # own, balanced by the file durations post-merge last measured on main (.github/actions/durations). desktop.yml runs it
 # for a change that reaches the app, on the pull request, so a change that breaks a spec fails there, and again in the
-# merge queue, on main as it will be; post-merge.yml once more, for the release.
+# merge queue, on main as it will be; post-merge.yml once more, for the release. A test whose quarantine lapsed is
+# skipped here (packages/testing/src/quarantine.ts); nightly.yml runs it, where it gates.
 on:
   workflow_call:
     inputs:
@@ -54,13 +55,14 @@ jobs:
       - uses: ./.github/actions/durations
         with:
           run: ${{ inputs.durations }}
-      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing). Those whose quarantine lapsed
+      # are left out of the run (QUARANTINE_SKIPPED, as Playwright's --grep-invert; none when it is empty).
       - uses: ./.github/actions/flaky/quarantine
       # The display is xvfb-run's, so the run keeps it (apps/desktop/scripts/display.ts).
       - env:
           E2E_SHARD: ${{ matrix.shard }}
           ALTHAR_E2E_DISPLAY: inherit
-        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
+        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e ${QUARANTINE_SKIPPED:+"--grep-invert=$QUARANTINE_SKIPPED"}'
       - uses: actions/upload-artifact@v6
         if: failure()
         with:

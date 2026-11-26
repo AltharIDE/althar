@@ -6,11 +6,18 @@
  * fewer for many, and a spec up to five times: what fails one run in ten, found within a day, not one run in ten on
  * main. A slow file runs only as many times as fit in its share of the time (three at least).
  *
+ * A change to source stresses the tests that import it too, through select.ts's import graph: the nearest first (those
+ * that import a changed file, then those that import them), eight on a pull request and sixteen at night, so a race
+ * in the code, not only in a test, shows on the change that brought it. Not the specs that reach it: the app's whole
+ * end-to-end run (desktop.yml) runs those already, and each run of a spec builds the app.
+ *
  * `bun stress.ts plan <changed> [nightly]` writes the plan for the file of changed paths to GITHUB_OUTPUT;
  * `bun stress.ts run` runs the part of it in PLAN.
  */
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
+
+import { graph, type Graph, nearest, repository } from './select'
 
 /** A package's changed test files, from its own folder. */
 export interface Part {
@@ -25,6 +32,8 @@ export interface Plan {
   readonly windows: Plan['linux']
   /** The changed end-to-end specs, from apps/desktop, how many times each runs, and on how many machines. */
   readonly specs: { readonly files: ReadonlyArray<string>; readonly runs: number; readonly shards: ReadonlyArray<string> }
+  /** The tests that import what changed, from the repository's root, stressed with the changed ones. */
+  readonly reached: ReadonlyArray<string>
 }
 
 /** The packages desktop.yml tests on Windows. */
@@ -59,12 +68,27 @@ const byPackage = (files: ReadonlyArray<readonly [string, string]>): ReadonlyArr
 /** A pull request's stress run, or the night's (nightly.yml) of what main changed that day. */
 export type When = 'pull request' | 'nightly'
 
-export const plan = (changed: ReadonlyArray<string>, when: When = 'pull request'): Plan => {
+/** How many tests that import changed source run with the changed tests: a few minutes' more on a pull request. */
+export const REACHED: Record<When, number> = { 'pull request': 8, nightly: 16 }
+
+/** A test as a package and its file from there, if it's one stress runs. */
+const testOf = (path: string) => {
+  const [, dir, file] = TEST.exec(path) ?? []
+  return dir !== undefined && file !== undefined && !REAL.test(path) ? [[dir, file] as const] : []
+}
+
+/** The plan for `changed`; with the repository's import graph, the tests that import its source too. */
+export const plan = (changed: ReadonlyArray<string>, when: When = 'pull request', known?: Graph): Plan => {
   const nightly = when === 'nightly'
-  const tests = changed.flatMap((path) => {
-    const [, dir, file] = TEST.exec(path) ?? []
-    return dir !== undefined && file !== undefined && !REAL.test(path) ? [[dir, file] as const] : []
-  })
+  const sources = changed.filter((path) => !TEST.test(path) && !SPEC.test(path))
+  // As many more than the changed tests as the cap, not counting those among them.
+  const reached =
+    known === undefined
+      ? []
+      : nearest(known, sources, REACHED[when] + changed.length)
+          .filter((path) => !changed.includes(path) && testOf(path).length > 0)
+          .slice(0, REACHED[when])
+  const tests = [...changed, ...reached].flatMap(testOf)
   const windows = tests.filter(([dir]) => ON_WINDOWS.has(dir))
   const specs = changed.flatMap((path) => SPEC.exec(path)?.slice(1, 2) ?? [])
   const specRuns = nightly ? share(specs.length, 20, 2, 5) : share(specs.length, 2, 2, 2)
@@ -77,6 +101,7 @@ export const plan = (changed: ReadonlyArray<string>, when: When = 'pull request'
     // Forty minutes of the hour the night's Windows job has (nightly.yml), as Linux's.
     windows: { parts: byPackage(windows), runs: share(windows.length, 100, 2, 10), seconds: 40 * 60 },
     specs: { files: specs, runs: specRuns, shards: Array.from({ length: shards }, (_, index) => `${index + 1}/${shards}`) },
+    reached,
   }
 }
 
@@ -140,6 +165,7 @@ if (mode === 'plan' && list !== undefined && output !== undefined) {
       .split('\n')
       .filter((line) => line.trim() !== ''),
     when === 'nightly' ? 'nightly' : 'pull request',
+    graph(repository()),
   )
   appendFileSync(
     output,
