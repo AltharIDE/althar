@@ -77,6 +77,11 @@ export interface RepositoryAccess {
   readonly path: string
   readonly state: AccessState
   readonly reason: AccessReason | null
+  /**
+   * Whether the service said the account itself may push there; null where it didn't say. A refusal with true is the
+   * sign-in's, with false the account's role, and with null either.
+   */
+  readonly accountPush?: boolean | null
 }
 
 export interface AccessLine {

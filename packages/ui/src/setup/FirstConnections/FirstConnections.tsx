@@ -90,10 +90,18 @@ export type FirstConnectionsProps = RootProps<
   'section',
   {
     /**
-     * Its host, connected, but whose sign-in may not push to these of its repositories, and why in a line: Connect again
-     * (`onConnect`) signs in with one that may.
+     * Its hosts, connected, but whose sign-ins may not push to these of its repositories: a row for each connection and
+     * remedy, with why in a line, and Connect again for that connection.
      */
-    cantPush?: readonly { readonly service: FirstConnectionsService; readonly names: readonly string[]; readonly why: string }[]
+    cantPush?: readonly {
+      /** Which row it is: a connection and its repositories with one remedy. */
+      readonly id: string
+      readonly service: FirstConnectionsService
+      readonly names: readonly string[]
+      readonly why: string
+      /** Connect again, for this row's own connection. */
+      readonly onConnectAgain: () => void
+    }[]
     /** Where the project's code is, on a host not connected yet: the host, and the place there. */
     host?: { readonly service: FirstConnectionsService; readonly where?: string }
     /** The code hosts to choose from, where the project's code names none and none is connected. */
@@ -152,7 +160,7 @@ export function FirstConnections({
               </li>
             ))}
             {cantPush.map((one) => (
-              <li key={one.service.id} className={cx(s.row, s.problem)}>
+              <li key={one.id} className={cx(s.row, s.problem)}>
                 <span className={s.marks}>
                   <Mark service={one.service} />
                 </span>
@@ -161,7 +169,7 @@ export function FirstConnections({
                   <span className={s.why}>{one.why}</span>
                 </span>
                 <span className={s.end}>
-                  <Button size="small" onClick={() => onConnect(one.service.id)}>
+                  <Button size="small" onClick={one.onConnectAgain}>
                     {t.connectAgain}
                   </Button>
                 </span>

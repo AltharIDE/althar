@@ -2441,11 +2441,13 @@ export const accessGitHub: Access = (input: AccessInput) =>
       destinations,
       (found): Effect.Effect<RepositoryAccess> => {
         const path = found.path.join('/')
-        if (found.push === false) return Effect.succeed({ path, state: 'no', reason: { kind: 'role', role: null } })
-        if (scopeless) return Effect.succeed({ path, state: 'no', reason: { kind: 'scope', scope: 'repo', url: settings } })
+        // What GitHub said of the account there, kept apart from what it didn't say.
+        const accountPush = found.push ?? null
+        if (found.push === false) return Effect.succeed({ path, state: 'no', reason: { kind: 'role', role: null }, accountPush })
+        if (scopeless) return Effect.succeed({ path, state: 'no', reason: { kind: 'scope', scope: 'repo', url: settings }, accountPush })
         return Effect.map(pushAnswer(input.fetch, `${web}/${path}.git`, authorization), (answer): RepositoryAccess => {
           if (answer === 'no')
-            return { path, state: 'no', reason: { kind: 'no_push', names: [path], url: kind === 'app' ? null : settings } }
+            return { path, state: 'no', reason: { kind: 'no_push', names: [path], url: kind === 'app' ? null : settings }, accountPush }
           return answer === 'yes' || kind !== 'fine' ? { path, state: 'ok', reason: null } : { path, state: 'unknown', reason: UNSAID }
         })
       },

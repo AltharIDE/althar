@@ -491,6 +491,89 @@ describe('whether a connection can push where a project’s work goes', () => {
       assert.isUndefined(sent.find((request) => request.url === receive('northwind/api')))
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
+
+  it.live('asks, for one project, only where that project’s work goes, though another project pushes to its upstream', () => {
+    const repo = (path: string) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        { json: { id: 1, full_name: path, default_branch: 'main', html_url: `${GITHUB}/${path}`, permissions: { push: true } } },
+      ] as const
+    const receive = (path: string) => `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`
+    const { fetch, sent } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      repo('you/api'),
+      repo('northwind/api'),
+      ['GET', receive('northwind/api'), { status: 403, json: {} }],
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      // A fork of northwind/api, and another project whose own origin is northwind/api.
+      const fork = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/you/api.git`], { cwd: fork })
+      execFileSync('git', ['remote', 'add', 'upstream', `${GITHUB}/northwind/api.git`], { cwd: fork })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: fork })
+      const plain = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/northwind/api.git`], { cwd: plain })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: plain, name: 'upstream-work' })
+      const forked = (yield* connections.guide('github')).places.find((place) => place.repositories.includes('you/api'))?.project ?? ''
+      const connection = yield* signedIn
+      const mine = yield* connections.check(connection.id, forked)
+      assert.deepStrictEqual(
+        mine.lines.find((line) => line.need === 'push')?.repositories?.map((one) => [one.path, one.state]),
+        [['you/api', 'ok']],
+      )
+      assert.isUndefined(sent.find((request) => request.url === receive('northwind/api')))
+      // The other project's own check is where its refusal is said.
+      const theirs = yield* connections.check(connection.id, 'upstream-work')
+      assert.deepStrictEqual(
+        theirs.lines.find((line) => line.need === 'push')?.repositories?.map((one) => [one.path, one.state]),
+        [['northwind/api', 'no']],
+      )
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+})
+
+describe('why a host refused a push, asked again', () => {
+  it.live('says a role or the sign-in only where GitHub said which, and nothing where its answer gives no permissions', () => {
+    const answer = (path: string, permissions?: { push: boolean }) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        {
+          json: {
+            id: 1,
+            full_name: path,
+            default_branch: 'main',
+            html_url: `${GITHUB}/${path}`,
+            ...(permissions === undefined ? {} : { permissions }),
+          },
+        },
+      ] as const
+    const refused = (path: string) =>
+      ['GET', `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`, { status: 403, json: {} }] as const
+    const { fetch } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      answer('northwind/unsaid'),
+      refused('northwind/unsaid'),
+      answer('northwind/token', { push: true }),
+      refused('northwind/token'),
+      answer('northwind/role', { push: false }),
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const connection = yield* signedIn
+      // No permissions in GitHub's answer: not taken as the account's role, nor as the token's.
+      assert.isNull(yield* connections.pushCause(connection.id, ['northwind', 'unsaid']))
+      assert.strictEqual(yield* connections.pushCause(connection.id, ['northwind', 'token']), 'token')
+      assert.strictEqual(yield* connections.pushCause(connection.id, ['northwind', 'role']), 'role')
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
 })
 
 describe('the guide to connecting a code host', () => {

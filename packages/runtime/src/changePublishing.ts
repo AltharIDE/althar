@@ -608,6 +608,8 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       const known = pushFailureOf(failed)
       if (known === null || (known.why !== 'forbidden' && known.why !== 'denied')) return yield* Effect.fail(failed)
       const info = (yield* connections.list.pipe(Effect.orElseSucceed(() => []))).find((one) => one.id === connectionId)
+      // Asked again, for this repository alone: whether the host says it was the account's role or the sign-in.
+      const cause = known.why === 'forbidden' ? yield* connections.pushCause(connectionId, repository.path) : null
       return yield* new PushRefused({
         taskId,
         why: known.why,
@@ -624,7 +626,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
                 kind: info.auth === 'device_flow' ? ('app' as const) : ('token' as const),
                 product: info.product,
                 repository: repository.path.join('/'),
-                canPush: repository.canPush,
+                ...(cause === null ? {} : { cause }),
               },
             }),
       })

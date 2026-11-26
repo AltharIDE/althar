@@ -496,7 +496,7 @@ export const words = (
         // Pushed with a connection's sign-in: whose, for which repository, and what puts it right.
         const signIn = fieldOf(error, 'signIn')
         if ((why === 'forbidden' || why === 'denied') && typeof signIn === 'object' && signIn !== null) {
-          const { account, kind, product, repository, canPush } = signIn as Record<string, unknown>
+          const { account, kind, product, repository, cause } = signIn as Record<string, unknown>
           const service = redacted(text(error, 'host')) || 'The code host'
           return refusedSignIn(why, {
             service,
@@ -504,7 +504,7 @@ export const words = (
             account: typeof account === 'string' ? account : '',
             kind: kind === 'app' ? 'app' : 'token',
             repository: typeof repository === 'string' ? repository : '',
-            canPush: typeof canPush === 'boolean' ? canPush : null,
+            cause: cause === 'role' || cause === 'token' ? cause : null,
             said,
           })
         }
@@ -665,18 +665,18 @@ export const refusedSignIn = (
     readonly account: string
     readonly kind: 'token' | 'app'
     readonly repository: string
-    /** Whether the host says the account itself may push there; null where it didn't say. */
-    readonly canPush: boolean | null
+    /** Why, where the host established it: the account's role, or the sign-in while the account may push; null where it didn't. */
+    readonly cause: 'role' | 'token' | null
     /** The host's own line, where it gave one. */
     readonly said: string
   },
 ): string => {
-  const { service, product, account, kind, repository, canPush, said } = refused
+  const { service, product, account, kind, repository, cause, said } = refused
   const whose = kind === 'app' ? `Althar’s ${service} app, signed in as ${account}` : `${account}’s token`
   if (why === 'denied')
     return `${service} didn’t take ${whose} for a push to ${repository}. Connect ${service} again in Settings › Code hosts, then try again.`
   // The account itself may not write there, as the host said when it was asked: a role, which no token of it changes.
-  if (canPush === false)
+  if (cause === 'role')
     return `${service} won’t take a push to ${repository} from ${account}: the account may only read there. Ask its owners for write access, or connect ${service} as an account that can push, then try again.`
   const owner = repository.split('/')[0] ?? repository
   const fix =
@@ -686,7 +686,7 @@ export const refusedSignIn = (
         ? `Give the token write access to ${repository} (a fine-grained token’s Contents: Read and write, made for ${owner}), or connect ${service} with one that can push there`
         : `Give the token write access to ${repository}, or connect ${service} with one that can push there`
   // The host said it is about writing: the sign-in reads there, and may not push.
-  if (/write access|permission to \S+ denied|not allowed to push/i.test(said))
+  if (cause === 'token' || /write access|permission to \S+ denied|not allowed to push/i.test(said))
     return `${service} refused ${whose} for ${repository}: it can read the repository but not push to it. ${fix}, then try again.`
   // Only a refusal, with no word why: said as that, with the host's own line where it gave another.
   const words = said === '' ? '' : ` It said: ${sentence(said)}`

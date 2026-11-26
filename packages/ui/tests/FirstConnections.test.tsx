@@ -66,7 +66,11 @@ describe('a new project’s card for its code host and tracker', () => {
     const onConnect = vi.fn()
     const why = 'GitHub took sam’s token, but it may only read there.'
     const { rerender } = render(
-      <FirstConnections cantPush={[{ service: GITHUB, names: ['northwind/meridian'], why }]} onConnect={onConnect} onHide={vi.fn()} />,
+      <FirstConnections
+        cantPush={[{ id: 'gh', service: GITHUB, names: ['northwind/meridian'], why, onConnectAgain: () => onConnect('github') }]}
+        onConnect={onConnect}
+        onHide={vi.fn()}
+      />,
     )
     // Its code isn't ready for a pull request: the card is the code's, though its host is connected.
     expect(screen.getByRole('region', { name: 'Before the first pull request' })).toBeInTheDocument()
@@ -77,7 +81,9 @@ describe('a new project’s card for its code host and tracker', () => {
     // Several, named two at a time and the rest counted.
     rerender(
       <FirstConnections
-        cantPush={[{ service: GITHUB, names: ['a/one', 'a/two', 'a/three', 'a/four'], why }]}
+        cantPush={[
+          { id: 'gh', service: GITHUB, names: ['a/one', 'a/two', 'a/three', 'a/four'], why, onConnectAgain: () => onConnect('github') },
+        ]}
         onConnect={onConnect}
         onHide={vi.fn()}
       />,
@@ -86,8 +92,14 @@ describe('a new project’s card for its code host and tracker', () => {
     rerender(
       <FirstConnections
         cantPush={[
-          { service: GITHUB, names: ['a/one', 'a/two'], why },
-          { service: { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab }, names: ['b/one'], why: 'GitLab too.' },
+          { id: 'gh', service: GITHUB, names: ['a/one', 'a/two'], why, onConnectAgain: () => onConnect('github') },
+          {
+            id: 'gl',
+            service: { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab },
+            names: ['b/one'],
+            why: 'GitLab too.',
+            onConnectAgain: vi.fn(),
+          },
         ]}
         onConnect={onConnect}
         onHide={vi.fn()}

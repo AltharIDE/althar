@@ -122,31 +122,52 @@ const cantPushWhy = (reason: AccessReason | null, service: string, login: string
   }
 }
 
+/** A refusal's reason, as one remedy: those with the same remedy are said together. */
+const remedyOf = (reason: AccessReason | null) =>
+  reason === null
+    ? 'none'
+    : reason.kind === 'scope'
+      ? `scope ${reason.scope}`
+      : reason.kind === 'no_push'
+        ? `no_push ${reason.url ?? ''}`
+        : reason.kind
+
 /**
- * What a connection's check says of pushing to the project's repositories there: those its sign-in may not push to, each
- * by its own outcome, and why; null where it may, or the check doesn't say. Another project's refusals are never this
- * one's: without each repository's own outcome, only a reason that names its repositories, or one about the whole token,
- * is said.
+ * What a connection's check says of pushing to the project's repositories there: those its sign-in may not push to, by
+ * remedy, each with why and what puts it right; empty where it may, or the check doesn't say. Only repositories with the
+ * same reason share a line, so a remedy is never given for a repository it doesn't fit; another project's refusals are
+ * never this one's, and without each repository's own outcome, only a reason that names its repositories, or one about the
+ * whole token, is said.
  */
-export const cantPushOf = (check: ConnectionCheck, repositories: ReadonlyArray<string>, service: string, login: string) => {
+export const cantPushOf = (
+  check: ConnectionCheck,
+  repositories: ReadonlyArray<string>,
+  service: string,
+  login: string,
+): ReadonlyArray<{ readonly names: ReadonlyArray<string>; readonly why: string }> => {
   const push = check.lines.find((line) => line.need === 'push')
-  if (push === undefined) return null
+  if (push === undefined) return []
   const mine = (path: string) => repositories.some((one) => one.toLowerCase() === path.toLowerCase())
-  const refused =
+  const refused: ReadonlyArray<{ readonly path: string; readonly reason: AccessReason | null }> =
     push.repositories !== undefined
       ? push.repositories.filter((one) => one.state === 'no' && mine(one.path))
       : push.state !== 'no'
         ? []
         : push.reason?.kind === 'no_push'
-          ? push.reason.names.filter(mine).map((path) => ({ path, state: 'no' as const, reason: push.reason }))
+          ? push.reason.names.filter(mine).map((path) => ({ path, reason: push.reason }))
           : push.reason?.kind === 'scope'
-            ? repositories.map((path) => ({ path, state: 'no' as const, reason: push.reason }))
+            ? repositories.map((path) => ({ path, reason: push.reason }))
             : []
-  const [first] = refused
-  if (first === undefined) return null
   // Named as the project names them.
   const named = (path: string) => repositories.find((one) => one.toLowerCase() === path.toLowerCase()) ?? path
-  return { names: refused.map((one) => named(one.path)), why: cantPushWhy(first.reason, service, login) }
+  const groups = new Map<string, { names: Array<string>; reason: AccessReason | null }>()
+  for (const one of refused) {
+    const key = remedyOf(one.reason)
+    const group = groups.get(key) ?? { names: [], reason: one.reason }
+    group.names.push(named(one.path))
+    groups.set(key, group)
+  }
+  return [...groups.values()].map((group) => ({ names: group.names, why: cantPushWhy(group.reason, service, login) }))
 }
 
 export interface FirstConnectionsViewProps {
@@ -172,6 +193,7 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
     [
       'connection-check',
       code.connection.id,
+      project,
       [...code.place.repositories]
         .map((path) => path.toLowerCase())
         .sort()
@@ -180,7 +202,8 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
   const checks = useQueries({
     queries: codes.map((code) => ({
       queryKey: keyOf(code),
-      queryFn: () => client.checkConnection(code.connection.id),
+      // For this project alone: where its own work is pushed, never another project's destinations on the same host.
+      queryFn: () => client.checkConnection(code.connection.id, project),
       enabled: canCall(client, 'CheckConnection'),
       staleTime: 5 * 60_000,
       retry: false,
@@ -192,8 +215,8 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
   const cantPush = codes.flatMap((code, index) => {
     const data = checks[index]?.data
     const found =
-      data === undefined ? null : cantPushOf(data, code.place.repositories, serviceName(code.service), code.connection.account.login)
-    return found === null ? [] : [{ code, ...found }]
+      data === undefined ? [] : cantPushOf(data, code.place.repositories, serviceName(code.service), code.connection.account.login)
+    return found.map((one) => ({ code, ...one }))
   })
   // Nothing this window may connect, and nothing in the way: no card; but one walking stays till its walk ends, its check shown.
   if (walking === null && offer.host === undefined && offer.hosts.length === 0 && offer.trackers.length === 0 && cantPush.length === 0)
@@ -207,12 +230,18 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
       {...walkingHost}
       {...(cantPush.length === 0
         ? {}
-        : { cantPush: cantPush.map((one) => ({ service: option(one.code.service), names: one.names, why: one.why })) })}
+        : {
+            cantPush: cantPush.map((one) => ({
+              id: `${one.code.connection.id} ${one.names.join(' ')}`,
+              service: option(one.code.service),
+              names: one.names,
+              why: one.why,
+              // Its own connection signed in to again, so it takes one that can push: never another server's of the same kind.
+              onConnectAgain: () => setWalking({ service: one.code.service, again: one.code.connection.id }),
+            })),
+          })}
       onConnect={(chosen) => {
-        if (!isService(chosen)) return
-        // A host whose sign-in can't push: signed in to again, so the same connection takes one that can.
-        const again = cantPush.find((one) => one.code.service === chosen)?.code.connection.id ?? null
-        setWalking({ service: chosen, again })
+        if (isService(chosen)) setWalking({ service: chosen, again: null })
       }}
       onHide={() => hide(projectId)}
       {...(walking === null

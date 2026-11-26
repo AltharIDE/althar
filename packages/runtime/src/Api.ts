@@ -2514,7 +2514,8 @@ export const handlers = apiLayer(
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId))),
+      CheckConnection: ({ connectionId, project }) =>
+        Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId, project))),
       Disconnect: ({ commandId, connectionId }) =>
         Effect.andThen(codeHostConnection(connectionId), once(commandId, api(connections.remove(connectionId, actorId)))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),

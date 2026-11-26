@@ -59,6 +59,8 @@ export const CantPush: Story = {
     trackers: [],
     cantPush: [
       {
+        id: 'github',
+        onConnectAgain: () => onConnect('github'),
         service: GITHUB,
         names: ['AltharIDE/althar'],
         why: 'GitHub won’t take a push there with sam’s token. Give it write access on GitHub, or connect again with one that can push.',

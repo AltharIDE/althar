@@ -1649,7 +1649,13 @@ export const AccessLine = Schema.Struct({
   /** Each repository it asked on its own, with its outcome and why: what a project's card says of its own repositories. */
   repositories: Schema.optional(
     Schema.Array(
-      Schema.Struct({ path: Schema.String, state: Schema.Literals(['ok', 'no', 'unknown']), reason: Schema.NullOr(AccessReason) }),
+      Schema.Struct({
+        path: Schema.String,
+        state: Schema.Literals(['ok', 'no', 'unknown']),
+        reason: Schema.NullOr(AccessReason),
+        /** Whether the service said the account itself may push there; null where it didn't say. */
+        accountPush: Schema.optional(Schema.NullOr(Schema.Boolean)),
+      }),
     ),
   ),
 })
@@ -6593,7 +6599,8 @@ const WorkApi = RpcGroup.make(
   /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
   command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
   /** Asks the service what a connection can do. */
-  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
+  /** A connection's check; for one project, by its name, only that project's repositories, and where its work is pushed. */
+  call('CheckConnection', { connectionId: Schema.String, project: Schema.optional(Schema.String) }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),

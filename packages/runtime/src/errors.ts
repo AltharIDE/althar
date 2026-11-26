@@ -336,8 +336,11 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
       kind: Schema.Literals(['token', 'app']),
       product: Schema.String,
       repository: Schema.String,
-      /** Whether the host says the account itself may push there, where it says: false is a role, not a token, to put right. */
-      canPush: Schema.optional(Schema.Boolean),
+      /**
+       * Why, where the host established it when asked again: the account's role there, or the sign-in while the account may
+       * push. Absent where it didn't say, as when GitHub gives no permissions for the repository.
+       */
+      cause: Schema.optional(Schema.Literals(['role', 'token'])),
     }),
   ),
 }) {}

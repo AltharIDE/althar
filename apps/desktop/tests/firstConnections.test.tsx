@@ -134,42 +134,84 @@ const refusing = (names: ReadonlyArray<string>, url: string | null = 'https://gi
 
 describe('a new project whose host is connected but can’t push there', () => {
   it('names the project’s repositories its sign-in can’t push to, and why, and nothing where it can', () => {
-    expect(cantPushOf(refusing(['Northwind/Meridian-API', 'northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toEqual({
-      names: ['northwind/meridian-api'],
-      why: 'GitHub won’t take a push there with you’s token. Give it write access on GitHub, or connect again with one that can push.',
-    })
-    expect(cantPushOf(refusing(['northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
-    expect(cantPushOf(githubCheck, ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
-    expect(cantPushOf(refusing(['northwind/meridian-api'], null), ['northwind/meridian-api'], 'GitHub', 'you')?.why).toContain(
+    expect(cantPushOf(refusing(['Northwind/Meridian-API', 'northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toEqual([
+      {
+        names: ['northwind/meridian-api'],
+        why: 'GitHub won’t take a push there with you’s token. Give it write access on GitHub, or connect again with one that can push.',
+      },
+    ])
+    expect(cantPushOf(refusing(['northwind/other']), ['northwind/meridian-api'], 'GitHub', 'you')).toEqual([])
+    expect(cantPushOf(githubCheck, ['northwind/meridian-api'], 'GitHub', 'you')).toEqual([])
+    expect(cantPushOf(refusing(['northwind/meridian-api'], null), ['northwind/meridian-api'], 'GitHub', 'you')[0]?.why).toContain(
       'Althar’s GitHub app may not push there',
     )
   })
 
+  /** GitHub's check, its push line giving each repository's own outcome. */
+  const outcomes = (repositories: NonNullable<(typeof githubCheck.lines)[number]['repositories']>) => ({
+    ...githubCheck,
+    lines: githubCheck.lines.map((line) =>
+      line.need === 'push' ? { ...line, state: 'no' as const, reason: { kind: 'role' as const, role: null }, repositories } : line,
+    ),
+  })
+  const role = { kind: 'role' as const, role: null }
+  const token = (path: string) => ({ kind: 'no_push' as const, names: [path], url: 'https://github.com/settings/personal-access-tokens' })
+
   it('goes by each repository’s own outcome: another project’s read-only role is never this one’s', () => {
-    const check = {
-      ...githubCheck,
-      lines: githubCheck.lines.map((line) =>
-        line.need === 'push'
-          ? {
-              ...line,
-              state: 'no' as const,
-              reason: { kind: 'role' as const, role: null },
-              repositories: [
-                { path: 'northwind/other', state: 'no' as const, reason: { kind: 'role' as const, role: null } },
-                { path: 'northwind/meridian-api', state: 'ok' as const, reason: null },
-              ],
-            }
-          : line,
-      ),
-    }
-    expect(cantPushOf(check, ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
-    expect(cantPushOf(check, ['northwind/other'], 'GitHub', 'you')).toEqual({
-      names: ['northwind/other'],
-      why: 'you may only read there: its owners can give the account write access, or connect again as one that can push.',
-    })
+    const check = outcomes([
+      { path: 'northwind/other', state: 'no', reason: role },
+      { path: 'northwind/meridian-api', state: 'ok', reason: null },
+    ])
+    expect(cantPushOf(check, ['northwind/meridian-api'], 'GitHub', 'you')).toEqual([])
+    expect(cantPushOf(check, ['northwind/other'], 'GitHub', 'you')).toEqual([
+      {
+        names: ['northwind/other'],
+        why: 'you may only read there: its owners can give the account write access, or connect again as one that can push.',
+      },
+    ])
     // Without each one's outcome, a role names no repository: nothing is said rather than the wrong thing.
     const { repositories: _, ...summary } = check.lines.find((line) => line.need === 'push')!
-    expect(cantPushOf({ ...check, lines: [summary] }, ['northwind/meridian-api'], 'GitHub', 'you')).toBeNull()
+    expect(cantPushOf({ ...check, lines: [summary] }, ['northwind/meridian-api'], 'GitHub', 'you')).toEqual([])
+  })
+
+  it('gives each remedy only the repositories it fits, grouping those refused for the same reason', () => {
+    const check = outcomes([
+      { path: 'northwind/api', state: 'no', reason: role },
+      { path: 'northwind/web', state: 'no', reason: token('northwind/web') },
+      { path: 'northwind/ops', state: 'no', reason: token('northwind/ops') },
+    ])
+    const said = cantPushOf(check, ['northwind/api', 'northwind/web', 'northwind/ops'], 'GitHub', 'you')
+    expect(said.map((one) => [one.names, one.why.split(' ')[1]])).toEqual([
+      [['northwind/api'], 'may'],
+      [['northwind/web', 'northwind/ops'], 'won’t'],
+    ])
+  })
+
+  it('connects again the very connection a row is for, of two servers of the same kind', async () => {
+    const server = (id: string, webUrl: string) => ({ ...githubConnection, id, webUrl })
+    const list = {
+      ...connectionList,
+      connections: [server('conn_a', 'https://git.a.test'), server('conn_b', 'https://git.b.test'), LINEAR],
+      places: [
+        { product: 'github' as const, webUrl: 'https://git.a.test', project: 'meridian', remote: null, repositories: ['a/api'] },
+        { product: 'github' as const, webUrl: 'https://git.b.test', project: 'meridian', remote: null, repositories: ['b/api'] },
+      ],
+    }
+    const checkConnection = vi.fn(async (id: string) => refusing([id === 'conn_a' ? 'a/api' : 'b/api']))
+    const getConnectGuide = vi.fn(async () => ({ ...(await fakeClient().client.getConnectGuide('github')) }))
+    const { client } = fakeClient({ checkConnection, getConnectGuide, listConnections: vi.fn(async () => list) })
+    render(
+      <ServicesProvider value={servicesFor(client)}>
+        <FirstConnectionsView projectId="p1" project="meridian" model={{ list } as unknown as ConnectionsModel} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByText('Can’t push to b/api')).toBeTruthy()
+    expect(checkConnection).toHaveBeenCalledWith('conn_a', 'meridian')
+    expect(checkConnection).toHaveBeenCalledWith('conn_b', 'meridian')
+    const [, second] = screen.getAllByRole('button', { name: 'Connect again' })
+    await userEvent.click(second!)
+    // Signing in again to the second server's connection, at its own address.
+    expect(await screen.findByText('Make a token on git.b.test')).toBeTruthy()
   })
 
   it('asks again for a repository added since, not by what it answered for the ones before', async () => {
@@ -202,7 +244,7 @@ describe('a new project whose host is connected but can’t push there', () => {
     const card = await screen.findByRole('region', { name: 'Before the first pull request' })
     expect(await screen.findByText('Can’t push to northwind/meridian-api')).toBeTruthy()
     expect(card.textContent).toContain('won’t take a push there')
-    expect(client.checkConnection).toHaveBeenCalledWith(githubConnection.id)
+    expect(client.checkConnection).toHaveBeenCalledWith(githubConnection.id, 'meridian')
     await userEvent.click(screen.getByRole('button', { name: 'Connect again' }))
     await waitFor(() => expect(client.getConnectGuide).toHaveBeenCalledWith('github'))
   })

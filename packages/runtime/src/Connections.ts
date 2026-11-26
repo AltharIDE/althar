@@ -347,7 +347,12 @@ export class Connections extends Context.Service<
     /** Which of a service's products answers at an address. */
     findServer(service: Service, typed: string): Effect.Effect<Found, unknown>
     /** Asks the service what a connection can do. */
-    check(connectionId: string): Effect.Effect<Check, unknown>
+    check(connectionId: string, project?: string): Effect.Effect<Check, unknown>
+    /**
+     * Why the host refused a push to a repository with a connection's sign-in, as far as it says when asked again: the
+     * account's role there, the sign-in itself while the account may push, or null where the host doesn't establish which.
+     */
+    pushCause(connectionId: string, path: ReadonlyArray<string>): Effect.Effect<'role' | 'token' | null>
     /**
      * Removes the connection once nothing it reads for is under way: what
      * reads through it with `whileThere` then ends first, and none starts after.
@@ -1585,14 +1590,34 @@ export class Connections extends Context.Service<
         }
       })
 
-      const check = (connectionId: string) =>
+      const pushCause = (connectionId: string, path: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const row = yield* rowOf(connectionId)
+          const now = yield* credential(connectionId)
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, [path], [path])
+          const said = report.lines
+            .find((line) => line.need === 'push')
+            ?.repositories?.find((one) => one.path.toLowerCase() === path.join('/').toLowerCase())
+          // A role, where the host said the account may only read; the sign-in, where it said the account may push and git
+          // still refused it; anything else isn't established.
+          if (said?.reason?.kind === 'role' && said.accountPush === false) return 'role' as const
+          if (said?.reason?.kind === 'no_push' && said.accountPush === true) return 'token' as const
+          return null
+        })
+
+      const check = (connectionId: string, project?: string) =>
         Effect.gen(function* () {
           const row = yield* rowOf(connectionId)
           const info = infoOf(row.product)
           const kept = yield* stored(row).pipe(Effect.mapError(refusedFor(row)))
           const now = yield* credential(connectionId).pipe(Effect.mapError(refusedFor(row)))
           // Its remotes by name, as git has them: which of them a project's work is pushed to, and which it only reads.
-          const here = (yield* placesOf(true)).filter((entry) => entry.place.product === row.product && entry.place.webUrl === row.webUrl)
+          const here = (yield* placesOf(true)).filter(
+            (entry) =>
+              entry.place.product === row.product &&
+              entry.place.webUrl === row.webUrl &&
+              (project === undefined || entry.place.project === project),
+          )
           const repositories = here.flatMap((entry) => entry.place.repositories.map((path) => path.split('/')))
           const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
           const pushes = [...new Map(here.flatMap((entry) => entry.pushes).map((path) => [path.join('/'), path])).values()]
@@ -1801,7 +1826,8 @@ export class Connections extends Context.Service<
         places: provide(Effect.map(placesOf(false), (found) => found.map((entry) => entry.place))),
         guide: (service) => provide(guide(service)),
         findServer: (service, typed) => provide(findServer(service, typed)),
-        check: (connectionId) => provide(check(connectionId)),
+        check: (connectionId, project) => provide(check(connectionId, project)),
+        pushCause: (connectionId, path) => provide(pushCause(connectionId, path)).pipe(Effect.orElseSucceed(() => null)),
         remove: (connectionId, actorId) =>
           provide(
             Effect.uninterruptibleMask((restore) => {

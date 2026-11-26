@@ -703,7 +703,8 @@ export interface Client {
   /** Connects with gh's or glab's sign-in on this device. */
   readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
   /** What a connection can do, as its service says. */
-  readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
+  /** A connection's check; for one project, by its name, only where that project's work goes. */
+  readonly checkConnection: (connectionId: string, project?: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
@@ -1417,7 +1418,8 @@ export const connect = async (
     findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
     connectCli: (product, webUrl, connectionId) =>
       command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
-    checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
+    checkConnection: (connectionId, project) =>
+      settle(api.CheckConnection({ connectionId, ...(project === undefined ? {} : { project }) })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
     setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
