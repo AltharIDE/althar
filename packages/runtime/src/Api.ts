@@ -355,7 +355,7 @@ export const handlers = apiLayer(
       identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
         ? effect
         : Effect.fail(
-            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+            new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
           )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
@@ -3169,7 +3169,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
                 return yield* new ApiError({
                   reason: 'PersonRequired',
-                  message: 'This call needs the person in the window or on a paired device.',
+                  message: 'This home doesn’t take that from this connection yet.',
                 })
               const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
               const prioritized = effect.pipe(

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AfterMergeRule, ProjectInk, ProjectList, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
-import { messageOf } from '../../data/client'
+import { canCall, messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
@@ -113,8 +113,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   // Only what the settings say of the list, this project and the inks others took: another's change of name draws nothing here.
   const listed = useQuery({ ...read.projects(), select: useCallback((list: ProjectList) => settingsOf(list, projectId), [projectId]) }).data
   const project = listed?.project ?? null
-  const rulesRead = useQuery(read.rules(projectId))
-  const notes = useQuery(read.notes(projectId)).data ?? null
+  // What a home keeps from this window isn't asked of it: its sections say so instead.
+  const rulesRead = useQuery({ ...read.rules(projectId), enabled: canCall(client, 'GetProjectRules') })
+  const notes = useQuery({ ...read.notes(projectId), enabled: canCall(client, 'GetProjectNotes') }).data ?? null
 
   // What the person chose, shown until the runtime says the same or says no.
   const [chosen, setChosen] = useState<Chosen>({})

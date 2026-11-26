@@ -873,7 +873,7 @@ describe('a new project on a home on another computer', () => {
   /** What the home refuses this window, as it does a socket: putting a repository on a host, and a project's tracker. */
   const refused = () =>
     vi.fn(async () => {
-      throw new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' })
+      throw new ApiError({ reason: 'PersonRequired', message: 'This home doesn’t take that from this connection yet.' })
     })
   /** The page, in a window on a home on another computer: its folders the home's own, as the window makes them. */
   const onHome = (

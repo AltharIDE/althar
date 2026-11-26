@@ -24,7 +24,10 @@ const MAX_CHALLENGES = 512
 const MAX_CHALLENGES_PER_DEVICE = 8
 const MAX_CLIENTS = 100
 const authenticationFailed = () =>
-  new ApiError({ reason: 'AuthenticationFailed', message: 'This device could not authenticate. Pair it again from a trusted client.' })
+  new ApiError({
+    reason: 'AuthenticationFailed',
+    message: 'This device could not authenticate. Pair it again with a new code from the home.',
+  })
 const storageFailed = () => new ApiError({ reason: 'IdentityUnavailable', message: 'Althar could not read its device identities.' })
 
 interface Registration {
@@ -184,7 +187,7 @@ export class ClientIdentities extends Context.Service<
           if (client === undefined || client.revokedAt !== null || client.actorId !== identity.actorId || client.role !== identity.role)
             return yield* new ApiError({
               reason: 'ClientRevoked',
-              message: 'This device no longer has access. Pair it again from a trusted client.',
+              message: 'This device no longer has access. Pair it again with a new code from the home.',
             })
         }).pipe(Effect.mapError((error) => (error instanceof ApiError ? error : storageFailed())))
 

@@ -5,6 +5,7 @@ import type { AppSettings } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { canCall } from '../../data/client'
 
 /*
  * What "Run it" on a pull request from outside the team does without asking
@@ -46,5 +47,6 @@ export const useRunOutside = (): RunOutsideModel | null => {
     [cache, client],
   )
 
-  return settings === undefined ? null : { to: settings.runOutside ?? 'ask', failed, set }
+  // Trusting outside code is the person's own word: a home on another computer keeps it from its window, which shows none.
+  return settings === undefined || !canCall(client, 'SetRunOutside') ? null : { to: settings.runOutside ?? 'ask', failed, set }
 }

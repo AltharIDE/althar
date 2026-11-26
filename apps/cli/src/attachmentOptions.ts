@@ -10,7 +10,7 @@ althar attach (--profile <absolute folder> | --ssh <host> --home <home_id>) --pr
 SSH options: --ssh-config <absolute file>, --ssh-port <port>, --remote-launcher <absolute path>, --remote-profile <absolute path>
 inspect prints the running home's identity and projects. Verify the home before using it in attach.
 Attached mode: /quit, EOF and Ctrl-C disconnect; remote work continues. /stop stops the session.
-Permission and question answers require a trusted person client.`
+Permissions and questions are answered in the Althar window.`
 
 export type AttachmentTarget =
   | { readonly kind: 'local'; readonly profile: string; readonly homeId?: string }

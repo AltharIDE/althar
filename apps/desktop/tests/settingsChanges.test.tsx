@@ -140,9 +140,22 @@ describe('how many agents run at once, in words', () => {
   const machine = { count: 4, memory: 16, cores: 10 }
 
   it('says what the default comes from, and what going past it does', () => {
-    expect(text.atOnceNote(4, machine)).toBe('Default for 16 GB and 10 cores')
-    expect(text.atOnceNote(1, machine)).toBe('Below the default')
-    expect(text.atOnceNote(9, machine)).toBe('May run hot')
+    const words = text.atOnce('this Mac')
+    expect(words.note(4, machine)).toBe('Default for this Mac’s 16 GB and 10 cores')
+    expect(words.note(1, machine)).toBe('Below the default')
+    expect(words.note(9, machine)).toBe('May run hot')
+  })
+
+  it('says a home’s held folder keeps its commits there, by its name', () => {
+    expect(text.keptOn('runner-1', 1)).toBe('Its commit stays on its branch, on runner-1.')
+    expect(text.keptOn('runner-1', 3)).toBe('Its commits stay on its branch, on runner-1.')
+  })
+
+  it('names the machine it is about: a home by its name, never this Mac', () => {
+    const words = text.atOnce('runner-1')
+    expect(words.note(4, machine)).toBe('Default for runner-1’s 16 GB and 10 cores')
+    expect(words.mark(machine)).toBe('4 · runner-1')
+    expect(words.value(4, machine)).toBe('4, runner-1’s default')
   })
 })
 
