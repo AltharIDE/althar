@@ -27,7 +27,7 @@
 .paper .picture { outline-color: var(--line); }
 
 .files { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 32px; margin-top: 22px; }
-.name { font: 600 28px/1.1 'Inter Display', var(--display); letter-spacing: -0.03em; }
+.name { font: 600 28px/1.1 var(--heading); letter-spacing: -0.03em; }
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 0 auto; padding: 0; list-style: none; }
 .links a {
   display: inline-flex;

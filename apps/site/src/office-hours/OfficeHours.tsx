@@ -2,22 +2,23 @@ import { useEffect, useState } from 'react'
 
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import { Out } from '../shared/Out'
 import s from './OfficeHours.module.css'
 
 /*
- * Office hours: twenty minutes on a call with Balazs, booked on Cal.com.
- * The night window the other pages open on, with the call's length, the
- * time where Balazs is and the price along its top, and the invitation and
+ * Office hours: twenty minutes on a call with Balazs and Niko, who build
+ * Althar, booked on Cal.com. The night window the other pages open on, with
+ * the call's length, the time where each of them is and the price along its
+ * top, and the invitation and
  * the booking in it. Bugs go to the issues, by a quiet link beside the
  * booking, so a call doesn't become triage. Under it, on paper, examples
  * of things to bring, then the few things worth knowing.
  */
 
-/** Where Balazs is: his clock in the window's readout. */
-const ZONE = 'Europe/London'
+/** Where Balazs and Niko are: their clocks in the window's readout. */
+const ZONES = ['America/Toronto', 'Europe/London'] as const
 
 /** Examples of what to bring, not a menu. */
 const TOPICS = [
@@ -35,12 +36,12 @@ const GOOD_TO_KNOW = [
   'It’s fine to just say hello.',
 ]
 
-/** The time where Balazs is, to the minute; null in the prerender, so the page never shows the build's time. */
+/** The time where each of them is, to the minute; null in the prerender, so the page never shows the build's time. */
 function useTimeThere() {
   const [time, setTime] = useState<string | null>(null)
   useEffect(() => {
-    const format = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: ZONE })
-    const tick = () => setTime(format.format(new Date()))
+    const formats = ZONES.map((timeZone) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone }))
+    const tick = () => setTime(formats.map((f) => f.format(new Date())).join(' · '))
     tick()
     const every = window.setInterval(tick, 15_000)
     return () => window.clearInterval(every)
@@ -52,7 +53,7 @@ export function OfficeHours() {
   const time = useTimeThere()
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
 
       <main id="main" tabIndex={-1}>
         <Night head>
@@ -63,8 +64,8 @@ export function OfficeHours() {
                 <Readout label="Length" href="#topics">
                   <b>20 min</b>
                 </Readout>
-                <Readout label="For me, in London" href="#topics" at="mid">
-                  <b>{time ?? 'London'}</b>
+                <Readout label="For us, in Toronto · London" href="#topics" at="mid">
+                  <b>{time ?? 'Toronto · London'}</b>
                 </Readout>
                 <Readout label="Price" href={LINKS.officeHours} at="end">
                   <b>Free</b>
@@ -75,11 +76,11 @@ export function OfficeHours() {
             <div className={n.head}>
               <p className={n.over}>
                 <span className={n.overLit}>Office hours</span>
-                <span>With Balazs, who makes Althar</span>
+                <span>With Balazs and Niko, who build Althar</span>
               </p>
-              <h1 className={n.headline}>Twenty minutes with me.</h1>
+              <h1 className={n.headline}>Twenty minutes with us.</h1>
               <p className={n.why}>
-                I’d love to hear how you work with coding agents: what’s working, what’s driving you mad, what you wish existed. Or bring a
+                We’d love to hear how you work with coding agents: what’s working, what’s driving you mad, what you wish existed. Or bring a
                 repo and we’ll get Althar running on it together.
               </p>
             </div>

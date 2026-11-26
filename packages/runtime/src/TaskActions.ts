@@ -1,4 +1,4 @@
-import { shipsToOpen } from '@althar/contracts'
+import { shipsToOpen, workerName } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -16,7 +16,7 @@ import { StepPick, stepOf } from './stepPick'
 import { modelNamer, withEffort } from './coordinatorNews'
 import { presetsIn } from './presets'
 import { TITLES_FOLLOW_WORK } from './presetBrief'
-import type { Agents } from './Config'
+import { type Agents, RuntimeConfig } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
 import { CantMerge, PushRefused, ShipRefused } from './errors'
@@ -289,7 +289,7 @@ export class TaskActions extends Context.Service<
     shape(taskId: string, preset: string, actorId: ActorId): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/TaskActions') {
-  static readonly layer: Layer.Layer<TaskActions, never, Store | ToolServer | Agents> = Layer.effect(
+  static readonly layer: Layer.Layer<TaskActions, never, Store | ToolServer | Agents | RuntimeConfig> = Layer.effect(
     TaskActions,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
@@ -304,6 +304,8 @@ export class TaskActions extends Context.Service<
       const projects = yield* Projects
       const errands = yield* Errands
       const busy = yield* Busy
+      // Its workers, for moving a task between the home and them.
+      const runtimeConfig = yield* RuntimeConfig
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       /** A task of the project, by its slug or its id, with its thread and whether it is a change. */
@@ -984,6 +986,10 @@ export class TaskActions extends Context.Service<
         name: Schema.optional(Schema.String),
         pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
         to: Schema.optional(Schema.Literals(['worktree', 'checkout'])),
+        /* Where it runs: the home, or one of its workers by name or id; and the model its lead starts on there. */
+        runs_on: Schema.optional(Schema.String),
+        model: Schema.optional(Schema.String),
+        from_last_turn: Schema.optional(Schema.Boolean),
         toward: Schema.optional(Schema.NullOr(Schema.String)),
         shelf: Schema.optional(Schema.Literals(['scratch', 'board'])),
         /* Checked by, or the preset's reviewer override: null for none; otherwise the model and effort requested. */
@@ -1622,6 +1628,41 @@ export class TaskActions extends Context.Service<
           }
         })
 
+      /** Moves a task between the home and its workers (taskPlaces.ts), by the worker's name as the person says it, or its id. */
+      const runsOn = (
+        access: ToolAccess,
+        task: { readonly id: string; readonly slug: string; readonly projectId: string },
+        where: string,
+        model: string | undefined,
+        fromLastTurn: boolean,
+      ) =>
+        Effect.gen(function* () {
+          const workers = runtimeConfig.workers?.list(task.projectId) ?? []
+          const wanted = where.trim().toLowerCase()
+          const worker = workers.find((one) => one.workerId === where.trim() || workerName(one).toLowerCase() === wanted)
+          const home = ['home', 'the home', 'this home', 'this mac', 'here', 'local'].includes(wanted)
+          if (!home && worker === undefined)
+            return yield* new ToolRefused({
+              message: `No worker of this project is called ${where}. Its workers: ${workers.map(workerName).join(', ') || 'none connected'}; or the home.`,
+            })
+          const to = home ? 'home' : (worker?.workerId ?? 'home')
+          const placed = yield* plainly(
+            runs.place({
+              envelope: yield* envelope('task.place', { taskId: task.id, to }, undefined, actorOf(access)),
+              taskId: task.id,
+              to,
+              ...(model === undefined ? {} : { lead: { model } }),
+              ...(fromLastTurn ? { fromLastTurn: true } : {}),
+            }),
+            task.slug,
+          )
+          return placed.kind === 'placed'
+            ? `${task.slug}: ${placed.said}`
+            : placed.kind === 'waits'
+              ? `${task.slug} ${placed.why.charAt(0).toLowerCase()}${placed.why.slice(1)}`
+              : `${task.slug} runs there already.`
+        })
+
       const changePart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
         Effect.gen(function* () {
           const asked = yield* read(PartAsked, input)
@@ -1629,9 +1670,11 @@ export class TaskActions extends Context.Service<
           switch (asked.part) {
             case 'workspace': {
               if (asked.toward !== undefined) return yield* workToward(access, { task: asked.task, toward: asked.toward })
+              if (asked.runs_on !== undefined) return yield* runsOn(access, task, asked.runs_on, asked.model, asked.from_last_turn === true)
               if (asked.to === undefined)
                 return yield* new ToolRefused({
-                  message: 'Say where it moves (to: worktree or checkout), or what it works toward (toward).',
+                  message:
+                    'Say where it moves (to: worktree or checkout; runs_on: the home or a worker), or what it works toward (toward).',
                 })
               const moved = yield* plainly(
                 runs.move({
@@ -2211,7 +2254,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own), between the home and its workers or between workers, its work coming along (runs_on: the home, or a worker by its name; model, where the lead’s isn’t offered there, one that is), or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {
@@ -2226,6 +2269,13 @@ export class TaskActions extends Context.Service<
                 description: 'Ship it now, its review first, where the person asked for it to go up: as ship_task does.',
               },
               to: { type: 'string', enum: ['worktree', 'checkout'] },
+              runs_on: { type: 'string', description: 'For workspace: the home, or one of its workers by name.' },
+              model: { type: 'string', description: 'With runs_on: the model its lead starts on there, where its own isn’t offered.' },
+              from_last_turn: {
+                type: 'boolean',
+                description:
+                  'With runs_on, on the person’s word: move from what its last turn brought home, where the worker it runs on can’t bring the rest.',
+              },
               toward: { type: ['string', 'null'] },
               shelf: { type: 'string', enum: ['scratch', 'board'] },
             },

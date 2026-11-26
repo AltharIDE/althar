@@ -1299,6 +1299,7 @@ CREATE TABLE repository_bindings (
   recorded_setup TEXT,
   upstream_offer_at TEXT CHECK (upstream_offer_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   work_toward TEXT,
+  worker_setup TEXT,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;

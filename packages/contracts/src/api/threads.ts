@@ -366,6 +366,8 @@ export const ThreadSnapshot = Schema.Struct({
     planId: Schema.NullOr(Schema.String),
     /** The worker assigned to this task's accepted plan. */
     workerId: Schema.optional(Schema.NullOr(Schema.String)),
+    /** A move between the home and its workers that waits for its lead's turn to end: where to (`home` or a worker), and why, in words. */
+    placing: Schema.optional(Schema.Struct({ to: Schema.String, why: Schema.String })),
     /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */

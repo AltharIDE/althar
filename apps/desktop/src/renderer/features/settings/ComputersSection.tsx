@@ -204,6 +204,8 @@ export function ComputersSection({
           onTrust={adder.trust}
           onAgain={adder.again}
           onStop={adder.stop}
+          onCheckWorker={adder.checkWorker}
+          onAllow={adder.allow}
           code={adder.code}
           unavailable={adder.unavailable}
           onCheck={adder.check}

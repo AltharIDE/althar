@@ -11197,6 +11197,9 @@
           },
           "type": "array"
         },
+        "readiness": {
+          "$ref": "#/$defs/WorkerReadiness"
+        },
         "release": {
           "type": "string"
         },
@@ -14272,6 +14275,49 @@
       "enum": ["profile", "logs", "worktrees"],
       "type": "string"
     },
+    "PlaceOutcome": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "enum": ["placed"],
+              "type": "string"
+            },
+            "said": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "said"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "enum": ["waits"],
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "why"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "enum": ["same"],
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        }
+      ]
+    },
     "PlacedRepository": {
       "additionalProperties": true,
       "properties": {
@@ -15518,7 +15564,22 @@
         "name": {
           "type": "string"
         },
+        "needs": {
+          "items": {
+            "$ref": "#/$defs/ToolNeed"
+          },
+          "type": "array"
+        },
         "providers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "$ref": "#/$defs/WorkerReadiness"
+        },
+        "signedIn": {
           "items": {
             "type": "string"
           },
@@ -21098,6 +21159,18 @@
       "enum": ["drafting", "planned", "held", "running", "waiting", "ready", "kept", "stopped", "settled"],
       "type": "string"
     },
+    "TaskPlace": {
+      "anyOf": [
+        {
+          "enum": ["home"],
+          "type": "string"
+        },
+        {
+          "pattern": "^wrk_[a-f0-9]{32}$",
+          "type": "string"
+        }
+      ]
+    },
     "TaskRepositoryHere": {
       "additionalProperties": true,
       "properties": {
@@ -22397,6 +22470,26 @@
                 }
               ]
             },
+            "placing": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "to": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["to", "why"],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "planId": {
               "anyOf": [
                 {
@@ -23278,6 +23371,25 @@
       "required": ["path"],
       "type": "object"
     },
+    "ToolNeed": {
+      "additionalProperties": true,
+      "properties": {
+        "installs": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "why", "installs"],
+      "type": "object"
+    },
     "ToolRole": {
       "enum": ["lead", "reviewer", "coordinator"],
       "type": "string"
@@ -24127,6 +24239,109 @@
     "WorkerPreviewSocketId": {
       "pattern": "^pvs_[a-f0-9]{32}$",
       "type": "string"
+    },
+    "WorkerReadiness": {
+      "additionalProperties": true,
+      "properties": {
+        "agents": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "problem": {
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "starts": {
+                "type": "boolean"
+              }
+            },
+            "required": ["providerId", "starts"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "models": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "models": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "providerId": {
+                "type": "string"
+              }
+            },
+            "required": ["providerId", "models"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "starts": {
+                  "enum": [true],
+                  "type": "boolean"
+                }
+              },
+              "required": ["starts"],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "fix": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string"
+                },
+                "starts": {
+                  "enum": [false],
+                  "type": "boolean"
+                }
+              },
+              "required": ["starts", "problem"],
+              "type": "object"
+            }
+          ]
+        },
+        "tools": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "version"],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["sandbox", "tools", "models"],
+      "type": "object"
     },
     "WorkerSelection": {
       "anyOf": [
@@ -29110,6 +29325,76 @@
       "socket": false,
       "success": {
         "$ref": "#/$defs/MoveOutcome"
+      }
+    },
+    "MoveTaskTo": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "command",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "commandId": {
+            "$ref": "#/$defs/CommandId"
+          },
+          "fromLastTurn": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lead": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "effort": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/$defs/TaskPlace"
+          }
+        },
+        "required": ["commandId", "taskId", "to"],
+        "type": "object"
+      },
+      "socket": false,
+      "success": {
+        "$ref": "#/$defs/PlaceOutcome"
       }
     },
     "OpenChange": {

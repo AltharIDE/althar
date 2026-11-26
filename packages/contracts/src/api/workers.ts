@@ -29,6 +29,40 @@ export const WorkerCapacity = Schema.Struct({
 
 export type WorkerCapacity = typeof WorkerCapacity.Type
 
+/**
+ * What a worker's own check found (its setup's last step, after each sign-in, and hourly): whether its agents' sandbox
+ * starts there, and where not why (NoUserNamespaces, NoBubblewrap, NoSocat, Failed) with the one command an
+ * administrator runs to let it; the tools on its PATH; and the models each of its signed-in agents offers there.
+ */
+export const WorkerReadiness = Schema.Struct({
+  sandbox: Schema.Union([
+    Schema.Struct({ starts: Schema.Literal(true) }),
+    Schema.Struct({ starts: Schema.Literal(false), problem: Schema.String, fix: Schema.optionalKey(Schema.String) }),
+  ]),
+  tools: Schema.Array(Schema.Struct({ name: Schema.String, version: Schema.String })),
+  models: Schema.Array(
+    Schema.Struct({ providerId: Schema.String, models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) }),
+  ),
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why in its own words. */
+  agents: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ providerId: Schema.String, starts: Schema.Boolean, problem: Schema.optionalKey(Schema.String) })),
+  ),
+})
+export type WorkerReadiness = typeof WorkerReadiness.Type
+
+/**
+ * A tool a project's files say it needs (`bun.lock` Bun, `.nvmrc` a Node, uv in `pyproject.toml` uv), at the version they
+ * pin where they do, with the file that says so; for a worker, those it lacks. A worker installs Bun, Node, pnpm and uv
+ * itself, into its own folder, before the task's setup (`installs`); the rest its task's lead sets up there and records.
+ */
+export const ToolNeed = Schema.Struct({
+  name: Schema.String,
+  version: Schema.optionalKey(Schema.String),
+  why: Schema.String,
+  installs: Schema.Boolean,
+})
+export type ToolNeed = typeof ToolNeed.Type
+
 /** A connected worker the home has granted access to this project. */
 export const ProjectWorker = Schema.Struct({
   workerId: Schema.String,
@@ -38,6 +72,12 @@ export const ProjectWorker = Schema.Struct({
   busy: Schema.Boolean,
   multiRepoProviders: Schema.optional(Schema.Array(Schema.String)),
   capacity: Schema.optionalKey(WorkerCapacity),
+  /** Of `providers`, those signed in on it, where it says. */
+  signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** What its own check found, where it has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
+  /** What the project's files need that it lacks, where they need anything it lacks. */
+  needs: Schema.optionalKey(Schema.Array(ToolNeed)),
 })
 export type ProjectWorker = typeof ProjectWorker.Type
 
@@ -67,6 +107,8 @@ export const HomeWorker = Schema.Struct({
   signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The Althar release it runs, where it says. */
   release: Schema.optionalKey(Schema.String),
+  /** What its own check found, while it is connected and has checked. */
+  readiness: Schema.optionalKey(WorkerReadiness),
   /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
   anyProject: Schema.optionalKey(Schema.Boolean),
   projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),

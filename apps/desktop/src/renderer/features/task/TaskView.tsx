@@ -25,6 +25,10 @@ import {
   type TaskAction,
   type ThreadItem,
   type ThreadSnapshot,
+  workerModels,
+  workerName,
+  workerOffersModel,
+  workerUnfit,
 } from '@althar/contracts'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -80,6 +84,11 @@ import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
+import { useProjectWorkers } from '../../shared/useProjectWorkers'
+import { device } from '../../shared/device'
+import { useHomeState } from '../homes/useHomes'
+import { runsOnText } from '../project/runsOn'
+import { MovePick } from './MovePick'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
@@ -627,6 +636,8 @@ export function TaskView({
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // A move to where its lead's model isn't offered: the person picks one that is, first.
+  const [movingTo, setMovingTo] = useState<{ readonly place: string; readonly name: string; readonly model: string } | null>(null)
   // Its plan's team, while nothing of it has begun, as its project's board reads it; and its dialog, open.
   const teamed = useTeamed(model.snapshot?.project.id ?? null, model.snapshot?.task.id ?? null)
   const [changingTeam, setChangingTeam] = useState(false)
@@ -871,6 +882,19 @@ export function TaskView({
   const snapshot = model.snapshot
   // An agent's rename types itself into the title; the person's own shows at once.
   const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
+  // The project's workers: where it may move to, and, on one, what its lead may run there.
+  const workers = useProjectWorkers(snapshot?.project.id)
+  // Assigned a worker, it runs there whether or not the worker is listed now: one not listed yet, or gone, has said nothing,
+  // so its picker offers only the lead agent's own default, which a run there starts on, never this home's models.
+  const leadAgent = snapshot?.session?.agentId ?? snapshot?.task.lead?.agentId ?? null
+  const onWorker =
+    snapshot?.task.workerId == null
+      ? undefined
+      : (workers.find((one) => one.workerId === snapshot.task.workerId) ?? { providers: leadAgent === null ? [] : [leadAgent] })
+  const homes = servicesHost.homes
+  const here = useHomeState(homes)
+  // The home by the window's name for it: This Mac, or the remote home's own.
+  const homeName = homes === undefined || here?.current.kind === 'local' ? device.This : (here?.current.home.name ?? runsOnText.home)
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -1320,6 +1344,8 @@ export function TaskView({
       ? {
           move: (to, consent) => void model.move(to, consent),
           dropMove: () => void model.dropMove(),
+          // Back where it runs: the move that waited is called off.
+          dropPlace: () => void model.moveTo(snapshot.task.workerId ?? 'home'),
           workToward: (branch) => void model.workToward(branch),
         }
       : {}),
@@ -1343,6 +1369,54 @@ export function TaskView({
     const partsActions = partsActionsAt(readingAt(now))
     return <TaskParts parts={partsOf(snapshot, partsActions)} kinds={kindsOf(snapshot, partsActions)} />
   }
+  // Where it runs, among the home and its workers (ADR-103), for a task under way in a worktree of its own: picking another
+  // moves it there once its lead's turn ends, with its work; where its lead's model isn't offered there, the person picks one.
+  const leadSteps = choice === null ? [] : [{ key: 'implement' as const, agentId: choice.agentId, model: choice.model, skipped: false }]
+  const placedOn = snapshot.task.workerId ?? 'home'
+  const movable =
+    workers.length > 0 &&
+    snapshot.task.phase !== 'settled' &&
+    snapshot.task.review == null &&
+    snapshot.task.worktree !== null &&
+    snapshot.task.local !== true &&
+    planId === null &&
+    choice !== null
+  const moveOrAsk = (place: string) => {
+    if (choice === null) return
+    const worker = workers.find((one) => one.workerId === place)
+    const name = place === 'home' ? homeName : worker === undefined ? place : workerName(worker)
+    // The home's own models: those its agent offers here.
+    const offered =
+      place === 'home'
+        ? (models ?? []).find((one) => one.agentId === choice.agentId)?.models.some((one) => one.id === choice.model) !== false
+        : workerOffersModel(worker, choice.agentId, choice.model)
+    if (!offered && choice.model !== null) return setMovingTo({ place, name, model: named(choice.agentId, choice.model).name })
+    void model.moveTo(place)
+  }
+  const runsOn = !movable
+    ? undefined
+    : {
+        value: snapshot.task.placing?.to ?? placedOn,
+        places: [
+          { value: 'home', label: homeName },
+          ...workers.map((worker) => {
+            const current = worker.workerId === placedOn
+            // The worker it runs on is at work on it: that's where it is, not a reason it can't be.
+            const unfit = current ? undefined : workerUnfit(worker, leadSteps)
+            const hint =
+              unfit === undefined
+                ? [runsOnText.free(worker.capacity?.freeMemoryMib), runsOnText.needs(worker)].filter(Boolean).join(' · ')
+                : runsOnText.unfit(unfit, agentName)
+            return {
+              value: worker.workerId,
+              label: workerName(worker),
+              ...(hint === undefined || hint === '' ? {} : { hint }),
+              ...(unfit === undefined ? {} : { disabled: true }),
+            }
+          }),
+        ],
+        onMove: moveOrAsk,
+      }
   // What else it can do is in its menu.
   const actionsAt = (now: string) => (
     <>
@@ -1422,6 +1496,8 @@ export function TaskView({
           : {})}
         // Held on by its project, allowing everything opens the project's rules, where it is turned off.
         {...(onRules === undefined ? {} : { onRules })}
+        // Where it runs, among the home and its workers (ADR-103): another place moves it there, with its work.
+        {...(runsOn === undefined ? {} : { runsOn })}
         // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
         {...(snapshot.task.worktree === null || editor === undefined
           ? {}
@@ -1627,6 +1703,7 @@ export function TaskView({
                 projectId={snapshot.project.id}
                 value={choice}
                 onChange={choose}
+                {...(onWorker === undefined ? {} : { worker: onWorker })}
                 {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
               />
             )}
@@ -2148,6 +2225,33 @@ export function TaskView({
           {turnUndo.dialog}
           {changingTeam && (
             <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
+          )}
+          {movingTo !== null && choice !== null && (
+            <MovePick
+              place={movingTo.name}
+              model={movingTo.model}
+              agents={model.agents}
+              // The first model the lead's agent offers there, to start from; the person picks another as they like.
+              start={{
+                agentId: choice.agentId,
+                model:
+                  workerModels(
+                    workers.find((one) => one.workerId === movingTo.place),
+                    choice.agentId,
+                  )?.[0]?.id ?? null,
+                effort: null,
+              }}
+              worker={workers.find((one) => one.workerId === movingTo.place)}
+              projectId={snapshot.project.id}
+              onMove={(picked) => {
+                setMovingTo(null)
+                void model.moveTo(movingTo.place, {
+                  ...(picked.model === null ? {} : { model: picked.model }),
+                  ...(picked.effort === null ? {} : { effort: picked.effort }),
+                })
+              }}
+              onClose={() => setMovingTo(null)}
+            />
           )}
           {abandoning && (
             <AbandonTask

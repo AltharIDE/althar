@@ -130,3 +130,17 @@ describe('MCP calls', () => {
     assert.deepStrictEqual(merge?.through, { server: 'github', tool: 'merge_pull_request' })
   })
 })
+
+describe('root on a worker, as its card says it', () => {
+  it('names what it runs as root and what that changes', () => {
+    const asked = { ...call('sudo apt-get install -y git', { command: 'sudo apt-get install -y git' }), kind: 'execute' as const }
+    assert.deepStrictEqual(irreversibleOf(asked, { ...everything, worker: 'runner-1' }), {
+      kind: 'history',
+      verb: 'Run it as root',
+      done: 'Ran as root.',
+      stays: 'It changes runner-1 itself, for every task and user on it.',
+      through: { command: 'sudo apt-get install -y git' },
+    })
+    assert.strictEqual(irreversibleOf(asked, everything), undefined)
+  })
+})

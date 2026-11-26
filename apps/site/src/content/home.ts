@@ -9,15 +9,16 @@
 export const BRAND = 'Althar'
 
 export const HERO = {
-  /** "Building software has never felt so fast.": a line, then its last word, set apart by its weight. */
-  title: 'Building software has never felt so',
-  last: 'fast.',
-  /** The subhead: open source and independence from the labs, in one sentence (the positioning's second and third messages). */
-  lead: 'Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
-  /** The figure's caption, with how many agents ride the orrery; the list of them, for screen readers; and the console under the lead. */
+  /** "Agents from every lab, working as one team.": its lines as set, the last one apart in cobalt. */
+  lines: ['Agents from', 'every lab, working as'],
+  last: 'one team.',
+  /** The subhead: what Althar is, the coordinator, the shared memory and where you come in. */
+  lead: 'The open source agentic development environment (ADE) where agents from every lab work as one team. One place where your entire software team builds together, all from the same context.',
+  /** The orrery's list of agents, for screen readers. */
   agents: 'Agents',
-  agentsName: 'The agents Althar runs',
+  agentsName: 'Althar at the centre, with the agents it runs in orbit',
   install: 'Install',
+  runsOn: 'Runs on',
 } as const
 
 export const CLOSE = {

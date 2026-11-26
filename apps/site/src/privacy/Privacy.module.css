@@ -17,9 +17,10 @@
 .article a:hover { color: var(--live); }
 .article code { font: 500 0.84em var(--mono); color: var(--t-2); }
 
-.part { scroll-margin-top: 72px; }
+/* Clear of the site's bar (76px), jumped to. */
+.part { scroll-margin-top: 96px; }
 .part + .part { padding-top: 56px; }
-.h2 { display: grid; gap: 8px; margin: 0 0 16px; font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; text-wrap: balance; }
+.h2 { display: grid; gap: 8px; margin: 0 0 16px; font-family: var(--heading); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; text-wrap: balance; }
 .no { font: 500 12px var(--mono); letter-spacing: 0.06em; color: var(--live); }
 
 .ul { margin: 0 0 14px; padding: 0; list-style: none; }

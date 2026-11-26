@@ -17,9 +17,16 @@ import {
 } from '../src/workerPlacement'
 
 const lead = { key: 'implement', agentId: 'codex', model: null, skipped: false } satisfies PlanStep
-const worker = { workerId: `wrk_${'1'.repeat(32)}`, providers: ['codex'], busy: false } satisfies ProjectWorker
+/** What a worker's own check found: its sandbox starts, it has git, and its lead's agent started there. */
+const ready = {
+  sandbox: { starts: true as const },
+  tools: [{ name: 'git', version: '2.43.0' }],
+  models: [],
+  agents: [{ providerId: 'codex', starts: true }],
+}
+const worker = { workerId: `wrk_${'1'.repeat(32)}`, providers: ['codex'], busy: false, readiness: ready } satisfies ProjectWorker
 const modern = { ...worker, multiRepoProviders: ['codex'] }
-const capacity = { platform: 'linux', architecture: 'arm64', freeMemoryMib: 4096, freeDiskMib: 1024, cpuCores: 4 } as const
+const capacity = { platform: 'linux', architecture: 'arm64', freeMemoryMib: 4096, freeDiskMib: 4096, cpuCores: 4 } as const
 const requirements = { repositoryCount: 1, homeOnly: false, readOnly: false }
 
 describe('worker placement', () => {
@@ -70,6 +77,32 @@ describe('worker placement', () => {
     )
     assert.deepStrictEqual(workerUnfit({ ...worker, providers: ['claude-code'] }, [lead]), { kind: 'agent', agentId: 'codex' })
     assert.strictEqual(automaticWorker([{ ...worker, busy: true }, worker], [lead], 2), undefined)
+  })
+
+  it('takes work only where the worker’s own check found its sandbox starts and the lead’s agent started there', () => {
+    const { readiness: _none, ...unchecked } = worker
+    assert.deepStrictEqual(workerUnfit(unchecked, [lead]), { kind: 'unchecked' })
+    assert.strictEqual(
+      workerProblem(unchecked, [lead]),
+      'Linux worker 111111 hasn’t checked it can run a task yet. A worker checks itself as it starts, and an older one updates itself within the hour.',
+    )
+    assert.deepStrictEqual(
+      workerUnfit({ ...worker, readiness: { ...ready, sandbox: { starts: false, problem: 'NoUserNamespaces', fix: 'sudo x' } } }, [lead]),
+      { kind: 'sandbox', problem: 'NoUserNamespaces', fix: 'sudo x' },
+    )
+    assert.deepStrictEqual(workerUnfit({ ...worker, readiness: { ...ready, tools: [] } }, [lead]), { kind: 'git' })
+    assert.deepStrictEqual(workerUnfit({ ...worker, capacity: { ...capacity, freeDiskMib: 1024 } }, [lead]), {
+      kind: 'disk',
+      freeMib: 1024,
+    })
+    assert.deepStrictEqual(workerUnfit({ ...worker, signedIn: [] }, [lead]), { kind: 'signedOut', agentId: 'codex' })
+    // Signed in, its sandbox fine, yet the agent itself couldn't start there: why, in its own words.
+    const failing = { ...worker, readiness: { ...ready, agents: [{ providerId: 'codex', starts: false, problem: 'Not logged in.' }] } }
+    assert.strictEqual(workerProblem(failing, [lead]), 'The lead’s agent couldn’t start on Linux worker 111111: Not logged in.')
+    assert.deepStrictEqual(workerUnfit({ ...worker, readiness: { ...ready, agents: [] } }, [lead]), {
+      kind: 'agentStarts',
+      agentId: 'codex',
+    })
   })
 
   it('chooses current capacity and breaks resource ties in a stable order', () => {

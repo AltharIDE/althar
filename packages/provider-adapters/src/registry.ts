@@ -443,6 +443,11 @@ export interface SessionOptions {
   readonly contained?: Contained
   readonly sandbox?: UpFront
   /**
+   * Whether the agent's own sandbox starts where the session runs, where that isn't this computer: a worker says so of
+   * itself (`althar-host worker check`). Without it, this computer's probe says (`claudeSandboxStarts`).
+   */
+  readonly sandboxStarts?: boolean
+  /**
    * The folder of skills Althar chose for this run, laid out as the agent's `skills.layout` says and loaded for
    * the session alone. Only a lead's session is given one; the person's own folders and the repository are never
    * written to.
@@ -1169,7 +1174,12 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     sessionMeta: (role = 'lead', options = {}) =>
       claudeWithout(
         role !== 'reader'
-          ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
+          ? claudeAsks(
+              options.sandbox,
+              options.skills,
+              options.sandboxStarts ?? claudeSandboxStarts(),
+              options.web === true && options.offline !== true,
+            )
           : options.contained !== undefined && options.untrusted !== true && options.offline !== true
             ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
             : claudeReads(

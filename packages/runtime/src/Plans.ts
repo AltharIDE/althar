@@ -1,4 +1,13 @@
-import { ApiError, automaticWorker, automaticWorkerUnavailable, workerPlanProblem, workerProblem } from '@althar/contracts'
+import {
+  ApiError,
+  automaticWorker,
+  automaticWorkerUnavailable,
+  workerModelUnfit,
+  workerModelWords,
+  workerName,
+  workerPlanProblem,
+  workerProblem,
+} from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
@@ -349,6 +358,10 @@ export class Plans extends Context.Service<
               : workerProblem(worker, parameters.steps, requirements.repositoryCount))
           if (worker === undefined || message !== undefined)
             return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
+          // Its agent there doesn't offer the lead's model: the person picks one it does.
+          const model = workerModelUnfit(worker, parameters.steps)
+          if (model !== undefined)
+            return yield* new ApiError({ reason: 'Invalid', message: workerModelWords(workerName(worker), model.model) })
           return { parameters: JSON.stringify({ ...parameters, workerId: worker.workerId }) }
         })
 

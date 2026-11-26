@@ -186,3 +186,24 @@ describe('an always, where the project has no rules of its own', () => {
     })
   })
 })
+
+describe('root on a worker', () => {
+  const everything = { project: { ...MVP_RULES, mode: 'allow' as const } }
+
+  it('asks before a command runs as root on a worker, even with everything allowed, and lets the rest through', () => {
+    for (const line of [
+      'sudo apt-get install -y libvips-dev',
+      'cd /tmp && sudo make install',
+      'doas pkg_add bun',
+      "su root -c 'apt update'",
+    ]) {
+      const verdict = run(line, { ...everything, worker: 'runner-1' })
+      assert.strictEqual(verdict.verdict, 'ask', line)
+      assert.match('reason' in verdict ? (verdict.reason ?? '') : '', /as root on a worker/u, line)
+    }
+    // Into its own folders, as a lead's fix does, it goes ahead; and on the home, as before.
+    assert.deepStrictEqual(run('curl -fsSL https://bun.sh/install | bash', { ...everything, worker: 'runner-1' }), { verdict: 'allow' })
+    assert.deepStrictEqual(run('echo pseudo sudoku', { ...everything, worker: 'runner-1' }), { verdict: 'allow' })
+    assert.strictEqual(run('sudo apt-get install -y libvips-dev', everything).verdict, 'allow')
+  })
+})
