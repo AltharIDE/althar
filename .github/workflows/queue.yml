@@ -11,11 +11,13 @@ name: queue
 # as its pull request did, and each runs what that change reaches: the checks and unit tests on Linux, and for a change
 # that reaches the app, its end-to-end run (desktop.yml calls e2e.yml). Not the stress run of changed tests or Windows'
 # smoke test, which the pull request ran on the same change, but a build fails if either failed on the head of a pull
-# request in its group. A change that reaches the runtime runs its coverage gate here too (harness.yml). Windows' unit
-# tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
+# request in its group. Each package the change reaches that gates on its coverage runs its gate here too
+# (harness.yml). Windows' full unit suites, the UI kit's and the app's coverage and the packages run after merge, in
+# post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
-# has (or it has none), the Windows smoke test hasn't failed and its migration and ADR numbers are free (`numbers`):
+# has (or it has none), the Windows smoke test hasn't failed, its migration and ADR numbers are free (`numbers`) and
+# no count that may only fall has risen (`measures`):
 # waited for here, on the pull request, a stress run no longer holds the queue, where every entry behind a waiting one
 # waited too. In the queue, it passes once every check that ran there did, and the stress run it reads again has long
 # finished.
@@ -26,6 +28,8 @@ on:
   merge_group:
 
 permissions:
+  # The workflows it calls read the test durations post-merge measured on main (.github/actions/durations).
+  actions: read
   contents: read
   # The workflows it calls file flaky tests as issues (.github/actions/flaky).
   issues: write
@@ -148,11 +152,35 @@ jobs:
             python3 .github/scripts/numbers.py --base HEAD^1 --pr "$PR"
           fi
 
-  # The one check main's rules require: passes when nothing that ran failed. On a pull request, only `numbers` above
-  # runs.
+  # Counts over the tree that may only fall (.github/measures.json), on every pull request and group whatever they
+  # change, with no install (.github/scripts/measures.py): the runtime's import cycles, json_extract calls, comparisons
+  # of a code host's or an agent's name, tests that sleep on the real clock, and writers of a status. A count above
+  # main's baseline is refused, and so is a baseline raised; one below its baseline is a warning to lower it
+  # (docs/decisions/foundations.md#what-ci-gates).
+  measures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On a pull request HEAD is its merge with main, and HEAD^1 is main.
+          fetch-depth: 2
+      - env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_measures.py'
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
+            python3 .github/scripts/measures.py --base FETCH_HEAD
+          else
+            python3 .github/scripts/measures.py --base HEAD^1
+          fi
+
+  # The one check main's rules require: passes when nothing that ran failed. On a pull request, only `numbers` and
+  # `measures` above run.
   merge-queue:
     name: merge queue
-    needs: [changes, numbers, desktop, harness, host, ui, site, brand, report, windows, worker]
+    needs: [changes, numbers, measures, desktop, harness, host, ui, site, brand, report, windows, worker]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.

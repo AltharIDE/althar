@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { coveredRuntime, graph, names, plan, type Plan, type Repository, repository } from '../src/select'
+import { covered, gated, graph, names, nearest, plan, type Plan, type Repository, repository } from '../src/select'
 
 const json = (value: unknown) => JSON.stringify(value)
 
@@ -125,7 +125,7 @@ describe('the selection', () => {
   })
   it('keeps checks and other packages when full runtime coverage replaces the selected tests', () => {
     const selected = plan(['packages/runtime/src/git.ts'], REPO, 'harness').jobs
-    const jobs = coveredRuntime(selected)
+    const jobs = covered(selected, ['packages/runtime'])
     expect(jobs.filter((job) => job.name === 'packages/runtime checks')).toHaveLength(1)
     expect(jobs.flatMap((job) => job.parts).filter((part) => part.dir === 'packages/runtime')).toEqual([
       { dir: 'packages/runtime', check: true, tests: [] },
@@ -134,9 +134,38 @@ describe('the selection', () => {
       selected.flatMap((job) => job.parts).filter((part) => part.dir !== 'packages/runtime'),
     )
     // A test-only dependency can reach runtime tests without requiring a runtime check.
-    expect(coveredRuntime([{ name: 'runtime', parts: [{ dir: 'packages/runtime', check: false, tests: ['tests/x.test.ts'] }] }])).toEqual(
-      [],
-    )
+    expect(
+      covered([{ name: 'runtime', parts: [{ dir: 'packages/runtime', check: false, tests: ['tests/x.test.ts'] }] }], ['packages/runtime']),
+    ).toEqual([])
+  })
+
+  it('gates the coverage of each package the change reaches that has a gate of its own, and leaves its tests to it', () => {
+    const files = {
+      ...FILES,
+      'packages/domain/package.json': json({
+        name: '@althar/domain',
+        exports: { '.': './src/index.ts' },
+        scripts: { test: 'vp test run', 'test:coverage': 'vp test run --coverage' },
+      }),
+      'packages/runtime/package.json': json({
+        name: '@althar/runtime',
+        exports: { '.': './src/index.ts' },
+        scripts: { 'test:coverage': 'vp test run --coverage' },
+        dependencies: { '@althar/domain': 'workspace:*', '@althar/provider-adapters': 'workspace:*' },
+      }),
+    }
+    const at = { files: Object.keys(files), read: (path: string) => files[path as keyof typeof files] ?? '' }
+    const selected = plan(['packages/domain/src/ids.ts'], at, 'harness').jobs
+    // The domain has a gate; provider-adapters, which it reaches, has none; the runtime's runs in parts of its own.
+    expect(gated(selected, at)).toEqual(['packages/domain'])
+    const jobs = covered(selected, gated(selected, at))
+    expect(jobs.flatMap((job) => job.parts).find((part) => part.dir === 'packages/domain')).toEqual({
+      dir: 'packages/domain',
+      check: true,
+      tests: [],
+    })
+    expect(gated(plan(['README.md'], at, 'harness').jobs, at)).toEqual([])
+    expect(gated(plan(['packages/runtime/src/words.ts'], at, 'harness').jobs, at)).toEqual([])
   })
   it('runs a UI copy change in the tests that reach it and the app’s end-to-end run, but not Windows’ smoke test', () => {
     const changed = ['packages/ui/src/chrome/TaskHeader/TaskHeader.tsx']
@@ -277,6 +306,24 @@ describe('the selection', () => {
     expect(plan(changed, REPO, 'desktop', { draft: false })).toMatchObject({ e2e: true, windowsE2e: true })
   })
 
+  it('stresses the tests nearest a change by their imports, nearest first, as many as asked', () => {
+    const known = graph(REPO)
+    expect(nearest(known, ['packages/domain/src/ids.ts'], 1)).toEqual(['packages/domain/tests/ids.test.ts'])
+    // Then the runtime's, through what imports the domain, in the order of their paths.
+    expect(nearest(known, ['packages/domain/src/ids.ts'], 2)).toEqual([
+      'packages/domain/tests/ids.test.ts',
+      'packages/runtime/tests/run0.test.ts',
+    ])
+    // The runtime's words reach three tests directly; the others only through its support, further off.
+    expect(nearest(known, ['packages/runtime/src/words.ts'], 8)).toEqual([
+      'packages/runtime/tests/words0.test.ts',
+      'packages/runtime/tests/words1.test.ts',
+      'packages/runtime/tests/words2.test.ts',
+    ])
+    expect(nearest(known, ['packages/runtime/src/git.ts'], 3)).toHaveLength(3)
+    expect(nearest(known, ['README.md'], 8)).toEqual([])
+  })
+
   it('leaves a change to specs alone to stress.yml, but runs everything for their support, and Windows’ smoke test for its own', () => {
     expect(plan(['apps/desktop/e2e/home.spec.ts'], REPO, 'desktop')).toMatchObject({ e2e: false, windowsE2e: false })
     expect(plan(['apps/desktop/e2e/support.ts'], REPO, 'desktop')).toMatchObject({ e2e: true, windowsE2e: true })
@@ -320,17 +367,28 @@ describe('this repository', () => {
   const repo = repository(join(import.meta.dirname, '../../..'))
   const known = graph(repo)
 
-  it('runs the future-date guard when another package changes a test', () => {
-    const selected = plan(['packages/runtime/tests/fastLane.test.ts'], repo, 'harness')
-    const testing = selected.jobs.flatMap((job) => job.parts).find((part) => part.dir === 'packages/testing')
-    expect(testing?.tests === 'all' || testing?.tests.includes('tests/dates.test.ts')).toBe(true)
+  it('runs the guard of the specs’ imports with the app’s tests when a change reaches a spec, as nearly any but docs does', () => {
+    const guard = (changed: ReadonlyArray<string>) =>
+      plan(changed, repo, 'desktop')
+        .jobs.flatMap((job) => job.parts)
+        .find((part) => part.dir === 'packages/testing')
+    expect(guard(['apps/desktop/e2e/smoke.spec.ts'])).toEqual({
+      dir: 'packages/testing',
+      check: false,
+      tests: ['tests/e2eImports.test.ts'],
+    })
+    // The kit's device helpers, which the specs' support imports.
+    expect(guard(['packages/ui/src/foundations/device.ts'])?.tests).toEqual(['tests/e2eImports.test.ts'])
+    // What the app's support reads by its path, the app's own files, may be what a spec imports.
+    expect(guard(['apps/desktop/src/renderer/features/settings/sections.ts'])?.tests).toEqual(['tests/e2eImports.test.ts'])
+    expect(guard(['README.md'])).toBeUndefined()
   })
   /**
    * Illustrative code isn't part of the import graph: samples a story shows, a file a spec
-   * writes into a test repository, prototypes, and this file's own small repository.
+   * writes into a test repository, prototypes, and the small repositories of this file and the stress plan's.
    */
   const sample = (one: string) =>
-    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
+    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/(?:select|stress)\.test\.ts:)/.test(
       one,
     )
 

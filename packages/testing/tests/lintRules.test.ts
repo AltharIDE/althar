@@ -1,9 +1,12 @@
 import { RuleTester } from 'vite-plus/lint/plugins-dev'
 import { describe, expect, it } from 'vite-plus/test'
 
+import { isoAfter } from '../src/time'
+
 /*
  * Althar's own lint rules (lint/, run on every package by the root vite.config.ts), as they read the code they check:
- * what each fails on, and what it leaves, as the docs it keeps say (docs/decisions/foundations.md, The UI is instant).
+ * what each fails on, and what it leaves, as the docs it keeps say (docs/decisions/foundations.md, The UI is instant;
+ * DEVELOPMENT.md, Tests that hold).
  * They are plain JavaScript, outside any package, so they are read here by their address.
  */
 
@@ -17,6 +20,10 @@ const rule = async (file: string, name: string) =>
 
 const pressAtOnce = await rule('press.js', 'pressAtOnce')
 const offTheThread = await rule('thread.js', 'offTheThread')
+const testTime = await rule('budget.js', 'testTime')
+const specTime = await rule('budget.js', 'specTime')
+const systemKeys = await rule('keys.js', 'systemKeys')
+const noFutureDates = await rule('dates.js', 'noFutureDates')
 
 const tsx = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'tsx' } } })
 const ts = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'ts' } } })
@@ -144,5 +151,91 @@ check(ts, 'off-the-thread', offTheThread, {
         { messageId: 'holds', data: { name: 'cpSync', what: 'a recursive copy' } },
       ],
     },
+  ],
+})
+
+check(ts, 'test-time', testTime, {
+  valid: [
+    `it('reads the store', () => {})`,
+    `it.live('reads the store', () => Effect.void, budget.large)`,
+    `describe('the store', () => {})`,
+    `beforeEach(() => reset())`,
+    `await until(read, (value) => value > 0)`,
+    `await until(read, (value) => value > 0, 'the store to have a row')`,
+    `await screen.findByText('Ready')`,
+    `await waitFor(() => expect(row).toBeVisible())`,
+    `for (let index = 0; index < 3; index++) rows.push(index)`,
+  ],
+  invalid: [
+    { code: `it('reads the store', () => {}, 30_000)`, errors: [{ messageId: 'own', data: { what: 'A test', time: '30_000' } }] },
+    { code: `it.live.skipIf(windows)('reads', () => Effect.void, 5000)`, errors: [{ messageId: 'own' }] },
+    { code: `test('reads', { timeout: 5000 }, () => {})`, errors: [{ messageId: 'own' }] },
+    { code: `beforeAll(() => start(), 60_000)`, errors: [{ messageId: 'own', data: { what: 'A hook', time: '60_000' } }] },
+    {
+      code: `await until(read, (value) => value > 0, 'a row', 5000)`,
+      errors: [{ messageId: 'own', data: { what: 'A wait', time: '5000' } }],
+    },
+    { code: `await until(read, (value) => value > 0, 5000)`, errors: [{ messageId: 'own' }] },
+    {
+      code: `await screen.findByText('Ready', {}, { timeout: 5000 })`,
+      errors: [{ messageId: 'own', data: { what: 'A find', time: '{ timeout: 5000 }' } }],
+    },
+    { code: `await waitFor(() => expect(row).toBeVisible(), { timeout: 5000 })`, errors: [{ messageId: 'own' }] },
+    {
+      code: `for (let tries = 0; tries < 50; tries++) { if (ready()) break; await new Promise((done) => setTimeout(done, 100)) }`,
+      errors: [{ messageId: 'loop' }],
+    },
+  ],
+})
+
+check(ts, 'spec-time', specTime, {
+  valid: [
+    `await expect(page.getByText('Ready')).toBeVisible()`,
+    `await expect(page.getByText('Ready')).toBeVisible({ timeout: budget.medium })`,
+    `export default defineConfig({ timeout: budget.large, expect: { timeout: budget.medium } })`,
+    `page.setDefaultTimeout(budget.medium)`,
+    `await page.waitForFunction(() => document.title === 'Althar')`,
+  ],
+  invalid: [
+    { code: `await expect(page.getByText('Ready')).toBeVisible({ timeout: 10_000 })`, errors: [{ messageId: 'own' }] },
+    { code: `test.use({ actionTimeout: 5000 })`, errors: [{ messageId: 'own' }] },
+    { code: `await page.waitForTimeout(500)`, errors: [{ messageId: 'sleep' }] },
+    { code: `test.setTimeout(120_000)`, errors: [{ messageId: 'test' }] },
+    { code: `test.info().setTimeout(120_000)`, errors: [{ messageId: 'test' }] },
+    { code: `test.slow()`, errors: [{ messageId: 'test' }] },
+    { code: `await page.evaluate(() => new Promise((done) => window.setTimeout(done, 100)))`, errors: [{ messageId: 'sleep' }] },
+    { code: `await new Promise((done) => setTimeout(done, 100))`, errors: [{ messageId: 'sleep' }] },
+    { code: `page.setDefaultTimeout(5000)`, errors: [{ messageId: 'every' }] },
+    {
+      code: `for (let tries = 0; tries < 20; tries++) { if (await ready()) break; await page.waitForTimeout(100) }`,
+      errors: [{ messageId: 'loop' }, { messageId: 'sleep' }],
+    },
+  ],
+})
+
+check(ts, 'system-keys', systemKeys, {
+  valid: [`await page.keyboard.press('ControlOrMeta+n')`, `await page.keyboard.press('Enter')`, `await input.press('Shift+Tab')`],
+  invalid: [{ code: `await page.keyboard.press('Meta+n')`, errors: [{ messageId: 'mac', data: { key: 'Meta+n', rest: 'n' } }] }],
+})
+
+// Relative to now, as a test's future dates must be.
+const tomorrow = isoAfter(86_400_000)
+const yesterday = isoAfter(-86_400_000)
+
+check(ts, 'no-future-dates', noFutureDates, {
+  valid: [
+    `const at = '${yesterday}'`,
+    `const at = isoAfter(86_400_000)`,
+    `// ends ${tomorrow}`,
+    `/* ends ${tomorrow} */ const day = 1`,
+    // A calendar date in words is copy.
+    `const said = 'Renews on ${tomorrow.slice(0, 10)}, as the plan says'`,
+    `const pattern = /${tomorrow.slice(0, 4)}-\\d{2}/`,
+  ],
+  invalid: [
+    { code: `const at = '${tomorrow}'`, errors: [{ messageId: 'future', data: { date: tomorrow } }] },
+    { code: `const day = '${tomorrow.slice(0, 10)}'`, errors: [{ messageId: 'future' }] },
+    { code: `const json = '{"at":"${tomorrow}"}'`, errors: [{ messageId: 'future' }] },
+    { code: `sql\`SELECT '${tomorrow}'\``, errors: [{ messageId: 'future' }] },
   ],
 })

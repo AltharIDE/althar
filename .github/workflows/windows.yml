@@ -23,6 +23,8 @@ on:
       - '.github/workflows/**'
 
 permissions:
+  # The test durations post-merge measured on main, which spread the runtime's parts (.github/actions/durations).
+  actions: read
   contents: read
   issues: write
 
@@ -37,6 +39,7 @@ jobs:
     outputs:
       jobs: ${{ steps.plan.outputs.jobs }}
       any: ${{ steps.plan.outputs.any }}
+      durations: ${{ steps.durations.outputs.run }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -52,6 +55,11 @@ jobs:
           fi
       - id: plan
         run: bun packages/testing/src/select.ts plan windows "$RUNNER_TEMP/changed"
+      - id: durations
+        if: steps.plan.outputs.any == 'true'
+        uses: ./.github/actions/durations
+        with:
+          pick: 'true'
 
   verify:
     name: unit (${{ matrix.name }})
@@ -83,6 +91,11 @@ jobs:
         with:
           node-version-file: .node-version
       - uses: ./.github/actions/electron
+      # A part of the runtime takes its share by the durations every part reads (packages/testing/src/sequencer.ts).
+      - if: contains(toJSON(matrix), '"shard"')
+        uses: ./.github/actions/durations
+        with:
+          run: ${{ needs.plan.outputs.durations }}
       - uses: ./.github/actions/flaky/quarantine
       - env:
           PLAN: ${{ toJSON(matrix) }}

@@ -1,0 +1,79 @@
+{
+  "about": [
+    "Measures of the refactor's progress. Each under counted is a count over the tree that may only fall: .github/scripts/measures.py counts it on every pull request and merge-queue group (queue.yml, measures) and refuses a count above main's baseline here, or a baseline raised.",
+    "A pull request may lower a baseline, never raise it: `python3 .github/scripts/measures.py --update` writes the tree's counts here. Each says what it counts, and how roughly; detail is what more the count says, and gates nothing.",
+    "Those under tracked aren't counts over the tree: they are kept by hand, or reported elsewhere, with the day they were read."
+  ],
+  "counted": {
+    "runtime-cycle-files": {
+      "what": "Files of packages/runtime/src on an import cycle: in a strongly connected component, of more than one file, of the graph of its value imports (`import … from './…'` and `export … from`, not `import type`), tests and stories apart. A file on a cycle loads in an order its importers decide. detail.sizes is each cycle's size.",
+      "baseline": 45,
+      "detail": {
+        "sizes": [28, 8, 6, 3]
+      }
+    },
+    "runtime-largest-cycle": {
+      "what": "The files in the runtime's largest import cycle, counted as for runtime-cycle-files: a cycle split in two lowers it, though as many files stay on one.",
+      "baseline": 28
+    },
+    "runtime-json-extract": {
+      "what": "json_extract in packages/runtime/src, in any case: a read of a JSON column's inside, which no index or schema checks. Counted in code and comments alike.",
+      "baseline": 372
+    },
+    "runtime-code-host-names": {
+      "what": "Comparisons of a code host's product name in packages/runtime/src: 'github', 'gitlab' or 'bitbucket' beside ===, !==, == or !=, on either side, or as a case. A feature for every host reads its adapter's capabilities instead (foundations.md, A feature ships for every service that can have it). A comparison through a constant or a set isn't seen.",
+      "baseline": 62
+    },
+    "runtime-agent-ids": {
+      "what": "Comparisons of an agent's id in packages/runtime/src, as for runtime-code-host-names: the agent registry's ids (claude-code, codex, opencode, copilot, junie, grok, kimi, mistral-vibe, qwen-code, antigravity) and claude, the runtime's name for Claude Code.",
+      "baseline": 58
+    },
+    "runtime-live-sleeps": {
+      "what": "Runtime tests on the real clock that sleep: an `it.live` in packages/runtime/tests whose body, up to the next `it.live` or `it.effect`, calls Effect.sleep, sleep( or setTimeout(. What waits for time to pass belongs on the test's clock (`it.effect` with onTestClock). Not every `it.live`: a test of real processes and git needs the real clock, and a new one would raise it. detail counts each kind of test.",
+      "baseline": 166,
+      "detail": {
+        "it.live": 2646,
+        "it.effect": 466
+      }
+    },
+    "runtime-node-attempt-writers": {
+      "what": "Places in packages/runtime/src that write a node attempt's state: a `change('node_attempts', id, { … })` whose object sets state, or an `UPDATE node_attempts SET …` that sets state or status before its WHERE. Rough: a write through a variable or an INSERT … ON CONFLICT isn't seen, and a ternary's two states count once.",
+      "baseline": 26
+    },
+    "runtime-attention-writers": {
+      "what": "Places in packages/runtime/src that write an attention request's state, counted as for runtime-node-attempt-writers, of attention_requests.",
+      "baseline": 21
+    },
+    "runtime-task-writers": {
+      "what": "Places in packages/runtime/src that write a task's state, counted as for runtime-node-attempt-writers, of tasks.",
+      "baseline": 12
+    }
+  },
+  "tracked": {
+    "contract-commit-share": {
+      "what": "The share of main's commits that touch packages/contracts, from git log, by hand: the API's width, which every feature pays.",
+      "value": "27%",
+      "as of": "2026-11-25"
+    },
+    "edits-per-rpc": {
+      "what": "Files edited to add one RPC end to end, by hand from the last one added.",
+      "value": "7, five of them mechanical",
+      "as of": "2026-11-25"
+    },
+    "post-merge-incidents": {
+      "what": "Times main went red after merge for what a pull request's own checks could have caught, from post-merge's runs.",
+      "value": "3 in 21–25 Nov 2026",
+      "as of": "2026-11-25"
+    },
+    "ungated-lines": {
+      "what": "Source lines with no coverage gate before merge, only after it, by hand from the packages' coverage reports. Before the packages' gates ran on pull requests (foundations.md, What CI gates, 26 Nov 2026).",
+      "value": "about 43,000",
+      "as of": "2026-11-25"
+    },
+    "quarantined-tests": {
+      "what": "Tests quarantined, and those whose quarantine lapsed: on every CI job's summary and log, from the quarantine step (packages/testing/src/quarantine.ts). Not a baseline: a pull request can't lower it with its own tree.",
+      "value": "16 open flaky issues",
+      "as of": "2026-11-26"
+    }
+  }
+}

@@ -11,6 +11,10 @@
  * - Windows' smoke test when what reaches the app is code that behaves differently there: the runtime and the packages
  *   it runs, the desktop app's main process, preload and scripts. Not the renderer, the UI kit, copy or docs.
  * - On a draft, nothing heavy: the end-to-end runs wait for ready for review. The merge queue has no drafts.
+ * - On a ready pull request and in the queue, the coverage gate of every package it reaches that has one (`gated`):
+ *   each runs its whole suite with coverage, as post-merge.yml does, and its selected tests run there (`covered`).
+ * - The guard that follows the specs' imports (packages/testing's tests/e2eImports.test.ts) reads them by their paths,
+ *   from a package the desktop app's run doesn't test: desktop runs it too, whenever the change reaches a spec.
  *
  * Reaching is read from the source: imports, re-exports, `require`, Vitest's mocks, `import.meta.glob`, CSS's
  * `@import`, `url()` and `composes`, `new URL('./…', import.meta.url)`, and a path joined to `import.meta.dirname`;
@@ -128,6 +132,10 @@ const TESTLIKE = /\/tests\/|\.(?:test|spec)\.tsx?$/
 /** What the end-to-end run builds and drives: the desktop app's files, but its unit tests, notes, Linux packaging and specs. */
 const APP = /^apps\/desktop\/(?!tests\/|release-notes\/|flatpak\/|e2e\/[^/]+\.spec\.ts$|.*\.md$)/
 const SPEC = /^apps\/desktop\/e2e\/[^/]+\.spec\.ts$/
+/** What the end-to-end run loads in Node: its specs and their support. */
+const E2E = /^apps\/desktop\/e2e\//
+/** The guard that follows what they import, which Node can't load (#217), as @althar/testing's test. */
+const E2E_GUARD = { dir: 'packages/testing', test: 'tests/e2eImports.test.ts' }
 /** The spec Windows runs: the app starts and makes a project. */
 const SMOKE = 'apps/desktop/e2e/smoke.spec.ts'
 /**
@@ -234,6 +242,7 @@ const targets = (entry: unknown): ReadonlyArray<string> =>
 
 interface Manifest {
   readonly name?: string
+  readonly scripts?: Record<string, string>
   readonly exports?: unknown
   readonly dependencies?: Record<string, string>
   readonly devDependencies?: Record<string, string>
@@ -406,7 +415,7 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
     const home = packageOf(known.packages, file)
     if (home === undefined) continue
     // What uses it: tests and the app in its own package or one that builds on it. A test elsewhere that reads it by
-    // its path (as limits.test.ts reads every test) reads it as text, which says nothing of what runs it.
+    // its path (as a guard reads every spec) reads it as text, which says nothing of what runs it.
     const own = new Set([home.dir, ...dependents(known.packages, home.dir)])
     const used = [...reaching(known, [file])].some(
       (one) => (isTest(one) || APP.test(one) || SPEC.test(one)) && own.has(packageOf(known.packages, one)?.dir ?? ''),
@@ -429,7 +438,7 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
   const reached = reaching(known, from)
 
   const total = (dir: string) => testsOf(dir).length
-  const jobs = layout.jobs.flatMap((group) =>
+  const planned = layout.jobs.flatMap((group) =>
     jobsOf(
       group,
       group.dirs
@@ -447,6 +456,16 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
       total,
     ),
   )
+  // The guard that follows the specs' imports reads them as text, from @althar/testing, which the app's own run doesn't
+  // test: it runs with the app's tests whenever the change reaches a spec or what one imports.
+  const guard = { dir: E2E_GUARD.dir, check: false, tests: [E2E_GUARD.test] }
+  const guarded = layout.e2e && repo.files.includes(`${E2E_GUARD.dir}/${E2E_GUARD.test}`) && [...reached].some((file) => E2E.test(file))
+  const [first, ...rest] = planned
+  const jobs = !guarded
+    ? planned
+    : first === undefined
+      ? [{ name: layout.jobs[0]?.name ?? workflow, parts: [guard] }]
+      : [{ ...first, parts: [...first.parts, guard] }, ...rest]
   const byOs = [...from].filter((file) => BY_OS.test(file) && !TESTLIKE.test(file))
   let e2e = layout.e2e && (everything !== undefined || [...reached].some((file) => APP.test(file)))
   let windowsE2e = layout.e2e && (everything !== undefined || [...reaching(known, byOs)].some((file) => APP.test(file)) || from.has(SMOKE))
@@ -472,15 +491,55 @@ export const repository = (root = '.'): Repository => ({
   },
 })
 
-/** Full runtime coverage replaces its selected tests in the queue, while its checks still gate once. */
-export const coveredRuntime = (jobs: ReadonlyArray<Job>): ReadonlyArray<Job> =>
+/**
+ * The packages a plan reaches that gate on their coverage, with a `test:coverage` of their own: on a ready pull request
+ * and in the queue, each runs its whole suite with coverage in a job of its own (harness.yml), as post-merge.yml does.
+ * Not the runtime, whose coverage runs in parts of its own.
+ */
+export const gated = (jobs: ReadonlyArray<Job>, repo: Repository): ReadonlyArray<string> =>
+  [
+    ...new Set(
+      jobs
+        .flatMap((job) => job.parts)
+        .filter((part) => part.check || part.tests === 'all' || part.tests.length > 0)
+        .map((part) => part.dir),
+    ),
+  ].filter((dir) => dir !== 'packages/runtime' && manifest(repo, `${dir}/package.json`).scripts?.['test:coverage'] !== undefined)
+
+/**
+ * A package whose whole suite runs with coverage elsewhere in the run leaves its selected tests to it, while its checks
+ * still gate here, once.
+ */
+export const covered = (jobs: ReadonlyArray<Job>, dirs: ReadonlyArray<string>): ReadonlyArray<Job> =>
   jobs.flatMap((job) => {
     const parts = job.parts
-      .map((part): Part => (part.dir === 'packages/runtime' ? { dir: part.dir, check: part.check, tests: [] } : part))
+      .map((part): Part => (dirs.includes(part.dir) ? { dir: part.dir, check: part.check, tests: [] } : part))
       .filter((part) => part.check || part.tests === 'all' || part.tests.length > 0)
     if (parts.length === 0) return []
     return [{ name: parts.every((part) => part.dir === 'packages/runtime') ? 'packages/runtime checks' : job.name, parts }]
   })
+
+/**
+ * The tests whose imports reach any of `from`, nearest first: those that import one, then those that import what
+ * does, and so on; at each step those in a package of `from` before the others, each in the order of their paths;
+ * `limit` at most. Only imports count here, not paths read, which every guard that reads the whole repository would
+ * answer.
+ */
+export const nearest = (known: Graph, from: Iterable<string>, limit: number): ReadonlyArray<string> => {
+  const seen = new Set(from)
+  const own = new Set([...seen].map((file) => packageOf(known.packages, file)?.dir))
+  const away = (file: string) => (own.has(packageOf(known.packages, file)?.dir) ? 0 : 1)
+  const found: Array<string> = []
+  for (let step = [...seen]; step.length > 0 && found.length < limit;) {
+    const next = [...new Set(step.flatMap((file) => [...(known.importers.get(file) ?? [])]))]
+      .filter((file) => !seen.has(file))
+      .sort((a, b) => away(a) - away(b) || (a < b ? -1 : a > b ? 1 : 0))
+    for (const file of next) seen.add(file)
+    found.push(...next.filter(isTest))
+    step = next
+  }
+  return found.slice(0, limit)
+}
 
 const describe = (part: Part) =>
   `${part.dir}: ${part.check ? 'checks, ' : ''}${part.tests === 'all' ? 'all its tests' : `${part.tests.length} of its tests`}${part.shard === undefined ? '' : `, part ${part.shard}`}`
@@ -513,7 +572,9 @@ const run = (jobs: ReadonlyArray<Job>) => {
   }
 }
 
-const [mode, workflow, list] = process.argv.slice(2)
+/* Run by its path, not imported (stress.ts and queue-stress.py import it). */
+const main = (process.argv[1] ?? '').replaceAll('\\', '/').endsWith('/select.ts')
+const [mode, workflow, list] = main ? process.argv.slice(2) : []
 const output = process.env.GITHUB_OUTPUT
 if (
   mode === 'plan' &&
@@ -524,16 +585,21 @@ if (
   const changed = readFileSync(list, 'utf8')
     .split('\n')
     .filter((line) => line.trim() !== '')
-  const planned = plan(changed, repository(), workflow, { draft: process.env.DRAFT === 'true' })
+  const repo = repository()
+  const planned = plan(changed, repo, workflow, { draft: process.env.DRAFT === 'true' })
   const runtime = planned.jobs.some((job) => job.parts.some((part) => part.dir === 'packages/runtime'))
-  const covered = workflow === 'harness' && process.env.RUNTIME_COVERAGE === 'true' && runtime
-  const jobs = covered ? coveredRuntime(planned.jobs) : planned.jobs
+  // On a ready pull request and in the queue, harness measures the coverage of each package the change reaches.
+  const measured = workflow === 'harness' && process.env.COVERAGE === 'true'
+  const coverage = measured ? gated(planned.jobs, repo) : []
+  const runtimeCovered = measured && runtime
+  const jobs = covered(planned.jobs, [...(runtimeCovered ? ['packages/runtime'] : []), ...coverage])
   appendFileSync(
     output,
     [
       `jobs=${JSON.stringify(jobs)}`,
       `any=${jobs.length > 0}`,
       `runtime=${runtime}`,
+      `coverage=${JSON.stringify(coverage)}`,
       `e2e=${planned.e2e}`,
       `windows-e2e=${planned.windowsE2e}`,
       '',
@@ -544,8 +610,9 @@ if (
     '',
     ...planned.why.map((line) => `- ${line}`),
     ...jobs.flatMap((job) => job.parts.map((part) => `- ${describe(part)}`)),
-    ...(covered ? ['- The runtime’s full suite runs once with coverage; its selected tests are covered there.'] : []),
-    ...(jobs.length === 0 && !covered ? ['- No checks or tests: nothing it changed reaches them.'] : []),
+    ...(runtimeCovered ? ['- The runtime’s full suite runs once with coverage; its selected tests are covered there.'] : []),
+    ...coverage.map((dir) => `- ${dir}: its whole suite, with its coverage gate, in a job of its own.`),
+    ...(jobs.length === 0 && !runtimeCovered && coverage.length === 0 ? ['- No checks or tests: nothing it changed reaches them.'] : []),
     ...(LAYOUT[workflow].e2e
       ? [`- The end-to-end run: ${planned.e2e ? 'yes' : 'no'}. Windows' smoke test: ${planned.windowsE2e ? 'yes' : 'no'}.`]
       : []),

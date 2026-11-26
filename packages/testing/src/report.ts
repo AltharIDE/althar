@@ -3,10 +3,11 @@
  * one per test. A flaky test, which failed and then passed on its retry, gets a new issue if it wasn't seen before, or
  * a comment on its issue, reopening it if it was closed. A quarantined test that failed every time (quarantine.ts) gets
  * a comment on its open issue, reopening it if it was closed while the job ran. Each comment says where it happened:
- * the platform, the job, and the pull request, merge queue or main it ran for.
+ * the platform, the job, and the pull request, merge queue or main it ran for. A new issue says when its quarantine
+ * ends (quarantine.ts); tend.ts names its owner on it that night.
  *
- * First it writes the job's summary of its quarantine: the quarantined tests that failed, and a warning when too many
- * are quarantined or they couldn't be read. Run by .github/actions/flaky after a job's tests, whether they passed or
+ * First it writes the job's summary of its quarantine: the lapsed tests it skipped, the quarantined tests that failed,
+ * and a warning when too many are quarantined or they couldn't be read. Run by .github/actions/flaky after a job's tests, whether they passed or
  * not; it never fails the job.
  */
 import { execFileSync } from 'node:child_process'
@@ -14,7 +15,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 
 import { afterFix } from './afterFix'
 import { type Flaky, LABEL, titleOf } from './flaky'
-import { held, summary } from './quarantine'
+import { day, held, lapsesAt, summary } from './quarantine'
 
 const gh = (...args: ReadonlyArray<string>) => execFileSync('gh', args, { encoding: 'utf8' }).trim()
 
@@ -107,7 +108,7 @@ if (tests.size > 0) {
           '--label',
           LABEL,
           '--body',
-          `\`${test.file}\` › ${test.name} failed in CI, then passed when it ran again. The retry let the change through, but until the cause is found and fixed, this test says nothing reliable. Each comment is another time it happened; CI reopens this if it happens after it's closed.\n\nWhile this is open, the test is quarantined: it still runs in CI, but when it fails, on its retry too, it doesn't fail the job, and the failure is said here. Close this from the pull request that fixes it, and it fails CI again.\n\n${said}${failed}`,
+          `\`${test.file}\` › ${test.name} failed in CI, then passed when it ran again. The retry let the change through, but until the cause is found and fixed, this test says nothing reliable. Each comment is another time it happened; CI reopens this if it happens after it's closed.\n\nWhile this is open, the test is quarantined: it still runs in CI, but when it fails, on its retry too, it doesn't fail the job, and the failure is said here. Close this from the pull request that fixes it, and it fails CI again.\n\nThe quarantine lasts until ${day(lapsesAt({ opened: new Date().toISOString() }))}, a week, or until the test fails on its retry twice in a day, when it is broken, not flaky. Then it lapses: the test is skipped in CI but at night, where it gates, and this is labelled \`broken\`. Its owner, who last changed what it covers, is named here tonight.\n\n${said}${failed}`,
         )
     }
   } catch (error) {

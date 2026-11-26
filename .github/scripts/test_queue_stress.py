@@ -124,7 +124,9 @@ class Tests(unittest.TestCase):
     def test_actual_workflow_filters(self):
         gate = self.gate()
         self.assertFalse(module.Gate.applies(gate, 'stress', ['README.md']))
-        self.assertFalse(module.Gate.applies(gate, 'stress', ['packages/runtime/src/Sessions.ts']))
+        # Source stresses the tests that import it (packages/testing/src/stress.ts).
+        self.assertTrue(module.Gate.applies(gate, 'stress', ['packages/runtime/src/Sessions.ts']))
+        self.assertFalse(module.Gate.applies(gate, 'stress', ['docs/decisions/foundations.md']))
         self.assertTrue(module.Gate.applies(gate, 'stress', ['packages/runtime/tests/sessions.test.ts']))
         self.assertTrue(module.Gate.applies(gate, 'desktop', ['packages/runtime/src/Sessions.ts']))
 

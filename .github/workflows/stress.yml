@@ -1,8 +1,10 @@
 name: stress
 
-# New and changed tests, run many times over with no retry, on Linux (packages/testing/src/stress.ts). On a pull
-# request, three times each and a changed end-to-end spec twice, a few minutes: a race that shows one run in three
-# fails here, on the pull request that brought it, rather than on everyone's after it lands. The pull request's
+# New and changed tests, run many times over with no retry, on Linux (packages/testing/src/stress.ts), and the tests
+# nearest the source it changes by their imports, eight at most on a pull request and sixteen at night, so a race in
+# the code shows as well as one in a test. On a pull request, three times each and a changed end-to-end spec twice, a
+# few minutes: a race that shows one run in three fails here, on the pull request that brought it, rather than on
+# everyone's after it lands. The pull request's
 # required `merge queue` check waits for it (queue.yml). Not on a draft, which runs it once it is ready for review; and
 # not in the merge queue, since the pull request ran it on the same tests. Called by nightly.yml with `nightly`, on the
 # tests main changed that day, twenty times for a few and a spec up to five: what shows one run in ten, found within a
@@ -19,8 +21,9 @@ on:
     paths:
       [
         'packages/*/tests/**',
-        'packages/*/src/**/*.test.*',
+        'packages/*/src/**',
         'apps/*/tests/**',
+        'apps/*/src/**',
         'apps/desktop/e2e/**',
         'packages/testing/src/stress.ts',
         '.github/workflows/stress.yml',
