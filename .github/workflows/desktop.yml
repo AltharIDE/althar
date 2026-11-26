@@ -32,11 +32,14 @@ on:
         'packages/testing/**',
         '.github/actions/flaky/**',
         '.github/actions/electron/**',
+        '.github/actions/durations/**',
         '.github/workflows/desktop.yml',
         '.github/workflows/e2e.yml',
       ]
 
 permissions:
+  # The test durations post-merge measured on main, which spread the end-to-end run's parts (.github/actions/durations).
+  actions: read
   contents: read
   issues: write
 
@@ -60,6 +63,8 @@ jobs:
       windows-e2e: ${{ steps.plan.outputs.windows-e2e }}
       native-homes: ${{ steps.native.outputs.homes }}
       native-computer: ${{ steps.computer.outputs.run }}
+      # The post-merge run whose test durations every part of the end-to-end run spreads its specs by.
+      durations: ${{ steps.durations.outputs.run }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -80,6 +85,11 @@ jobs:
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
         run: bun packages/testing/src/select.ts plan desktop "$RUNNER_TEMP/changed"
+      - id: durations
+        if: steps.plan.outputs.e2e == 'true'
+        uses: ./.github/actions/durations
+        with:
+          pick: 'true'
       # Connection credentials must survive a real desktop relaunch using each OS's own keyring.
       - id: native
         env:
@@ -340,3 +350,5 @@ jobs:
     needs: plan
     if: needs.plan.outputs.e2e == 'true'
     uses: ./.github/workflows/e2e.yml
+    with:
+      durations: ${{ needs.plan.outputs.durations }}

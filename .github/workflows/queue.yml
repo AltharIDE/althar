@@ -11,8 +11,9 @@ name: queue
 # as its pull request did, and each runs what that change reaches: the checks and unit tests on Linux, and for a change
 # that reaches the app, its end-to-end run (desktop.yml calls e2e.yml). Not the stress run of changed tests or Windows'
 # smoke test, which the pull request ran on the same change, but a build fails if either failed on the head of a pull
-# request in its group. A change that reaches the runtime runs its coverage gate here too (harness.yml). Windows' unit
-# tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
+# request in its group. Each package the change reaches that gates on its coverage runs its gate here too
+# (harness.yml). Windows' full unit suites, the UI kit's and the app's coverage and the packages run after merge, in
+# post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
 # has (or it has none), the Windows smoke test hasn't failed and its migration and ADR numbers are free (`numbers`):
@@ -26,6 +27,8 @@ on:
   merge_group:
 
 permissions:
+  # The workflows it calls read the test durations post-merge measured on main (.github/actions/durations).
+  actions: read
   contents: read
   # The workflows it calls file flaky tests as issues (.github/actions/flaky).
   issues: write

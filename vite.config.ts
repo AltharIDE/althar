@@ -62,6 +62,31 @@ export default defineConfig({
         files: ['apps/desktop/src/renderer/**/*.tsx', 'packages/ui/src/**/*.tsx'],
         rules: { 'althar/press-at-once': 'error' },
       },
+      /* A test takes its size's time, never one of its own (lint/budget.js). */
+      {
+        files: ['packages/*/tests/**/*.{ts,tsx}', 'apps/*/tests/**/*.{ts,tsx}', 'brand/tests/**/*.{ts,tsx}'],
+        rules: { 'althar/test-time': 'error' },
+      },
+      /* But the tests of real agents and real accounts, run by hand with configs of their own, a benchmark run by hand, and @althar/testing's own, which test the budget. */
+      {
+        files: ['**/tests/agents/**', '**/tests/real/**', '**/openBenchMerged.test.ts', 'packages/testing/**'],
+        rules: { 'althar/test-time': 'off' },
+      },
+      /* An end-to-end spec takes the budget's times, never sleeps, and presses each system's own keys (lint/budget.js, lint/keys.js). */
+      {
+        files: ['apps/desktop/e2e/**/*.ts', 'apps/desktop/playwright.config.ts'],
+        rules: { 'althar/spec-time': 'error', 'althar/system-keys': 'error' },
+      },
+      /* But the specs that drive real agents or a machine of the person's own, run by hand, which take as long as those do. */
+      {
+        files: ['apps/desktop/e2e/{real,real-tools,workerLab}.spec.ts'],
+        rules: { 'althar/spec-time': 'off', 'althar/system-keys': 'off' },
+      },
+      /* No test or fixture rests on a date still to come (lint/dates.js). */
+      {
+        files: ['packages/*/tests/**/*.{ts,tsx}', 'apps/*/tests/**/*.{ts,tsx}', 'apps/*/e2e/**/*.ts', 'brand/tests/**/*.{ts,tsx}'],
+        rules: { 'althar/no-future-dates': 'error' },
+      },
     ],
   },
   fmt: {
