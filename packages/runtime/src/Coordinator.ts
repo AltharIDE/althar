@@ -104,6 +104,9 @@ import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
 import { waitFor } from './waits'
 
+/** How many drafts of turns that are over each coordinator thread keeps the tasks of, for a Hold from a window behind. */
+const ENDED_DRAFTS_KEPT = 50
+
 /**
  * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
  * start in its report, for the person or the coordinator.
@@ -305,8 +308,6 @@ const ToReview = Schema.Struct({
 })
 const Named = Schema.Struct({ task: Schema.String })
 /* When an automation runs, as the coordinator says it: on days of the week at a time, or every hour at a minute past. */
-/** How many drafts of turns that are over each coordinator thread keeps the tasks of, for a Hold from a window behind. */
-const ENDED_DRAFTS_KEPT = 50
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
 const When = Schema.Struct({
   days: Schema.optional(Schema.Array(Schema.Literals(DAY_NAMES))),
