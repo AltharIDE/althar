@@ -174,6 +174,14 @@
 .shot { margin: 0; }
 .shot .frame { aspect-ratio: 16 / 11; }
 .shot .frame img { height: 100%; object-fit: cover; object-position: 0 0; }
+/* The canvas, drawn live, and the brand pack's picture of one for a phone: the live one is the whole window laid out at
+   its desktop size, which a phone's browser can run out of room drawing. Not drawn at all there, it costs nothing. */
+.live { display: contents; }
+.shot .frame .still { display: none; }
+@media (max-width: 699px) {
+  .live { display: none; }
+  .shot .frame .still { display: block; }
+}
 .shot figcaption { display: grid; gap: 4px; margin-top: 14px; }
 .shot figcaption b { font-size: 16px; letter-spacing: -0.015em; }
 .shot figcaption span { font-size: 14px; line-height: 1.45; color: var(--t-2); }
@@ -181,21 +189,24 @@
 /* The download, on cobalt, its light along the foot: the light rises as the scene comes in, and its blocks brighten in turn. */
 /* Its words and buttons in the middle of the cobalt: the room over the line a little less, for the room its line height leaves over the letters. */
 .end { position: relative; margin-top: 80px; padding: 89px 0 96px; overflow: hidden; background: var(--cobalt); color: #fff; text-align: center; }
+/* The light is a square picture, 1440px a side at least and as wide as the scene, standing on the scene's foot. It is
+   painted as a background on layers no larger than the scene (and the 140px it rises by), not as six pictures the
+   square's size: each of those is a layer of its own (the blocks move), 1440px a side whatever the screen, and a phone
+   ran out of memory drawing them as the scene came into sight. The blocks' masks are placed as the picture is. */
+.end { container-type: inline-size; }
 .aurora {
+  --side: max(1440px, 100cqw);
   position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: max(1440px, 100%);
-  aspect-ratio: 1;
-  transform: translate(-50%, calc((1 - var(--p, 1)) * 140px));
+  inset: -140px 0 0;
+  transform: translateY(calc((1 - var(--p, 1)) * 140px));
   pointer-events: none;
 }
-.aurora img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
+.aurora i { position: absolute; inset: 0; background: url('./aurora.webp') center bottom / var(--side) var(--side) no-repeat; }
 .block {
   --mask: radial-gradient(var(--mw) 22% at var(--mx) 100%, #000 0, rgba(0, 0, 0, 0.6) 45%, transparent 100%);
   opacity: 0;
   filter: saturate(2.4) brightness(1.06) contrast(1.08);
-  mask-image: var(--mask);
+  mask: var(--mask) center bottom / var(--side) var(--side) no-repeat;
   animation: brighten var(--md) cubic-bezier(0.35, 0.6, 0.3, 1) var(--dl) infinite;
 }
 .block[data-block='1'] { --mx: 8%; --mw: 20%; --md: 4.4s; --dl: -0.7s; }
