@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { needsOn, pinnedVersion, projectNeeds, toolsToInstall, withNeeds } from '../src/toolNeeds'
+import { needsInAll, needsOn, pinnedVersion, projectNeeds, toolsToInstall, withNeeds } from '../src/toolNeeds'
 
 /* The tools a project's files say it needs, with why, and what a worker lacks of them (ADR-103). */
 
@@ -115,10 +119,6 @@ describe('what a worker lacks of them', () => {
 
 describe('what a task’s repositories need, each in its folder', () => {
   it('reads each repository where its setup runs, a subfolder included, and keeps the first of each tool', async () => {
-    const { mkdirSync, mkdtempSync, writeFileSync } = await import('node:fs')
-    const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
-    const { needsInAll } = await import('../src/toolNeeds')
     const root = mkdtempSync(join(tmpdir(), 'althar-needs-'))
     // A repository bound to its app/ folder, where bun.lock is, and a second one with uv.
     mkdirSync(join(root, 'web', 'app'), { recursive: true })
