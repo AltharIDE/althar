@@ -385,10 +385,11 @@ describe('this repository', () => {
   })
   /**
    * Illustrative code isn't part of the import graph: samples a story shows, a file a spec
-   * writes into a test repository, prototypes, and the small repositories of this file and the stress plan's.
+   * writes into a test repository, prototypes, the small repositories of this file and the stress plan's, and the
+   * modules the runtime's structure test gives its lint rules to read.
    */
   const sample = (one: string) =>
-    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/(?:select|stress)\.test\.ts:)/.test(
+    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/(?:select|stress)\.test\.ts:|packages\/runtime\/tests\/structure\.test\.ts:)/.test(
       one,
     )
 
