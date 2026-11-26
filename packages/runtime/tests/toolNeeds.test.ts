@@ -112,3 +112,27 @@ describe('what a worker lacks of them', () => {
     expect(withNeeds([ready], needs)).toEqual([ready])
   })
 })
+
+describe('what a task’s repositories need, each in its folder', () => {
+  it('reads each repository where its setup runs, a subfolder included, and keeps the first of each tool', async () => {
+    const { mkdirSync, mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { needsInAll } = await import('../src/toolNeeds')
+    const root = mkdtempSync(join(tmpdir(), 'althar-needs-'))
+    // A repository bound to its app/ folder, where bun.lock is, and a second one with uv.
+    mkdirSync(join(root, 'web', 'app'), { recursive: true })
+    writeFileSync(join(root, 'web', 'app', 'package.json'), '{}')
+    writeFileSync(join(root, 'web', 'app', 'bun.lock'), '')
+    writeFileSync(join(root, 'web', 'app', '.bun-version'), '1.3.5')
+    mkdirSync(join(root, 'api'))
+    writeFileSync(join(root, 'api', 'uv.lock'), '')
+    writeFileSync(join(root, 'api', 'package.json'), JSON.stringify({ packageManager: 'bun@1.2.0' }))
+    expect(await needsInAll([join(root, 'web', 'app'), join(root, 'api')])).toEqual([
+      { name: 'bun', why: 'bun.lock', version: '1.3.5' },
+      { name: 'uv', why: 'uv.lock' },
+    ])
+    // Read at the repository's top, the subfolder's bun.lock isn't seen: the folder is what counts.
+    expect(await needsInAll([join(root, 'web')])).toEqual([])
+  })
+})
