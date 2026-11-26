@@ -7,14 +7,14 @@
   "counted": {
     "runtime-cycle-files": {
       "what": "Files of packages/runtime/src on an import cycle: in a strongly connected component, of more than one file, of the graph of its value imports (`import … from './…'` and `export … from`, not `import type`), tests and stories apart. A file on a cycle loads in an order its importers decide. detail.sizes is each cycle's size.",
-      "baseline": 45,
+      "baseline": 0,
       "detail": {
-        "sizes": [28, 8, 6, 3]
+        "sizes": []
       }
     },
     "runtime-largest-cycle": {
       "what": "The files in the runtime's largest import cycle, counted as for runtime-cycle-files: a cycle split in two lowers it, though as many files stay on one.",
-      "baseline": 28
+      "baseline": 0
     },
     "runtime-json-extract": {
       "what": "json_extract in packages/runtime/src, in any case: a read of a JSON column's inside, which no index or schema checks. Counted in code and comments alike.",
