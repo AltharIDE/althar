@@ -2051,6 +2051,7 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      PlacePlan: ({ commandId, planId, workerId, chosenAt }) => once(commandId, api(plans.place(planId, workerId, actorId, chosenAt))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>
         once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),

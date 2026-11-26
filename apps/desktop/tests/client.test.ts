@@ -420,6 +420,7 @@ describe('the client', () => {
           StartPlan: () => Effect.die('unused'),
           StopWaiting: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
+          PlacePlan: () => Effect.die('unused'),
           HoldDraft: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           ChangeTeam: () => Effect.die('unused'),

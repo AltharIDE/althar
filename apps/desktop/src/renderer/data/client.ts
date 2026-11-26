@@ -625,11 +625,14 @@ export interface Client {
      */
     readonly artifact?: { readonly canvasId: string | null }
   }) => Promise<TaskSummary>
-  readonly startPlan: (planId: string, workerId?: string) => Promise<void>
+  /** Where it runs: a worker, any free one, or null for the home; absent, where it was placed before it started. */
+  readonly startPlan: (planId: string, workerId?: string | null) => Promise<void>
   /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
+  /** Where a planned task runs once it starts: a worker, `auto`, or null for the home. Whether it was held, as one counting down is where that place can't take it. */
+  readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
@@ -1363,6 +1366,8 @@ export const connect = async (
       command((commandId) => api.StartPlan({ commandId, planId, ...(workerId === undefined ? {} : { workerId }) })),
     stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    placePlan: (planId, workerId, chosenAt) =>
+      command((commandId) => api.PlacePlan({ commandId, planId, workerId, ...(chosenAt === undefined ? {} : { chosenAt }) })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
