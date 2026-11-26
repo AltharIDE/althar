@@ -2289,6 +2289,29 @@ export const NoticeItem = Schema.Struct({
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
+     * For a line about an errand that merges, in its own thread: the errand, what of it is still to merge as the line is
+     * said (each by its pull request, #1224, or its task's name while it has none, and what it waits for; nothing once it is
+     * done or called off), and whether the line only says it
+     * moved on (kept, a step done, resumed, done). Those fold into the merging line at the thread's foot; one that needs the
+     * person (held, called off, failed) stays a line of its own.
+     */
+    errand: Schema.optional(
+      Schema.Struct({
+        id: Schema.String,
+        quiet: Schema.Boolean,
+        merges: Schema.Array(
+          Schema.Struct({
+            label: Schema.String,
+            /** Its pull request, which tells it apart across repositories; null while it has none. */
+            url: Schema.NullOr(Schema.String),
+            /** Its task's id, where it has one. */
+            task: Schema.NullOr(Schema.String),
+            once: Schema.String,
+          }),
+        ),
+      }),
+    ),
+    /**
      * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
      * change started, by its name and branch, and what it works toward where that isn't the task's.
      */
