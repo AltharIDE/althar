@@ -11,6 +11,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       [
+        'packages/access/**',
         'packages/connectors/**',
         'packages/contracts/**',
         'packages/transport-node/**',

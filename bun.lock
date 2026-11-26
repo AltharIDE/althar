@@ -178,6 +178,23 @@
         "wawoff2": "^2.0.1",
       },
     },
+    "packages/access": {
+      "name": "@althar/access",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.7",
+      },
+      "devDependencies": {
+        "@althar/testing": "workspace:*",
+        "@effect/vitest": "4.0.7",
+        "@types/node": "^24.0.0",
+        "@vitest/coverage-v8": "5.1.0",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+        "vite-plus": "1.6.0",
+        "vitest": "5.1.0",
+      },
+    },
     "packages/connectors": {
       "name": "@althar/connectors",
       "version": "0.0.0",
@@ -450,6 +467,8 @@
     "@agentclientprotocol/codex-acp": ["@agentclientprotocol/codex-acp@2.12.0", "", { "dependencies": { "@agentclientprotocol/sdk": "~2.9.1", "@openai/codex": "^0.171.0", "cross-spawn": "^7.0.6", "diff": "^9.0.0", "open": "^11.0.1", "vscode-jsonrpc": "^9.0.1", "zod": "^4.0.0" }, "bin": { "codex-acp": "dist/index.js" } }, "sha512-UYZwEZoDUdzre4VG/ECGlAVVWlB4tSuy40WiGGiNcA/t3qx0i2Iz9i1BRgzrFHhq2QgEsxH8c7FFEdRwgLUBvg=="],
 
     "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.5.1", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-nSUIrC1fOR9+ppKfx9KdwjBBND2sAPzFHo4yVQrGbXZHnayUYpwL8CDVR5LSxbapY/oKMOzNP0wvwfyx3PS2KA=="],
+
+    "@althar/access": ["@althar/access@workspace:packages/access"],
 
     "@althar/brand": ["@althar/brand@workspace:brand"],
 
