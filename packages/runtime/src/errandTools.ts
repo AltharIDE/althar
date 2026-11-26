@@ -1,7 +1,7 @@
 import { Effect, Schema } from 'effect'
 
 import { Errands } from './Errands'
-import { errandWaitKinds } from './errandWaits'
+import { errandWaitKinds, unwatchedStep } from './errandWaits'
 import type { Tool } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 
@@ -42,7 +42,7 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
   },
   {
     name: 'keep_errand',
-    description: `Keep what the person asked for later, from their message id in this turn (read_turn). Steps run in order. taskId accepts any task’s slug or internal id in this project. Each step needs key, tool, target, request (the tool’s semantic arguments only; no message/errand/step), and nonempty waits [{kind, target}]. Watched kinds: ${errandWaitKinds.join(', ')}; other kinds are refused. review_settled, checks_passed and lead_done target a task by slug or id, and results already recorded for that task can meet the wait. For "once the task’s PR is ready and green, merge it, then tag its merge commit vX", keep these two steps: {key:"merge",tool:"merge_pull_request",taskId:"<slug>",target:"task:<slug>",request:{},waits:[{kind:"task_pull_request",target:"<slug>"}]} then {key:"tag",tool:"push_tag",taskId:"<slug>",target:"<owner/repo> tag vX",request:{tag:"vX",commit:"task:<slug>"},waits:[{kind:"task_merged",target:"<slug>"}]}. Omit head and branch for these task references: the merge watcher binds the PR when ready, checks its gates, and wakes you with merge_pull_request {errand,step:"merge"}; after that step confirms the merge, the tag watcher wakes you with the tag call. No further person message is needed. For an already known merge, use merge_pull_request on their message and the head you read; it keeps the concrete merge errand for you. Other release steps bind the targets and requests their tools describe: checks/post-merge/required-check-missing target a commit; run targets a tag whose run needs approval; draft targets a tag whose draft exists. merge_line/merge_queue/merge_train/merge_in_flight and checks are the concrete merge watcher’s waits. Only a window or paired-device message gives their word. Give each step says, the step in a few plain words for the person ("Merge the 0.9.0 pull request", "Tag v0.9.0"), and each wait says, what it waits for after "once" ("it’s open", "its checks pass"): the thread shows those, never the tool, kind or branch. No action happens while keeping.`,
+    description: `Keep what the person asked for later, from their message id in this turn (read_turn). Steps run in order. taskId accepts any task’s slug or internal id in this project. Each step needs key, tool, target, request (the tool’s semantic arguments only; no message/errand/step), and nonempty waits [{kind, target}]. Watched kinds: ${errandWaitKinds.join(', ')}; other kinds are refused. review_settled, checks_passed and lead_done target a task by slug or id, and results already recorded for that task can meet the wait. For "once the task’s PR is ready and green, merge it, then tag its merge commit vX", keep these two steps: {key:"merge",tool:"merge_pull_request",taskId:"<slug>",target:"task:<slug>",request:{},waits:[{kind:"task_pull_request",target:"<slug>"}]} then {key:"tag",tool:"push_tag",taskId:"<slug>",target:"<owner/repo> tag vX",request:{tag:"vX",commit:"task:<slug>"},waits:[{kind:"task_merged",target:"<slug>"}]}. Omit head and branch for these task references: the merge watcher binds the PR when ready, checks its gates, and wakes you with merge_pull_request {errand,step:"merge"}; after that step confirms the merge, the tag watcher wakes you with the tag call. No further person message is needed. For an already known merge, use merge_pull_request on their message and the head you read; it keeps the concrete merge errand for you. Other release steps bind the targets and requests their tools describe: checks/post-merge/required-check-missing target a commit; run targets a tag whose run needs approval; draft targets a tag whose draft exists. merge_line/merge_queue/merge_train/merge_in_flight and checks are the concrete merge watcher’s waits. A step Althar can’t watch is refused with why, so keep it another way: a merge goes by its task (above), or, for a pull request open already, through merge_pull_request itself, never by a link, title or branch here; a release step targets its repository and tag as above; any other tool waits only on review_settled, checks_passed or lead_done. Only a window or paired-device message gives their word. Give each step says, the step in a few plain words for the person ("Merge the 0.9.0 pull request", "Tag v0.9.0"), and each wait says, what it waits for after "once" ("it’s open", "its checks pass"): the thread shows those, never the tool, kind or branch. No action happens while keeping.`,
     input: {
       type: 'object',
       properties: {
@@ -83,7 +83,15 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
       },
       required: ['message', 'steps'],
     },
-    call: (input, access) => Effect.flatMap(decode(Kept, input), (kept) => errands.keep(access, kept.message, kept.steps)),
+    call: (input, access) =>
+      Effect.flatMap(decode(Kept, input), (kept) => {
+        // A step nothing of Althar's would watch is refused now, with why, rather than kept to sit on hold.
+        for (const step of kept.steps) {
+          const why = unwatchedStep(step)
+          if (why !== null) return Effect.fail(new ToolRefused({ message: `Step ${step.key}: ${why} Nothing was kept.` }))
+        }
+        return errands.keep(access, kept.message, kept.steps)
+      }),
   },
   {
     name: 'read_errands',

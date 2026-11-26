@@ -11,6 +11,7 @@ import {
   mergesLeft,
   plainReason,
   resumedNote,
+  settledNote,
   stepNote,
   stillNote,
   unwatched,
@@ -343,5 +344,38 @@ describe('what a merge errand still has to merge', () => {
   it('is nothing for an errand that does anything else, whose lines stand as they are', () => {
     assert.isNull(mergesLeft([{ step: { tool: 'push_tag', target: 'v0.9.0', waits: [] }, done: false, task: null }]))
     assert.isNull(mergesLeft([]))
+  })
+})
+
+describe('the line of a held errand that closed by itself', () => {
+  const pull = { label: '#957', url: PR.replace('698', '957') }
+  it('says what was done already, each linked, where nothing is left', () => {
+    const note = settledNote([
+      { said: '#957 merged already', links: [pull] },
+      { said: 'v0.9.0 is tagged already', links: [] },
+    ])
+    assert.strictEqual(note.title, 'Errand done: #957 merged already; v0.9.0 is tagged already')
+    assert.deepStrictEqual(note.links, [pull])
+  })
+  it('says what came that Althar couldn’t watch for, and what to ask for again', () => {
+    const note = settledNote([], {
+      steps: [
+        { tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] },
+        { tool: 'publish_release', target: 'AltharIDE/althar release v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'draft' }] },
+      ],
+      happened: { said: '#957 merged', links: [pull] },
+    })
+    assert.strictEqual(
+      note.title,
+      'Errand closed: #957 merged, which Althar couldn’t watch for. Ask again to tag v0.9.0, then publish the v0.9.0 release.',
+    )
+    assert.deepStrictEqual(note.links, [pull])
+  })
+  it('says a merge done already once, not again as what the next step waited for', () => {
+    const note = settledNote([{ said: '#957 merged already', links: [pull] }], {
+      steps: [{ tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] }],
+      happened: { said: '#957 merged', links: [pull] },
+    })
+    assert.strictEqual(note.title, 'Errand closed: #957 merged already, which Althar couldn’t watch for. Ask again to tag v0.9.0.')
   })
 })
