@@ -245,3 +245,49 @@ it('leaves codes, grants and keys out of what it logs, and keeps the last lines'
   expect(forTheLog(`a\n\nb ${'A'.repeat(64)}==\nc`, 2)).toBe('b …\nc')
   expect(forTheLog('join althar-worker1.abc.def')).toBe('join althar-worker1.…')
 })
+
+it('ends with the worker’s check: stays at it where its sandbox can’t start, and says when sudo couldn’t allow it', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const fix = "sudo sh -c 'apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+  const blocked = event('check', 'done', {
+    sandbox: { starts: false, problem: 'NoUserNamespaces', fix },
+    tools: [],
+    agents: [{ id: 'codex', name: 'Codex', signedIn: false, models: 0 }],
+  })
+  const { system, asked } = machine({
+    probe: { stdout: [event('reach', 'done'), event('look', 'done', { arch: 'x64', freeKiB: 65_000_000, linger: true })].join('\n') },
+    'worker-install': { stdout: event('key', 'done', { publicKey: 'PUBLIC' }) },
+    'worker-enroll': { stdout: [event('start', 'done', { agents: [] }), event('check', 'started'), blocked].join('\n') },
+    'worker-sandbox': {
+      code: 1,
+      stdout: [
+        blocked,
+        event('sandbox', 'failed', { code: 'NeedsAdministrator', message: 'This login can’t use sudo without a password here.' }),
+      ].join('\n'),
+    },
+  })
+  vi.mocked(system.release).mockResolvedValue({
+    envelope: new Uint8Array([1]),
+    key: 'KEY',
+    version: '0.3.0',
+    url: 'https://x.test/a.tar.gz',
+    sha256: 'a'.repeat(64),
+    bytes: 1,
+    unpackedBytes: 1,
+    apiVersion: 1,
+    storage: 'c'.repeat(64),
+  })
+  const told: Array<WorkerSetup | null> = []
+  const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://x.test' }))
+  const setups = workerSetups(system, vi.fn(), (setup) => told.push(setup), vi.fn(), { log: machine({}).log, release })
+  setups.start({ target: 'build@box' }, true)
+  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('enroll'))
+  await setups.act({ kind: 'enroll', grant: { homeId: `home_${'1'.repeat(32)}`, workerId: `wrk_${'7'.repeat(32)}` } as never })
+  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('done'))
+  // Added, at its check: what stops a task there, with the command that lets it.
+  expect(told.at(-1)).toMatchObject({ at: 5, check: { sandbox: { starts: false, problem: 'NoUserNamespaces', fix } } })
+  await setups.act({ kind: 'sandbox' })
+  await vi.waitFor(() => expect(told.at(-1)?.check?.allowed).toBe('NeedsAdministrator'))
+  expect(told.at(-1)).toMatchObject({ phase: 'done', at: 5, checking: false })
+  expect(asked).toContain('worker-sandbox')
+})
