@@ -86,6 +86,17 @@ export const API_VERSION_HEADER = 'x-althar-api-version'
 export const LANE_HEADER = 'x-althar-lane'
 export const BACKGROUND = 'background'
 
+/** The reads a runtime puts behind when their request says `BACKGROUND`. Any other call is answered as it comes, header or not. */
+export const BEHIND_CALLS: ReadonlySet<string> = new Set([
+  'ListProjects',
+  'GetHome',
+  'GetBoard',
+  'GetCoordinator',
+  'GetThread',
+  'GetThreadItem',
+  'GetThreadItems',
+])
+
 /** The most items one `GetThreadItems` reads. */
 export const THREAD_ITEMS_AT_ONCE = 500
 
