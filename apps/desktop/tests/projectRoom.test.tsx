@@ -35,8 +35,9 @@ import { servicesFor, useSettingsOf, withServices } from './render'
  * before the coordinator's thread is read, and what it leaves alone for
  * other projects and threads; a task's card with its issue, its earlier pull
  * requests, who holds the places it waits for, and its ending changed; the
- * composer's handover and queue when Althar doesn't take what was said; and
- * what the front page makes of trackers it can't place.
+ * composer's handover and queue when Althar doesn't take what was said, and a
+ * pick made while another agent takes over; and what the front page makes of
+ * trackers it can't place.
  */
 
 const session = {
@@ -645,6 +646,53 @@ describe('the Talk room’s composer when Althar doesn’t take what was said', 
         dictated: true,
       }),
     )
+  })
+})
+
+describe('the Talk room’s composer while another agent takes over', () => {
+  it('keeps the agent taking over in the picker while its switch is on its way, moves a pick made then to it, and asks for the switch once', async () => {
+    let landed = false
+    let effort: string | null = null
+    // Once the runtime has the switch, the thread says Codex takes over, as the runtime does the moment the agent going out lets
+    // go, on the effort it was last set to.
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: landed
+            ? { ...session, held: false, handover: true, nextLead: { agentId: 'codex', model: 'gpt-5.2-codex', effort } }
+            : { ...session, turnRunning: true },
+          items: [items.tool({ status: 'in_progress' })],
+        }),
+      ),
+      setEffort: vi.fn(async (input: { readonly effort: string }) => {
+        effort = input.effort
+      }),
+    })
+    let release: () => void = () => {}
+    vi.mocked(client.switchAgent).mockImplementationOnce(() => new Promise<string>((resolve) => (release = () => resolve('s2'))))
+    withServices(<Project />, client)
+    const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(composer, 'Over to you{Enter}')
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledTimes(1))
+    // The switch is open: the picker is on the agent taking over, not the one going out, and a pick on it is for it.
+    await userEvent.click(await screen.findByRole('button', { name: /^Coordinator: gpt-5\.2-codex/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByRole('button', { name: 'Coordinator: gpt-5.2-codex Extra high' })).toBeTruthy()
+    // Said again meanwhile, it is not another switch.
+    await userEvent.type(composer, 'And this{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'And this', disposition: 'after_current' }))
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
+    expect(client.setEffort).not.toHaveBeenCalled()
+    landed = true
+    release()
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', effort: 'extra-high' }))
+    expect(client.switchAgent).toHaveBeenCalledTimes(1)
+    // And the picker keeps saying it once the runtime has it.
+    expect(await screen.findByRole('button', { name: 'Coordinator: gpt-5.2-codex Extra high' })).toBeTruthy()
   })
 })
 

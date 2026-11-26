@@ -534,6 +534,11 @@ export function ProjectView({
   const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
+  // The agent picked to take over, from the moment what the person said to it is sent until the runtime has the switch: the
+  // picker keeps saying it rather than going back to the agent going out, and no second switch is asked for by what is said meanwhile.
+  const [switching, setSwitching] = useState<Choice | null>(null)
+  // What was picked on that agent meanwhile, the last of it: moved to as the switch lands. A pick made once it has landed supersedes it.
+  const pickedMeanwhile = useRef<Choice | null>(null)
   const coordinator = model.coordinator
   // The tasks the coordinator is drafting, each as its card fills in, in its card's place in the thread once it is a task.
   const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
@@ -599,7 +604,7 @@ export function ProjectView({
     (session === null
       ? null
       : session.held
-        ? ((moving === null ? null : { ...moving, agentId: session.agentId }) ?? upcomingOn(session) ?? runningOn(session))
+        ? (switching ?? (moving === null ? null : { ...moving, agentId: session.agentId }) ?? upcomingOn(session) ?? runningOn(session))
         : taking === null
           ? null
           : ((moving === null ? null : { ...moving, agentId: taking.agentId }) ?? taking)) ??
@@ -754,7 +759,11 @@ export function ProjectView({
     setDraft('')
     images.clear()
     const picked = waiting
-    if (picked !== null) setHandover(null)
+    if (picked !== null) {
+      setHandover(null)
+      setSwitching(picked)
+      pickedMeanwhile.current = null
+    }
     // Sent from under the board, the coordinator's conversation comes back for the answer.
     if (docked) {
       asides.back()
@@ -774,23 +783,50 @@ export function ProjectView({
       batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      if (picked !== null) setHandover(picked)
+      if (picked !== null) {
+        // The switch didn't go: what was picked on the agent since is the pick given back, not the one sent.
+        setHandover(pickedMeanwhile.current ?? picked)
+        pickedMeanwhile.current = null
+        setSwitching(null)
+      }
     }
     const said =
       picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
     void said.then((accepted) => {
-      if (accepted) batch.finish(true)
-      else restore()
+      if (!accepted) return restore()
+      if (picked !== null) {
+        // What was picked on the agent taking over since is moved to as the switch lands, not lost with it.
+        const later = pickedMeanwhile.current
+        pickedMeanwhile.current = null
+        setSwitching(null)
+        if (later !== null) move(later)
+      }
+      batch.finish(true)
     }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
-  const choose = (next: Choice) => {
-    if (session === null || !session.held) return setPick(next)
-    if (next.agentId !== session.agentId) return setHandover(next)
+  const move = (next: Choice) => {
+    // The last pick stands: one made on the agent before the switch landed is not moved to after this.
+    pickedMeanwhile.current = null
     setHandover(null)
     setMoving(next)
     // Only the last pick's end takes the choice shown away: one made after is still on its way.
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
+  }
+  const choose = (next: Choice) => {
+    // Another session taking over after the one going out let go is the coordinator as far as the runtime goes: a pick is moved to there too.
+    if (taking !== null) {
+      setSwitching(null)
+      return move(next)
+    }
+    // The switch to the agent is still on its way: a pick of its own waits for it, and is moved to as it lands.
+    if (switching !== null && next.agentId === switching.agentId) {
+      pickedMeanwhile.current = next
+      return setSwitching(next)
+    }
+    if (session === null || !session.held) return setPick(next)
+    if (next.agentId !== session.agentId) return setHandover(next)
+    move(next)
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   // Out of the queue and in the composer at once; one the coordinator had already read comes back where it was, said why,
