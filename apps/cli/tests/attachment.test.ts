@@ -140,7 +140,7 @@ describe('attached CLI', () => {
       )
       assert.deepStrictEqual(at.calls[0]?.payload, { commandId, projectId, title: 'Work' })
       assert.deepStrictEqual(at.calls[1]?.payload, { commandId: startCommand(commandId), threadId, agentId: 'codex', model: 'm' })
-      assert.include(at.output(), 'cannot answer permissions')
+      assert.include(at.output(), 'can’t answer permissions')
       assert.include(at.output(), commandId)
       assert.isTrue(at.input.destroyed)
       const generated = fixture()
@@ -293,7 +293,7 @@ describe('attached CLI', () => {
       'Waiting\nDetails',
       'Info',
       'Deploy?',
-      'trusted person client',
+      'Answer it in the Althar window',
     ])
       assert.include(initial, word)
     assert.strictEqual(out.snapshot(snap), '')

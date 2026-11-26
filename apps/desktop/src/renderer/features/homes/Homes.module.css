@@ -274,6 +274,36 @@
   gap: 8px;
 }
 
+/* A part of a screen the window's home shows but won't take a change to from here: one quiet line, then the part as it stands. */
+.holds {
+  display: grid;
+  gap: 14px;
+}
+.holdsLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sunk);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.holdsIcon {
+  flex: none;
+  color: var(--t-3);
+}
+.held {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0.6;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .more,
   .chip {

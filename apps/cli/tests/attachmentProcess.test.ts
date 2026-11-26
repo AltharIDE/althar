@@ -93,7 +93,7 @@ it.live('attaches the built CLI to an already locked profile and disconnects on 
       const interactive = yield* run(['attach', '--profile', profile, '--home', endpoint.homeId, '--thread', task.threadId])
       interactive.child.stdin.end('/allow\n/quit\n')
       assert.strictEqual(yield* Effect.promise(() => interactive.closed), 0, interactive.error())
-      assert.include(interactive.output(), 'cannot answer permissions')
+      assert.include(interactive.output(), 'can’t answer permissions')
       const interrupted = yield* run(['attach', '--profile', profile, '--thread', task.threadId])
       yield* until(
         Effect.sync(() => {

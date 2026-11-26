@@ -51,15 +51,3 @@
 .heldInset {
   padding: 18px 0 4px;
 }
-
-/* A home's settings it doesn't take from this window yet: as they stand there, quieter, with nothing to press. */
-.held {
-  display: grid;
-  gap: 16px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0.6;
-  pointer-events: none;
-}

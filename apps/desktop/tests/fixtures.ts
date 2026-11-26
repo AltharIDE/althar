@@ -43,11 +43,11 @@ import type {
   ConnectionInfo,
   HomeFolders,
 } from '@althar/contracts'
-import { SOCKET_CALLS } from '@althar/contracts'
+import { Api, SOCKET_CALLS } from '@althar/contracts'
 import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
-import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { type Client, type ProjectRulesChange, refusedHere } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host, PagesHost } from '../src/renderer/data/services'
 import type { HomeState, HomesHost } from '../src/homes'
@@ -1728,6 +1728,24 @@ export const remoteConnection = (calls: ReadonlyArray<string> | null = SOCKET_CA
     position: { homeId, cursor: 0, checkpoint: null },
     ...(calls === null ? {} : { calls }),
   }
+}
+
+/** Every call the API has, by its tag. */
+const API_TAGS: ReadonlySet<string> = new Set(Api.requests.keys())
+
+/**
+ * A fake client as a window on another computer's home has it: each call the home doesn't list for this connection is
+ * refused, as the real client refuses it (`refusedHere`), so a screen meets what that window meets.
+ */
+export const onHomeWindow = (overrides: Partial<Client> = {}, calls: ReadonlyArray<string> = SOCKET_CALLS) => {
+  const fake = fakeClient({ ...overrides, connection: remoteConnection(calls) })
+  const client = fake.client as unknown as Record<string, unknown>
+  for (const [name, method] of Object.entries(client)) {
+    const tag = `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`
+    if (typeof method !== 'function' || !API_TAGS.has(tag) || calls.includes(tag)) continue
+    client[name] = vi.fn(async () => Promise.reject(refusedHere(tag)))
+  }
+  return fake
 }
 
 /** What a home on another computer finds where its person keeps code, and where new code goes there. */

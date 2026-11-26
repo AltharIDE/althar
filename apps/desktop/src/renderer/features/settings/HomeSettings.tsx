@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { LAST_WITHOUT_HOME_SETTINGS } from '../../../homes'
 import { behindText, HomeBehind } from '../homes/HomeBehind'
+import { Held } from '../homes/HomeHolds'
 import { useHomeTakes } from './home'
 import s from './Settings.module.css'
 
@@ -16,9 +17,7 @@ export function HomeSettings({ children, inset = false }: { children: ReactNode;
     // Inset, inside a card of its own (the home opened out in Computers): the strip clear of the card's edge.
     <div className={inset ? s.heldInset : s.heldPage}>
       <HomeBehind line={behindText.settings} since={LAST_WITHOUT_HOME_SETTINGS} />
-      <fieldset disabled className={s.held}>
-        {children}
-      </fieldset>
+      <Held>{children}</Held>
     </div>
   )
 }

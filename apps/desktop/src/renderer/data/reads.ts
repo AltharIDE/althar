@@ -3,7 +3,7 @@ import { type EnsureQueryDataOptions, QueryClient, queryOptions } from '@tanstac
 import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
 import { mergeItems, settled } from '../shared/items'
-import type { Client } from './client'
+import { canCall, type Client } from './client'
 import { readModelsAgain } from './models'
 
 /*
@@ -130,6 +130,8 @@ export const homeSince = (client: Client) => {
 }
 
 export const reads = (client: Client) => ({
+  /** Whether the window's home lets it make a call: every one, in this computer's own window. */
+  allows: (tag: string) => canCall(client, tag),
   projects: () => queryOptions({ queryKey: keys.projects, queryFn: () => client.listProjects() }),
   status: () => queryOptions({ queryKey: keys.status, queryFn: () => client.status() }),
   home: () =>
@@ -279,9 +281,10 @@ export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read
   read.projects(),
   read.coordinator(projectId),
   read.board(projectId),
-  read.rules(projectId),
+  // What the window's home keeps from it isn't asked: the screens that would show it say so instead.
+  ...(read.allows('GetProjectRules') ? [read.rules(projectId)] : []),
   read.connections(),
-  read.automations(projectId),
+  ...(read.allows('GetAutomations') ? [read.automations(projectId)] : []),
 ]
 
 /** The home reads its local projects, work and calls before opening. Agent checks run afterwards. */

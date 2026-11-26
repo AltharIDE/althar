@@ -1122,10 +1122,7 @@ export const connect = async (
           get(target, tag, receiver): unknown {
             // What the home says this connection may call, where it says; else what this app's own contracts allow a socket.
             if (typeof tag === 'string' && tag in target && !(connection?.calls?.includes(tag) ?? socketCanCall(tag)))
-              return () =>
-                Effect.fail(
-                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
-                )
+              return () => Effect.fail(refusedHere(tag))
             return Reflect.get(target, tag, receiver)
           },
         })
@@ -1607,6 +1604,17 @@ export const receivePort = (
     target.addEventListener('message', onMessage)
     signal?.addEventListener('abort', aborted, { once: true })
   })
+
+/**
+ * A call the window's home doesn't take from it, refused before it goes: in plain words, and with a reason of its own,
+ * so a screen can say calmly what isn't shown here rather than an error.
+ */
+export const HOME_KEEPS = 'HomeKeeps'
+export const refusedHere = (tag: string) =>
+  new ApiError({ reason: HOME_KEEPS, message: 'This home doesn’t take that from a window on another computer yet.', detail: tag })
+
+/** Whether an error is the window's home not taking a call from it. */
+export const keptByHome = (error: unknown) => error instanceof ApiError && error.reason === HOME_KEEPS
 
 /**
  * Whether this window may make a call: any, on this computer's own runtime;
