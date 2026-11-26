@@ -70,3 +70,27 @@
   flex: none;
   margin-left: auto;
 }
+
+/* A host connected whose sign-in may not push: what it can't, in the danger colour, and why under it. */
+.problem {
+  align-items: flex-start;
+  padding: 10px 0;
+}
+.problem .marks {
+  padding-top: 1px;
+}
+.said {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.problem .name {
+  color: var(--danger);
+}
+.why {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+}

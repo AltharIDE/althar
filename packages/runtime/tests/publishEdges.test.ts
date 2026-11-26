@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 
 import { ConnectorFailed } from '@althar/connectors'
@@ -14,7 +15,7 @@ import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
-import { Queries } from '../src/Queries'
+import { Queries, stuckOf } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -190,6 +191,43 @@ describe('opening a task’s pull request', () => {
       assert.lengthOf(github.changes, 1)
       assert.deepStrictEqual(yield* runsOf(task.taskId), [{ state: 'succeeded' }])
     }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('says whose sign-in the host refused for which repository, and what to do, never git’s own line', () => {
+    // A host that takes git's sign-in but not a push, as GitHub answers a token kept to reading: 403 to git's first question.
+    const server = createServer((_request, response) => {
+      response.statusCode = 403
+      response.end('Write access to repository not granted.')
+    })
+    const listening = Effect.acquireRelease(
+      Effect.callback<string>((resume) => {
+        server.listen(0, '127.0.0.1', () => {
+          const address = server.address()
+          resume(Effect.succeed(typeof address === 'object' && address !== null ? `http://127.0.0.1:${address.port}` : ''))
+        })
+      }),
+      () => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
+    )
+    let origin = ''
+    const { working } = hosted()
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    const github = makeFakeService({ pushUrl: (path) => `${origin}/${path.join('/')}.git` })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      origin = yield* listening
+      const task = yield* publishing(working)
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['publish', 'push_refused'])
+      assert.strictEqual(
+        call.detail,
+        'GitHub refused a push to meridian/api with you’s token. Give the token write access to meridian/api (a fine-grained token’s Contents: Read and write, made for meridian), or connect GitHub with one that can push there, then try again.',
+      )
+      assert.notInclude(call.detail ?? '', 'git push')
+      // As the window reads the call: the way on it offers is the host's connection, then trying again.
+      assert.strictEqual(stuckOf(call).why, 'push_refused')
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.scoped, Effect.provide(runtimeWith(github)))
   })
 
   it.live('asks nothing of the person when the host refuses it after they stopped the task, and opens it once resumed', () => {

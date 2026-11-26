@@ -112,7 +112,12 @@ describe('checking a GitHub connection', () => {
           line('account', 'ok', { fact: 'you' }),
           // Owners as GitHub spells them, once each.
           line('reach', 'ok', { fact: 'northwind' }),
-          line('push', 'ok'),
+          line('push', 'ok', {
+            repositories: [
+              { path: 'northwind/api', state: 'ok', reason: null },
+              { path: 'Northwind/web', state: 'ok', reason: null },
+            ],
+          }),
           line('changes', 'ok'),
           line('checks', 'ok'),
           line('issues', 'ok'),
@@ -124,6 +129,8 @@ describe('checking a GitHub connection', () => {
       })
       for (const request of sent) {
         assert.strictEqual(request.method, 'GET')
+        // git's own question of a push goes to the web host, as git sends it.
+        if (!request.url.startsWith(GH)) continue
         assert.strictEqual(request.headers['x-github-api-version'], '2022-11-28')
         assert.strictEqual(request.headers.accept, 'application/vnd.github+json')
       }
@@ -361,8 +368,128 @@ describe('checking a GitHub connection', () => {
         { repositories: [['northwind', 'api']] },
       )
       const report = yield* check
-      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null })
+      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null, names: ['northwind/api'] })
       assert.deepStrictEqual(states(report), ['account ok', 'reach ok', 'push no', 'changes ok', 'checks ok', 'issues ok'])
+    }),
+  )
+
+  /** git's first question of a push to northwind/api, answered as a test says. */
+  const RECEIVE = 'https://github.com/northwind/api.git/info/refs?service=git-receive-pack'
+
+  it.effect('asks each repository it sees whether this token may push there, as git does before a push', () =>
+    Effect.gen(function* () {
+      // A public repository: any token reads it, and GitHub says the account may push; the token was kept to reading.
+      const tokens = 'https://github.com/settings/personal-access-tokens'
+      const { check, sent } = gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { status: 403, text: '' }]], {
+        repositories: [['northwind', 'api']],
+      })
+      const report = yield* check
+      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'no_push', names: ['northwind/api'], url: tokens })
+      // Signed in as git is, on the web host, never with the token in the address; nothing is sent.
+      const asked = sent.find((request) => request.url === RECEIVE)
+      assert.strictEqual(asked?.method, 'GET')
+      assert.strictEqual(asked?.headers.authorization, `Basic ${Buffer.from('x-access-token:secret-token').toString('base64')}`)
+      assert.isUndefined(asked?.body)
+      // Taken: a fine-grained token's push is known, not guessed.
+      const taken = yield* gitHub(
+        [me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { text: '001e# service=git-receive-pack' }]],
+        {
+          repositories: [['northwind', 'api']],
+        },
+      ).check
+      assert.deepStrictEqual(
+        taken.lines.find((one) => one.need === 'push'),
+        line('push', 'ok', { repositories: [{ path: 'northwind/api', state: 'ok', reason: null }] }),
+      )
+      // Refused by git's sign-in too, as a token that reads the API but not git is.
+      const unsigned = yield* gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { status: 401, text: '' }]], {
+        repositories: [['northwind', 'api']],
+      }).check
+      assert.strictEqual(reasonOf(unsigned, 'push')?.kind, 'no_push')
+      // Unanswered, or rate limited, says nothing: the check goes by what else it knows.
+      for (const answer of [
+        { status: 500, text: '' },
+        { status: 429, text: '' },
+        { status: 403, text: '', headers: { 'retry-after': '60' } },
+      ]) {
+        const unsaid = yield* gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, answer]], {
+          repositories: [['northwind', 'api']],
+        }).check
+        assert.deepStrictEqual(
+          unsaid.lines.find((one) => one.need === 'push'),
+          line('push', 'unknown', { reason: UNSAID, repositories: [{ path: 'northwind/api', state: 'unknown', reason: UNSAID }] }),
+        )
+      }
+    }),
+  )
+
+  it.effect('keeps each repository’s own outcome, and asks only those a task’s work is pushed to', () =>
+    Effect.gen(function* () {
+      const WEB = `${GH}/repos/northwind/web`
+      const UPSTREAM = `${GH}/repos/acme/api`
+      const receive = (path: string) => `https://github.com/${path}.git/info/refs?service=git-receive-pack`
+      const { check, sent } = gitHub(
+        [
+          me({ 'x-oauth-scopes': 'repo' }),
+          // One the account may only read, one the token may only read, and a fork's upstream nobody pushes to.
+          ['GET', NORTHWIND, { json: repository({ permissions: { push: false } }) }],
+          ['GET', WEB, { json: repository({ id: 8, full_name: 'northwind/web' }) }],
+          ['GET', UPSTREAM, { json: repository({ id: 9, full_name: 'acme/api', permissions: { push: false } }) }],
+          ['GET', receive('northwind/web'), { status: 403, text: '' }],
+        ],
+        {
+          repositories: [
+            ['northwind', 'api'],
+            ['northwind', 'web'],
+            ['acme', 'api'],
+          ],
+          pushes: [
+            ['northwind', 'api'],
+            ['northwind', 'web'],
+          ],
+        },
+      )
+      const report = yield* check
+      const push = report.lines.find((one) => one.need === 'push')
+      assert.deepStrictEqual(push?.repositories, [
+        { path: 'northwind/api', state: 'no', reason: { kind: 'role', role: null, names: ['northwind/api'] }, accountPush: false },
+        {
+          path: 'northwind/web',
+          state: 'no',
+          reason: { kind: 'no_push', names: ['northwind/web'], url: 'https://github.com/settings/tokens' },
+          accountPush: true,
+        },
+      ])
+      // The upstream is read, never asked whether it takes a push.
+      assert.isUndefined(sent.find((request) => request.url === receive('acme/api')))
+    }),
+  )
+
+  it.effect('says Althar’s app or a classic token can’t push where git refuses it, but a missing scope by its scope', () =>
+    Effect.gen(function* () {
+      const routes: ReadonlyArray<Route> = [
+        ['GET', NORTHWIND, { json: repository() }],
+        ['GET', RECEIVE, { status: 403, text: '' }],
+      ]
+      const installed: Route = [
+        'GET',
+        `${GH}/user/installations?per_page=100&page=1`,
+        { json: { total_count: 1, installations: [{ id: 1, account: { login: 'northwind' }, repository_selection: 'all' }] } },
+      ]
+      const app = yield* gitHub([me(), installed, ...routes], {
+        auth: 'device_flow',
+        appSlug: 'althar',
+        repositories: [['northwind', 'api']],
+      }).check
+      assert.deepStrictEqual(reasonOf(app, 'push'), { kind: 'no_push', names: ['northwind/api'], url: null })
+      const classic = yield* gitHub([me({ 'x-oauth-scopes': 'repo' }), ...routes], { repositories: [['northwind', 'api']] }).check
+      assert.deepStrictEqual(reasonOf(classic, 'push'), {
+        kind: 'no_push',
+        names: ['northwind/api'],
+        url: 'https://github.com/settings/tokens',
+      })
+      const scopeless = yield* gitHub([me({ 'x-oauth-scopes': 'read:org' }), ...routes], { repositories: [['northwind', 'api']] }).check
+      assert.strictEqual(reasonOf(scopeless, 'push')?.kind, 'scope')
     }),
   )
 
@@ -387,7 +514,7 @@ describe('checking a GitHub connection', () => {
       assert.deepStrictEqual(report.lines, [
         line('account', 'ok', { fact: 'you' }),
         line('reach', 'ok', { fact: 'northwind' }),
-        line('push', 'unknown', { reason: UNSAID }),
+        line('push', 'unknown', { reason: UNSAID, repositories: [{ path: 'northwind/api', state: 'unknown', reason: UNSAID }] }),
         line('changes', 'unknown', { reason: UNSAID }),
         line('checks', 'ok'),
         line('issues', 'unknown', { reason: UNSAID }),

@@ -186,7 +186,9 @@ export const useHomeWelcome = (
         ...now,
         way: 'clone',
         query: text,
-        clone: { id: `url:${text}`, remote: ref.path, from: { url: text }, product: null, hostName: ref.host, host: ref.host, here: null },
+        clones: [
+          { id: `url:${text}`, remote: ref.path, from: { url: text }, product: null, hostName: ref.host, host: ref.host, here: null },
+        ],
         name: now.name.trim() === '' ? name.replace(/^./, (first) => first.toUpperCase()) : now.name,
       }))
       return true

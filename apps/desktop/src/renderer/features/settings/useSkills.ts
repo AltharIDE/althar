@@ -5,6 +5,7 @@ import type { InstalledSkill, SkillList, SkillReviewCard, SkillsFound, SkillUpda
 import type { SkillReviewModel } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
+import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
 import { text } from './text'
 
@@ -32,6 +33,8 @@ export interface SkillsModel {
   /** Whether Althar has skills to give at all; when it hasn't, the page says so and nothing else. */
   readonly enabled: boolean
   readonly loadFailed: boolean
+  /** Why the store couldn't be read, in the runtime's words; null where it was. */
+  readonly loadError: string | null
   /** Reads the store again. */
   readonly reload: () => void
   readonly found: SkillsFound | null
@@ -134,6 +137,7 @@ export const useSkills = (options: { readonly check?: boolean } = {}): SkillsMod
     loaded: query.data !== undefined,
     enabled: query.data?.enabled ?? false,
     loadFailed: query.isError,
+    loadError: query.isError ? messageOf(query.error) : null,
     reload: reread,
     found,
     card: card === null ? null : reviewOf(card),

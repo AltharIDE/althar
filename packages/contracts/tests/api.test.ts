@@ -471,6 +471,7 @@ describe('the API', () => {
               CloseLaunchPreviewSocket: () => Effect.die('unused'),
               PrepareWorkerSnapshot: () => Effect.die('unused'),
               ReadWorkerFile: () => Effect.die('unused'),
+              ReadPicture: () => Effect.die('unused'),
               ReadWorkerSnapshotChunk: () => Effect.die('unused'),
               ReleaseWorkerSnapshot: () => Effect.die('unused'),
               GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
@@ -501,6 +502,7 @@ describe('the API', () => {
               MakeRepository: () => Effect.die('unused'),
               PrepareFolder: () => Effect.die('unused'),
               ListHostRepositories: () => Effect.die('unused'),
+              ReadHostReach: () => Effect.die('unused'),
               ListRepositoryOwners: () => Effect.die('unused'),
               CloneRepository: () => Effect.die('unused'),
               PublishRepository: () => Effect.die('unused'),
@@ -948,5 +950,13 @@ describe('the calls a socket may make', () => {
       assert.notInclude(SOCKET_CALLS, tag)
     // Where a plan runs is chosen and started from any window, a remote home's too.
     for (const tag of ['StartPlan', 'PlacePlan']) assert.include(SOCKET_CALLS, tag)
+    // The home's own settings change from its window; a project's rules stay with the project's own settings.
+    for (const tag of ['SetAgentsAtOnce', 'SetPlansAndReviews', 'SetPostTeamReviews', 'ListPresets', 'SetFolderWait', 'GetTaskFolders'])
+      assert.include(SOCKET_CALLS, tag)
+    for (const tag of ['SetProjectRules', 'SetRunOutside', 'CleanUpFolders', 'RemoveTaskFolder', 'RemovePreset'])
+      assert.notInclude(SOCKET_CALLS, tag)
+    // Its MCP servers and skills show and change there too; a server's sign-in opens a browser where it runs, so stays.
+    for (const tag of ['GetAgentTools', 'ListSkills', 'AddServer', 'ApproveSkill']) assert.include(SOCKET_CALLS, tag)
+    assert.notInclude(SOCKET_CALLS, 'SignInToolServer')
   })
 })

@@ -22,6 +22,7 @@ import type {
   IssueField,
   ListedChange,
   ListedRepository,
+  RepositoryReach,
   MergeMethod,
   MergeRules,
   NewHostRepository,
@@ -210,6 +211,8 @@ export interface FakeControls {
   ): Repository
   /** Where the account can make a repository, in place of itself alone, as `owners` says. */
   setOwners(owners: ReadonlyArray<RepositoryOwner>): void
+  /** Lists fewer than the account has, as a token made for some of them does, or all again (`null`): all unless said. */
+  limitReach(limited: RepositoryReach['limited']): void
   /** Every repository `createRepository` made, in order, as it was asked for. */
   readonly repositoriesMade: ReadonlyArray<NewHostRepository>
   /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
@@ -404,6 +407,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   /** How `repositories` lists each, by its path in lower case. */
   const listings = new Map<string, Pick<ListedRepository, 'description' | 'private' | 'pushedAt' | 'archived'>>()
   /** Where the account can make a repository: itself, as its product has it, unless a test says. */
+  let reach: RepositoryReach = { limited: null }
   let owners: ReadonlyArray<RepositoryOwner> = [
     product === 'bitbucket_cloud'
       ? { id: account.login, name: account.name ?? account.login, kind: 'workspace' }
@@ -1145,6 +1149,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
             .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? '')),
         ),
       ),
+    reach: () => Effect.andThen(called('reach'), () => Effect.succeed(reach)),
     owners: () => Effect.andThen(called('owners'), () => Effect.succeed(owners)),
     // As a host: in one of its owners alone, and never over one of that path already, whatever the case.
     createRepository: (asked) =>
@@ -1332,6 +1337,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       return repository
     },
     setOwners: (set) => void (owners = [...set]),
+    limitReach: (limited) => void (reach = { limited }),
     get repositoriesMade() {
       return [...made]
     },

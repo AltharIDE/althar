@@ -25,7 +25,7 @@ import {
 import { device } from '../../shared/device'
 import { ConnectFlow } from '../connections/ConnectFlow'
 import { useConnect } from '../connections/useConnect'
-import type { Draft, DraftFolder } from './draft'
+import { cloneFolders, type Draft, type DraftFolder } from './draft'
 import s from './NewProject.module.css'
 import type { SetupActions, SetupModel } from './useSetup'
 
@@ -185,23 +185,39 @@ export function SetupSide({
   const height = minHeight
   const folders = draft.folders.filter((folder) => folder.came === undefined)
   const madeNew = draft.folders.find((folder) => folder.came === 'new')
-  const clone = setup.clone
-  const cloned = draft.folders.find((folder) => folder.came === 'clone')
+  const clones = setup.clones
+  const clonedOf = (id: string) => draft.folders.find((folder) => folder.came === 'clone' && folder.clone === id)
+  // Where those cloned go, said once under the list: the usual place, or the one chosen; not for one here already.
+  const going = clones.find((clone) => clone.here === null)
 
   const body = (() => {
     if (setup.way === 'clone') {
-      if (clone !== null && (creating || cloned !== undefined)) {
-        const parts = clone.remote.split('/')
-        const name = parts.at(-1) ?? clone.remote
+      // Being cloned, or some cloned already: each, those still to clone filling as Create works through them.
+      if (clones.length > 0 && (creating || clones.some((clone) => clonedOf(clone.id) !== undefined))) {
+        const folders = cloneFolders(clones, draft.folders)
         return (
           <SetupZone>
-            <SetupSource
-              mark={clone.brand === null ? <Icon name="download" size={18} /> : <BrandMark brand={clone.brand} size={22} />}
-              owner={parts.slice(0, -1).join('/')}
-              name={name}
-              where={cloned?.where ?? clone.here?.where ?? (clone.where === null ? clone.hostName : `${clone.where}/${name}`)}
-              filling={creating && setup.statuses.source === 'doing'}
-            />
+            <div className={s.folders}>
+              {clones.map((clone) => {
+                const parts = clone.remote.split('/')
+                const name = parts.at(-1) ?? clone.remote
+                const cloned = clonedOf(clone.id)
+                return (
+                  <SetupSource
+                    key={clone.id}
+                    mark={clone.brand === null ? <Icon name="download" size={18} /> : <BrandMark brand={clone.brand} size={22} />}
+                    owner={parts.slice(0, -1).join('/')}
+                    name={name}
+                    where={
+                      cloned?.where ??
+                      clone.here?.where ??
+                      (clone.where === null ? clone.hostName : `${clone.where}/${folders.get(clone.id) ?? name}`)
+                    }
+                    filling={creating && setup.statuses.source === 'doing' && cloned === undefined}
+                  />
+                )
+              })}
+            </div>
           </SetupZone>
         )
       }
@@ -212,6 +228,8 @@ export function SetupSide({
             repositories={setup.repositories}
             failed={setup.failed}
             onRetry={setup.retry}
+            limited={setup.limited}
+            onWiden={setup.widen}
             query={draft.query}
             onQuery={setup.onQuery}
             pasted={setup.pasted}
@@ -225,13 +243,13 @@ export function SetupSide({
             }
             height={height}
           />
-          {clone !== null && clone.here === null && (
+          {going !== undefined && (
             <p className={s.cloneWhere}>
-              {clone.where === null ? (
+              {going.where === null ? (
                 onChooseCloneInto !== undefined && <LinkButton onClick={onChooseCloneInto}>{text.chooseWhere}</LinkButton>
               ) : (
                 <>
-                  <span>{text.into(clone.where)}</span>
+                  <span>{text.into(going.where)}</span>
                   {onChooseCloneInto !== undefined && (
                     <LinkButton onClick={onChooseCloneInto} aria-label={`${text.change}: ${text.cloneWhere}`}>
                       {text.change}

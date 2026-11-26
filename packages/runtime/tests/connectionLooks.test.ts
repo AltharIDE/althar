@@ -114,6 +114,10 @@ const device = [
 ] as const
 const you = { json: { id: 5, login: 'you', name: 'You Person' } }
 const INSTALLATIONS = 'https://api.github.com/user/installations?per_page=100&page=1'
+/** Althar's app, installed on every repository of the accounts these tests ask about. */
+const everywhere = {
+  json: { installations: ['you', 'northwind'].map((login, id) => ({ id, account: { login }, repository_selection: 'all' })) },
+}
 const refusal: Answer = { status: 401, json: { message: 'Bad credentials' } }
 
 /** GitHub, taking only the tokens it hasn't let go of, and answering for others as the test says. */
@@ -576,6 +580,129 @@ describe('a browser sign-in over a token that reaches only some of the repositor
       assert.deepInclude((yield* connections.list)[0], { auth: 'device_flow', state: 'ready' })
       assert.include(map.get(token.id) ?? '', 'ghu_first')
     }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar', secrets: kept(map) })))
+  })
+})
+
+describe('whether a connection can push where a project’s work goes', () => {
+  it.live('asks a fork’s own repository, never the one it came from, which is only read', () => {
+    const repo = (path: string) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        { json: { id: 1, full_name: path, default_branch: 'main', html_url: `${GITHUB}/${path}`, permissions: { push: true } } },
+      ] as const
+    const receive = (path: string) => `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`
+    const { fetch, sent } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      ['GET', INSTALLATIONS, everywhere],
+      repo('you/api'),
+      repo('northwind/api'),
+      ['GET', receive('you/api'), { status: 403, json: {} }],
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const path = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/you/api.git`], { cwd: path })
+      execFileSync('git', ['remote', 'add', 'upstream', `${GITHUB}/northwind/api.git`], { cwd: path })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const connection = yield* signedIn
+      const check = yield* connections.check(connection.id)
+      const push = check.lines.find((line) => line.need === 'push')
+      assert.deepStrictEqual(
+        push?.repositories?.map((one) => [one.path, one.state]),
+        [['you/api', 'no']],
+      )
+      assert.isDefined(sent.find((request) => request.url === receive('you/api')))
+      assert.isUndefined(sent.find((request) => request.url === receive('northwind/api')))
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+
+  it.live('asks, for one project, only where that project’s work goes, though another project pushes to its upstream', () => {
+    const repo = (path: string) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        { json: { id: 1, full_name: path, default_branch: 'main', html_url: `${GITHUB}/${path}`, permissions: { push: true } } },
+      ] as const
+    const receive = (path: string) => `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`
+    const { fetch, sent } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      ['GET', INSTALLATIONS, everywhere],
+      repo('you/api'),
+      repo('northwind/api'),
+      ['GET', receive('northwind/api'), { status: 403, json: {} }],
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      // A fork of northwind/api, and another project whose own origin is northwind/api.
+      const fork = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/you/api.git`], { cwd: fork })
+      execFileSync('git', ['remote', 'add', 'upstream', `${GITHUB}/northwind/api.git`], { cwd: fork })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: fork })
+      const plain = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${GITHUB}/northwind/api.git`], { cwd: plain })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: plain, name: 'upstream-work' })
+      const forked = (yield* connections.guide('github')).places.find((place) => place.repositories.includes('you/api'))?.project ?? ''
+      const connection = yield* signedIn
+      const mine = yield* connections.check(connection.id, forked)
+      assert.deepStrictEqual(
+        mine.lines.find((line) => line.need === 'push')?.repositories?.map((one) => [one.path, one.state]),
+        [['you/api', 'ok']],
+      )
+      assert.isUndefined(sent.find((request) => request.url === receive('northwind/api')))
+      // The other project's own check is where its refusal is said.
+      const theirs = yield* connections.check(connection.id, 'upstream-work')
+      assert.deepStrictEqual(
+        theirs.lines.find((line) => line.need === 'push')?.repositories?.map((one) => [one.path, one.state]),
+        [['northwind/api', 'no']],
+      )
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+})
+
+describe('why a host refused a push, asked again', () => {
+  it.live('says a role or the sign-in only where GitHub said which, and nothing where its answer gives no permissions', () => {
+    const answer = (path: string, permissions?: { push: boolean }) =>
+      [
+        'GET',
+        `https://api.github.com/repos/${path}`,
+        {
+          json: {
+            id: 1,
+            full_name: path,
+            default_branch: 'main',
+            html_url: `${GITHUB}/${path}`,
+            ...(permissions === undefined ? {} : { permissions }),
+          },
+        },
+      ] as const
+    const refused = (path: string) =>
+      ['GET', `${GITHUB}/${path}.git/info/refs?service=git-receive-pack`, { status: 403, json: {} }] as const
+    const { fetch } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      ['GET', INSTALLATIONS, everywhere],
+      answer('northwind/unsaid'),
+      refused('northwind/unsaid'),
+      answer('northwind/token', { push: true }),
+      refused('northwind/token'),
+      answer('northwind/role', { push: false }),
+    ])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const connection = yield* signedIn
+      // No permissions in GitHub's answer: not taken as the account's role, nor as the token's.
+      assert.isNull(yield* connections.pushCause(connection.id, ['northwind', 'unsaid']))
+      assert.strictEqual(yield* connections.pushCause(connection.id, ['northwind', 'token']), 'token')
+      assert.strictEqual(yield* connections.pushCause(connection.id, ['northwind', 'role']), 'role')
+    }).pipe(Effect.provide(withGitHub(fetch)))
   })
 })
 
