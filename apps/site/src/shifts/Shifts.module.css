@@ -48,7 +48,7 @@
 .shape[data-kind='access'], .shape[data-kind='outage'] { border-radius: 2px; transform: rotate(45deg) scale(0.86); }
 
 .month { margin-top: 72px; }
-.monthName { display: flex; align-items: baseline; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--hair-2); font: 500 40px/1.05 'Inter Display', var(--display); letter-spacing: -0.04em; color: #fff; }
+.monthName { display: flex; align-items: baseline; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--hair-2); font: 500 40px/1.05 var(--heading); letter-spacing: -0.04em; color: #fff; }
 .monthName span { font: 500 13px var(--mono); color: var(--ink-3); letter-spacing: 0; }
 .entries { margin: 0; padding: 0; list-style: none; }
 .entry { display: grid; grid-template-columns: 76px 150px minmax(0, 1fr) 200px; gap: 24px; align-items: start; padding: 26px 0; border-bottom: 1px solid var(--hair); scroll-margin-top: 88px; }
@@ -58,7 +58,7 @@
 .kind { font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lit); }
 .kind[data-kind='limits'], .kind[data-kind='pricing'], .kind[data-kind='access'], .kind[data-kind='outage'] { color: #d8d0c4; }
 .ahead { color: var(--ink-3); }
-.title { margin-top: 6px; font-size: 21px; line-height: 1.25; letter-spacing: -0.02em; font-weight: 600; color: #fff; }
+.title { margin-top: 6px; font-family: var(--heading); font-size: 21px; line-height: 1.25; letter-spacing: -0.02em; font-weight: 600; color: #fff; }
 .what { margin-top: 6px; font-size: 16px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .source { padding-top: 3px; justify-self: end; font-size: 13.5px; color: var(--ink-2); text-decoration-color: var(--hair-2); text-underline-offset: 4px; text-align: right; }
 .source:hover { color: #fff; text-decoration-color: currentColor; }

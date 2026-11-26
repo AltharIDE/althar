@@ -7,11 +7,11 @@ import { useMarks } from './loop'
 import { type Aim, button, Pointer } from './Pointer'
 import p from './signin.module.css'
 import { cx } from '../../../lib/cx'
-import { Shot } from './Shot'
+import { PHONE_WINDOW, Shot } from './Shot'
 import { Typed, typed, Typing, typing, useGlide } from './talk'
 import s from './views.module.css'
 
-/** On a phone, how wide the window lays itself out: the canvas alone, its page as it reads that narrow (views.module.css, signin.module.css); on a tablet, the conversation narrower beside it. */
+/** Outside the carousel's box on a phone, how wide the window lays itself out; in it, it is the desktop's window whole (Shot.tsx). On a tablet, the conversation narrower beside the canvas. */
 const PHONE_W = 460
 const TABLET_W = 1000
 
@@ -254,6 +254,7 @@ export function CanvasAtWork({ active = true }: { active?: boolean } = {}) {
         phone={{ x: 560, y: 0, w: 880, h: 780 }}
         phoneW={PHONE_W}
         tabletW={TABLET_W}
+        whole={PHONE_WINDOW}
         fill={{ phone: { x: 0, y: 0, w: PHONE_W }, tablet: { x: 0, y: 0, w: TABLET_W } }}
         label={LABEL}
         frame={cx(s.frame, s.canvasFit)}

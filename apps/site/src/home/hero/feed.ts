@@ -26,9 +26,9 @@ import { type RefObject, useEffect } from 'react'
  * and every dot the button took flies back to the agent that sent it, the
  * button shrinking back as they go. With reduced motion, neither.
  *
- * On a touch screen, with nothing to point with, the agents feed the button
- * by themselves a moment after the page opens, and take back what they gave
- * as you scroll the first screen away; there is no dot.
+ * On a touch screen, with nothing to point with, there is none of it: it is
+ * the pointer's, a hover's answer, and the race's period is simply there
+ * (Race.module.css).
  */
 
 /** Deliveries that fill the button, and how much larger it is full. */
@@ -63,6 +63,7 @@ export function useFeed(
     const cv = canvas.current
     const dot = follower.current
     if (!root || !btn || !cv || !dot || still) return
+    if (window.matchMedia('(pointer: coarse)').matches) return
 
     let cx: number | null = null
     let cy = 0
@@ -80,8 +81,6 @@ export function useFeed(
     window.addEventListener('pointermove', onPointer, { passive: true })
 
     let feeding = false
-    const touch = window.matchMedia('(pointer: coarse)').matches
-    const opened = performance.now()
     const on = () => {
       feeding = true
       root.toggleAttribute('data-feeding', true)
@@ -133,7 +132,7 @@ export function useFeed(
     }
     /** The dot already the period, with no flight: there is none to see. */
     const park = () => {
-      if (!period || touch) return
+      if (!period) return
       place = 'parked'
       period.toggleAttribute('data-on', true)
       dot.removeAttribute('data-in')
@@ -204,15 +203,6 @@ export function useFeed(
       last = now
       const box = root.getBoundingClientRect()
 
-      // On a touch screen, fed while the first screen is in view, a moment after it opens.
-      if (touch) {
-        const want = now - opened > 1200 && box.bottom > window.innerHeight * 0.65
-        if (want !== feeding) {
-          ;(want ? on : off)()
-          if (want) take()
-        }
-      }
-
       // The follower, in the window's px.
       if (snap) {
         dot.style.removeProperty('transition')
@@ -220,7 +210,7 @@ export function useFeed(
       }
       // No pointer seen yet: no dot in play, and the period is there.
       if (cx === null && place === 'free') park()
-      if (cx !== null && !touch) {
+      if (cx !== null) {
         const over = cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom
         if (fx === null) {
           fx = cx

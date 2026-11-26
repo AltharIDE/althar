@@ -1,4 +1,6 @@
-import { type CSSProperties, type ReactNode, useLayoutEffect, useRef } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+
+import { useMedia } from '../../lib/browser'
 
 import { useClock } from '../bodies/kit/loop'
 
@@ -41,6 +43,15 @@ const VIEWS: readonly View[] = [
   { id: 'home', name: 'Home', node: (active) => <HomeAtWork active={active} />, at: ['2.2%', '22px'] },
   { id: 'canvas', name: 'A canvas', node: (active) => <CanvasAtWork active={active} />, at: ['-1.8%', '10px'] },
 ]
+
+/*
+ * On a phone each view is the whole window as a desktop lays it out, scaled down to the screen (Shot.tsx), and only the
+ * one in front is drawn live, playing its story; the two behind it are bare windows. Three live at once, at a desktop's
+ * size, asked a phone's browser for more layer memory than it has (what moves in each is a layer the size it is laid
+ * out at), and it closed the page when the scene was scrolled through fast. One at a time is about what the three laid
+ * out for a phone came to. Which is live changes once the scroll has settled on a view, so one passed on the way to
+ * another is never drawn.
+ */
 export const VIEW_COUNT = VIEWS.length
 
 /** Where a view stands from the middle: -1 left, 0 middle, 1 right, round the row. */
@@ -49,7 +60,18 @@ const offsetOf = (i: number, at: number, n: number) => {
   return d > n / 2 ? d - n : d
 }
 
+/** How long a view has to be in front, on a phone, before it is the one drawn live: scrolled through fast, none of those passed is. */
+const SETTLE = 260
+
 export function Views({ at }: { at: number }) {
+  // On a phone only one view is live, the one in front once the scroll has settled on it; the others are bare windows (above).
+  const phone = useMedia('(max-width: 699px)')
+  const [live, setLive] = useState(at)
+  useEffect(() => {
+    if (live === at) return
+    const timer = setTimeout(() => setLive(at), SETTLE)
+    return () => clearTimeout(timer)
+  }, [at, live])
   // Where the views start under the window's top once the scene is pinned: on a tablet or a phone they take what is left under it (Views.module.css).
   const row = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -75,6 +97,7 @@ export function Views({ at }: { at: number }) {
               key={view.id}
               className={s.view}
               data-off={off}
+              data-bare={(phone && i !== live) || undefined}
               data-fit-box=""
               aria-hidden={off !== 0 || undefined}
               inert={off !== 0 || undefined}
@@ -82,7 +105,7 @@ export function Views({ at }: { at: number }) {
               aria-label={view.name}
               style={{ '--at-x': view.at[0], '--at-y': view.at[1] } as CSSProperties}
             >
-              {view.node(off === 0)}
+              {(!phone || i === live) && view.node(off === 0)}
             </div>
           )
         })}

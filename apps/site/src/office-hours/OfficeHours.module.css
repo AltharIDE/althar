@@ -20,7 +20,7 @@
 .sheet { box-sizing: border-box; display: grid; gap: 72px; max-width: calc(860px + 2 * var(--gut)); margin: 0 auto; padding: 88px var(--gut) 128px; }
 /* Clear of the site's bar (76px), jumped to. */
 .part { scroll-margin-top: 96px; }
-.h2 { margin: 0 0 22px; font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; }
+.h2 { margin: 0 0 22px; font-family: var(--heading); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; }
 
 /* The topics: two columns of lines on hairlines, read down the left then the right; one column on a phone. */
 .topics { columns: 2; column-gap: 40px; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.4; }

@@ -936,6 +936,8 @@
   const dpath = (a, c, b) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${c.x.toFixed(1)} ${c.y.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 
   let R = { left: 0, top: 0 };
+  // How much the drawing is scaled by what it is in (a transform round it, as on a phone's pinned review): what is measured on the screen is put back into its own px by it.
+  let K = 1;
   let em = 12;
   let padB = 6;
   let memo = new Map();
@@ -943,7 +945,7 @@
     let r = memo.get(el);
     if (!r) {
       const b = el.getBoundingClientRect();
-      r = { x: b.left - R.left, y: b.top - R.top, w: b.width, h: b.height };
+      r = { x: (b.left - R.left) / K, y: (b.top - R.top) / K, w: b.width / K, h: b.height / K };
       memo.set(el, r);
     }
     return r;
@@ -1019,11 +1021,11 @@
     const c = card.getBoundingClientRect();
     const mid = (el) => {
       const b = el.getBoundingClientRect();
-      return { x: b.left - s.left + b.width / 2, y: b.top - s.top + b.height / 2 };
+      return { x: (b.left - s.left + b.width / 2) / K, y: (b.top - s.top + b.height / 2) / K };
     };
     const ys = steps.map(({ nd }) => mid(nd).y);
     const x = mid(steps[0].nd).x;
-    rail = { x, ys, ox: s.left - c.left, oy: s.top - c.top };
+    rail = { x, ys, ox: (s.left - c.left) / K, oy: (s.top - c.top) / K };
     for (const el of [trk, lit]) {
       el.style.left = `${x.toFixed(1)}px`;
       el.style.top = `${ys[0].toFixed(1)}px`;
@@ -1045,6 +1047,7 @@
     const jump = still || t < prevT || t - prevT > 0.3;
     prevT = t;
     R = root.getBoundingClientRect();
+    K = (root.offsetWidth && R.width / root.offsetWidth) || 1;
     memo = new Map();
     tog(root, 'out', !still && t >= OUT);
 

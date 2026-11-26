@@ -86,10 +86,3 @@
 @media (prefers-reduced-motion: reduce) {
   .page, .piece, .brandName, .claim, .submit { transition: none; }
 }
-
-/* On a phone, the page as narrow as the screen: split, the brand's side a band of its teal with the name, the form keeping its room. */
-@media (max-width: 699px) {
-  .page[data-split] { grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr); }
-  .brandName { left: 18px; }
-  .claim { display: none; }
-}

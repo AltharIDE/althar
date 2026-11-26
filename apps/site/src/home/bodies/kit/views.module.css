@@ -36,12 +36,12 @@
 @keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
 .page { width: 100%; height: 100%; border: 0; }
 
-/* On a tablet the canvas's conversation is narrower beside it; on a phone the home is its list alone, as the app lays itself out that narrow, and the canvas is the canvas alone, its page with the brand's side narrower (signin.module.css). */
+/* On a tablet the canvas's conversation is narrower beside it. On a phone each is the whole window, as a desktop lays it out, scaled down (Shot.tsx). */
 @media (min-width: 700px) and (max-width: 900px) {
   .canvasFit .beside { grid-template-columns: 420px minmax(0, 1fr); }
 }
+/* On a phone the window is laid out smaller (Shot.tsx PHONE_WINDOW), and the conversation narrower beside the board and the canvas. */
 @media (max-width: 699px) {
-  .homeFit aside { display: none; }
-  .canvasFit .beside { grid-template-columns: minmax(0, 1fr); }
-  .canvasFit .talk { display: none; }
+  :global([data-fit-box]) .besideBoard { grid-template-columns: 400px minmax(0, 1fr); }
+  .canvasFit .beside { grid-template-columns: 420px minmax(0, 1fr); }
 }

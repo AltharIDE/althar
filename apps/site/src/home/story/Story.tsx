@@ -8,6 +8,7 @@ import { LightUnder } from '../../shared/lightUnder'
 import { GROUPS } from '../bodies/desktop/Connections'
 import { Review } from '../bodies/desktop/Review'
 import { SCREENS } from '../bodies/desktop/screens/list'
+import canvasStill from './canvas-signin.webp'
 import { CanvasScreen } from '../bodies/desktop/CanvasScreen'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
 import { Altitude, KM } from './Altitude'
@@ -112,13 +113,16 @@ function Board() {
  * side of the drawing, the answers carried by hand, and a line taken out as
  * each lands; then the preview pans to Althar's side, the heading's new line
  * types in, and the review's hunks come in as Althar's side gets to each,
- * all played by the scroll while pinned. On a tablet or a phone it isn't
- * pinned: one column, all of it there, the drawing whole and playing as it
- * scrolls by.
+ * all played by the scroll while pinned. On a phone it is pinned and played
+ * the same, laid out for it (Patch.module.css): the heading, the lines under
+ * it, and the preview under those. On a tablet it isn't pinned: one column,
+ * all of it there, the drawing whole and playing as it scrolls by.
  */
 function ReviewScene() {
   const box = useRef<HTMLElement>(null)
-  const narrow = useMedia('(max-width: 900px)')
+  const phone = useMedia('(max-width: 699px)')
+  // A tablet: not pinned.
+  const narrow = useMedia('(max-width: 900px)') && !phone
   const [run, setRun] = useState<number | null>(null)
   const [enter, setEnter] = useState(1)
   // Its parts come in as it scrolls up into place (Patch), and today's first copy is under way as it settles.
@@ -132,7 +136,7 @@ function ReviewScene() {
       <LightUnder tone="ink" className={s.under} />
       <div className={s.stick} data-stick="">
         <div className={s.wrap}>
-          <Patch at={still || narrow ? Infinity : (at ?? 0)} enter={enter} preview={<Review {...seen} flush />} />
+          <Patch at={still || narrow ? Infinity : (at ?? 0)} enter={enter} phone={phone && !still} preview={<Review {...seen} flush />} />
         </div>
       </div>
     </section>
@@ -206,13 +210,14 @@ function Screens() {
                 <figure key={x.file} className={s.shot}>
                   <div className={s.frame}>
                     {/* The canvas is drawn here, the sign-in page the carousel builds (CanvasScreen); the rest are the brand pack's
-                        screenshots, and on a phone the canvas is too (Story.module.css shows one or the other). */}
+                        screenshots. On a phone the canvas is a picture too, of this same card as a desktop draws it
+                        (canvas-signin.webp; Story.module.css shows one or the other). */}
                     {x.file === 'canvas' ? (
                       <>
                         <div className={s.live}>
                           <CanvasScreen label={x.alt} />
                         </div>
-                        <img className={s.still} src={screen(x.file)} alt={x.still ?? x.alt} loading="lazy" />
+                        <img className={s.still} src={canvasStill} alt={x.alt} loading="lazy" />
                       </>
                     ) : (
                       <img src={screen(x.file)} alt={x.alt} loading="lazy" />

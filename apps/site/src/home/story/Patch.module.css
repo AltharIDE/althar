@@ -210,6 +210,58 @@
   .row p { font-size: 15.5px; }
 }
 
+/*
+ * A phone, pinned (Patch.tsx `phone`): the window's height, in one column, and nearly all of it the drawing's, which
+ * reads only when it is large. Over it, two lines: the heading's line in play (the line taken out today, the line put in
+ * with Althar, the other folded away) and one line under it (today the paste just made; with Althar the lead, then the
+ * first line of the hunk just in). The file's bar and what else the patch says are a desktop's. The preview takes the
+ * room left and the window's whole width, over the line numbers: one side of the drawing in its middle, as wide as the
+ * page's measure where the height allows, the other out of sight until it pans. The download is under the picture.
+ */
+@media (max-width: 699px) {
+  .patch[data-phone] { height: 100%; grid-template-rows: 0 minmax(0, 1fr); }
+  .patch[data-phone] .file { display: none; }
+  .patch[data-phone] .body { grid-template-rows: auto minmax(0, 1fr); gap: 8px; min-height: 0; padding-top: 10px; }
+  .patch[data-phone] .text { --size: clamp(26px, 7.6vw, 32px); --slot: 54px; --over: calc(var(--size) * 1.02 + 14px); display: block; position: relative; min-height: calc(var(--over) + var(--slot)); transition: min-height 460ms var(--ease-out); }
+  /* With Althar: the line taken out folds away, leaving the line put in; under it the lead while it is all there is, then a hunk's first line. */
+  .patch[data-phone]:not([data-today]) .text { --slot: 40px; --over: calc(var(--size) * 1.03 + 16px); }
+  .patch[data-phone][data-arrived='0']:not([data-today]) .text { --slot: 66px; }
+  .patch[data-phone] .minus { max-height: calc(var(--size) * 1.02 + 14px); overflow: hidden; transition: max-height 460ms var(--ease-out), padding 460ms var(--ease-out), opacity 300ms var(--ease-out); }
+  .patch[data-phone]:not([data-today]) .minus { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
+  .patch[data-phone] .text > .note { position: absolute; top: calc(var(--over) + 6px); left: 0; right: 0; margin: 0; font-size: 12.5px; line-height: 1.5; opacity: 1; translate: none; transition: opacity 320ms var(--ease-out); }
+  .patch[data-phone][data-today] .text > .note,
+  .patch[data-phone]:not([data-arrived='0']) .text > .note { opacity: 0; }
+  /* Today's lines, one at a time: the paste just made. */
+  .patch[data-phone] .byHand > .note { display: none; }
+  .patch[data-phone] .byHand ol { margin-top: 4px; }
+  .patch[data-phone] .byHand li:not([data-in]),
+  .patch[data-phone] .byHand li[data-in]:has(+ li[data-in]) { display: none; }
+  .patch[data-phone] .row { grid-template-columns: 14px minmax(0, 1fr); gap: 6px; padding: 5px 10px 5px 8px; }
+  .patch[data-phone] .row > i { font-size: 13px; }
+  .patch[data-phone] .row p { font-size: 13px; line-height: 1.38; }
+  /* The hunk just in, its first line alone: no header to open it by, no second line. */
+  .patch[data-phone] .hunks { margin-top: 6px; }
+  .patch[data-phone] .hunk:not([data-open]) { display: none; }
+  .patch[data-phone] .hh { display: none; }
+  .patch[data-phone] .more .row + .row { display: none; }
+  .patch[data-phone] .hunk[data-open] .more > div { margin-top: 0; }
+  /* The window's whole width, over the line numbers too (the page's gutter, the patch's 36px and the body's 14px), on the section's own dark. */
+  .patch[data-phone] .preview { position: relative; z-index: 1; min-height: 0; margin: 0 calc(-1 * var(--gut)) 0 calc(-50px - var(--gut)); }
+  .patch[data-phone] .crop {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    overflow: hidden;
+    border-radius: 0;
+    background: #0b0a08;
+  }
+  /* The side in play in the frame's middle: today's middle is 25.9% across the drawing (5.6 in, 40.6 wide: review.html), Althar's 48.2% further. */
+  .patch[data-phone] .crop > * { position: absolute; top: 0; left: 50%; width: 880px; transform-origin: 0 0; transform: translateX(calc((-25.9% - 48.2% * var(--pan, 1)) * var(--fit, 0.3))) scale(var(--fit, 0.3)); }
+  /* The drawing as a desktop's, both sides across: not stood upright, as it would be this narrow (Review.module.css). */
+  .patch[data-phone] .crop > * > * { aspect-ratio: 16 / 10; }
+  .patch[data-phone] .get { position: absolute; top: calc(100% + 28px); left: 14px; margin: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hunk, .check circle, .check path, .chevron, .more, .byHand, .byHand .row, .plus, .note, .get { transition: none; }
 }
