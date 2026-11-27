@@ -116,6 +116,8 @@ export const ImageThatDoesNotLoad: Story = {
     ],
   },
   play: async ({ canvasElement }) => {
+    // A browser says the picture failed on its own; jsdom never loads one, so it is said here too.
+    canvasElement.querySelector('img')?.dispatchEvent(new Event('error'))
     await waitFor(() => expect(canvasElement.querySelector('img')).toBeNull())
   },
 }
