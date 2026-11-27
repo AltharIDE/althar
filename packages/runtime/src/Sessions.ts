@@ -549,6 +549,8 @@ export class Sessions extends Context.Service<
       )
       const setups = yield* Setups
       const runtimeConfig = yield* RuntimeConfig
+      // Told each look for where what an agent left running answers, where a test watches them.
+      const looked = runtimeConfig.serving ?? (() => undefined)
       const skillsConfig = runtimeConfig.skills
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // How long a task is under way after its last agent went or its lead's turn ended, before its card is read again (DEV-173).
@@ -716,7 +718,7 @@ export class Sessions extends Context.Service<
           const rivals = others.filter((other) => other.ended === null && other.url === null).length
           const own = held.length > 0
           const port = portFor({ found: seen.ports, claimed, own, known, rivals })
-          runtimeConfig.serving?.looked?.({
+          looked({
             kind: 'look',
             at: yield* Clock.currentTimeMillis,
             id: left.id,
@@ -746,7 +748,7 @@ export class Sessions extends Context.Service<
             agent === undefined
               ? Option.none()
               : yield* portsSeenBelow([agent], undefined, (part) => void parts.push(part)).pipe(Effect.timeoutOption(BASELINE_WITHIN))
-          runtimeConfig.serving?.looked?.({
+          looked({
             kind: 'before',
             at: yield* Clock.currentTimeMillis,
             agent: agent ?? null,
@@ -768,18 +770,18 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const known = yield* Deferred.await(before)
           // Why it stops looking, for whoever watches the looks (`RuntimeOptions.serving`).
-          const stopped = (why: 'gone' | 'ended' | 'found in its output' | 'out of tries') =>
-            Effect.map(Clock.currentTimeMillis, (at) => runtimeConfig.serving?.looked?.({ kind: 'stopped', at, id, why }))
+          const stopped = (why: 'gone or ended' | 'found in its output' | 'out of tries') =>
+            Effect.map(Clock.currentTimeMillis, (at) => looked({ kind: 'stopped', at, id, why }))
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
-            if (left === undefined || left.ended !== null) return yield* stopped(left === undefined ? 'gone' : 'ended')
+            if (left === undefined || left.ended !== null) return yield* stopped('gone or ended')
             const printed = yield* printedBy(left)
             const port =
               left.url === null && servingAt(printed) === null && tries % PORTS_EVERY === PORTS_EVERY - 1
                 ? yield* listeningPort(running, left, known)
                 : null
             const now = running.background.get(id)
-            if (now === undefined || now.ended !== null) return yield* stopped(now === undefined ? 'gone' : 'ended')
+            if (now === undefined || now.ended !== null) return yield* stopped('gone or ended')
             const found = addressOf(now, printed, port)
             if (found !== null) {
               now.url = found.url

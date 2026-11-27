@@ -235,7 +235,7 @@ export interface RuntimeOptions {
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
   /** Told each look for where something an agent left running answers from its port (`ports.ts`), as a test is, to say what it saw. */
-  readonly serving?: { readonly looked?: (look: PortLook) => void }
+  readonly serving?: (look: PortLook) => void
 }
 
 /** Each is the default unless a test says otherwise. */

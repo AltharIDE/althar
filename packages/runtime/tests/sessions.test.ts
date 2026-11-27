@@ -1011,11 +1011,7 @@ describe('sessions', () => {
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         assert.strictEqual(serving?.name, 'Start the dev server')
         yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
-      }).pipe(
-        Effect.provide(
-          Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { serving: { looked: (look) => void looks.push(look) } }))),
-        ),
-      )
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { serving: (look) => void looks.push(look) })))))
     })
 
     it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>

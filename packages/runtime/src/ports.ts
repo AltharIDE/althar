@@ -103,10 +103,10 @@ const printedRan = (file: string, args: ReadonlyArray<string>): Effect.Effect<{ 
     const { out, failed } = yield* Effect.callback<{ readonly out: string | null; readonly failed: string | null }>((resume) => {
       try {
         execFile(file, [...args], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
-          // `lsof` exits 1 where it finds nothing.
-          const kept = error === null || (typeof error.code === 'number' && stdout !== '')
-          const why = error?.killed === true ? 'killed (timed out)' : `code ${String(error?.code)}`
-          resume(Effect.succeed({ out: kept ? stdout : null, failed: kept ? null : `${why}: ${error?.message ?? ''}`.slice(0, 300) }))
+          if (error === null) return resume(Effect.succeed({ out: stdout, failed: null }))
+          // `lsof` exits 1 where it finds nothing. Its time says where it timed out.
+          const kept = typeof error.code === 'number' && stdout !== ''
+          resume(Effect.succeed(kept ? { out: stdout, failed: null } : { out: null, failed: error.message.slice(0, 300) }))
         })
       } catch (error) {
         // Not allowed to run it, as in a sandbox.
@@ -282,7 +282,7 @@ export type PortLook =
       readonly kind: 'stopped'
       readonly at: number
       readonly id: string
-      readonly why: 'gone' | 'ended' | 'found in its output' | 'out of tries'
+      readonly why: 'gone or ended' | 'found in its output' | 'out of tries'
     }
 
 /** Where a server on `port` answers, as a browser opens it. */
