@@ -45,31 +45,19 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Add a worker from Settings › Computers, over SSH or with a one-time code. Althar installs it and signs its agents in.',
+        text: 'Add one from Settings › Computers, over SSH or with a one-time code: Althar installs it, signs its agents in, and checks it’s ready for your projects. Settings › Computers then shows what each worker is running and what it has free.',
       },
       {
         kind: 'new',
-        text: 'Before a worker takes any work, Althar checks it can do it: its sandbox starts, its agents are signed in, and it has the disk and tools the project needs. Anything missing is said, with how to fix it.',
+        text: 'Choose where each task runs: your Mac, a worker, or Any free worker, which picks the one with the most to spare. Move it later from its menu.',
       },
       {
         kind: 'new',
-        text: 'Choose where a task runs before it starts: your Mac, a worker, or Any free worker, which picks the one with the most memory, disk and CPU to spare.',
+        text: 'A task on a worker runs its setup, builds, tests and dev servers there, and you open its dev server’s page in Althar, live reload and all.',
       },
-      { kind: 'new', text: 'Move a task to a worker, or back, from its menu. Its work goes with it, and its agent carries on there.' },
       {
         kind: 'new',
-        text: 'A task on a worker runs its setup, builds, tests and dev servers there too, and you open a dev server’s page in Althar, live reload and all.',
-      },
-      { kind: 'new', text: 'A worker installs Bun, Node, pnpm or uv itself where a project needs them.' },
-      {
-        kind: 'new',
-        text: 'On a worker, a task brings its helper agents and MCP servers along, its skills with Codex and Claude, and up to eight repositories where its agent supports it. Save a local copy brings the work to your Mac.',
-      },
-      { kind: 'new', text: 'A task on a worker offers the models that worker’s agents have.' },
-      { kind: 'new', text: 'Workers clean up after each task, update themselves, and uninstall when you remove them.' },
-      {
-        kind: 'new',
-        text: 'Settings › Computers lists your workers: what each is running, and the memory and disk it has free. File › Computers… opens it.',
+        text: 'Its helper agents and MCP servers go with it, its skills too with Codex and Claude, and up to eight repositories where its agent supports it.',
       },
       {
         kind: 'new',
@@ -77,11 +65,11 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Your own host, experimental: run Althar on a Linux server of yours, so your projects and their agents keep working with your laptop closed. Expect rough edges.',
+        text: 'Your own host, experimental: run Althar on a Linux server of yours, so your projects and their agents keep working with your laptop closed, and your workers can work for it too. Expect rough edges.',
       },
       {
         kind: 'new',
-        text: 'Connect a home installs Althar on your server over SSH, step by step, or connects to one with a one-time code.',
+        text: 'Connect a home installs Althar on your server over SSH, step by step, or connects to one with a one-time code. It updates from Althar too.',
       },
       {
         kind: 'new',
@@ -91,8 +79,6 @@ export const RELEASES: readonly Release[] = [
         kind: 'new',
         text: 'From a server’s window, start tasks, talk to their agents and read their changes. Answering an agent’s permission requests there takes a security key; merging there comes later.',
       },
-      { kind: 'new', text: 'A server updates from its window, each update checked against Althar’s signing key.' },
-      { kind: 'new', text: 'Workers can work for your server too, connecting to it directly or through a relay.' },
       {
         kind: 'new',
         text: 'From a terminal: Althar’s command line starts or joins a task on your server over SSH and shows its agent at work. Leave, and it keeps going.',
@@ -127,10 +113,6 @@ export const RELEASES: readonly Release[] = [
       { kind: 'new', text: 'GPT-6.2 Sol, through Codex.' },
       {
         kind: 'new',
-        text: 'When a plan runs low, Althar keeps the same model, through another account or agent, before it switches models, and the task says which.',
-      },
-      {
-        kind: 'new',
         text: 'More agents: add any coding agent from the ACP registry, or your own by its command. Althar checks it works before giving it a task.',
       },
       {
@@ -159,13 +141,15 @@ export const RELEASES: readonly Release[] = [
       { kind: 'new', text: 'A project only on your computer merges its tasks there, and goes on a code host when you like.' },
       { kind: 'new', text: 'A task stopped at its usage limit carries on by itself once the limit resets.' },
       { kind: 'new', text: 'Tune the built-in presets: their agent, reviewer, effort and brief, with Reset.' },
-      { kind: 'new', text: 'Plan usage shows when each limit resets, and how far through it you are.' },
-      { kind: 'new', text: 'A waiting task says what it’s waiting for, on its card, its page and its plan.' },
-      { kind: 'new', text: 'Ship says what it will do before it does: a review or not, then a push, ready or merged.' },
       { kind: 'new', text: 'About Althar shows how much space Althar takes, with Free up space.' },
       { kind: 'new', text: 'Agents read `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, to go through a gateway of your own.' },
       { kind: 'improved', text: 'Althar answers at once however busy your computer is, the model picker, search and the board included.' },
       { kind: 'improved', text: 'Switching an agent’s model shows the new one at once.' },
+      { kind: 'improved', text: 'Plan usage shows when each limit resets, and how far through it you are.' },
+      {
+        kind: 'improved',
+        text: 'When a plan runs low, Althar keeps the same model, through another account or agent, before it switches models, and the task says which.',
+      },
       {
         kind: 'improved',
         text: 'Althar stays light when nothing’s running: an idle coordinator sleeps after half an hour and wakes when you message it, and Home opens fast in a long-used profile.',
@@ -179,6 +163,7 @@ export const RELEASES: readonly Release[] = [
       },
       { kind: 'improved', text: 'Agents know your local date and time.' },
       { kind: 'improved', text: 'Up next starts work as soon as an agent is free.' },
+      { kind: 'improved', text: 'A waiting task says what it’s waiting for, on its card, its page and its plan.' },
       { kind: 'improved', text: 'Up next says when your Mac’s memory or CPU is holding agents back.' },
       { kind: 'improved', text: 'Abandon a task from its row in Up next.' },
       { kind: 'improved', text: 'Stopped work waits in Up next with Resume, out of Needs you unless it asks something.' },
@@ -198,6 +183,7 @@ export const RELEASES: readonly Release[] = [
       },
       { kind: 'improved', text: 'An issue’s card says whether merging closes it or is only part of it.' },
       { kind: 'improved', text: 'Only the checks your code host requires hold a change back; a failing optional one is a quiet note.' },
+      { kind: 'improved', text: 'Ship says what it will do before it does: a review or not, then a push, ready or merged.' },
       { kind: 'improved', text: 'GitLab reviews post their summary and line comments together.' },
       { kind: 'improved', text: 'Comments you haven’t sent stay in the composer across restarts.' },
       { kind: 'improved', text: 'Asides work in projects of several repositories.' },
@@ -212,10 +198,6 @@ export const RELEASES: readonly Release[] = [
       { kind: 'improved', text: 'Screenshots on a pull request sit two to a row, each with its caption.' },
       {
         kind: 'improved',
-        text: 'A conversation brought in from Claude Code or Codex waits while it’s still open there, so the two don’t split.',
-      },
-      {
-        kind: 'improved',
         text: 'Anonymous usage data, if you leave it on, covers more of how work goes. The privacy page lists every event, and Settings turns it off.',
       },
       { kind: 'improved', text: 'When git fails, you see git’s own error, and a worktree whose link broke is repaired.' },
@@ -227,13 +209,12 @@ export const RELEASES: readonly Release[] = [
       { kind: 'fixed', text: 'Dictation tries a failed transcription again before showing an error.' },
       { kind: 'fixed', text: 'A lost agent connection ends the turn, rather than showing Following up.' },
       { kind: 'fixed', text: 'Gemini can use Althar’s tools.' },
-      { kind: 'fixed', text: 'Signing in to Codex works again.' },
+      { kind: 'fixed', text: 'Signing in to Codex no longer fails while your computer’s DNS is slow to answer.' },
       { kind: 'fixed', text: 'An aside’s permission request no longer moves the window.' },
       { kind: 'fixed', text: 'The coordinator finds a fork’s pull requests on the repository it came from.' },
       { kind: 'fixed', text: 'A fork is recognised whatever its remotes are called.' },
-      { kind: 'fixed', text: 'Screenshots reach GitHub pull requests again, those over GitHub’s 10 MB limit too.' },
+      { kind: 'fixed', text: 'Screenshots over GitHub’s 10 MB limit still reach the pull request.' },
       { kind: 'fixed', text: 'Ship shows for commits waiting before a task’s first pull request.' },
-      { kind: 'fixed', text: 'Ship releases only work held on this computer, never another’s.' },
       { kind: 'fixed', text: 'Run servers nothing owns any more are stopped, and a task’s runs stop when its worktree is cleaned up.' },
       { kind: 'fixed', text: 'Board cards stay in their column while you drag the divider.' },
       { kind: 'fixed', text: 'A message sent to an idle agent no longer flashes as queued.' },
