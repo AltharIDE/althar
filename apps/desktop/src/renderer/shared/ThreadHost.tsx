@@ -31,7 +31,7 @@ import {
 import { messageOf } from '../data/client'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
-import type { PageOpener } from '../features/browser/opener'
+import { linkOpensBeside, type PageOpener } from '../features/browser/opener'
 import { pages, usePage } from '../features/browser/pages'
 import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
@@ -202,7 +202,14 @@ export const useThreadHost = (
           }
         : {}),
       ...(coded.shell === undefined ? {} : { code: coded.shell }),
-      ...(page === null ? {} : { openLink: page.opener.link, ...(page.opener.links === 'beside' ? { linkNote: text.beside } : {}) }),
+      ...(page === null
+        ? {}
+        : {
+            openLink: page.opener.link,
+            ...(page.opener.links === 'outside'
+              ? {}
+              : { linkNote: (href: string) => (linkOpensBeside(page.opener.links, href) ? text.beside : text.outside) }),
+          }),
       ...(threadId === null
         ? {}
         : {
@@ -274,7 +281,7 @@ export const useThreadHost = (
   }
 }
 
-const text = { beside: '(opens beside the conversation)' } as const
+const text = { beside: '(opens beside the conversation)', outside: '(opens in your browser)' } as const
 
 /** A document in the side panel: as it was when it opened, then as it is now, read again at each `version`. */
 export function DocumentPanel({

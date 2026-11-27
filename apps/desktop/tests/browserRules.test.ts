@@ -204,11 +204,13 @@ describe('how long pages keep cookies', () => {
   it('until the task is done: when it is', () => expect(at('task')).toEqual(['settled']))
   it('as long as each site asks: never', () => expect(at('site')).toEqual([]))
 
-  it('keeps them until the task is done unless the person says otherwise, and opens thread links beside the conversation', () => {
+  it('keeps them until the task is done unless the person says otherwise, and opens thread links by address: local beside, the web in the browser', () => {
     expect(DEFAULT_PREFERENCES.browserCookies).toBe('task')
-    expect(DEFAULT_PREFERENCES.browserLinks).toBe('beside')
+    expect(DEFAULT_PREFERENCES.browserLinks).toBe('local')
     expect(holds('browserCookies', 'quit')).toBe(true)
     expect(holds('browserCookies', 'forever')).toBe(false)
+    expect(holds('browserLinks', 'local')).toBe(true)
+    expect(holds('browserLinks', 'beside')).toBe(true)
     expect(holds('browserLinks', 'outside')).toBe(true)
     expect(holds('browserLinks', 'tab')).toBe(false)
     expect(isCookieKeep('site')).toBe(true)

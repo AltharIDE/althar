@@ -1021,8 +1021,8 @@ export function EdgeHere({ title, note, why, picture, className }: EdgeHereProps
 
 /* ---- browser --------------------------------------------------------------------- */
 
-/** Where a link in a thread opens: beside the conversation, or in the person's browser. */
-export type LinksOpen = 'beside' | 'outside'
+/** Where a link in a thread opens: beside the conversation for a local address and in the person's browser for the web, always beside, or always in their browser. */
+export type LinksOpen = 'local' | 'beside' | 'outside'
 
 /** How long pages keep cookies: until the page closes, until Althar quits, until the task is done, or as long as each site asks. */
 export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
@@ -1030,6 +1030,9 @@ export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
 export interface BrowserPreferencesText {
   links: string
   linksNote: string
+  linksNoteBeside: string
+  linksNoteOutside: string
+  local: string
   beside: string
   outside: string
   keep: string
@@ -1043,9 +1046,13 @@ export interface BrowserPreferencesText {
 
 export const browserPreferencesText: BrowserPreferencesText = {
   links: 'Links from threads',
-  linksNote: 'A task’s run opens beside its conversation either way.',
-  beside: 'Beside the conversation',
-  outside: 'In your browser',
+  linksNote:
+    'What runs on this computer opens beside; the web, where you’re signed in, opens in your browser. A task’s run always opens beside.',
+  linksNoteBeside: 'Every link opens beside the conversation, the web too. A task’s run always opens beside.',
+  linksNoteOutside: 'Every link opens in your browser. A task’s run still opens beside its conversation.',
+  local: 'Local only',
+  beside: 'All beside',
+  outside: 'All in your browser',
   keep: 'Keep cookies',
   keepNote: 'Each task’s pages keep their own, apart from your browser’s and other tasks’.',
   keeps: {
@@ -1089,13 +1096,18 @@ export function BrowserPreferences({
   const keeps: ReadonlyArray<CookieKeep> = ['page', 'quit', 'task', 'site']
   return (
     <SettingList>
-      <SettingRow title={t.links} note={t.linksNote} glyph={<Icon name="globe" size={15} />}>
+      <SettingRow
+        title={t.links}
+        note={links === 'beside' ? t.linksNoteBeside : links === 'outside' ? t.linksNoteOutside : t.linksNote}
+        glyph={<Icon name="globe" size={15} />}
+      >
         {() => (
           <Segmented<LinksOpen>
             label={t.links}
             value={links}
             onChange={onLinks}
             options={[
+              { value: 'local', label: t.local },
               { value: 'beside', label: t.beside },
               { value: 'outside', label: t.outside },
             ]}

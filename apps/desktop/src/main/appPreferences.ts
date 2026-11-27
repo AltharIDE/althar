@@ -49,12 +49,16 @@ const accent: Kind<AccentSource> = {
   holds: (value): value is AccentSource => value === 'althar' || value === 'system',
 }
 
-/** Where a link in a thread opens: beside the conversation, or in the person's browser. A task's run opens beside it either way. */
-export type LinksOpen = 'beside' | 'outside'
+/**
+ * Where a link in a thread opens: beside the conversation, in the person's
+ * browser, or, as it starts, beside it for a local address and in their
+ * browser for the web. A task's run opens beside it in every case.
+ */
+export type LinksOpen = 'local' | 'beside' | 'outside'
 
 const links: Kind<LinksOpen> = {
-  starts: 'beside',
-  holds: (value): value is LinksOpen => value === 'beside' || value === 'outside',
+  starts: 'local',
+  holds: (value): value is LinksOpen => value === 'local' || value === 'beside' || value === 'outside',
 }
 
 const cookies: Kind<CookieKeep> = { starts: 'task', holds: isCookieKeep }
@@ -92,7 +96,7 @@ export const PREFERENCES = {
   openAtLogin: onOff(false),
   /** The last choice to keep work running after the last window closes; an explicit Quit clears it. */
   keepWorkingOnClose: onOff(false),
-  /** Where a link in a thread opens: beside the conversation, or in the person's browser (browser/, ADR-100). */
+  /** Where a link in a thread opens: beside the conversation, in the person's browser, or by address (browser/, ADR-100). */
   browserLinks: links,
   /** How long pages beside a conversation keep cookies and storage; the main process clears them at that moment (browser/cookies.ts). */
   browserCookies: cookies,

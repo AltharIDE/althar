@@ -7,6 +7,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
+import { outsideAddress, threadLinkAddress } from './externalLink'
 import { locations as locationsOf } from './locations'
 import { APP_VERSION_ARG, NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
@@ -37,7 +38,7 @@ import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, work
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { claimOnce } from './claimOnce'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, THREAD_LINK_FEATURE, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
 import { downloadCanvas } from './canvases/download'
 import { handleCanvases } from './canvases/ipc'
@@ -965,14 +966,8 @@ const showChosenIcon = async () => {
 }
 
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
-const openOutside = (url: string) => {
-  try {
-    const parsed = new URL(url)
-    const local = parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-    if (parsed.protocol === 'https:' || local) void shell.openExternal(parsed.toString())
-  } catch {
-    // Not a URL; nothing to open.
-  }
+const openOutside = (url: string, address = outsideAddress(url)) => {
+  if (address !== null) void shell.openExternal(address)
 }
 
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
@@ -1108,11 +1103,13 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.on('show', windowOpenedForUsage)
   window.on('focus', windowOpenedForUsage)
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url, features }) => {
     if (showWorkerPreview(window, url)) return { action: 'deny' }
     const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
-    if (allowed !== null) openOutside(allowed)
+    // Only a thread's link, which Settings › Browser sends out, may be plain http to the web; every other caller keeps the narrower rule.
+    const thread = !remote && features.split(',').includes(THREAD_LINK_FEATURE)
+    if (allowed !== null) openOutside(allowed, thread ? threadLinkAddress(allowed) : outsideAddress(allowed))
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {

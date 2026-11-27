@@ -679,7 +679,7 @@ describe('a page beside the coordinator’s conversation', () => {
   it('gives the right side back to the board when it closes', async () => {
     forgetPages()
     const { client } = fakeClient({
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('See [the docs](https://example.com/docs).')] })),
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('See [the docs](http://localhost:5173/docs).')] })),
     })
     const host = fakeHost({ pages: fakePagesHost() })
     render(

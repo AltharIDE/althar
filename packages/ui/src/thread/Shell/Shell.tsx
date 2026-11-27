@@ -99,8 +99,8 @@ export interface ThreadShell {
    * tab. Without it, every link does.
    */
   openLink?: (href: string) => void
-  /** What a link says it does, for assistive technology, where `openLink` takes it. */
-  linkNote?: string
+  /** What a link says it does, for assistive technology, where `openLink` takes it: one line for every link, or by the link's address. */
+  linkNote?: string | ((href: string) => string)
   /** Opens one of the project's canvases beside the conversation (ADR-104): a line naming it is pressed. */
   openCanvas?: (canvas: CanvasRef) => void
   /** The canvas open beside the conversation, by its id: its lines show it open. */

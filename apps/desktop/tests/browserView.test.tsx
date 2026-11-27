@@ -3,6 +3,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@te
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { THREAD_LINK_FEATURE } from '@althar/contracts'
 
 import type { PageKey, PageLine, PageState, Pointed } from '../src/main/browser/page'
 import type { DictationHost, Host, PagesHost } from '../src/renderer/data/services'
@@ -470,7 +471,7 @@ describe('where an address from a conversation opens', () => {
       <ServicesProvider value={servicesFor(fakeClient().client, host)}>{children}</ServicesProvider>
     )
 
-  it('a run’s and a link’s, beside the conversation, which comes to the front for it', async () => {
+  it('a run’s and a local link’s, beside the conversation, which comes to the front for it', async () => {
     const fake = fakePages()
     const onShow = vi.fn()
     const { result } = renderHook(() => useOpener(OWNER, onShow), { wrapper: wrapper(fakeHost({ pages: fake.host })) })
@@ -479,10 +480,33 @@ describe('where an address from a conversation opens', () => {
     expect(onShow).toHaveBeenCalled()
     expect(fake.host.open).toHaveBeenCalledWith(OWNER, 'http://localhost:5173/')
     await waitFor(() => expect(pages.state(OWNER)?.address).toBe('http://localhost:5173/'))
-    expect(result.current.links).toBe('beside')
+    expect(result.current.links).toBe('local')
+    act(() => result.current.link('http://127.0.0.1:3000/docs'))
+    expect(fake.host.open).toHaveBeenCalledWith(OWNER, 'http://127.0.0.1:3000/docs')
   })
 
-  it('a link, in the person’s browser where they keep links there; a run’s still beside the conversation', async () => {
+  it('by default, a link to the web goes to the person’s browser, not beside the conversation', async () => {
+    const fake = fakePages()
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { result } = renderHook(() => useOpener(OWNER), { wrapper: wrapper(fakeHost({ pages: fake.host })) })
+    act(() => result.current.link('https://github.com/AltharIDE/althar/pull/1'))
+    expect(opened).toHaveBeenCalledWith('https://github.com/AltharIDE/althar/pull/1', '_blank', THREAD_LINK_FEATURE)
+    expect(fake.host.open).not.toHaveBeenCalled()
+  })
+
+  it('where they keep every link beside the conversation, the web opens there too', async () => {
+    const fake = fakePages()
+    const host = fakeHost({ pages: fake.host })
+    await host.setPreference('browserLinks', 'beside')
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { result } = renderHook(() => useOpener(OWNER), { wrapper: wrapper(host) })
+    await waitFor(() => expect(result.current.links).toBe('beside'))
+    act(() => result.current.link('https://althar.ai/changelog'))
+    expect(fake.host.open).toHaveBeenCalledWith(OWNER, 'https://althar.ai/changelog')
+    expect(opened).not.toHaveBeenCalled()
+  })
+
+  it('every link, in the person’s browser where they keep links there; a run’s still beside the conversation', async () => {
     const fake = fakePages()
     const host = fakeHost({ pages: fake.host })
     await host.setPreference('browserLinks', 'outside')
@@ -490,7 +514,10 @@ describe('where an address from a conversation opens', () => {
     const { result } = renderHook(() => useOpener(OWNER), { wrapper: wrapper(host) })
     await waitFor(() => expect(result.current.links).toBe('outside'))
     act(() => result.current.link('https://althar.ai/changelog'))
-    expect(opened).toHaveBeenCalledWith('https://althar.ai/changelog', '_blank')
+    expect(opened).toHaveBeenCalledWith('https://althar.ai/changelog', '_blank', THREAD_LINK_FEATURE)
+    act(() => result.current.link('http://localhost:5173/'))
+    expect(opened).toHaveBeenLastCalledWith('http://localhost:5173/', '_blank', THREAD_LINK_FEATURE)
+    expect(fake.host.open).not.toHaveBeenCalled()
     act(() => result.current.run('http://localhost:5173/'))
     expect(fake.host.open).toHaveBeenCalledWith(OWNER, 'http://localhost:5173/')
   })

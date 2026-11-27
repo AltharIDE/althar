@@ -711,7 +711,7 @@ export const DictationDownloading: Story = {
 }
 
 function Browser() {
-  const [links, setLinks] = useState<LinksOpen>('beside')
+  const [links, setLinks] = useState<LinksOpen>('local')
   const [keep, setKeep] = useState<CookieKeep>('task')
   const [cleared, setCleared] = useState(false)
   return (
@@ -725,9 +725,11 @@ export const BrowserSettings: Story = {
   render: () => <Browser />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('radio', { name: 'Beside the conversation' })).toBeChecked()
-    await userEvent.click(c.getByRole('radio', { name: 'In your browser' }))
-    await expect(c.getByRole('radio', { name: 'In your browser' })).toBeChecked()
+    await expect(c.getByRole('radio', { name: 'Local only' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: 'All in your browser' }))
+    await expect(c.getByRole('radio', { name: 'All in your browser' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: 'Local only' }))
+    await expect(c.getByRole('radio', { name: 'Local only' })).toBeChecked()
     await userEvent.click(c.getByRole('button', { name: 'Clear all' }))
     await expect(c.getByText('None kept.')).toBeInTheDocument()
   },

@@ -419,7 +419,9 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await panel.getByRole('button', { name: 'Its own session' }).click()
     await page.getByRole('button', { name: 'Change' }).click()
     await expect(page.getByRole('heading', { name: 'Pages beside conversations' })).toBeVisible()
-    await expect(page.getByRole('radio', { name: 'Beside the conversation' })).toBeChecked()
+    await expect(page.getByRole('radio', { name: 'Local only' })).toBeChecked()
+    await expect(page.getByRole('radio', { name: 'All beside' })).not.toBeChecked()
+    await expect(page.getByRole('radio', { name: 'All in your browser' })).not.toBeChecked()
     await still(page)
     await page.screenshot({ path: 'test-results/browser-settings.png', animations: 'disabled', scale: 'css' })
   } finally {
