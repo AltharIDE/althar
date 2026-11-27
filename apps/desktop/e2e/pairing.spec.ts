@@ -192,7 +192,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(
       JSON.parse(execFileSync(process.execPath, [entry, 'pair', root], { encoding: 'utf8' })),
     )
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     // A first home opens on what a home is, then how to set one up; one set up already pairs, or is checked over SSH.
     await page.getByRole('dialog', { name: 'Your first home' }).getByRole('button', { name: 'Set one up' }).click()
@@ -222,7 +222,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
           throw new Error(await page.getByRole('dialog').getByRole('alert').innerText())
         }),
     ])
-    await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, connected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: paired remote window connected')
     await remote
       .getByRole('complementary', { name: 'Projects' })
@@ -248,12 +248,12 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await remote.screenshot({ path: 'test-results/pairing-flow-03-remote.png', scale: 'css' })
     host.child.kill('SIGTERM')
     await host.closed
-    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Computers', exact: true })).toBeVisible()
     const before = host.ready
     host = await startListening(true)
     expect(host.ready).toEqual(before)
     await remote.getByRole('button', { name: 'Reconnect', exact: true }).click()
-    await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, connected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: connected after host restart')
     await expect(remote.getByRole('heading', { name: 'remote-project', exact: true })).toBeVisible()
     const saved = await page.evaluate(async () => (await window.althar.homes!.list())[0])
@@ -262,8 +262,8 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     progress('Native pairing: desktop closed for relaunch')
     ;({ electronApp, page, child: desktopChild } = await launch(clientRoot, clientEnvironment))
     progress('Native pairing: desktop relaunched')
-    await expect(page.getByRole('button', { name: 'Homes', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Computers', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Manage homes…', exact: true }).click()
     const manage = page.getByRole('dialog', { name: 'Homes', exact: true })
     await expect(manage.getByText('My VPS', { exact: true })).toBeVisible()
@@ -289,7 +289,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     const deviceId = saved.https.deviceId
     if (deviceId === undefined) throw new Error('No saved paired device')
     execFileSync(process.execPath, [entry, 'revoke', root, deviceId])
-    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: revocation disconnected the client')
     expect(readFileSync(join(clientRoot, 'profile/homes.json'), 'utf8')).not.toContain(invitation.code)
   } finally {

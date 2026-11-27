@@ -240,24 +240,24 @@ it('connects the first home from a visible chip, and names a remote home in its 
       <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
     </>,
   )
-  await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect a home…' }))
   // A first home opens on what a home is.
   expect(await screen.findByRole('dialog', { name: 'Your first home' })).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
   act(() => at.tell(overview))
-  expect(await screen.findByRole('button', { name: /Homes/ })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: /Computers/ })).not.toBeNull()
   view.unmount()
   at.homes.state.mockResolvedValue(remote)
   render(<Chip homes={at.homes} />)
-  expect(await screen.findByRole('button', { name: 'My server, over SSH. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'My server, over SSH. Computers' })).not.toBeNull()
 })
 
 it('shows a dropped connection in the chip, readable, with an explicit Reconnect', async () => {
   const at = fixture()
   at.homes.state.mockResolvedValue(remote)
   render(<Chip homes={at.homes} />)
-  await screen.findByRole('button', { name: 'My server, over SSH. Homes' })
+  await screen.findByRole('button', { name: 'My server, over SSH. Computers' })
   act(() => at.emit({ ...remote, connection: 'disconnected', problem: 'Network closed' }))
   expect(await screen.findByText('Disconnected')).not.toBeNull()
   expect(screen.queryByRole('dialog')).toBeNull()
@@ -285,15 +285,15 @@ it('names a paired home in the chip and keeps an HTTPS disconnect explicit', asy
   at.homes.state.mockResolvedValue(state)
   at.homes.overview.mockResolvedValue({ ...overview, homes: [paired] })
   render(<Chip homes={at.homes} />)
-  expect(await screen.findByRole('button', { name: 'Secure server, connected. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'Secure server, connected. Computers' })).not.toBeNull()
   act(() => at.emit({ ...state, connection: 'disconnected', problem: 'Host stopped' }))
-  expect(await screen.findByRole('button', { name: 'Secure server, disconnected. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'Secure server, disconnected. Computers' })).not.toBeNull()
   expect(at.homes.reconnect).not.toHaveBeenCalled()
   await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
   expect(at.homes.reconnect).toHaveBeenCalledOnce()
 })
 
-it('opens the chip’s menu from File › Homes… where there is a chip, and Connect a home where there is none', async () => {
+it('opens the chip’s menu from File › Computers… where there is a chip, and Connect a home where there is none', async () => {
   const at = fixture()
   at.homes.overview.mockResolvedValue({ ...overview, homes: [] })
   render(<HomeConnections host={{ ...fakeHost(), homes: at.homes }} />)
@@ -904,7 +904,7 @@ it('keeps a stale home-menu selection from becoming an unhandled native rejectio
       <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
     </>,
   )
-  await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: 'My server' }))
   await waitFor(() => expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id))
   expect(screen.queryByRole('menu')).toBeNull()
@@ -1260,7 +1260,7 @@ it('reports an empty home without reading its task activity', async () => {
   expect(client.getHome).not.toHaveBeenCalled()
 })
 
-it('opens local and saved homes from the menu, and reaches Manage and Connect from File › Homes', async () => {
+it('opens local and saved homes from the menu, and reaches Manage and Connect from File › Computers', async () => {
   const at = fixture()
   render(
     <>
@@ -1274,7 +1274,7 @@ it('opens local and saved homes from the menu, and reaches Manage and Connect fr
     })
     await screen.findByRole('menuitem', { name: /This computer/ })
   }
-  await screen.findByRole('button', { name: 'Homes' })
+  await screen.findByRole('button', { name: 'Computers' })
   await show()
   await userEvent.click(screen.getByRole('menuitem', { name: /This computer/ }))
   expect(at.homes.open).toHaveBeenCalledWith('local')
@@ -1295,12 +1295,12 @@ it('keeps a forgotten home in its own window’s menu while reconnecting and dis
   at.homes.state.mockResolvedValue({ ...remote, connection: 'connecting' })
   at.homes.overview.mockResolvedValue({ ...overview, homes: [], windows: {} })
   render(<Chip homes={at.homes} />)
-  await userEvent.click(await screen.findByRole('button', { name: 'My server, reconnecting. Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, reconnecting. Computers' }))
   expect(await screen.findByRole('menuitem', { name: /My server/ })).not.toBeNull()
   expect(screen.getByText('This window')).not.toBeNull()
   await userEvent.keyboard('{Escape}')
   act(() => at.emit({ ...remote, connection: 'disconnected', problem: 'SSH lost' }))
-  await userEvent.click(screen.getByRole('button', { name: 'My server, disconnected. Homes' }))
+  await userEvent.click(screen.getByRole('button', { name: 'My server, disconnected. Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: /Reconnect/ }))
   expect(at.homes.reconnect).toHaveBeenCalledOnce()
 })

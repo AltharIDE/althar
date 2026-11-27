@@ -43,10 +43,10 @@ test('draws the chip once a home is saved, and Manage homes by each home’s pro
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(projects))
-    const chip = page.getByRole('button', { name: 'Homes', exact: true })
+    const chip = page.getByRole('button', { name: 'Computers', exact: true })
     await expect(chip).toBeVisible()
     await chip.click()
-    const menu = page.getByRole('menu', { name: 'Homes' })
+    const menu = page.getByRole('menu', { name: 'Computers' })
     await expect(menu.getByRole('menuitem', { name: /hetzner-01/ })).toBeVisible()
     await still(page)
     await menu.screenshot({ path: 'test-results/homes-manage-01-menu.png', scale: 'css' })

@@ -7,9 +7,9 @@
 }
 
 .column {
-  max-width: 880px;
+  max-width: var(--page-width);
   margin: 0 auto;
-  padding: 36px 40px 96px;
+  padding: 36px var(--page-inline) 96px;
 }
 
 /* ——— The head ——— */

@@ -246,7 +246,7 @@ export function PairPhone({
       <div className={s.side}>
         <span className={s.leadPair}>
           <span className={s.lead}>Scan it with your phone’s camera</span>
-          <span className={s.note}>It opens Althar, or the App Store or Google Play to get it first.</span>
+          <span className={s.note}>It opens Althar on your phone.</span>
         </span>
         {seed !== null && (
           <span className={s.check}>

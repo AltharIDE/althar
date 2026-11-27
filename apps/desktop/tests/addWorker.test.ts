@@ -242,18 +242,17 @@ describe('a worker, as the window lists it', () => {
 })
 
 describe('a code’s way, as the dialog draws it', () => {
-  it('gives its line and how long it lasts, says it is being made, or why the home made none', () => {
+  it('gives its line, says it is being made, or why the home made none', () => {
     const now = 1_000_000
     const base = 'https://github.com/AltharIDE/althar/releases/download/host-v0.2.0'
     // From the host release that has workers, not the repository's latest, which is the desktop's.
     expect(codeView({ code: 'althar-worker1.e30', expiresAt: now + 600_000 }, null, now, base)).toEqual({
       command: `curl -fsSL ${base}/althar-worker.sh | ALTHAR_RELEASE_BASE=${base} sh -s -- join 'althar-worker1.e30'`,
-      lasts: '10 minutes',
     })
-    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now, base).lasts).toBe('a minute')
-    expect(codeView({ code: 'c', expiresAt: now }, null, now, base)).toEqual({ command: null, lasts: null })
-    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now, null)).toEqual({ command: null, lasts: null })
-    expect(codeView(null, null, now, base)).toEqual({ command: null, lasts: null })
-    expect(codeView(null, 'The home is busy.', now, base)).toEqual({ command: null, lasts: null, failed: 'The home is busy.' })
+    // One run out is being made again.
+    expect(codeView({ code: 'c', expiresAt: now }, null, now, base)).toEqual({ command: null })
+    expect(codeView({ code: 'c', expiresAt: now + 20_000 }, null, now, null)).toEqual({ command: null })
+    expect(codeView(null, null, now, base)).toEqual({ command: null })
+    expect(codeView(null, 'The home is busy.', now, base)).toEqual({ command: null, failed: 'The home is busy.' })
   })
 })

@@ -285,7 +285,8 @@ describe('the Artifacts view as cards', () => {
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'With open comments' }))
     await userEvent.keyboard('{Escape}')
     expect(titles()).toHaveLength(1)
-    expect(screen.getByText('1 of 4')).toBeInTheDocument()
+    // No bare count beside the search: the rows say how many there are.
+    expect(screen.queryByText('1 of 4')).toBeNull()
 
     await userEvent.type(screen.getByRole('searchbox', { name: 'Find an artifact' }), 'nothing like it')
     expect(screen.getByText('Nothing matches “nothing like it”.')).toBeInTheDocument()

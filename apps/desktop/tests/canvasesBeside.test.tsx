@@ -801,12 +801,12 @@ describe('the project’s Artifacts view', () => {
     expect(within(cards).getByLabelText('2 open comments')).toBeTruthy()
     expect(within(await within(cards).findByRole('button', { name: /^Mood board/ })).getByText('Drawing the first version')).toBeTruthy()
 
-    // Filter keeps those saved to a repository; the count says how many of all show.
+    // Filter keeps those saved to a repository, with no bare count beside the search.
     await userEvent.click(screen.getByRole('button', { name: 'Filter' }))
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Saved to a repository' }))
     await userEvent.keyboard('{Escape}')
     expect(within(cards).queryByRole('button', { name: /^Sign-in flow/ })).toBeNull()
-    expect(screen.getByText('1 of 3')).toBeTruthy()
+    expect(screen.queryByText('1 of 3')).toBeNull()
   })
 
   it('opens one asked for beside a conversation, as the view shows and while it shows; Escape goes back to every artifact', async () => {

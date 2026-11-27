@@ -9,6 +9,10 @@ const capital = (words: string) => `${words.slice(0, 1).toUpperCase()}${words.sl
 export const text = {
   /** Under Remove, on a home over SSH that runs an older Althar, which lets no window but its own manage workers. */
   olderHome: (home: string) => `${home} runs an older Althar: update it to remove its workers from here.`,
+  /** Add a worker… asked before the home's workers could be read: what was read decides how one is added. */
+  workersUnread: (home: string) => `Althar couldn’t read ${home}’s workers, so it can’t add one yet.`,
+  workersAgain: 'Try again',
+  workersCancel: 'Cancel',
   /** The gear at the end of the window's bar, which every screen has: Althar's, not a project's. */
   gear: 'Althar settings',
   /** The quick settings, as a screen reader names them. */

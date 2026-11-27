@@ -1,4 +1,4 @@
-import { Dialog, PairPhone, PhoneList } from '@althar/ui'
+import { Dialog, Notice, PairPhone, PhoneList } from '@althar/ui'
 
 import { useNow } from '../../shared/time'
 import { phoneOf, usePairedPhones, usePairing } from './usePairing'
@@ -9,8 +9,14 @@ import s from './Phones.module.css'
  * window's home and lists what it has paired with a code, each with Remove:
  * phones, and computers that connected the same way, which the home doesn't
  * tell apart. Done
- * closes it; Pair another phone makes a new code in place.
+ * closes it; Pair another phone makes a new code in place. Over it, until
+ * the phone app is out, that it isn't in the app stores yet.
  */
+
+export const soonText = {
+  title: 'The Althar phone app isn’t in the app stores yet',
+  body: 'It’s coming very soon.',
+}
 
 export interface PhonesDialogProps {
   /** The window's home, as the window names it: This Mac, or the remote home's name. */
@@ -25,6 +31,9 @@ export function PhonesDialog({ home, onClose }: PhonesDialogProps) {
   const list = phones.devices ?? []
   return (
     <Dialog title={`Pair a phone with ${home}`} onClose={onClose} width={660}>
+      <Notice icon="phone" title={soonText.title} className={s.soon}>
+        {soonText.body}
+      </Notice>
       <PairPhone
         home={home}
         state={pairing.state}

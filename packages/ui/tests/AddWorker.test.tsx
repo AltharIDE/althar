@@ -166,19 +166,20 @@ describe('adding a worker', () => {
         onTrust={vi.fn()}
         onAgain={vi.fn()}
         onStop={vi.fn()}
-        code={{ command: null, lasts: null }}
+        code={{ command: null }}
         onClose={vi.fn()}
       />,
     )
     expect(screen.getByText('Making a code…')).toBeTruthy()
     unmount()
-    dialog({ way: 'code', code: { command: "curl … | sh -s -- join 'althar-worker1.x'", lasts: '9 minutes' } })
+    dialog({ way: 'code', code: { command: "curl … | sh -s -- join 'althar-worker1.x'" } })
     expect(screen.getByText("curl … | sh -s -- join 'althar-worker1.x'")).toBeTruthy()
-    expect(screen.getByText('Works for 9 minutes')).toBeTruthy()
+    // Only what the person needs: the line, not how long it lasts or where the worker will show.
+    expect(screen.queryByText(/Works for|once it connects/)).toBeNull()
   })
 
   it('without SSH here, offers only the code', () => {
-    dialog({ ssh: false, code: { command: null, lasts: null, failed: 'The home couldn’t make a code.' } })
+    dialog({ ssh: false, code: { command: null, failed: 'The home couldn’t make a code.' } })
     expect(screen.queryByRole('radio', { name: 'Over SSH' })).toBeNull()
     expect(screen.getByText('The home couldn’t make a code.')).toBeTruthy()
   })

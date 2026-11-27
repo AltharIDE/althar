@@ -35,6 +35,7 @@ import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
+import { claimOnce } from './claimOnce'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { CANVAS_SCHEME, emitterPort, type AttentionEvent, WORKER_PREVIEW_SCHEME } from '@althar/contracts'
 import { watchRuntimeAttention } from './runtimeAttention'
@@ -1302,6 +1303,18 @@ const startAtLogin = (on: boolean) => {
 }
 
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
+// Homes are still experimental: said once for the profile, claimed here so windows asking together never both say it.
+const claimHomesExperimental = claimOnce(
+  async () => {
+    await preferencesRead
+    return preferences.homesExperimentalSaid
+  },
+  async () => {
+    const kept = await writeAppPreference(locations().profile, 'homesExperimentalSaid', true)
+    preferences = { ...preferences, homesExperimentalSaid: kept }
+  },
+)
+ipcMain.handle('althar:claim-homes-experimental', () => claimHomesExperimental())
 ipcMain.handle('althar:preferences', async () => {
   await preferencesRead
   return preferences
