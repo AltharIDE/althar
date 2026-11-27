@@ -30,6 +30,7 @@ import type { PageAnswer, PageCall } from './pageBridge'
 import type { ComputerAnswer, ComputerCall, ComputerOwner } from './computerBridge'
 import type { SkillsConfig } from './Skills'
 import type { WorkerExecutionPlatform } from './workerExecution'
+import type { WorkerWait } from './workerWait'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
 export interface Shot {
@@ -187,6 +188,8 @@ export interface RuntimeOptions {
   readonly betweenAgents?: Duration.Duration
   /** How often a start looks again for the program Althar brings for its agent, and for how long, while it isn't there yet. */
   readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
+  /** How a lead's start waits for its worker while another run holds it (workerWait.ts), unless a test says otherwise. */
+  readonly workerWait?: WorkerWait
   /**
    * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
    * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.

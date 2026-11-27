@@ -8,7 +8,7 @@ import { once } from 'node:events'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, type ClientIdentity, type ThreadSnapshot } from '@althar/contracts'
-import { AgentRequestFailed, agents as registry } from '@althar/provider-adapters'
+import { AgentRequestFailed, AgentStartFailed, agents as registry } from '@althar/provider-adapters'
 import { fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
 import { createDeviceKey } from '@althar/transport-node'
 import { AgentRunOutcome, type AgentManagedExit } from '@althar/worker-protocol'
@@ -44,6 +44,7 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     readonly workers?: RuntimeOptions['workers']
     readonly countdown?: Duration.Duration
+    readonly workerWait?: RuntimeOptions['workerWait']
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -62,6 +63,7 @@ const connected = (
         checksAppear: Duration.zero,
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.workers === undefined ? {} : { workers: options.workers }),
+        ...(options.workerWait === undefined ? {} : { workerWait: options.workerWait }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
@@ -512,6 +514,96 @@ describe('a normal task assigned to a worker', () => {
         online = false
         const [gone] = (yield* client.GetWorkers({})).workers
         assert.deepInclude(gone, { connected: false, busy: true, task: named })
+      }),
+    ),
+  )
+
+  it.live('waits for a worker another task’s lead holds, says which, and starts there once it is free', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '6'.repeat(32)
+        const workerPath = repository()
+        let projectId = ''
+        // The workspace the worker's one run holds, as its ledger keeps it: the first task's, from its start.
+        let held: string | undefined
+        const opened: Array<string> = []
+        const { client, grant } = yield* connected({
+          workerWait: { every: Duration.millis(20), away: Duration.seconds(5), sayAfter: Duration.zero },
+          workers: {
+            // Free when the second task was planned on it, as when the person writes to a task placed there before.
+            list: () => [{ workerId, name: 'hermes-box', providers: ['codex'], busy: false, readiness: READY }],
+            enrolled: () => [
+              {
+                workerId,
+                connected: true,
+                busy: held !== undefined,
+                providers: ['codex'],
+                projectIds: [projectId],
+                ...(held === undefined ? {} : { workspaceId: held }),
+              },
+            ],
+            open: (request) =>
+              Effect.gen(function* () {
+                // The worker's own slot refuses a second run, as agentRuns.ts does.
+                if (held !== undefined)
+                  return yield* new AgentStartFailed({ command: 'codex', reason: 'The worker is already running an agent.' })
+                held = request.workspaceId
+                opened.push(request.workspaceId)
+                return {
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  transport: yield* openFakeWorker(workerPath),
+                  checkpoint: Effect.void,
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        projectId = project.id
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
+        const start = (title: string, description: string) =>
+          client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            workerId,
+            title,
+            description,
+            end: 'ready',
+            steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          })
+        // A task placed on the worker that has done its step: its run there ended, so the worker is free again.
+        const setup = yield* start('A short setup right after a worker connects', '[lead:finish]')
+        yield* until(client.GetThread({ threadId: setup.threadId, fresh: true }), (thread) =>
+          thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+        )
+        yield* client.StopSession({ commandId: commandId(), threadId: setup.threadId })
+        yield* until(client.GetThread({ threadId: setup.threadId, fresh: true }), (thread) => thread.session === null)
+        held = undefined
+        // Another task's lead starts there, and holds it while it asks the person something.
+        const popover = yield* start('Redesign the Worktree popover', '[lead:permission] [lead:finish]')
+        yield* until(client.GetThread({ threadId: popover.threadId, fresh: true }), (thread) =>
+          thread.attention.some((one) => one.kind === 'permission'),
+        )
+        // The person writes to the first task: its lead waits for the worker, says for whom, and the window isn't kept waiting.
+        yield* client.Send({ commandId: commandId(), threadId: setup.threadId, body: 'One more thing.', disposition: 'after_current' })
+        yield* client.StartSession({ commandId: commandId(), threadId: setup.threadId, agentId: 'codex' })
+        const notice = (thread: ThreadSnapshot) =>
+          thread.items.find((item) => item.kind === 'notice' && JSON.stringify(item.content).includes('runs there'))
+        const waiting = yield* until(client.GetThread({ threadId: setup.threadId, fresh: true }), (thread) => notice(thread) !== undefined)
+        assert.include(JSON.stringify(notice(waiting)?.content), 'Waiting for hermes-box: “Redesign the Worktree popover” runs there.')
+        assert.notInclude(JSON.stringify(waiting.items), "couldn't start")
+        assert.lengthOf(opened, 2)
+        // The other run ends: the worker is free, and the lead starts there by itself, and reads what the person said.
+        held = undefined
+        yield* until(
+          client.GetThread({ threadId: setup.threadId, fresh: true }),
+          (thread) =>
+            idle(thread) &&
+            thread.items.some(
+              (item) => item.kind === 'user_message' && item.content.text === 'One more thing.' && item.input?.state === 'delivered',
+            ),
+        )
+        assert.lengthOf(opened, 3)
       }),
     ),
   )

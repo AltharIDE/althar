@@ -47,6 +47,7 @@ import {
   StartTimedOut,
   type StopRequest,
   type Store,
+  type TaskThread,
   type ThreadContext,
   agentLost,
   cwdOf,
@@ -67,6 +68,7 @@ import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
+import { holdOn, holdWords, WORKER_WAIT } from './workerWait'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
 import { startsAgain } from './startAgain'
@@ -334,6 +336,63 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
   }
 
   /**
+   * Waits, before a lead's start, while its worker can't take it: another task's run holds it (the thread names that
+   * task), its own last run there hasn't been said to have stopped, or it isn't connected, for a while. Nothing waits
+   * where the run holding it is this thread's own live session's, as when another agent takes the thread over: that one
+   * stops only once the new one has started, so the new one starts as it would have, and its worker says.
+   */
+  const waitForWorker = (thread: TaskThread, sessionId: string, workerId: string) =>
+    Effect.gen(function* () {
+      const platform = runtimeConfig.workers
+      if (platform === undefined) return
+      const sql = yield* SqlClient.SqlClient
+      const { every, away, sayAfter } = runtimeConfig.workerWait ?? WORKER_WAIT
+      const since = yield* Clock.currentTimeMillis
+      let said: string | undefined
+      for (;;) {
+        const hold = holdOn(platform, thread.projectId, workerId)
+        if (hold === undefined) return
+        const waited = (yield* Clock.currentTimeMillis) - since
+        // Not connected for longer than a reconnect takes: it starts, and its refusal says the worker is gone.
+        if (hold.kind === 'away' && waited >= Duration.toMillis(away)) return
+        const [held] =
+          hold.workspaceId === undefined
+            ? []
+            : yield* sql<{ taskId: string; title: string }>`
+                SELECT t.id AS task_id, t.title FROM workspaces w JOIN tasks t ON t.id = w.task_id WHERE w.id = ${hold.workspaceId}`
+        const own = held !== undefined && held.taskId === thread.taskId
+        if (own) {
+          const [live] = yield* sql<{ id: string }>`
+            SELECT id FROM provider_sessions
+            WHERE thread_id = ${thread.threadId} AND id != ${sessionId} AND state IN ('active', 'waiting_approval', 'cancelling')
+            LIMIT 1`
+          if (live !== undefined) return
+        }
+        if (waited >= Duration.toMillis(sayAfter)) {
+          const worker = platform.list(thread.projectId).find((one) => one.workerId === workerId)
+          const words = holdWords(
+            worker === undefined ? workerNameOf(workerId) : workerName(worker),
+            hold,
+            held === undefined ? undefined : own ? { own: true } : { own: false, title: held.title },
+          )
+          if (words.title !== said) {
+            said = words.title
+            yield* Effect.logInfo('Waiting for the worker').pipe(
+              Effect.annotateLogs({ session: sessionId, thread: thread.threadId, worker: workerId, hold: hold.kind }),
+            )
+            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: words.title,
+              ...(words.description === null ? {} : { description: words.description }),
+            })
+          }
+        }
+        yield* Effect.sleep(every)
+      }
+    })
+
+  /**
    * Starts the agent and its session, in the mode that asks, and records
    * its process. The session stays `starting`: it takes over the thread
    * only when `activate` runs, so a failed start leaves the thread as it was.
@@ -357,6 +416,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
       const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
       const selectedWorker = thread.role !== 'task' ? null : yield* taskWorker(thread.taskId)
+      // A lead waits for its worker while another run holds it, rather than failing: a worker runs one agent at a time. A
+      // helper runs within its lead's run there, so it never waits for it.
+      if (selectedWorker !== null && thread.role === 'task' && thread.helper === undefined)
+        yield* waitForWorker(thread, sessionId, selectedWorker)
       // The worker as it is now, with what its own check found: whether its agents' sandbox starts there, and its tools.
       const placedOn =
         selectedWorker === null ? undefined : runtimeConfig.workers?.list(thread.projectId).find((one) => one.workerId === selectedWorker)

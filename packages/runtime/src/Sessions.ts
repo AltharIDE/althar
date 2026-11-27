@@ -106,6 +106,8 @@ import { type OutputSoFar, addItem, keepAltharCall, moveToEnd, toolItem } from '
 import { ToolServer } from './ToolServer'
 import { canUndoTask, recoverTurnUndo, undoConversation, undoTarget } from './turnUndo'
 import { agentSaid, lostWords, startedAfreshWords } from './words'
+import { taskWorker } from './workerExecution'
+import { holdOn } from './workerWait'
 
 export { COMPACT } from './compact'
 export {
@@ -155,6 +157,11 @@ export class Sessions extends Context.Service<
       readonly accountId?: string
       /** Who it stands in for, where Althar started it in place of the lead the task was given (standIn.ts). */
       readonly standsIn?: StandIn
+      /**
+       * The person's own start, which nothing else waits on: where another run holds its task's worker, it waits for the
+       * worker in the background, the thread saying for whom, and this answers once its session is recorded.
+       */
+      readonly waitsAside?: boolean
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
@@ -1591,17 +1598,20 @@ export class Sessions extends Context.Service<
       const locks = makeKeyedLock()
       const exclusive = locks.withLock
 
-      const startOn = (input: {
-        readonly threadId: string
-        readonly agentId: string
-        readonly model?: string
-        readonly effort?: string
-        readonly accountId?: string
-        readonly recovering?: string
-        readonly goalRevision?: number
-        /** Who it stands in for, as the session it starts again after did. */
-        readonly standsIn?: StandIn
-      }) =>
+      const startOn = (
+        input: {
+          readonly threadId: string
+          readonly agentId: string
+          readonly model?: string
+          readonly effort?: string
+          readonly accountId?: string
+          readonly recovering?: string
+          readonly goalRevision?: number
+          /** Who it stands in for, as the session it starts again after did. */
+          readonly standsIn?: StandIn
+        },
+        created?: Deferred.Deferred<string>,
+      ) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
@@ -1674,6 +1684,7 @@ export class Sessions extends Context.Service<
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, input.standsIn).pipe(
               Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
             )
+            if (created !== undefined) yield* Deferred.succeed(created, sessionId)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort).pipe(
               Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
             )
@@ -2333,13 +2344,50 @@ export class Sessions extends Context.Service<
         )
 
       /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
-      const start = (asked: Parameters<typeof startOn>[0]) =>
+      const start = (asked: Parameters<typeof startOn>[0], created?: Deferred.Deferred<string>) =>
         Effect.gen(function* () {
           const { input, said, refused } = yield* routed(asked, false)
           if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
-          const sessionId = yield* startOn(input)
+          const sessionId = yield* startOn(input, created)
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
+        })
+
+      /** Whether another run holds the worker a thread's task runs on now: its lead's start would wait for it. */
+      const workerHeld = (threadId: string) =>
+        Effect.gen(function* () {
+          const platform = runtimeConfig.workers
+          if (platform === undefined) return false
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string; projectId: string }>`
+            SELECT task_id, project_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
+          if (thread === undefined) return false
+          const workerId = yield* taskWorker(thread.taskId)
+          return workerId !== null && holdOn(platform, thread.projectId, workerId) !== undefined
+        })
+
+      /**
+       * The person's own start, as `start`, answered without waiting for a worker another run holds: it goes on in the
+       * background from there, once its session is recorded, and the thread says what it waits for (sessionConnections.ts).
+       * What fails before then fails here, as a start does.
+       */
+      const startAside = (asked: Parameters<typeof startOn>[0]) =>
+        Effect.gen(function* () {
+          if (!(yield* workerHeld(asked.threadId))) return yield* start(asked)
+          const created = yield* Deferred.make<string>()
+          const starting = yield* Effect.forkIn(
+            start(asked, created).pipe(
+              Effect.tapCause((cause) =>
+                Effect.flatMap(Deferred.isDone(created), (detached) =>
+                  detached && !Cause.hasInterruptsOnly(cause)
+                    ? Effect.logWarning('A start that waited for its worker did not start', cause)
+                    : Effect.void,
+                ),
+              ),
+            ),
+            sessionsScope,
+          )
+          return yield* Effect.raceFirst(Fiber.join(starting), Deferred.await(created))
         })
 
       /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
@@ -2751,7 +2799,7 @@ export class Sessions extends Context.Service<
             ),
           ),
         recoverQueued,
-        start: (input) => run(start(input)),
+        start: ({ waitsAside, ...input }) => run(waitsAside === true ? startAside(input) : start(input)),
         startLast: (threadId) => run(startLast(threadId)),
         tryAgain: (threadId) => run(tryAgain(threadId)),
         retryable: (threadId) => run(Effect.map(retryOf(threadId), (retry) => retry.retryable)),

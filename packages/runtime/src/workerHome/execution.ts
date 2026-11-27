@@ -66,7 +66,8 @@ export const workerExecution = (
       readonly homeToolPort: number
     }
   >()
-  const preparing = new Set<string>()
+  /** The workers being readied for a task, each by the workspace it is readied for: it holds the worker as a run does. */
+  const preparing = new Map<string, string>()
   /** A worker at work, or being readied for a task: taking it out would cut its task off, so it waits. */
   const working = (workerId: string) =>
     preparing.has(workerId) || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
@@ -118,7 +119,7 @@ export const workerExecution = (
       return listing.workers().map(({ workerId, projectIds, name, ssh }) => {
         const worker = live.get(workerId)
         // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
-        const workspaceId = listing.outstanding?.(workerId)?.workspaceId
+        const workspaceId = listing.outstanding?.(workerId)?.workspaceId ?? preparing.get(workerId)
         const holding = workspaceId === undefined ? {} : { workspaceId }
         const known = { ...(name === undefined ? {} : { name }), ...(ssh === undefined ? {} : { ssh }) }
         if (worker === undefined)
@@ -327,7 +328,7 @@ export const workerExecution = (
             yield* Effect.acquireRelease(
               Effect.suspend(() => {
                 if (preparing.has(workerId)) return Effect.fail(new Error('This worker is preparing another task.'))
-                preparing.add(workerId)
+                preparing.set(workerId, workspaceId)
                 return Effect.void
               }),
               () => Effect.sync(() => void preparing.delete(workerId)),
