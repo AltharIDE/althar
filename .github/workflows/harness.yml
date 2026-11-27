@@ -210,6 +210,10 @@ jobs:
   coverage:
     name: coverage (packages/runtime)
     needs: [plan, coverage-parts]
+    permissions:
+      contents: read
+      # Main's latest measurement, from post-merge.yml's runs.
+      actions: read
     if: ${{ !cancelled() && needs.plan.outputs.runtime == 'true' && github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -243,5 +247,20 @@ jobs:
           bun run test:coverage --merge-reports=.vitest/blob --reporter=default
           --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
           --coverage.reporter=text --coverage.reporter=json-summary
+      # Main's latest measurement: below the gate, this pull request fails only where it is below main's too. None found
+      # leaves the gate alone to decide.
+      - continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for run in $(gh run list --workflow post-merge.yml --branch main --status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+            if gh run download "$run" --name runtime-coverage-summary --dir "$RUNNER_TEMP/main-coverage"; then
+              echo "Main's runtime coverage, from post-merge run $run"
+              break
+            fi
+          done
       # Missing, malformed or partial output fails here. Only the fresh whole measurement decides coverage.
-      - run: python3 ../../.github/scripts/runtime-coverage.py gate .vitest coverage/coverage-summary.json
+      - run: >-
+          python3 ../../.github/scripts/runtime-coverage.py gate .vitest coverage/coverage-summary.json
+          --main "$RUNNER_TEMP/main-coverage/coverage-summary.json"

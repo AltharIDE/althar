@@ -270,6 +270,20 @@ describe('the selection', () => {
     })
   })
 
+  it('splits the runtime’s tests into up to six parts on Windows, and four on Linux', () => {
+    const files: Record<string, string> = {
+      ...FILES,
+      ...Object.fromEntries(
+        Array.from({ length: 300 }, (_, index) => [`packages/runtime/tests/more${index}.test.ts`, "import { start } from './support'"]),
+      ),
+    }
+    const at = { files: Object.keys(files), read: (path: string) => files[path] ?? '' }
+    const parts = (workflow: 'harness' | 'windows') =>
+      plan(['packages/runtime/src/git.ts'], at, workflow).jobs.filter((job) => job.name.startsWith('packages/runtime')).length
+    expect(parts('harness')).toBe(4)
+    expect(parts('windows')).toBe(6)
+  })
+
   it('runs Windows for main-process changes and shared tooling, leaving renderer-only work and docs out', () => {
     expect(runs(plan(['apps/desktop/src/main/keyring.ts'], REPO, 'windows').jobs)).toEqual({
       desktop: ['apps/desktop: tests/keyring.test.ts'],

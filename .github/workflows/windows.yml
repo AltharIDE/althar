@@ -58,7 +58,9 @@ jobs:
     needs: plan
     if: needs.plan.outputs.any == 'true'
     runs-on: windows-2025
-    timeout-minutes: 25
+    # A pull request waits for these before it can be queued: a part takes ten to fifteen minutes, so a slow machine
+    # finishes here rather than losing its work at the limit, and a hang still fails.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:

@@ -58,11 +58,11 @@ export interface Plan {
 
 export type Workflow = 'harness' | 'desktop' | 'ui' | 'windows'
 
-/** A job's packages, and whether its tests are split by file into machines of their own. */
+/** A job's packages, and into how many machines of their own at most its tests are split by file. */
 interface Group {
   readonly name: string
   readonly dirs: ReadonlyArray<string>
-  readonly sharded?: true
+  readonly shards?: number
 }
 
 const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e2e: boolean }> = {
@@ -82,7 +82,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
           'apps/cli',
         ],
       },
-      { name: 'packages/runtime', dirs: ['packages/runtime'], sharded: true },
+      { name: 'packages/runtime', dirs: ['packages/runtime'], shards: 4 },
     ],
     e2e: false,
   },
@@ -91,7 +91,9 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
   windows: {
     jobs: [
       { name: 'desktop', dirs: ['apps/desktop'] },
-      { name: 'packages/runtime', dirs: ['packages/runtime'], sharded: true },
+      // Windows runs the runtime's tests about half again as slowly as Linux: six machines keep each part well inside
+      // its job's time, which a pull request waits for before it can be queued.
+      { name: 'packages/runtime', dirs: ['packages/runtime'], shards: 6 },
       {
         name: 'packages',
         dirs: [
@@ -112,9 +114,8 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
   },
 }
 
-/** About a quarter of the runtime's tests: a machine's worth, a few minutes. More take more machines, up to four. */
+/** A machine's worth of the runtime's tests, a few minutes. More take more machines, up to the group's shards. */
 const PER_SHARD = 50
-const SHARDS = 4
 
 /** What every test may rest on: the lockfile, the root's config, lint rules and patches, @althar/testing, the workflows. */
 const EVERYTHING =
@@ -379,8 +380,8 @@ const jobsOf = (group: Group, parts: ReadonlyArray<Part>, total: (dir: string) =
   const kept = parts.filter((part) => part.check || part.tests === 'all' || part.tests.length > 0)
   const [only] = kept
   if (only === undefined) return []
-  if (group.sharded !== true) return [{ name: group.name, parts: kept }]
-  const shards = Math.max(1, Math.min(SHARDS, Math.ceil((only.tests === 'all' ? total(only.dir) : only.tests.length) / PER_SHARD)))
+  if (group.shards === undefined) return [{ name: group.name, parts: kept }]
+  const shards = Math.max(1, Math.min(group.shards, Math.ceil((only.tests === 'all' ? total(only.dir) : only.tests.length) / PER_SHARD)))
   if (shards === 1) return [{ name: group.name, parts: [only] }]
   return Array.from({ length: shards }, (_, index) => ({
     name: `${group.name} ${index + 1}/${shards}`,
