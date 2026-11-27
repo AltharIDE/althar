@@ -46,7 +46,7 @@ jobs:
             packages: packages/runtime
             shard: 4/4
           - part: packages
-            packages: apps/desktop packages/ui packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite apps/cli apps/site apps/report
+            packages: apps/desktop packages/ui packages/provider-adapters packages/access packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite apps/cli apps/site apps/report
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -111,7 +111,7 @@ jobs:
             packages: packages/runtime
             shard: 6/6
           - part: packages
-            packages: packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/ui
+            packages: packages/provider-adapters packages/access packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/ui
     defaults:
       run:
         shell: bash

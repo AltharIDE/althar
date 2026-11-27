@@ -1,0 +1,34 @@
+{
+  "name": "@althar/access",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Who may do what in a shared project, and which setup reaches whom: the permission catalog, roles, the signed access list a home enforces, and the rules agents keep when they talk across a team. Pure; shared by homes and Althar Cloud.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "effect": "4.0.7"
+  },
+  "devDependencies": {
+    "@althar/testing": "workspace:*",
+    "@effect/vitest": "4.0.7",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.1.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

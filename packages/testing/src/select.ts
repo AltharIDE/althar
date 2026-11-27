@@ -71,6 +71,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
       {
         name: 'packages',
         dirs: [
+          'packages/access',
           'packages/connectors',
           'packages/contracts',
           'packages/transport-node',
@@ -95,6 +96,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
       {
         name: 'packages',
         dirs: [
+          'packages/access',
           'packages/connectors',
           'packages/contracts',
           'packages/transport-node',
