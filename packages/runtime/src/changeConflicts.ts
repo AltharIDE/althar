@@ -422,10 +422,11 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
      * Asks the lead: quietly, as Althar does, since the thread says it in a
      * notice; a lead that isn't running is started for it, on the agent last
      * on the thread, as an answer starts one (Runs.answered). The round keeps
-     * which of the thread's inputs asked it.
+     * which of the thread's inputs asked it, and its fact what asked it (`by`).
      */
     const askLead = (
       round: { readonly id: string; readonly projectId: ProjectId; readonly taskId: string; readonly threadId: string },
+      by: 'at once' | 'given a place' | 'trying again' | 'checks failed',
       attempt: number,
       body: string,
       why: Readonly<Record<string, unknown>> = {},
@@ -441,7 +442,7 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
           round,
           'conflict_resolution.asked',
           { attempt, askedSequence: accepted.sequence, waiting: null },
-          { attempt, ...why },
+          { attempt, by, ...why },
         )
         if (Option.isSome(yield* sessions.running(round.threadId))) return
         // Started apart, so what holds the task's pull request isn't held while an agent starts.
@@ -531,7 +532,7 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
                 : 'The lead resolves both once an agent is free.',
         })
         yield* touchCard(task.taskId)
-        if (room) yield* askLead({ id, ...task }, 1, body)
+        if (room) yield* askLead({ id, ...task }, 'at once', 1, body)
       })
 
     /**
@@ -567,7 +568,8 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
         const round = yield* roundOf({ id })
         if (round === undefined || round.state !== 'resolving' || round.waiting === null) return
         const waited = yield* decodeWaiting(round.waiting)
-        yield* askLead(round, waited.attempt, waited.body, waited.why)
+        // Since when it waited says whether it waited from its start, or as a try again after checks failed (`why`).
+        yield* askLead(round, 'given a place', waited.attempt, waited.body, { ...waited.why, waitedSince: waited.since })
       })
 
     /** Changes a round's record, with its fact. */
@@ -687,7 +689,7 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
           })
           // Asked to commit it where that is all that was left, not to resolve it again.
           const note = noteFor(conflicts, place, failure, uncommitted.length === failures.length ? uncommitted : [])
-          return yield* askLead(round, round.attempt + 1, note, { failure })
+          return yield* askLead(round, 'trying again', round.attempt + 1, note, { failure })
         }
         yield* reviseRound(
           round,
@@ -1187,7 +1189,7 @@ export const makeChangeConflicts = (dependencies: ChangeConflictsDependencies) =
           title: `${checksFailed(sum.failing)} on ${where}.`,
           description: room ? 'The lead is fixing them.' : 'The lead fixes them once an agent is free.',
         })
-        if (room) yield* askLead(round, round.attempt + 1, body, why)
+        if (room) yield* askLead(round, 'checks failed', round.attempt + 1, body, why)
         return true
       })
 
