@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { WORKER_FREE } from '../src/fixtures/computers'
 import { Brand } from '../src/foundations/brands/brands'
 import { AddWorkerDialog, type AddWorkerDialogProps, type WorkerSetupView } from '../src/setup/Computers/AddWorker'
-import { AddWorkerByHandDialog, Computers, type ComputersProps, type ComputerWorker } from '../src/setup/Computers/Computers'
+import { AddWorkerByHandDialog, Computers, type ComputersProps, type ComputerWorker, UNINSTALL } from '../src/setup/Computers/Computers'
 
 /*
  * Add a worker, and a worker's sheet once added (ADR-103): an SSH address or a code; the steps as they go, a host key
@@ -281,5 +281,31 @@ describe('a worker’s sheet', () => {
     sheet({ onSignIn: vi.fn(), workers: { enabled: true, list: [{ ...ADDED, reachable: false }] } })
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
     expect(screen.getByText('Sign in on the worker itself: this window can’t reach it over SSH.')).toBeTruthy()
+  })
+
+  it('says, at Remove, that it takes itself off its computer, and offline, the line that does it there now', async () => {
+    const onRemove = vi.fn()
+    const { unmount } = sheet({ onRemove })
+    await userEvent.click(screen.getByRole('button', { name: 'Remove build-box' }))
+    const online = within(screen.getByRole('dialog', { name: 'Remove build-box?' }))
+    expect(online.getByText(/takes itself off its computer: its service, its checkouts and its releases/)).toBeTruthy()
+    expect(online.queryByText(UNINSTALL)).toBeNull()
+    await userEvent.click(online.getByRole('button', { name: 'Remove' }))
+    expect(onRemove).toHaveBeenCalledWith(ADDED.id)
+    unmount()
+
+    sheet({ workers: { enabled: true, list: [{ ...ADDED, state: 'offline' }] } })
+    await userEvent.click(screen.getByRole('button', { name: 'Remove build-box' }))
+    const offline = within(screen.getByRole('dialog', { name: 'Remove build-box?' }))
+    expect(offline.getByText('It’s offline, so it does that once it next reaches This Mac. To do it now, run this on it:')).toBeTruthy()
+    expect(offline.getByText(UNINSTALL)).toBeTruthy()
+  })
+
+  it('says only that a worker set up by hand gets no more tasks', async () => {
+    sheet({ workers: { enabled: true, list: [{ ...ADDED, managed: false, state: 'offline' }] } })
+    await userEvent.click(screen.getByRole('button', { name: 'Remove build-box' }))
+    const asked = within(screen.getByRole('dialog', { name: 'Remove build-box?' }))
+    expect(asked.getByText(/its key isn’t accepted again/)).toBeTruthy()
+    expect(asked.queryByText(UNINSTALL)).toBeNull()
   })
 })

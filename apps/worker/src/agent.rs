@@ -40,6 +40,7 @@ use crate::{
     agent_tools::forward_tools,
     agent_workspace::{WorkspaceTransfer, workspace_patch},
     agent_workspace_set::{AgentWorkspace, WorkspaceSet},
+    cleanup::forget_run,
     diagnostic::{DiagnosticJournal, read_credentials},
     grpc::{WorkerEnrollment, control_client, endpoint},
     project::{cgroup_empty, cgroup_path, monotonic_ms},
@@ -305,6 +306,11 @@ impl AgentConfig {
             executable: path.into(),
         });
         Ok(())
+    }
+
+    /// Where its runs' checkouts go, a folder for each project.
+    pub fn workspaces(&self) -> &Path {
+        &self.root
     }
 
     fn provider(&self, project: &str, provider: &str) -> io::Result<&Provider> {
@@ -997,15 +1003,24 @@ async fn send_snapshot(
     Ok(())
 }
 
+/// How an exchange with the home ended.
+#[derive(Debug, Eq, PartialEq)]
+pub enum SlotEnd {
+    /// It ran or reconciled what the home sent, or the home had nothing for it.
+    Served,
+    /// The person removed this worker from its home: it should take itself off this computer.
+    Removed,
+}
+
 pub async fn watch_agent_slot(
     address: &str,
     enrollment: &WorkerEnrollment<'_>,
     relay: Option<&WorkerRelay<'_>>,
     config: &AgentConfig,
     journal: &DiagnosticJournal,
-) -> Result<(), Failure> {
+) -> Result<SlotEnd, Failure> {
     let journal_id = journal.agent_identity()?;
-    let mut slot = timeout(REPLY_TIMEOUT, async {
+    let Some(mut slot) = timeout(REPLY_TIMEOUT, async {
         let endpoint = endpoint(address, enrollment)?;
         let channel = match relay {
             Some(relay) => relay_channel(endpoint, relay).await?,
@@ -1037,10 +1052,11 @@ pub async fn watch_agent_slot(
             .run_agent(ReceiverStream::new(receiver))
             .await?
             .into_inner();
-        let Some(HomeMessage::Hello(hello)) =
-            incoming.message().await?.and_then(|frame| frame.payload)
-        else {
-            return Err(invalid("The home did not accept the agent worker").into());
+        let hello = match incoming.message().await?.and_then(|frame| frame.payload) {
+            Some(HomeMessage::Hello(hello)) => hello,
+            // Removed while it was away: the home says so in place of its hello.
+            Some(HomeMessage::Removed(_)) => return Ok(None),
+            _ => return Err(invalid("The home did not accept the agent worker").into()),
         };
         let lease = Duration::from_millis(hello.lease_ms.into());
         if hello.home_id != enrollment.home_id
@@ -1053,7 +1069,7 @@ pub async fn watch_agent_slot(
         }
         let mut send_heartbeat = interval(HEARTBEAT_EVERY);
         send_heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        Ok::<_, Failure>(Slot {
+        Ok::<_, Failure>(Some(Slot {
             channel,
             incoming,
             outgoing,
@@ -1074,9 +1090,12 @@ pub async fn watch_agent_slot(
                 )
             }),
             reserve_before_transfer: hello.reserve_before_transfer,
-        })
+        }))
     })
-    .await??;
+    .await??
+    else {
+        return Ok(SlotEnd::Removed);
+    };
 
     let reply = match slot.message().await? {
         HomeMessage::Start(run) => {
@@ -1119,6 +1138,8 @@ pub async fn watch_agent_slot(
                 worker_busy: false,
             }
         }
+        // Only ever sent between runs: the home refuses to remove a worker at work.
+        HomeMessage::Removed(_) => return Ok(SlotEnd::Removed),
         _ => return Err(invalid("Expected an agent run or reconciliation from the home").into()),
     };
     let run_id = reply.run_id.clone();
@@ -1154,8 +1175,12 @@ pub async fn watch_agent_slot(
     .await??;
     if confirmed {
         journal.forget_agent_group(&run_id)?;
+        // Recorded and confirmed: nothing will ask for the run again, so what it made goes (cleanup.rs).
+        if let Err(error) = forget_run(&config.root, &run_id) {
+            eprintln!("Couldn't clean up after agent run {run_id}: {error}");
+        }
     }
-    Ok(())
+    Ok(SlotEnd::Served)
 }
 
 #[derive(Debug)]

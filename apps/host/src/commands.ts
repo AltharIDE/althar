@@ -1,6 +1,6 @@
 import { configureNetwork, disableNetwork } from './network'
 import { issuePairing, listConnectionDevices, revokeConnectionDevice } from './pairing'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { Cause, Effect, Option } from 'effect'
 
@@ -214,13 +214,22 @@ ${readable}`,
               version: HOST_VERSION,
               ...(io.workerBinary === undefined || io.workerBinary === '' ? {} : { worker: io.workerBinary }),
               ...(io.workerTools === undefined || io.workerTools === '' ? {} : { workerTools: io.workerTools }),
+              // With a worker to carry, its own release too, from the build beside this one (vite.worker.config.ts).
+              ...(io.workerBinary === undefined || io.workerBinary === ''
+                ? {}
+                : { workerEntry: join(dirname(io.entry), 'worker', 'althar-worker.js') }),
             },
             signingKey: io.releaseSigningKey,
             ...(io.updates?.assemble === undefined ? {} : { assemble: io.updates.assemble }),
             ...(io.updates?.execute === undefined ? {} : { execute: io.updates.execute }),
           }),
         )
-        return yield* out(result, `Signed host release assembled: ${result.archive}`)
+        return yield* out(
+          result,
+          result.worker === undefined
+            ? `Signed host release assembled: ${result.archive}`
+            : `Signed host and worker releases assembled: ${result.archive}, ${result.worker.archive}`,
+        )
       }
       case 'setup':
         return yield* update(() => setupHome(options, io, io.out, dependencies))

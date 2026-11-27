@@ -21,7 +21,7 @@ import { workerCodeOf } from '@althar/runtime/workerHome'
 import { newKey } from '@althar/transport-node'
 import { Effect } from 'effect'
 
-import { HOST_VERSION } from './home'
+import { HOST_VERSION } from './version'
 import { privateDirectory, readPrivate, writePrivate } from './privateFiles'
 import { authenticateRelease, verifyRelease } from './updates/release'
 import { downloadRelease, getUpdateBytes } from './updates/network'
@@ -30,7 +30,7 @@ import { checkHere, checkWorker, linkShipped, shippedSandbox, workerPath, type C
 import { installTools } from './workerTools'
 
 /*
- * A worker, set up from the window (ADR-103): the same signed release a home installs, run as a worker. Nobody types
+ * A worker, set up from the window (ADR-103): a signed worker release, published beside the home's. Nobody types
  * any of this. The window's SSH setup runs it on the worker (`bootstrap/ssh.sh`'s `worker-` operations), and a machine
  * without SSH runs `join` with a one-time code. Each prints JSON lines the window reads.
  *
@@ -42,13 +42,19 @@ import { installTools } from './workerTools'
  * - `agents`: which agents it has and which are signed in, kept where the worker reads it with its heartbeats.
  * - `sign-in --agent <id> --way <browser|device>`: the agent's own sign-in, as Althar runs it on a home, its steps
  *   said as JSON lines; a code pasted back comes in on stdin.
- * - `update`: its timer's, hourly: a newer signed release, from where the home's come from, verified, unpacked and
- *   switched to while the worker runs no task, and the worker started again on it; and its check again.
+ * - `update`: its timer's, hourly: a newer signed worker release, from where the home's come from, verified, unpacked
+ *   and switched to while the worker runs no task, and the worker started again on it; and its check again.
  * - `check`: whether its agents' sandbox starts, its tools, and each signed-in agent started once, which says its
  *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it.
  * - `sandbox`: what only root may do to let the sandbox start (newer Ubuntu's AppArmor rule for bubblewrap), with
  *   `sudo -n` where this login may without a password; then the check again. Without, it only says the command.
  * - `tools <name@version>…`: what a project needs that the worker installs itself (workerTools.ts), before its setup.
+ * - `version`: the release it is, for its packaging to check.
+ *
+ * A worker's own release runs these as `althar-worker.js <command>` (worker.ts); a home's, as `althar-host worker
+ * <command>`, for workers installed from it before workers had a release of their own. Taking a worker off its
+ * computer is its native program's (`althar-worker uninstall`, apps/worker/src/uninstall.rs), which the home starts
+ * when the person removes it.
  */
 
 const run = promisify(execFile)
@@ -171,7 +177,19 @@ export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
   }
 }
 
-const renderUnits = (folder: string, program: string) => {
+/**
+ * How a release runs its worker's setup commands: a worker's own release by its own entry; a home's release, which
+ * workers were installed from before they had their own, as `althar-host worker …`.
+ */
+const commandsOf = async (release: string): Promise<readonly [entry: string, ...rest: string[]]> =>
+  (await fs.stat(join(release, 'dist', 'althar-worker.js')).then(
+    (stat) => stat.isFile(),
+    () => false,
+  ))
+    ? ['dist/althar-worker.js']
+    : ['dist/althar-host.js', 'worker']
+
+const renderUnits = (folder: string, program: string, [entry, ...rest]: Awaited<ReturnType<typeof commandsOf>>) => {
   const current = join(program, 'current')
   return {
     [SERVICE]: `[Unit]
@@ -193,7 +211,7 @@ Description=Althar worker update
 
 [Service]
 Type=oneshot
-ExecStart=${join(current, 'node', 'bin', 'node')} ${join(current, 'dist', 'althar-host.js')} worker update
+ExecStart=${[join(current, 'node', 'bin', 'node'), join(current, entry), ...rest].join(' ')} update
 `,
     'althar-worker-update.timer': `[Unit]
 Description=Check for a newer Althar worker every hour
@@ -207,6 +225,14 @@ RandomizedDelaySec=10min
 WantedBy=timers.target
 `,
   }
+}
+
+/** Its services' files, for the release `current` points at. */
+const writeUnits = async (folder: string, program: string) => {
+  const units = unitsFolder()
+  await fs.mkdir(units, { recursive: true, mode: 0o700 })
+  const commands = await commandsOf(join(program, 'current'))
+  for (const [name, text] of Object.entries(renderUnits(folder, program, commands))) await writePrivate(join(units, name), text, true)
 }
 
 const failed = (code: string, message: string) => Object.assign(new Error(message), { code })
@@ -295,9 +321,7 @@ export const enroll = async (raw: unknown, out: (text: string) => void, first: R
   await writeAgents(folder, current)
   await linkAll(folder, current)
   const { agents: found } = await checkAgents(folder)
-  const units = unitsFolder()
-  await fs.mkdir(units, { recursive: true, mode: 0o700 })
-  for (const [name, text] of Object.entries(renderUnits(folder, program))) await writePrivate(join(units, name), text, true)
+  await writeUnits(folder, program)
   await systemctl('daemon-reload')
   await systemctl('enable', SERVICE, 'althar-worker-update.timer')
   await systemctl('restart', SERVICE)
@@ -495,12 +519,16 @@ export const signIn = async (id: string, way: SignInWay, out: (text: string) => 
   await check(out).catch(() => undefined)
 }
 
-/** The newer signed release, where there is one: verified against the key the worker was installed with. */
+/**
+ * The newer signed worker release, where there is one: verified against the key the worker was installed with. A worker
+ * installed from a home's release, before workers had their own, moves to the worker's own release of the same version.
+ */
 export const update = async (out: (text: string) => void, fetcher: typeof fetch = fetch) => {
   const program = programFolder()
   const current = await fs.realpath(join(program, 'current'))
   const keys = [(await fs.readFile(join(current, '.release-key'), 'utf8')).trim()]
   const installed = authenticateRelease(await fs.readFile(join(current, '.manifest')), keys, process.arch === 'arm64' ? 'arm64' : 'x64')
+  const moving = (installed.manifest.product ?? 'host') === 'host'
   const feed = (await readPrivate(join(workerFolder(), 'update-feed'), 2048))?.toString('utf8').trim()
   const bytes = feed === undefined || feed === '' ? await latestManifest(fetcher) : await getUpdateBytes(feed, 262_144, fetcher)
   let verified: ReturnType<typeof verifyRelease>
@@ -511,6 +539,8 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
       now: Date.now(),
       minimumSequence: installed.manifest.sequence,
       installedVersion: HOST_VERSION,
+      product: 'worker',
+      sameRelease: moving,
     })
   } catch {
     say(out, { step: 'update', state: 'current', version: HOST_VERSION })
@@ -537,6 +567,8 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   await writePrivate(join(workerFolder(), 'release'), `${verified.manifest.version}\n`, true)
   await writeAgents(workerFolder(), join(program, 'current'))
   await linkAll(workerFolder(), join(program, 'current'))
+  // Its update runs from the release it's on: a worker's own runs its own entry.
+  await writeUnits(workerFolder(), program)
   await systemctl('daemon-reload')
   await systemctl('restart', SERVICE)
   // The release before it stays, for a step back; older ones go.
@@ -548,7 +580,7 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
 }
 
 const latestManifest = async (fetcher: typeof fetch) => {
-  const asset = `althar-host-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
+  const asset = `althar-worker-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
   const listed = JSON.parse(
     new TextDecoder().decode(
       await getUpdateBytes('https://api.github.com/repos/AltharIDE/althar/releases?per_page=30', 2_097_152, fetcher),
@@ -604,6 +636,10 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
         return 0
       case 'check':
         await check(out)
+        return 0
+      case 'version':
+        // What a release says it is, for its packaging to check against what it signs (updates/publish.ts).
+        say(out, { step: 'version', state: 'done', version: HOST_VERSION, arch: process.arch === 'arm64' ? 'arm64' : 'x64' })
         return 0
       case 'sandbox':
         await allowSandbox(out)

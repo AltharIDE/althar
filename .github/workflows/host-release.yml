@@ -94,7 +94,8 @@ jobs:
           binary: 'false'
       - run: bun run check
       - run: bun run test --maxWorkers=1
-      # A worker installs from the same release a home does: its native worker goes in it.
+      # A worker installs from a release of its own, signed beside the home's; the home's carries the native worker too,
+      # for workers installed from it before they had their own, until they move (apps/host/src/workerSetup.ts update).
       - name: Build the native worker
         working-directory: .
         run: |
@@ -114,7 +115,7 @@ jobs:
           ALTHAR_GITLAB_CLIENT_ID: ${{ vars.ALTHAR_GITLAB_CLIENT_ID }}
           ALTHAR_COPILOT_CLIENT_ID: ${{ vars.ALTHAR_COPILOT_CLIENT_ID }}
         run: bun run build
-      - name: Assemble and sign the complete native Linux release
+      - name: Assemble and sign the home's and the worker's native Linux releases
         env:
           ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
           ALTHAR_WORKER_BINARY: ${{ github.workspace }}/target/release/althar-worker
@@ -167,7 +168,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(find host-release -type f | wc -l)" -eq 6
+          test "$(find host-release -type f | wc -l)" -eq 10
           gh release create "$RELEASE_TAG" host-release/* --target "$GITHUB_SHA" \
             --draft --latest=false --title "Althar host $RELEASE_VERSION" \
             --notes-file "apps/host/release-notes/$RELEASE_VERSION.md"

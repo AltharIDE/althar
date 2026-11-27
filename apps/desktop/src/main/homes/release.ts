@@ -67,8 +67,17 @@ const json = (bytes: Uint8Array): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 
-/** The release in these bytes, where they authenticate under one of the keys, for this server's architecture, now. */
-export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<string>, arch: string, now = Date.now()): HostRelease => {
+/**
+ * The release in these bytes, where they authenticate under one of the keys, for this server's architecture, now, and
+ * are what's asked for: a home's release, or a worker's own (a manifest that says nothing of what it is is a home's).
+ */
+export const authenticateRelease = (
+  bytes: Uint8Array,
+  keys: ReadonlyArray<string>,
+  arch: string,
+  now = Date.now(),
+  product: 'host' | 'worker' = 'host',
+): HostRelease => {
   try {
     if (bytes.length > MAX_MANIFEST_BYTES || keys.length === 0) throw rejected()
     const envelope = json(bytes)
@@ -101,7 +110,8 @@ export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<strin
       !/^[a-f0-9]{64}$/.test(manifest.storage) ||
       expires <= published ||
       published > now + 300_000 ||
-      expires <= now
+      expires <= now ||
+      (manifest.product ?? 'host') !== product
     )
       throw rejected()
     const url = new URL(archive.url)
@@ -140,28 +150,50 @@ export interface ReleaseSource {
 }
 
 /** The newest host release for this architecture, authenticated; NoRelease where none is published or pinned. */
-export const findRelease = async (arch: string, source: ReleaseSource, signal: AbortSignal): Promise<HostRelease> => {
+export const findRelease = (arch: string, source: ReleaseSource, signal: AbortSignal): Promise<HostRelease> =>
+  findProduct('host', arch, source, signal)
+
+/**
+ * The newest release a worker installs, for this architecture, authenticated: the worker's own, published beside the
+ * home's; from a release before workers had their own, the home's, which carries the worker too. A release of your own
+ * (`manifest`) is taken as it is.
+ */
+export const findWorkerRelease = (arch: string, source: ReleaseSource, signal: AbortSignal): Promise<HostRelease> =>
+  findProduct('worker', arch, source, signal)
+
+const findProduct = async (product: 'host' | 'worker', arch: string, source: ReleaseSource, signal: AbortSignal): Promise<HostRelease> => {
   if (source.keys.length === 0) throw new ReleaseProblem('NoRelease')
   const fetcher = source.fetch ?? fetch
-  const manifestAt = async () => {
-    if (source.manifest !== undefined) return source.manifest
-    const listed: unknown = JSON.parse(
-      new TextDecoder().decode(await read(fetcher, `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, 4_194_304, signal)),
-    )
-    const name = `althar-host-linux-${arch}.json`
-    for (const release of Array.isArray(listed) ? listed : []) {
-      if (typeof release !== 'object' || release === null) continue
-      const { draft, prerelease, tag_name: tag, assets } = release as Record<string, unknown>
-      if (draft === true || prerelease === true || typeof tag !== 'string' || !/^host-v\d+\.\d+\.\d+$/.test(tag)) continue
-      const asset = (Array.isArray(assets) ? assets : []).find(
-        (one: unknown) => typeof one === 'object' && one !== null && (one as Record<string, unknown>).name === name,
-      ) as Record<string, unknown> | undefined
-      if (typeof asset?.browser_download_url === 'string') return asset.browser_download_url
+  const now = source.now?.() ?? Date.now()
+  if (source.manifest !== undefined) {
+    const bytes = await read(fetcher, source.manifest, MAX_MANIFEST_BYTES, signal)
+    try {
+      return authenticateRelease(bytes, source.keys, arch, now, product)
+    } catch (error) {
+      if (product === 'host') throw error
+      return authenticateRelease(bytes, source.keys, arch, now)
     }
-    throw new ReleaseProblem('NoRelease')
   }
-  const bytes = await read(fetcher, await manifestAt(), MAX_MANIFEST_BYTES, signal)
-  return authenticateRelease(bytes, source.keys, arch, source.now?.() ?? Date.now())
+  const listed: unknown = JSON.parse(
+    new TextDecoder().decode(await read(fetcher, `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, 4_194_304, signal)),
+  )
+  for (const release of Array.isArray(listed) ? listed : []) {
+    if (typeof release !== 'object' || release === null) continue
+    const { draft, prerelease, tag_name: tag, assets } = release as Record<string, unknown>
+    if (draft === true || prerelease === true || typeof tag !== 'string' || !/^host-v\d+\.\d+\.\d+$/.test(tag)) continue
+    const named = (name: string) =>
+      (
+        (Array.isArray(assets) ? assets : []).find(
+          (one: unknown) => typeof one === 'object' && one !== null && (one as Record<string, unknown>).name === name,
+        ) as Record<string, unknown> | undefined
+      )?.browser_download_url
+    const own = product === 'worker' ? named(`althar-worker-linux-${arch}.json`) : undefined
+    const at = own ?? named(`althar-host-linux-${arch}.json`)
+    if (typeof at !== 'string') continue
+    const bytes = await read(fetcher, at, MAX_MANIFEST_BYTES, signal)
+    return authenticateRelease(bytes, source.keys, arch, now, typeof own === 'string' ? 'worker' : 'host')
+  }
+  throw new ReleaseProblem('NoRelease')
 }
 
 const versionOf = (tag: string) => /^host-v(\d{1,9}\.\d{1,9}\.\d{1,9})$/.exec(tag)?.[1]

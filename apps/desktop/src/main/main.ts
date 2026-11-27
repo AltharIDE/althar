@@ -848,7 +848,9 @@ const startRuntime = () => {
         logs.info('Profile is open in another Althar or the command line', { reason: storeFailure.reason })
       else if (storeFailure !== undefined)
         logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
-      for (const window of BrowserWindow.getAllWindows()) if (homes.state(window.webContents.id).current.kind === 'local') connect(window)
+      // Althar's own windows: a preview's isn't one.
+      for (const window of BrowserWindow.getAllWindows())
+        if (mine(window.webContents) && homes.state(window.webContents.id).current.kind === 'local') connect(window)
       return
     }
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
@@ -885,7 +887,7 @@ const startRuntime = () => {
       storeFailure = undefined
       startRuntime()
       for (const window of BrowserWindow.getAllWindows())
-        if (homes.state(window.webContents.id).current.kind === 'local') window.webContents.reload()
+        if (mine(window.webContents) && homes.state(window.webContents.id).current.kind === 'local') window.webContents.reload()
       return
     }
     logs.error('Runtime keeps stopping; quitting', { restarts: restarts.length })

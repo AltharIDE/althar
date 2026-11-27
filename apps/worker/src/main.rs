@@ -3,9 +3,10 @@
 async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Send + Sync>> {
     use althar_worker::{
         agent::{
-            AgentConfig, run_agent_unit, run_agent_unit_with_repository_setup,
+            AgentConfig, SlotEnd, run_agent_unit, run_agent_unit_with_repository_setup,
             run_agent_unit_with_setup, watch_agent_slot,
         },
+        cleanup::sweep,
         diagnostic::{DiagnosticJournal, read_credentials, run_worker_once},
         grpc::WorkerEnrollment,
         project::{ProjectConfig, run_unit},
@@ -13,7 +14,7 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     };
     use std::{env, io, path::Path, process::ExitCode, time::Duration};
 
-    const USAGE: &str = "Usage: althar-worker serve <worker-folder>\n       althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file> | --agent-config <private-file>] [--watch]";
+    const USAGE: &str = "Usage: althar-worker serve <worker-folder>\n       althar-worker uninstall [<worker-folder>]\n       althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file> | --agent-config <private-file>] [--watch]";
     let raw = env::args_os().skip(1).collect::<Vec<_>>();
     if let [flag, executable, args @ ..] = raw.as_slice()
         && flag == "--project-unit"
@@ -59,6 +60,22 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         && command == "serve"
     {
         return serve(Path::new(folder)).await;
+    }
+    if let [command, folder @ ..] = raw.as_slice()
+        && command == "uninstall"
+        && folder.len() <= 1
+    {
+        let folder = match folder.first() {
+            Some(folder) => Path::new(folder).to_path_buf(),
+            None => althar_worker::uninstall::default_folder()?,
+        };
+        return Ok(match althar_worker::uninstall::uninstall(&folder).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        });
     }
     let args = raw
         .into_iter()
@@ -127,6 +144,9 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         server_name: None,
     };
     let journal = DiagnosticJournal::open(Path::new(journal), &enrollment)?;
+    if let Some(config) = &agents {
+        sweep(config.workspaces(), &journal).await;
+    }
     let run = || {
         run_worker_once(
             address,
@@ -160,9 +180,17 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         loop {
             let result = match &agents {
                 Some(config) => {
-                    watch_agent_slot(address, &enrollment, relay.as_ref(), config, &journal)
+                    match watch_agent_slot(address, &enrollment, relay.as_ref(), config, &journal)
                         .await
-                        .map(|()| None)
+                    {
+                        // Set up by hand, it is its operator's to take away: it only stops.
+                        Ok(SlotEnd::Removed) => {
+                            eprintln!("The home removed this worker. It stops.");
+                            return;
+                        }
+                        Ok(SlotEnd::Served) => Ok(None),
+                        Err(error) => Err(error),
+                    }
                 }
                 None => run().await,
             };
@@ -216,9 +244,11 @@ async fn serve(
     folder: &std::path::Path,
 ) -> Result<std::process::ExitCode, Box<dyn std::error::Error + Send + Sync>> {
     use althar_worker::{
-        agent::{AgentConfig, watch_agent_slot},
+        agent::{AgentConfig, SlotEnd, watch_agent_slot},
+        cleanup::sweep,
         diagnostic::{DiagnosticJournal, read_credentials},
         grpc::WorkerEnrollment,
+        uninstall,
     };
     use std::{fs, io, process::ExitCode, time::Duration};
     use tokio::signal::unix::{SignalKind, signal};
@@ -265,6 +295,8 @@ async fn serve(
     let config = AgentConfig::read(&folder.join("agents.conf"))?
         .with_status(folder.join("signed-in"), release.trim().to_owned());
     let journal = DiagnosticJournal::open(&folder.join("journal"), &enrollment)?;
+    // What a crash left of runs its home is done with (cleanup.rs).
+    sweep(config.workspaces(), &journal).await;
     let mut stop = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
     // The address that answered last time first: a restart doesn't wait on one that never answers.
@@ -279,7 +311,20 @@ async fn serve(
         loop {
             let address = &addresses[at % addresses.len()];
             match watch_agent_slot(address, &enrollment, None, &config, &journal).await {
-                Ok(()) => {
+                Ok(SlotEnd::Removed) => {
+                    // Its uninstall stops this service; until it does, nothing more to do. Where it couldn't start,
+                    // the home says so again at the next connection.
+                    match uninstall::begin(folder).await {
+                        Ok(()) => std::future::pending::<()>().await,
+                        Err(error) => {
+                            eprintln!(
+                                "The home removed this worker, but it couldn't uninstall itself: {error}"
+                            );
+                            tokio::time::sleep(Duration::from_secs(60)).await;
+                        }
+                    }
+                }
+                Ok(SlotEnd::Served) => {
                     failures = 0;
                     if kept != at % addresses.len() {
                         kept = at % addresses.len();

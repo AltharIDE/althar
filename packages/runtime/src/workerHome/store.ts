@@ -187,6 +187,7 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
     const project = attempts('project_attempt', 'project_log')
     const forAttempt = (attemptId: string) => (projectAttempt(attemptId) ? project : diagnostic)
     const enrolled = db.prepare('SELECT id FROM worker_enrollment WHERE fingerprint = ? AND revoked = 0')
+    const removed = db.prepare('SELECT 1 FROM worker_enrollment WHERE fingerprint = ? AND revoked = 1')
     const enrolledById = db.prepare('SELECT id FROM worker_enrollment WHERE id = ? AND revoked = 0')
     const listed = db.prepare(`SELECT w.id AS workerId, p.project_id AS projectId, f.name AS name, f.ssh AS ssh FROM worker_enrollment w
       LEFT JOIN agent_worker_project p ON p.worker_id = w.id LEFT JOIN worker_profile f ON f.worker_id = w.id
@@ -263,6 +264,8 @@ export const openWorkerStore = async (profile: string, homeId: string, now: () =
       agents,
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
+      /** The person removed the worker of this fingerprint, and hasn't added it again: it is told so when it connects. */
+      workerRemoved: (fingerprint: string) => removed.get(fingerprint) !== undefined,
       /** Every worker enrolled and not revoked, in the order it was enrolled, with the projects it may work on. */
       workers(): ReadonlyArray<EnrolledWorker> {
         const byId = new Map<string, { projectIds: string[]; name: string | null; ssh: string | null }>()

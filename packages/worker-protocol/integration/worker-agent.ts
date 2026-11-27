@@ -46,13 +46,14 @@ const journalId = 'wjn_' + '5'.repeat(32)
 const providerId = 'codex'
 const placement = { projectId, workspaceId, providerId }
 
-const fixture = async (t: TestContext, id = homeId) => {
+const fixture = async (t: TestContext, id = homeId, { removed = false } = {}) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-agent-worker-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const path = workerCertificates(root, true)
   const read = (name: string) => readFileSync(path(name))
   const fingerprint = workerCertificateFingerprint(new X509Certificate(read('enrolled.pem')).raw)
-  const enrolled = new Map([[fingerprint, workerId]])
+  // Removed by the person: not enrolled, and told so when it connects.
+  const enrolled = new Map(removed ? [] : [[fingerprint, workerId]])
   const outstanding = new Map<string, AgentRunAssignment>()
   const withdrawn = new Set<string>()
   const journals = new Map<string, string>()
@@ -78,6 +79,7 @@ const fixture = async (t: TestContext, id = homeId) => {
     certificatePem: read('home.pem'),
     privateKeyPem: read('home.key'),
     workerForCertificate: (value) => enrolled.get(value),
+    workerRemoved: (value) => removed && value === fingerprint,
     agentWorkers: pool,
   })
   t.after(home.close)
@@ -868,6 +870,48 @@ void test(
 )
 
 void test(
+  'the native worker sweeps what a crash left, and a worker set up by hand stops once its home says it was removed',
+  { timeout: 15_000, skip: process.platform !== 'linux' },
+  async (t) => {
+    const { root, path, home } = await fixture(t, homeId, { removed: true })
+    const project = join(root, 'workspaces', projectId)
+    mkdirSync(project, { recursive: true, mode: 0o700 })
+    const run = 'war_' + '6'.repeat(32)
+    // A crash's leftovers: a checkout whose run the journal has no record of, and its import.
+    const leftovers = [join(project, `${workspaceId}-${run}`), join(project, `.${run}.import`)]
+    for (const folder of leftovers) mkdirSync(folder)
+    // Set up by its operator: never the worker's to remove.
+    const kept = join(project, workspaceId)
+    mkdirSync(kept)
+    const config = join(root, 'agent-config')
+    writeFileSync(config, [join(root, 'workspaces'), [projectId, providerId, '/usr/bin/cat'].join('\t'), ''].join('\n'), { mode: 0o600 })
+    const child = spawn(
+      native,
+      [
+        'https://localhost:' + home.port,
+        homeId,
+        workerId,
+        path('home-ca.pem'),
+        path('enrolled.pem'),
+        path('enrolled.key'),
+        join(root, 'journal'),
+        '--agent-config',
+        config,
+        '--watch',
+      ],
+      { env: { ...process.env, HOME: root }, stdio: ['ignore', 'ignore', 'pipe'] },
+    )
+    t.after(() => child.kill())
+    let stderr = ''
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+    deepEqual(await once(child, 'exit'), [0, null])
+    ok(stderr.includes('The home removed this worker.'), stderr)
+    for (const folder of leftovers) equal(existsSync(folder), false, folder)
+    ok(existsSync(kept))
+  },
+)
+
+void test(
   'the native worker checks out one repository and a repository set under systemd',
   { timeout: 25_000, skip: process.platform !== 'linux' || process.env.ALTHAR_TEST_SYSTEMD !== '1' },
   async (t) => {
@@ -1133,6 +1177,10 @@ void test(
       equal(await response.text(), 'home tools')
       equal((await agent.stop()).outcome, AgentRunOutcome.STOPPED)
       equal(existsSync(agent.skillsPath), false)
+      // Its end recorded, nothing asks for the run again: the worker takes its checkout away.
+      for await (const _ of setInterval(25, undefined, { signal: AbortSignal.timeout(5_000) })) {
+        if (!existsSync(agent.workspacePath)) break
+      }
     }
   },
 )

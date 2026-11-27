@@ -109,8 +109,13 @@ export interface BundleSource {
   readonly node: string
   readonly version: string
   readonly license?: string
-  /** The native worker, built for this release's system: a worker installs from the same release a home does. */
+  /**
+   * The native worker, built for this release's system. A worker installs from a release of its own (`workerEntry`);
+   * the home's carries it too, for workers installed from a home's release before they had their own, until they move.
+   */
   readonly worker?: string
+  /** The worker's own release's JavaScript (`dist/worker/althar-worker.js`): its setup's commands, without the home. */
+  readonly workerEntry?: string
   /**
    * What the worker's agents' sandbox needs beside what Codex's package carries (scripts/worker-sandbox-tools.sh): its
    * `bin` (socat) goes to the release's `tools/bin`, its `licenses` to `tools/licenses`.
@@ -126,22 +131,21 @@ export const copyHostAssets = async (entry: string, destination: string) => {
     // Builds with a single entry file have no separate assets.
   }
 }
-export const assembleBundle = async (source: BundleSource, destination: string) => {
-  await privateDirectory(destination, true)
-  if ((await fs.readdir(destination)).length !== 0) throw failed()
-  const dist = join(destination, 'dist')
-  await fs.mkdir(dist, { mode: 0o700 })
-  await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
-  await copyHostAssets(source.entry, dist)
+/** The license and notices a built entry keeps beside it, or, in a portable release, at its root. */
+const copyNotices = async (entry: string, destination: string) => {
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
     try {
-      await fs.copyFile(join(dirname(source.entry), name), join(destination, name), constants.COPYFILE_EXCL)
+      await fs.copyFile(join(dirname(entry), name), join(destination, name), constants.COPYFILE_EXCL)
     } catch (error) {
       if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
       // Built entries keep assets beside the entry; portable releases keep them at their root.
-      await fs.copyFile(join(dirname(source.entry), '..', name), join(destination, name), constants.COPYFILE_EXCL)
+      await fs.copyFile(join(dirname(entry), '..', name), join(destination, name), constants.COPYFILE_EXCL)
     }
   }
+}
+
+/** Node, its license and the release's package.json: what every release runs on. */
+const copyNode = async (source: BundleSource, destination: string, name: string) => {
   await fs.mkdir(join(destination, 'node/bin'), { recursive: true, mode: 0o700 })
   await fs.copyFile(source.node, join(destination, 'node/bin/node'), constants.COPYFILE_EXCL)
   await fs.chmod(join(destination, 'node/bin/node'), 0o700)
@@ -149,10 +153,13 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
   await fs.copyFile(license, join(destination, 'node/LICENSE'), constants.COPYFILE_EXCL)
   await writePrivate(
     join(destination, 'package.json'),
-    JSON.stringify({ name: '@althar/host-release', type: 'module', version: source.version, license: 'Apache-2.0' }),
+    JSON.stringify({ name, type: 'module', version: source.version, license: 'Apache-2.0' }),
     false,
   )
-  await copyDependencies(source.entry, destination, ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp', 'sharp'])
+}
+
+/** The native worker and what its agents' sandbox needs beside Codex's package: `tools/bin` and `tools/licenses`. */
+const copyWorker = async (source: BundleSource, destination: string) => {
   if (source.worker !== undefined) {
     await fs.copyFile(source.worker, join(destination, 'althar-worker'), constants.COPYFILE_EXCL)
     await fs.chmod(join(destination, 'althar-worker'), 0o700)
@@ -170,6 +177,42 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
         await fs.chmod(join(destination, 'tools', part, name), mode)
       }
     }
+}
+
+/** The agents a worker runs, as their ACP adapters, each with the agent's own program among its dependencies. */
+const AGENT_ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
+
+const emptyDestination = async (destination: string) => {
+  await privateDirectory(destination, true)
+  if ((await fs.readdir(destination)).length !== 0) throw failed()
+  const dist = join(destination, 'dist')
+  await fs.mkdir(dist, { mode: 0o700 })
+  return dist
+}
+
+export const assembleBundle = async (source: BundleSource, destination: string) => {
+  const dist = await emptyDestination(destination)
+  await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
+  await copyHostAssets(source.entry, dist)
+  await copyNotices(source.entry, destination)
+  await copyNode(source, destination, '@althar/host-release')
+  await copyDependencies(source.entry, destination, [...AGENT_ADAPTERS, 'sharp'])
+  await copyWorker(source, destination)
+}
+
+/**
+ * A worker's own release: its native program, Node, its setup's commands (`dist/althar-worker.js`), the agents it runs
+ * and its sandbox's tools. None of the home: no runtime, store or pictures.
+ */
+export const assembleWorkerBundle = async (source: BundleSource, destination: string) => {
+  if (source.workerEntry === undefined || source.worker === undefined || source.workerTools === undefined) throw failed()
+  const dist = await emptyDestination(destination)
+  await fs.copyFile(source.workerEntry, join(dist, 'althar-worker.js'), constants.COPYFILE_EXCL)
+  await copyHostAssets(source.workerEntry, dist)
+  await copyNotices(source.workerEntry, destination)
+  await copyNode(source, destination, '@althar/worker-release')
+  await copyDependencies(source.entry, destination, AGENT_ADAPTERS)
+  await copyWorker(source, destination)
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

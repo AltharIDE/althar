@@ -156,6 +156,10 @@ describe('enrolling a worker with what its home gave', () => {
     expect(unit).toContain(`ExecStart=${join(data, 'althar-worker-program', 'current', 'althar-worker')} serve ${folder}`)
     expect(unit).toContain('Restart=always')
     expect(existsSync(join(config, 'systemd', 'user', 'althar-worker-update.timer'))).toBe(true)
+    // A release with no worker entry of its own is a home's: its update runs as `althar-host worker update`.
+    expect(readFileSync(join(config, 'systemd', 'user', 'althar-worker-update.service'), 'utf8')).toContain(
+      `${join(data, 'althar-worker-program', 'current', 'dist', 'althar-host.js')} worker update\n`,
+    )
     expect(calls).toEqual([
       ['daemon-reload'],
       ['enable', 'althar-worker.service', 'althar-worker-update.timer'],
@@ -304,7 +308,7 @@ describe('updating itself', () => {
     // A newer one, signed by the same key, while a task runs: it waits for the next check.
     const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
     const newer = JSON.parse(Buffer.from(JSON.parse(installed.envelope).payload, 'base64url').toString('utf8')) as Record<string, unknown>
-    const body = Buffer.from(JSON.stringify({ ...newer, version: `${major}.${minor}.${(patch ?? 0) + 1}`, sequence: 2 }))
+    const body = Buffer.from(JSON.stringify({ ...newer, version: `${major}.${minor}.${(patch ?? 0) + 1}`, sequence: 2, product: 'worker' }))
     const envelope = JSON.stringify({
       format: 1,
       keyId: releaseIdentity(installed.publicKey),
@@ -362,7 +366,7 @@ describe('a code’s way, where it doesn’t get through', () => {
 })
 
 describe('finding the newest release, with no feed of its own', () => {
-  const asset = `althar-host-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
+  const asset = `althar-worker-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
   const listing = (releases: ReadonlyArray<Record<string, unknown>>, manifest = '') =>
     (async (input: string) =>
       new URL(input).hostname === 'api.github.com'
@@ -412,7 +416,7 @@ describe('finding the newest release, with no feed of its own', () => {
       {},
     ]
     await expect(update(out, listing(passed))).rejects.toMatchObject({ code: 'NoRelease' })
-    // The newest that is the host's, with its asset: here, the one it runs already.
+    // The newest that is the host's, with the worker's asset: here, the one it runs already.
     const found = [...passed, { tag_name: 'host-v1.0.0', assets: [{ name: asset, browser_download_url: 'https://x/host' }] }]
     await update(out, listing(found, installed.envelope))
     expect(said.findLast((one) => one.step === 'update')).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
@@ -551,7 +555,7 @@ describe('updating itself to a newer release', () => {
     const root = temporary()
     const source = join(root, 'source')
     mkdirSync(join(source, 'dist'), { recursive: true })
-    writeFileSync(join(source, 'dist', 'althar-host.js'), 'host')
+    writeFileSync(join(source, 'dist', 'althar-worker.js'), 'host')
     writeFileSync(join(source, 'althar-worker'), 'worker', { mode: 0o700 })
     const archive = join(root, 'release.tar.gz')
     await c({ file: archive, cwd: source, gzip: true, portable: true, noMtime: true }, ['dist', 'althar-worker'])
@@ -565,6 +569,7 @@ describe('updating itself to a newer release', () => {
       archive: { url: 'https://updates.example/release.tar.gz', sha256, bytes: bytes.length },
       files: 2,
       unpackedBytes: 'host'.length + 'worker'.length,
+      product: 'worker',
     })
     writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
     const fetcher = (async (input: string) =>
@@ -577,6 +582,79 @@ describe('updating itself to a newer release', () => {
     expect(calls).toEqual(expect.arrayContaining([['daemon-reload'], ['restart', 'althar-worker.service']]))
     expect(existsSync(join(program, 'bundle-abc'))).toBe(true)
     expect(existsSync(join(program, 'bundle-older'))).toBe(false)
+    // A worker's own release runs its update by its own entry, through `current`.
+    expect(readFileSync(join(config, 'systemd', 'user', 'althar-worker-update.service'), 'utf8')).toContain(
+      `ExecStart=${join(program, 'current', 'node', 'bin', 'node')} ${join(program, 'current', 'dist', 'althar-worker.js')} update\n`,
+    )
+  })
+
+  it('moves a worker installed from a home’s release to the worker’s own of the same release, and only then', async () => {
+    const pair = generateKeyPairSync('ed25519')
+    const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+    const envelopeOf = (fields: Record<string, unknown>) => {
+      const payload = Buffer.from(
+        JSON.stringify({
+          format: 1,
+          version: HOST_VERSION,
+          sequence: 7,
+          publishedAt: new Date(Date.now() - 1000).toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+          platform: 'linux',
+          arch,
+          updaterProtocol: 1,
+          apiVersion: 1,
+          storage: 'a'.repeat(64),
+          files: 2,
+          ...fields,
+        }),
+      )
+      return JSON.stringify({
+        format: 1,
+        keyId: releaseIdentity(publicKey),
+        payload: payload.toString('base64url'),
+        signature: sign(null, payload, pair.privateKey).toString('base64url'),
+      })
+    }
+    // Installed from a home's release, which runs its commands as `althar-host worker …`.
+    const folder = release()
+    mkdirSync(join(folder, 'dist'))
+    writeFileSync(join(folder, 'dist', 'althar-host.js'), 'host')
+    await install(folder, out)
+    const home = envelopeOf({
+      archive: { url: 'https://updates.example/host.tar.gz', sha256: 'b'.repeat(64), bytes: 100 },
+      unpackedBytes: 1,
+    })
+    writeFileSync(join(folder, '.manifest'), home, { mode: 0o600 })
+    writeFileSync(join(folder, '.release-key'), publicKey, { mode: 0o600 })
+    const source = join(temporary(), 'source')
+    mkdirSync(join(source, 'dist'), { recursive: true })
+    writeFileSync(join(source, 'dist', 'althar-worker.js'), 'worker commands')
+    writeFileSync(join(source, 'althar-worker'), 'worker', { mode: 0o700 })
+    const archive = join(source, '..', 'worker.tar.gz')
+    await c({ file: archive, cwd: source, gzip: true, portable: true, noMtime: true }, ['dist', 'althar-worker'])
+    const bytes = readFileSync(archive)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    // The same release, as the worker's own: same version, same sequence.
+    const own = envelopeOf({
+      archive: { url: 'https://updates.example/worker.tar.gz', sha256, bytes: bytes.length },
+      unpackedBytes: 'worker commands'.length + 'worker'.length,
+      product: 'worker',
+    })
+    writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
+    const serving = (manifest: string) =>
+      (async (input: string) => (input.endsWith('.tar.gz') ? new Response(bytes) : new Response(manifest))) as unknown as typeof fetch
+    // A home's release in the worker's feed is never taken.
+    await update(out, serving(home))
+    expect(said.findLast((one) => one.step === 'update')).toMatchObject({ state: 'current' })
+    await update(out, serving(own))
+    expect(said.at(-1)).toMatchObject({ step: 'update', state: 'done', version: HOST_VERSION })
+    const program = join(data, 'althar-worker-program')
+    expect(readlinkSync(join(program, 'current'))).toContain(`bundle-${sha256}`)
+    expect(readFileSync(join(config, 'systemd', 'user', 'althar-worker-update.service'), 'utf8')).toContain('dist/althar-worker.js update')
+    // On its own release now, the same one again is no update.
+    await update(out, serving(own))
+    expect(said.findLast((one) => one.step === 'update')).toMatchObject({ state: 'current' })
   })
 })
 
