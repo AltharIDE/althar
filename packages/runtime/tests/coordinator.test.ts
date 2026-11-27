@@ -1081,6 +1081,58 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('starts a lead that goes on its own mid-turn after its plan again, once, with what the person said in that turn', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Talked to after', '[lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      // Its plan is done; the person talks to its lead, which goes on its own in that turn, as a lost worker run does.
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: task.threadId,
+        body: 'One more thing. [lead:gone-once]',
+      })
+      const said = (title: string) =>
+        sql<{ title: string }>`
+          SELECT json_extract(content, '$.title') AS title FROM thread_items
+          WHERE thread_id = ${task.threadId} AND kind = 'notice' AND json_extract(content, '$.title') = ${title}`
+      yield* until(said('Started again after its agent stopped on its own.'), (rows) => rows.length === 1)
+      // The new session has what the person said in the turn that was lost, and answers it.
+      yield* until(
+        sql<{ state: string }>`
+          SELECT d.state FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id
+          JOIN user_inputs i ON i.id = di.user_input_id
+          WHERE i.thread_id = ${task.threadId} AND i.body LIKE 'One more thing.%' ORDER BY d.requested_at DESC LIMIT 1`,
+        (rows) => rows[0]?.state === 'completed',
+      )
+      assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`, 2)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('leaves a lead that goes on its own again soon after it was started again so to the person', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Talked to, crashes twice', '[lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+      ])
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: task.threadId,
+        body: 'One more thing. [lead:gone-twice]',
+      })
+      // Started again once, and gone again: it waits for the person, as its notice says.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at`,
+        (rows) => rows.length === 2 && rows.every((row) => row.state === 'lost'),
+      )
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`, 2)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
