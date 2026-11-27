@@ -153,7 +153,7 @@ export interface ProjectModel {
   readonly holdPlan: (planId: string) => Promise<void>
   /** Where a planned task runs once it starts: whether that went through. */
   readonly placePlan: (planId: string, workerId: string | null, chosenAt?: number) => Promise<boolean>
-  readonly holdDraft: (threadId: string, key: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string, taskId?: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (
@@ -710,8 +710,8 @@ export const useProject = (projectId: string): ProjectModel => {
       return placed
     },
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
-    holdDraft: (threadId, key) =>
-      client.holdDraft(threadId, key).catch((failure: unknown) => {
+    holdDraft: (threadId, key, taskId) =>
+      client.holdDraft(threadId, key, taskId).catch((failure: unknown) => {
         fail(failure)
         throw failure
       }),

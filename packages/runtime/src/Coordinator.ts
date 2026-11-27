@@ -5,7 +5,7 @@ import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from
 import { type Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, GOAL_LENGTH, GOAL_ROUNDS, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
+import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -103,6 +103,9 @@ import {
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
 import { waitFor } from './waits'
+
+/** How many drafts of turns that are over each coordinator thread keeps the tasks of, for a Hold from a window behind. */
+const ENDED_DRAFTS_KEPT = 50
 
 /**
  * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
@@ -432,8 +435,11 @@ export class Coordinator extends Context.Service<
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
-    /** The person held a task while it was drafted, by its draft's key: its plan comes held, or is held where it came already. */
-    holdDraft(threadId: string, key: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * The person held a task while it was drafted, by its draft's key, and its task where the window knew it: its plan comes
+     * held, or is held where it came already.
+     */
+    holdDraft(threadId: string, key: string, actorId: ActorId, taskId?: string): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Coordinator') {
   static readonly layer: Layer.Layer<Coordinator, never, Store> = Layer.effect(
@@ -1159,6 +1165,11 @@ export class Coordinator extends Context.Service<
        * the draft_task handler and the calls' events, on fibers of their own, never undo each other's.
        */
       const draftsBy = new Map<string, Drafts>()
+      /*
+       * The tasks of drafts whose turn is over, by thread and draft key: a window behind may still show such a draft as it
+       * was before its task was made, and Hold from it holds that task. The latest few of each thread.
+       */
+      const endedDrafts = new Map<string, Map<string, string>>()
       const coordinatorProjects = new Map<string, string | null>()
       const coordinatorProject = (threadId: string) =>
         Effect.gen(function* () {
@@ -1183,6 +1194,10 @@ export class Coordinator extends Context.Service<
           if (event._tag === 'TurnEnded') {
             const drafts = draftsBy.get(event.threadId)
             if (drafts === undefined) return
+            const ended = endedDrafts.get(event.threadId) ?? new Map<string, string>()
+            for (const draft of drafts.drafts) if (draft.taskId !== null) ended.set(draft.key, draft.taskId)
+            for (const key of [...ended.keys()].slice(0, Math.max(0, ended.size - ENDED_DRAFTS_KEPT))) ended.delete(key)
+            endedDrafts.set(event.threadId, ended)
             // A draft whose plan never came keeps a card in the thread once its live one goes: it says it has no plan, or
             // that it was discarded, and offers to plan or discard it. Posted first, so the thread is never without it.
             const projectId = yield* coordinatorProject(event.threadId)
@@ -1200,7 +1215,10 @@ export class Coordinator extends Context.Service<
             const tool = call.althar
             if (tool !== 'draft_task' && tool !== 'propose_plan') return
             if ((yield* coordinatorProject(threadId)) === null) return
-            yield* redraft(threadId, (drafts) => callBegan(drafts, call.toolCallId, tool))
+            // A key of its own: the agent may give a call of a later turn the same id, and a Hold from a window behind,
+            // by this draft's key, must never reach that one's draft.
+            const key = `${call.toolCallId}@${yield* Effect.orDie((yield* Crypto.Crypto).randomUUIDv7())}`
+            yield* redraft(threadId, (drafts) => callBegan(drafts, call.toolCallId, tool, key))
           } else if (draftsBy.get(threadId)?.calls.has(call.toolCallId) !== true) return
           const projectId = yield* coordinatorProject(threadId)
           if (projectId === null) return
@@ -1271,12 +1289,15 @@ export class Coordinator extends Context.Service<
        * here as draft_task makes it; one whose plan came already is held there and then.
        */
       const heldTasks = new Set<string>()
-      const holdDraft = (threadId: string, key: string, actorId: ActorId) =>
+      const holdDraft = (threadId: string, key: string, actorId: ActorId, task?: string) =>
         Effect.gen(function* () {
           yield* redraft(threadId, (drafts) => heldDraft(drafts, key))
-          const taskId =
-            draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.taskId ?? (key.startsWith('task:') ? key.slice(5) : null)
-          if (taskId === null) return
+          // Its task as the window knew it, or as the draft had it once its turn was over: the turn that drafted it can end,
+          // and its drafts go, before Hold comes, from a card drawn before or after its task was made.
+          const live = draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)
+          const taskId = live?.taskId ?? task ?? endedDrafts.get(threadId)?.get(key) ?? (key.startsWith('task:') ? key.slice(5) : null)
+          // Neither being drafted nor drafted: nothing to hold, which the window is told, so it shows the card as it was.
+          if (taskId === null) return live === undefined ? yield* new NotFound({ kind: 'draft', id: key }) : undefined
           heldTasks.add(taskId)
           const sql = yield* SqlClient.SqlClient
           const proposed = yield* sql<{ id: string }>`
@@ -3663,7 +3684,7 @@ export class Coordinator extends Context.Service<
         thread: (projectId) => provide(thread(projectId)),
         suggested: (projectId) => provide(suggested(projectId)),
         say: (input) => provide(say(input)),
-        holdDraft: (threadId, key, actorId) => provide(holdDraft(threadId, key, actorId)),
+        holdDraft: (threadId, key, actorId, taskId) => provide(holdDraft(threadId, key, actorId, taskId)),
         reading: (read) =>
           Effect.sync(() => {
             pullRequests = read

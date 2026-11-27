@@ -185,6 +185,25 @@ describe('the client', () => {
     await client.close()
   })
 
+  it('holds a drafted task by its task where the home has let its draft go, and hears one it never had turned down', async () => {
+    const { client, grant } = await connected()
+    const project = await client.openProject(await grant(repository()))
+    const coordinator = await client.getCoordinator(project.id)
+    await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
+    const planned = await waitFor(
+      () => client.getCoordinator(project.id, { limit: 50 }),
+      (snapshot) => snapshot.items.some((item) => item.kind === 'task' && item.content.plan != null),
+    )
+    const card = planned.items.find((item) => item.kind === 'task')
+    // A key the home no longer knows, as after the turn that drafted it ended: its task is held all the same.
+    await client.holdDraft(coordinator.threadId, 'gone', card?.kind === 'task' ? card.content.taskId : undefined)
+    const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
+    expect(held?.kind === 'task' && held.content.phase).toBe('held')
+    // Neither a draft it has nor a task: turned down, so the card shows as it was.
+    await expect(client.holdDraft(coordinator.threadId, 'never')).rejects.toThrow()
+    await client.close()
+  })
+
   it('rejects with what went wrong, in words', async () => {
     const { client } = await connected()
     const failure = await client.openProject('grant_nobody_gave').catch((error: unknown) => error)

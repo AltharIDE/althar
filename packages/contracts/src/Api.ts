@@ -6004,8 +6004,11 @@ const ProjectApi = RpcGroup.make(
     },
     Schema.Boolean,
   ),
-  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
-  command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
+  /**
+   * Holds a task the coordinator is drafting, by its draft's key, and by its task where the window knows it (the turn that
+   * drafted it may have ended, and its draft gone, by then): its plan comes held, even one that would start at once.
+   */
+  command('HoldDraft', { threadId: Schema.String, key: Schema.String, taskId: Schema.optional(Schema.String) }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',

@@ -133,7 +133,7 @@ export function useDraftingCards(
   threadId: string | null,
   drafts: ReadonlyArray<Draft>,
   items: ReadonlyArray<ThreadItem>,
-  onHold: (threadId: string, key: string) => Promise<void>,
+  onHold: (threadId: string, key: string, taskId?: string) => Promise<void>,
 ): {
   readonly shown: ReadonlyArray<Draft>
   readonly placed: ReadonlyArray<ThreadItem>
@@ -201,8 +201,9 @@ export function useDraftingCards(
     hold: (draft) => {
       if (threadId === null) return
       setPressed((current) => new Set(current).add(draft.key))
+      // With its task, where it is one: the runtime may have heard its turn end, and let its draft go, before this comes.
       // Turned down: it shows as the runtime has it again.
-      void onHold(threadId, draft.key).catch(() =>
+      void (draft.taskId === null ? onHold(threadId, draft.key) : onHold(threadId, draft.key, draft.taskId)).catch(() =>
         setPressed((current) => {
           const next = new Set(current)
           next.delete(draft.key)

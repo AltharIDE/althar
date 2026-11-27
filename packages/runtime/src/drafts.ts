@@ -30,7 +30,10 @@ export interface WrittenPick {
 }
 
 export interface Draft {
-  /** Stable while it lasts: its draft_task call's id, or its task's where no call was seen. */
+  /**
+   * Stable while it lasts, and never another draft's, in a later turn either: the key its draft_task call's beginning was
+   * given (agents may number their calls again each turn), or its task's where no call was seen.
+   */
   readonly key: string
   /** Its title, once written; null before. */
   readonly title: string | null
@@ -113,13 +116,13 @@ export const writtenPick = (value: unknown): WrittenPick | undefined => {
   }
 }
 
-/** A call to one of the tools followed began. */
-export const callBegan = (state: Drafts, callId: string, tool: 'draft_task' | 'propose_plan'): Drafts => {
+/** A call to one of the tools followed began; a draft's call makes a draft of the key given, unique to it. */
+export const callBegan = (state: Drafts, callId: string, tool: 'draft_task' | 'propose_plan', key: string = callId): Drafts => {
   if (state.calls.has(callId)) return state
   const calls = new Map(state.calls)
   if (tool === 'draft_task') {
-    calls.set(callId, { tool, draft: callId })
-    return { drafts: [...state.drafts, blank(callId)], calls }
+    calls.set(callId, { tool, draft: key })
+    return { drafts: [...state.drafts, blank(key)], calls }
   }
   // A plan's call names its task first; until it does, it is the plan of the one draft waiting for one, where there is one.
   const waiting = state.drafts.filter((draft) => !draft.planning && !draft.planned)

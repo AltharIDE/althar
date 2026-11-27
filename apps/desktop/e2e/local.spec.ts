@@ -52,6 +52,30 @@ const shoot = async (page: Page, part: Locator, name: string) => {
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark')
 }
 
+/**
+ * What the task's page and the checkout showed, first in a failure's message: a quarantined failure keeps no trace, only
+ * the start of what it says (#569). Its header, the end of its thread, and the checkout's branch and what isn't committed.
+ */
+const whatItSaw = async (page: Page, root: string) => {
+  const words = async (part: Locator, last: number) => {
+    // Only what is there now: waiting for a part that never came would spend the failure's own time.
+    const text = (await part.count()) === 0 ? '' : await part.innerText().catch(() => '')
+    const flat = text.replace(/\s+/g, ' ').trim()
+    return flat === '' ? '(nothing)' : flat.length > last ? `…${flat.slice(-last)}` : flat
+  }
+  const header = await words(page.getByRole('banner').filter({ visible: true }).last(), 200)
+  const thread = await words(page.getByRole('region', { name: 'Thread' }).filter({ visible: true }).last(), 500)
+  // A git that can't read it says why, rather than losing what the window showed and the failure itself.
+  const checkout = (() => {
+    try {
+      return `${git(root, 'branch', '--show-current')}, ${git(root, 'status', '--porcelain') || 'all committed'}`
+    } catch (error) {
+      return `unread: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`
+    }
+  })()
+  return `It saw: header: ${header} | thread: ${thread} | checkout: ${checkout}`
+}
+
 /** Abandons the task open in the window, from its menu. */
 const abandon = async (page: Page) => {
   await page.getByRole('button', { name: 'More for this task' }).click()
@@ -94,7 +118,12 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await showPanes(page, { conversation: false, board: true })
     await work.getByRole('button', { name: 'Fix the login', exact: true }).click()
     const wait = page.getByRole('button', { name: 'Wait until they’re committed' })
-    await expect(wait).toBeVisible()
+    // Where it doesn't come, what was there instead (#569): the cause isn't known yet.
+    await expect(wait)
+      .toBeVisible()
+      .catch(async (error: unknown) => {
+        throw new Error(`The ask didn't come. ${await whatItSaw(page, root)}\n${error instanceof Error ? error.message : String(error)}`)
+      })
     await shoot(page, blockWith(page, page.getByText('Before it starts'), wait), 'ask')
     expect(git(root, 'branch', '--show-current')).toBe('main')
     await wait.click()
