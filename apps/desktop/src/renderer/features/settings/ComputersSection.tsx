@@ -19,7 +19,7 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
-import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkers, useWorkerSignIn } from '../../shared/useWorkers'
+import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkersRead, useWorkerSignIn } from '../../shared/useWorkers'
 import { useAddWorker } from './useAddWorker'
 import { homesUi, useHomesUi } from '../homes/useHomes'
 import { useWindowHome } from '../homes/windowHome'
@@ -78,7 +78,8 @@ export function ComputersSection({
     retry: false,
   })
   const places = usePlaces(true)
-  const workers = useWorkers(true)
+  const workersRead = useWorkersRead(true)
+  const workers = workersRead.data ?? null
   const removing = useRemoveWorker()
   const picking = useWorkerProjects()
   const signing = useWorkerSignIn()
@@ -211,6 +212,24 @@ export function ComputersSection({
       {removing.failed !== null && <Problem className={s.failed}>{removing.failed}</Problem>}
       {picking.failed !== null && <Problem className={s.failed}>{picking.failed}</Problem>}
       {atOnce?.failed === true && <Problem className={s.failed}>{text.failed}</Problem>}
+      {/* Asked before the home's workers are read, as from the Computers menu: held until they are, to pick the right way to add one. */}
+      {adding && workers === null && workersRead.isError && (
+        <Problem
+          className={s.failed}
+          action={
+            <>
+              <Button size="small" onClick={() => void workersRead.refetch()} disabled={workersRead.isFetching}>
+                {text.workersAgain}
+              </Button>
+              <Button size="small" variant="quiet" onClick={() => setAdding(false)}>
+                {text.workersCancel}
+              </Button>
+            </>
+          }
+        >
+          {text.workersUnread(here.name)}
+        </Problem>
+      )}
       {adding && workers?.adds === true && here.canManageWorkers && (
         <AddWorkerDialog
           home={here.name}
@@ -234,13 +253,8 @@ export function ComputersSection({
           onClose={adder.close}
         />
       )}
-      {adding && (workers?.adds !== true || !here.canManageWorkers) && (
-        <AddWorkerByHandDialog
-          home={here.name}
-          enabled={workers?.enabled ?? false}
-          standalone={here.standalone}
-          onClose={() => setAdding(false)}
-        />
+      {adding && workers !== null && (workers.adds !== true || !here.canManageWorkers) && (
+        <AddWorkerByHandDialog home={here.name} enabled={workers.enabled} standalone={here.standalone} onClose={() => setAdding(false)} />
       )}
     </>
   )
