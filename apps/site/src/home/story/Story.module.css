@@ -93,17 +93,6 @@
  * yet with a layer's own background, and the page's is paper, so on the page's layer the dark flashed light. On its
  * own it fills with black, and the flash can't show.
  */
-/* Your workers: pinned under its heading, the kit's orrery played by the scroll, as large as the window leaves room for. */
-.workers { padding-bottom: 96px; }
-.workers .head { margin-bottom: 8px; }
-.workers .stick { padding-top: 24px; }
-.workers .fleet { max-width: none; margin-top: 12px; }
-.workers .fleet svg { max-height: calc(100svh - 370px); }
-@media (max-width: 900px) {
-  .workers { padding-bottom: 64px; }
-  .workers .stick { position: static; padding-top: 0; }
-  .workers .fleet svg { max-height: none; }
-}
 .review { margin-top: 88px; padding: 0 0 80px; background: #0b0a08; color: #f4efe7; will-change: transform; }
 .review .stick { padding-top: 80px; }
 .review .lead { color: rgba(244, 239, 231, 0.66); }

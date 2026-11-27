@@ -347,11 +347,30 @@
   fill: var(--yw-ink-3);
 }
 
-/* The pause, in the drawing's corner, quiet until pointed at. */
+/*
+ * The pause, in the drawing's corner, quiet until pointed at. It draws itself
+ * in the drawing's own inks, so it holds where the kit's button reset isn't
+ * loaded (the site) and on the drawing's dark grounds.
+ */
 .pause {
   position: absolute;
   right: 6px;
   bottom: 6px;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--yw-ink-2);
+  cursor: pointer;
+}
+.pause:hover {
+  background: color-mix(in srgb, var(--yw-ink) 10%, transparent);
+  color: var(--yw-ink);
+}
+.pause:focus-visible {
+  outline: 2px solid var(--yw-ink-2);
+  outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {

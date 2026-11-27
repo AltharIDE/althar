@@ -15,16 +15,6 @@ export const SCENE = {
     ),
     lead: 'Up next, running, needs you, settled: every task across Claude Code, Codex, Gemini and Qwen, in one place. When one agent runs out, another takes over.',
   },
-  workers: {
-    title: (
-      <>
-        One worker.
-        <br />
-        <b>Then a fleet.</b>
-      </>
-    ),
-    lead: 'In early access: add Linux machines of yours as workers, and your tasks’ agents run there, with their setup, tests and dev servers. The commits come back to your computer.',
-  },
   community: {
     title: (
       <>

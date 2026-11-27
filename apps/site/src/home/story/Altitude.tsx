@@ -15,7 +15,6 @@ export const KM = {
   hero: 52,
   race: 45,
   independent: 38,
-  workers: 34.5,
   community: 31,
   review: 24,
   flow: 17,

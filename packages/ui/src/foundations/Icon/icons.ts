@@ -59,8 +59,10 @@ import {
   PagePlus,
   PageRight,
   Pause,
+  PauseSolid,
   Pin,
   Play,
+  PlaySolid,
   Plus,
   Prohibition,
   Quote,
@@ -203,6 +205,9 @@ export const ICONS = {
   /** Plays something once, to hear it. */
   play: Play,
   pause: Pause,
+  /** A moving picture's own pause and play, solid as a player's are (the outline pause reads as "00" small). */
+  stillPicture: PauseSolid,
+  playPicture: PlaySolid,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,

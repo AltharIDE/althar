@@ -69,7 +69,7 @@ const WRITTEN: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Connect a home installs Althar on your server over SSH, step by step, or connects to one with a one-time code. It updates from Althar too.',
+        text: 'Connect a home installs Althar on your server over SSH, step by step, or connects with a one-time code; from Flathub, install the host yourself, then connect. It updates from Althar too.',
       },
       {
         kind: 'new',
