@@ -1,4 +1,4 @@
-/* Where the work runs now: the machines, drawn, and the work going along their wires. In the picture's own pixels. */
+/* Your workers: this computer and one worker, then many, drawn, and the work going along their wires. In the picture's own pixels. */
 
 .figure {
   width: 912px;
@@ -25,10 +25,21 @@
 }
 .wire {
   stroke: var(--n-5);
-  transition: opacity 600ms var(--ease);
 }
-.wire[data-gone='true'] {
+/* One worker's wire goes as the many come; each of the many's comes in turn, after the one before. */
+.act {
+  transition: opacity 500ms var(--ease);
+}
+.act[data-gone='true'] {
   opacity: 0;
+}
+.fan {
+  opacity: 0;
+  transition: opacity 500ms var(--ease);
+}
+.fan[data-shown='true'] {
+  opacity: 1;
+  transition-delay: calc(var(--i) * 140ms + 300ms);
 }
 /*
  * A wire at work: its current reaches along it, from where the work leaves to
@@ -42,6 +53,10 @@
 .current[data-on='true'] {
   opacity: 1;
   transition-duration: 120ms;
+}
+.fan .current[data-on='true'],
+.fan .current[data-on='true'] .reach {
+  transition-delay: calc(var(--i) * 140ms + 300ms);
 }
 .reach {
   fill: none;
@@ -67,16 +82,16 @@
 }
 .via {
   position: absolute;
-  top: 78px;
-  left: 281px;
-  translate: -50% 0;
+  top: 84px;
+  left: 401px;
+  translate: -50% -50%;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--n-2);
   font: 500 10.5px/1.4 var(--font-label);
   letter-spacing: 0.02em;
   color: var(--t-3);
-  transition: opacity 600ms var(--ease);
+  transition: opacity 400ms var(--ease);
 }
 .via[data-gone='true'] {
   opacity: 0;
@@ -109,12 +124,12 @@
     transform 460ms var(--ease) var(--exit);
 }
 
-/* ---- this computer: a laptop, its screen going to sleep as it closes ---- */
+/* ---- this computer: a laptop, the task open on it ---- */
 
 .laptop {
   position: absolute;
   top: 36px;
-  left: 0;
+  left: 40px;
   width: 232px;
 }
 .lid {
@@ -128,21 +143,6 @@
 }
 .screen {
   position: relative;
-}
-/* closed, the screen is dark glass: what was on it goes under, a sheen across it */
-.screen::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.07) 48%, transparent 58%),
-    linear-gradient(160deg, color-mix(in srgb, var(--term) 82%, var(--paper)), var(--term) 60%);
-  opacity: 0;
-  transition: opacity 600ms var(--ease);
-}
-.laptop[data-closed='true'] .screen::after {
-  opacity: 1;
 }
 .base {
   position: relative;
@@ -239,13 +239,12 @@
   color: var(--del-ink-2);
 }
 
-/* ---- the home and the workers: machines, in ink ---- */
+/* ---- the workers: machines, in ink ---- */
 
-.server,
 .worker {
   position: absolute;
   isolation: isolate;
-  width: 232px;
+  width: 372px;
   padding: 11px 13px 12px;
   border-radius: 12px;
   background: var(--term);
@@ -254,7 +253,6 @@
   font-size: 11.5px;
 }
 /* at work, the machine's edge lights */
-.server::before,
 .worker::before {
   content: '';
   position: absolute;
@@ -268,25 +266,56 @@
   transition: opacity 700ms var(--ease);
 }
 /* it lights as the current reaches it */
-.server[data-busy='true']::before,
 .worker[data-busy='true']::before {
   opacity: 1;
   transition-delay: 600ms;
 }
-.server {
-  top: 44px;
-  left: 340px;
-  height: 136px;
-}
+/* runner-1 whole, then folded into the first row of many */
 .one {
-  top: -2px;
-  left: 680px;
-  height: 148px;
+  top: 14px;
+  left: 540px;
+  height: 208px;
+  overflow: hidden;
+  transition:
+    top 700ms var(--ease),
+    height 700ms var(--ease),
+    padding 700ms var(--ease);
 }
-.two {
-  top: 172px;
-  left: 680px;
-  height: 44px;
+.one[data-many='true'] {
+  top: 0;
+  height: 32px;
+  padding: 5px 13px;
+}
+.one .log {
+  transition: opacity 300ms var(--ease);
+}
+.one[data-many='true'] .log {
+  opacity: 0;
+}
+/* the rest of the many, each joining in turn */
+.row {
+  left: 540px;
+  height: 32px;
+  padding: 5px 13px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition:
+    opacity 450ms var(--ease),
+    transform 450ms var(--ease);
+}
+.row[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(var(--i) * 140ms + 300ms);
+}
+.task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--term-t2);
+  white-space: nowrap;
 }
 .head {
   display: flex;
@@ -304,76 +333,6 @@
   font: 560 12.5px/1 var(--mono);
   color: var(--term-t1);
 }
-.kind {
-  margin-left: auto;
-  font-size: 11px;
-}
-.leds {
-  display: flex;
-  gap: 3px;
-}
-.leds i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--term-t5);
-  opacity: 0.45;
-  transition: opacity 500ms var(--ease);
-}
-.server[data-busy='true'] .leds i {
-  background: var(--term-live);
-  animation: led 1.6s var(--ease) infinite;
-}
-.server[data-busy='true'] .leds i:nth-child(2) {
-  animation-delay: 0.3s;
-}
-.server[data-busy='true'] .leds i:nth-child(3) {
-  animation-delay: 0.6s;
-}
-@keyframes led {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-.tasks {
-  display: grid;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.tasks li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  border-top: 1px solid var(--term-raised);
-  color: var(--term-t2);
-  opacity: 0;
-  transform: translateY(4px);
-  transition:
-    opacity 500ms var(--ease),
-    transform 500ms var(--ease);
-}
-.tasks li[data-shown='true'] {
-  opacity: 1;
-  transform: none;
-}
-.tasks li > svg {
-  flex: none;
-  color: var(--term-t3);
-}
-.task {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.tasks .swap,
 .head .swap {
   font-size: 11px;
   color: var(--term-t3);
@@ -417,7 +376,7 @@
 
 .captions {
   display: grid;
-  grid-template-columns: 232px 108px 232px 108px 232px;
+  grid-template-columns: 40px 232px 268px 372px;
   margin-top: 22px;
   font-size: 13px;
   line-height: 1.5;
@@ -428,11 +387,11 @@
   gap: 2px;
   text-wrap: pretty;
 }
-.captions > span:nth-child(2) {
-  grid-column: 3;
+.captions > span:nth-child(1) {
+  grid-column: 2;
 }
-.captions > span:nth-child(3) {
-  grid-column: 5;
+.captions > span:nth-child(2) {
+  grid-column: 4;
 }
 .captions b {
   font: 620 15px/1.3 var(--font-display);
@@ -446,18 +405,16 @@
   }
   .reach,
   .current,
-  .wire,
+  .act,
+  .fan,
   .via,
-  .server::before,
+  .one,
+  .one .log,
+  .row,
   .worker::before,
-  .screen::after,
   .swap > span,
-  .tasks li,
   .log li {
     transition: none;
-  }
-  .server[data-busy='true'] .leds i {
-    animation: none;
   }
 }
 

@@ -5,7 +5,7 @@ import { ProjectTabs } from '../src/chrome/ProjectTabs/ProjectTabs'
 import { MARKED } from '../src/fixtures/marks'
 import { BETTER, FEATURES, FOLLOW, LEAD, RELEASE_0_10, RELEASE_0_9, RELEASES, ROADMAP } from '../src/fixtures/whatsNew'
 import { ComingNext } from '../src/screens/ComingNext/ComingNext'
-import { HostAndWorkers } from '../src/screens/WhatsNew/HostAndWorkers'
+import { YourWorkers } from '../src/screens/WhatsNew/YourWorkers'
 import { compareVersions, dated, firstSentence, named } from '../src/screens/WhatsNew/notes'
 import { Releases } from '../src/screens/WhatsNew/Releases'
 import { WhatsNew, type WhatsNewProps } from '../src/screens/WhatsNew/WhatsNew'
@@ -148,29 +148,40 @@ describe('What’s new', () => {
 })
 
 describe('the lead drawn', () => {
-  const laptop = (container: HTMLElement) => container.querySelector('[data-closed]')
+  const state = (container: HTMLElement) => container.querySelector('[data-finished]')
+  const one = (container: HTMLElement) => container.querySelector('[data-many]')
+  const rows = (container: HTMLElement) => [...container.querySelectorAll('.row')]
 
-  it('goes round its beats while on screen: the laptop closes, and opens on the finished task', async () => {
+  it('goes round its beats while on screen: one worker runs a task and sends it back, then many work at once', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
-    const { container } = render(<HostAndWorkers />)
+    const { container } = render(<YourWorkers />)
     // The observer sees it on screen a moment after it's drawn.
     await act(async () => {
       await Promise.resolve()
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    // From its rest at 10 s, through the loop's end at 13.6 s, to the laptop closing at 3.4 s into the next.
+    expect(one(container)).toHaveAttribute('data-many', 'true')
+    // From its rest at 10.4 s, through the loop's end at 14 s, to runner-1 at work 1.6 s into the next.
     await act(async () => {
-      vi.advanceTimersByTime(3_600 + 3_400 + 10)
+      vi.advanceTimersByTime(3_600 + 1_600 + 10)
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'true')
+    expect(one(container)).toHaveAttribute('data-many', 'false')
+    expect(one(container)).toHaveAttribute('data-busy', 'true')
+    expect(rows(container).every((row) => row.getAttribute('data-shown') === 'false')).toBe(true)
+    // Its commits come back, and the task is finished on this computer.
     await act(async () => {
-      vi.advanceTimersByTime(8_200 - 3_400)
+      vi.advanceTimersByTime(4_400 - 1_600)
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
+    expect(state(container)).toHaveAttribute('data-finished', 'true')
+    // Then many workers, each at work.
+    await act(async () => {
+      vi.advanceTimersByTime(6_000 - 4_400)
+    })
+    expect(one(container)).toHaveAttribute('data-many', 'true')
+    expect(rows(container)).toHaveLength(5)
+    expect(rows(container).every((row) => row.getAttribute('data-shown') === 'true')).toBe(true)
   })
 
-  it('rests on the finished task with motion reduced', () => {
+  it('rests on the many with motion reduced', () => {
     vi.stubGlobal(
       'matchMedia',
       (query: string) =>
@@ -181,12 +192,11 @@ describe('the lead drawn', () => {
           removeEventListener() {},
         }) as unknown as MediaQueryList,
     )
-    const { container } = render(<HostAndWorkers text={{ computer: { name: 'This Mac', what: 'Close it.' } }} />)
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    expect(screen.getByText('This Mac')).toBeInTheDocument()
-    // The finished task is back on this computer; runner-2 still works on the other.
-    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
-    expect(container.querySelector('.one')).toHaveAttribute('data-busy', 'false')
+    const { container } = render(<YourWorkers text={{ computer: { name: 'Your laptop', what: 'Where you talk.' } }} />)
+    expect(screen.getByText('Your laptop')).toBeInTheDocument()
+    expect(one(container)).toHaveAttribute('data-many', 'true')
+    expect(rows(container).every((row) => row.getAttribute('data-busy') === 'true')).toBe(true)
+    expect(screen.getAllByText('6 tasks on your workers').length).toBeGreaterThan(0)
   })
 })
 
