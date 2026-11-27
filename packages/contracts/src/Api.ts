@@ -3225,6 +3225,13 @@ export const TaskCard = Schema.Struct({
    */
   issues: Schema.optional(Schema.Struct({ drafts: Schema.Int, changes: Schema.Int })),
   /**
+   * Settled (done, merged, abandoned), the issue drafts its lead left that the person hasn't filed or discarded, oldest first,
+   * each by where it stands, so its card changes as one does.
+   * They don't keep it in Needs you: the project lists them (`BoardSnapshot.drafts`), each to file or discard. Absent where
+   * it is open, or left none.
+   */
+  draftsLeft: Schema.optional(Schema.Array(Schema.Struct({ draftId: Schema.String, title: Schema.String, state: Schema.String }))),
+  /**
    * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
    * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
    */
@@ -3537,6 +3544,16 @@ export const IssueDraftCard = Schema.Struct({
   leftOff: Schema.optional(Schema.Array(Schema.String)),
 })
 export type IssueDraftCard = typeof IssueDraftCard.Type
+
+/** An issue draft a settled task left unfiled, as the project lists it: its card, and the task, its thread and its card's item there. */
+export const DraftLeft = Schema.Struct({
+  taskId: Schema.String,
+  taskTitle: Schema.String,
+  threadId: Schema.String,
+  itemId: Schema.String,
+  draft: IssueDraftCard,
+})
+export type DraftLeft = typeof DraftLeft.Type
 
 export const IssueDraftItem = Schema.Struct({
   ...itemFields,
@@ -4836,6 +4853,12 @@ export const BoardSnapshot = Schema.Struct({
   calls: Schema.Array(BoardCall),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
+  /**
+   * The issue drafts the project's settled tasks left that the person hasn't filed or discarded, the most recently settled
+   * task's first: each its card as its task's thread shows it, and the task it came from. They hold no task in Needs you; the
+   * coordinator's conversation lists them, to file or discard. Absent from a runtime before it.
+   */
+  drafts: Schema.optional(Schema.Array(DraftLeft)),
 })
 export type BoardSnapshot = typeof BoardSnapshot.Type
 

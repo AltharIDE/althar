@@ -123,6 +123,7 @@ import { showingAside } from './asked'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
+import { SettledDrafts } from './SettledDrafts'
 import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
 import { type HomeRoom, isHome, shownOf, toggled } from './rooms'
 import s from './Project.module.css'
@@ -1276,6 +1277,8 @@ export function ProjectView({
                                   onDiscard={actions.onDiscard}
                                 />
                               ))}
+                              {/* What the project's finished tasks left to file: no task waits in Needs you on them. */}
+                              <SettledDrafts drafts={seen?.drafts} actions={draftActions} onTask={onTask} />
                             </ThreadShellProvider>
                           </Thread>
                         </ConversationFace>

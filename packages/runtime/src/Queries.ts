@@ -80,7 +80,7 @@ import { homeRows, readHomeCards } from './readHomeCards'
 import { holds, noteAll, noteLook, noteUnsure, nowFor, type StandsOn, there, unnoted, workedOut } from './standsOn'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
-import { unstartedIn } from './waits'
+import { blockerStands, unstartedIn } from './waits'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
@@ -104,8 +104,9 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf } from './lineComments'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
+import { draftsLeftOf, handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsLeft, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
+import { settledDrafts } from './settledDrafts'
 import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { ASKED_MS, BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
@@ -170,29 +171,6 @@ const CARDS_GATHER = Duration.millis(50)
 const CARD_CHANGES = 1000
 /** How many changed tasks are looked up at once for the tasks they wait for, or that wait for them. */
 const WAITS_BATCH = 500
-
-/**
- * How a task another waits for stands, from its card (waits.ts): before its lead starts, under way (in review once its pull
- * request is open), stuck where it waits on the person or stopped, and in review once it is the person's to merge.
- */
-export const blockerStands = (card: Pick<TaskCard, 'phase' | 'change'>): BlockerStanding => {
-  switch (card.phase) {
-    case 'drafting':
-    case 'planned':
-    case 'held':
-      return 'planned'
-    case 'running':
-      return card.change?.state === 'open' ? 'review' : 'working'
-    case 'waiting':
-    case 'stopped':
-      return 'stuck'
-    case 'ready':
-    case 'kept':
-      return 'review'
-    case 'settled':
-      return 'merged'
-  }
-}
 
 /** How many of its steps' reports a thread reads beside its page, newest first: far more than a task's rounds have. */
 const REPORTS = 200
@@ -2459,6 +2437,7 @@ export class Queries extends Context.Service<
             waiting: number
             issueDrafts: number
             issueChanges: number
+            draftsLeft: string | null
             review: string | null
             lead: string | null
             leadModel: string | null
@@ -2521,6 +2500,7 @@ export class Queries extends Context.Service<
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               ${sql.unsafe(issueDraftsWaiting('k'))} AS issue_drafts,
               ${sql.unsafe(issueChangesWaiting('k'))} AS issue_changes,
+              ${sql.unsafe(issueDraftsLeft('k'))} AS drafts_left,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
@@ -3039,6 +3019,7 @@ export class Queries extends Context.Service<
             ...(changeCount > 1 ? { changeCount, changeMarks: marks } : {}),
             ...(task.shelf === 'scratch' ? { scratch: true } : {}),
             ...(task.issueDrafts + task.issueChanges > 0 ? { issues: { drafts: task.issueDrafts, changes: task.issueChanges } } : {}),
+            ...draftsLeftOf(task.draftsLeft),
             ...(exchange === undefined ? {} : { latest: exchange }),
             ...(unsaid?.unsaid === 1 ? { unsaid: true } : {}),
             ...(answer === undefined ? {} : { answer }),
@@ -3568,11 +3549,13 @@ export class Queries extends Context.Service<
           forget((owner) => owner.projectId === projectId && !onIt.has(owner.taskId))
           const calls = yield* callsIn(projectId)
           const cards = tasks.flat()
+          const drafts = yield* settledDrafts(projectId)
           return {
             cursor: at,
             tasks: cards,
             calls: calls.map((one) => one.call),
             settledTotal: counted?.total ?? 0,
+            ...(drafts.length === 0 ? {} : { drafts }),
           } satisfies BoardSnapshot
         })
 
