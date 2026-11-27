@@ -15,7 +15,7 @@
 
 use std::{fs, io, os::unix::fs::PermissionsExt, path::Path};
 
-use crate::{diagnostic::DiagnosticJournal, valid_id};
+use crate::{agent_reservation::quiet_for_sweep, diagnostic::DiagnosticJournal, valid_id};
 
 const RUN_ID: usize = "war_".len() + 32;
 
@@ -140,11 +140,22 @@ pub(crate) fn forget_run(root: &Path, run_id: &str) -> io::Result<()> {
 }
 
 /// At start, before any run: what a crash left of runs the home has nothing more to ask of. A run whose control group
-/// the journal still records keeps its files until the home reconciles it.
-pub fn sweep(root: &Path, journal: &DiagnosticJournal) {
+/// the journal still records keeps its files until the home reconciles it. Another worker process on this login (a
+/// second home's) may be at work in the same folders, with a journal of its own: the sweep holds the login's
+/// reservation, so none starts meanwhile, waits for the next start where one holds it now, and keeps the run last
+/// reserved while its unit may still be going.
+pub async fn sweep(root: &Path, journal: &DiagnosticJournal) {
+    let Some((_held, live)) = quiet_for_sweep().await else {
+        eprintln!("A run is going on this login: what runs left is cleaned up at the next start.");
+        return;
+    };
+    sweep_except(root, journal, live.as_deref());
+}
+
+fn sweep_except(root: &Path, journal: &DiagnosticJournal, live: Option<&str>) {
     remove_runs(root, |run| {
         // Unsure, keep it: the home may still ask.
-        matches!(journal.agent_group(run), Ok(None))
+        Some(run) != live && matches!(journal.agent_group(run), Ok(None))
     });
 }
 
@@ -253,20 +264,23 @@ mod tests {
         let workspace = id("ws_", '2');
         let unfinished = id("war_", '1');
         let crashed = id("war_", '6');
+        // Another worker process's run on this login, still going: not in this journal, and kept.
+        let elsewhere = id("war_", '7');
         journal.record_agent_group(&unfinished, b"/user.slice/althar-agent.service")?;
-        for run in [&unfinished, &crashed] {
+        for run in [&unfinished, &crashed, &elsewhere] {
             fs::create_dir(project.join(format!("{workspace}-{run}")))?;
             fs::create_dir(project.join(format!(".{run}.import")))?;
         }
         // A file where a project's folder would be is no project, and stops nothing.
         fs::write(root.join(id("proj_", 'f')), b"not a folder")?;
-        sweep(&root, &journal);
+        sweep_except(&root, &journal, Some(&elsewhere));
         assert!(project.join(format!("{workspace}-{unfinished}")).is_dir());
+        assert!(project.join(format!("{workspace}-{elsewhere}")).is_dir());
         assert!(project.join(format!(".{unfinished}.import")).is_dir());
         assert!(!project.join(format!("{workspace}-{crashed}")).exists());
         assert!(!project.join(format!(".{crashed}.import")).exists());
         // No workspaces yet: nothing to sweep.
-        sweep(&temp.path().join("none"), &journal);
+        sweep_except(&temp.path().join("none"), &journal, None);
         Ok(())
     }
 }

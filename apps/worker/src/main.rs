@@ -145,7 +145,7 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     };
     let journal = DiagnosticJournal::open(Path::new(journal), &enrollment)?;
     if let Some(config) = &agents {
-        sweep(config.workspaces(), &journal);
+        sweep(config.workspaces(), &journal).await;
     }
     let run = || {
         run_worker_once(
@@ -296,7 +296,7 @@ async fn serve(
         .with_status(folder.join("signed-in"), release.trim().to_owned());
     let journal = DiagnosticJournal::open(&folder.join("journal"), &enrollment)?;
     // What a crash left of runs its home is done with (cleanup.rs).
-    sweep(config.workspaces(), &journal);
+    sweep(config.workspaces(), &journal).await;
     let mut stop = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
     // The address that answered last time first: a restart doesn't wait on one that never answers.
