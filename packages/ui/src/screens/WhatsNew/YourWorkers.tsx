@@ -408,7 +408,7 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
         <IconButton
           className={w.pause}
           size="small"
-          icon={paused ? 'play' : 'pause'}
+          icon={paused ? 'playPicture' : 'stillPicture'}
           label={paused ? t.play : t.pause}
           tooltip="above"
           tooltipAlign="end"
