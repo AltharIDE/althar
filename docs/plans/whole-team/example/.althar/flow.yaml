@@ -1,0 +1,33 @@
+# The stages of this project's features, read from the default branch
+# (ADR-109). This file states the default five in full; a project with
+# no flow.yaml gets exactly these. The reference is in ../README.md.
+
+specs: specs/
+
+stages:
+  - id: spec
+    owner: product
+    artefact: spec.md
+    done: merged            # the default: spec.md merged on the default branch
+    next: design            # the default: the stage below
+
+  - id: design
+    owner: design
+    artefact: design/       # a folder: done once a file in it has merged
+
+  - id: build
+    owner: engineering
+    artefact: build.md
+    done: pull-requests     # build.md and every pull request in the set merged
+
+  - id: ship
+    owner: devops
+    artefact: ops.md
+
+  - id: operate
+    owner: devops
+    done: never             # ongoing: questions and incidents go back to spec
+
+roles:
+  - id: data                # a custom role (ADR-108)
+    like: engineering       # starts from engineering's lens
