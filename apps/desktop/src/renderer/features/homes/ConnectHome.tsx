@@ -5,7 +5,7 @@ import { Button, Code, CopyButton, Dialog, Field, Problem, Spinner } from '@alth
 import type { CheckedHome, HomesHost, SshHomeTarget } from '../../../homes'
 import { device } from '../../shared/device'
 import { Board, CodeField, HostField, LaterProblem, MethodSwitch, NameField, Options, Routes, type Route, type View } from './Drawing'
-import { useExperimental } from './Experimental'
+import { type ExperimentalStore, useExperimental } from './Experimental'
 import { InstallDone, installActions, InstallSteps, useSetup } from './SetUp'
 import { useFlow } from './useFlow'
 import { homeProblem, nameFrom } from './useHomes'
@@ -220,8 +220,11 @@ export function ConnectHome({
   first = false,
   onClose,
   onHide = onClose,
+  said,
 }: {
   homes: HomesHost
+  /** Where Homes being experimental is kept as said, once for every window. Without it, it isn't said. */
+  said?: ExperimentalStore | undefined
   /** The person's first home: it opens on what a home is. */
   first?: boolean
   onClose: () => void
@@ -229,7 +232,7 @@ export function ConnectHome({
   onHide?: () => void
 }) {
   const finished = useRef(() => {})
-  const experimental = useExperimental(c.experimental)
+  const experimental = useExperimental(said, c.experimental)
   const flow = useFlow(homes, () => finished.current())
   const install = useSetup(homes, flow)
   useEffect(() => {

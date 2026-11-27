@@ -257,7 +257,7 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
   if (host.homes === undefined) return null
   const close = () => homesUi.set({ dialog: null })
   if (dialog === 'connect')
-    return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} />
+    return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} said={host} />
   if (dialog === 'manage')
     return (
       <ManageHomes
@@ -266,6 +266,7 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
         here={here}
         onClose={close}
         onConnect={() => homesUi.set({ dialog: 'connect' })}
+        said={host}
       />
     )
   return null
