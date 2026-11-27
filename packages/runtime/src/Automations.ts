@@ -817,10 +817,12 @@ export class Automations extends Context.Service<
        */
       const subjectsOf = (
         row: Row,
+        reviewRequested: true | undefined,
       ): Effect.Effect<
         | { readonly failed: string }
         | {
             readonly subjects: ReadonlyArray<Subject>
+            readonly anyListed: boolean
             readonly left: number
             readonly failed: ReadonlyArray<string>
             /** The repositories whose oldest open pull requests weren't looked at, with how many were. */
@@ -850,6 +852,7 @@ export class Automations extends Context.Service<
           const failed: Array<string> = []
           const short: Array<{ readonly name: string; readonly read: number }> = []
           let reviewable = 0
+          let anyListed = false
           for (const binding of bindings) {
             const remotes = Option.getOrElse(
               Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes),
@@ -869,6 +872,7 @@ export class Automations extends Context.Service<
                 const list = yield* place.host.listChanges(repository, {
                   state: 'open',
                   draft: false,
+                  ...(reviewRequested ? { reviewRequested } : {}),
                   limit: listedAtOnce,
                   ...(until === undefined ? {} : { updatedUntil: until }),
                 })
@@ -880,6 +884,7 @@ export class Automations extends Context.Service<
                 until = list.changes.at(-1)?.updatedAt
               }
               if (!whole) short.push({ name: binding.name, read: read.size })
+              if (read.size > 0) anyListed = true
               return [...read.values()].filter((one) => one.author !== null && one.author.login.toLowerCase() !== me)
             }).pipe(
               Effect.catch((error) =>
@@ -904,12 +909,12 @@ export class Automations extends Context.Service<
               })
             }
           }
-          if (reviewable === 0) return { failed: 'None of the project’s repositories is on GitHub, where Althar reviews pull requests.' }
+          if (reviewable === 0) return { failed: 'None of the project’s repositories is on a host connected for pull request reviews.' }
           if (found.length === 0 && failed.length > 0) return { failed: failed.join(' ') }
           const oldest = found
             .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt))
             .map(({ number, updatedAt: _updatedAt, ...one }) => ({ ...one, named: reviewable === 1 ? `#${number}` : one.url }))
-          return { subjects: oldest.slice(0, REVIEWS_A_RUN), left: Math.max(0, oldest.length - REVIEWS_A_RUN), failed, short }
+          return { subjects: oldest.slice(0, REVIEWS_A_RUN), anyListed, left: Math.max(0, oldest.length - REVIEWS_A_RUN), failed, short }
         })
 
       /** What a run says of the repositories it couldn't read to their end: their oldest open pull requests weren't looked at. */
@@ -926,15 +931,18 @@ export class Automations extends Context.Service<
         due: number,
       ) =>
         Effect.gen(function* () {
-          const listed = yield* subjectsOf(row)
+          const reviewRequested = definition.work.kind === 'review' ? definition.work.reviewRequested : undefined
+          const listed = yield* subjectsOf(row, reviewRequested)
           if (!('subjects' in listed)) return yield* end(occurrenceId, 'failed', listed.failed)
           if (listed.subjects.length === 0)
             return yield* end(
               occurrenceId,
               'nothing',
-              listed.short.length === 0
-                ? 'No new pull requests to review.'
-                : `No new pull requests among those looked at.${shortWords(listed.short)}`,
+              listed.short.length > 0
+                ? `No new pull requests among those looked at.${shortWords(listed.short)}`
+                : reviewRequested && !listed.anyListed
+                  ? 'No open pull request asks for your review'
+                  : 'No new pull requests to review.',
             )
           // Its reviews say what it found; the slot says only what they don't: those left for later, and what it couldn't read.
           const count = listed.subjects.length
@@ -1412,6 +1420,7 @@ export class Automations extends Context.Service<
         prompt: definition.prompt,
         schedule: definition.schedule,
         work: definition.work.kind,
+        ...(definition.work.kind === 'review' && definition.work.reviewRequested ? { reviewRequested: true } : {}),
         state: row.state,
         pausedBy: row.state === 'paused' ? row.pausedBy : null,
         pauseReason: row.state === 'paused' ? row.pauseReason : null,

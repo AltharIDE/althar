@@ -98,8 +98,24 @@ export const NeedsAttention: Story = {
 function useLimits(review: boolean): readonly AutomationLimit[] {
   const [all, setAll] = useState(true)
   const [posts, setPosts] = useState(false)
+  const [scope, setScope] = useState('all')
   const [stops, setStops] = useState('45')
   return [
+    ...(review
+      ? [
+          {
+            id: 'reviewScope',
+            kind: 'select' as const,
+            title: 'Pull requests to review',
+            value: scope,
+            options: [
+              { value: 'all', label: 'Every pull request' },
+              { value: 'requested', label: 'Only those that ask for my review' },
+            ],
+            onChange: setScope,
+          },
+        ]
+      : []),
     {
       id: 'all',
       kind: 'switch',
@@ -173,7 +189,7 @@ function Page(props: Partial<AutomationPageProps> & { review?: boolean }) {
 /** A new one, as a consumer keeps it: its name and prompt typed in, and what it lacks said under its field. */
 function NewPage(props: Partial<AutomationPageProps> & { prompt?: string }) {
   const { prompt: start = '', ...rest } = props
-  const limits = useLimits(true)
+  const limits = useLimits(false)
   const [name, setName] = useState(rest.name ?? '')
   const [prompt, setPrompt] = useState(start)
   const [missing, setMissing] = useState(false)
@@ -267,6 +283,18 @@ export const On: Story = {
     await expect(c.queryByRole('button', { name: /No new pull requests/ })).toBeNull()
     await userEvent.click(c.getByRole('switch', { name: 'On' }))
     await expect(c.getByText('Paused')).toBeInTheDocument()
+  },
+}
+
+export const ReviewScope: Story = {
+  render: () => <Page />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('combobox', { name: 'Pull requests to review' })
+    await expect(field).toHaveTextContent('Every pull request')
+    await userEvent.click(field)
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Only those that ask for my review' }))
+    await expect(field).toHaveTextContent('Only those that ask for my review')
   },
 }
 

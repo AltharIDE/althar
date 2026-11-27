@@ -1,4 +1,4 @@
-import type { MessageSender, SentCanvasComment } from '@althar/contracts'
+import type { AutomationSummary, MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
@@ -313,6 +313,10 @@ const When = Schema.Struct({
 })
 /* What each run ends in: nothing outside this computer, a draft pull request, one ready for review, or a review of each new pull request. */
 const EndsIn = Schema.Literals(['nothing', 'draft', 'ready', 'reviews'])
+const reviewRequested = {
+  type: 'boolean',
+  description: 'For ends_in: reviews, only pull requests asking you or your team for review. False means every eligible pull request.',
+} as const
 /* An automation the coordinator proposes. */
 const ProposedAutomation = Schema.Struct({
   name: Schema.String,
@@ -321,6 +325,7 @@ const ProposedAutomation = Schema.Struct({
   lead: StepPick,
   review: Schema.optional(Schema.NullOr(StepPick)),
   ends_in: EndsIn,
+  review_requested: Schema.optional(Schema.Boolean),
   minutes: Schema.optional(Schema.Int),
 })
 /* A change to an automation: what changes, the rest as it is. */
@@ -332,6 +337,7 @@ const ChangedAutomation = Schema.Struct({
   lead: Schema.optional(StepPick),
   review: Schema.optional(Schema.NullOr(StepPick)),
   ends_in: Schema.optional(EndsIn),
+  review_requested: Schema.optional(Schema.Boolean),
   minutes: Schema.optional(Schema.Int),
 })
 const NamedAutomation = Schema.Struct({ automation: Schema.String })
@@ -2448,14 +2454,11 @@ export class Coordinator extends Context.Service<
         }))
 
       /** What each run does, from what it ends in and its reviewer. Any agent may lead a review. */
-      const workOf = (
-        projectId: string,
-        endsIn: typeof EndsIn.Type,
-        lead: { readonly agentId: string },
-        review: typeof StepPick.Type | null,
-      ) =>
+      const workOf = (projectId: string, endsIn: typeof EndsIn.Type, review: typeof StepPick.Type | null, requested: boolean | undefined) =>
         Effect.gen(function* () {
-          if (endsIn === 'reviews') return { kind: 'review' } as const
+          if (endsIn === 'reviews') return requested ? ({ kind: 'review', reviewRequested: true } as const) : ({ kind: 'review' } as const)
+          if (requested !== undefined)
+            return yield* new ToolRefused({ message: 'Only an automation that reviews pull requests can filter by requested reviewer.' })
           return {
             kind: 'task',
             review: review === null ? null : yield* keptStep(projectId, review, 'its reviewer'),
@@ -2475,17 +2478,7 @@ export class Coordinator extends Context.Service<
           : Effect.succeed(name.trim())
 
       /** An automation in a line, for the coordinator to read. */
-      const automationLine = (one: {
-        readonly id: string
-        readonly name: string
-        readonly schedule: AutomationDefinition['schedule']
-        readonly work: 'task' | 'review'
-        readonly state: string
-        readonly pausedBy: string | null
-        readonly pauseReason: string | null
-        readonly nextAt: string | null
-        readonly latest: ReadonlyArray<{ readonly state: string; readonly reason: string | null; readonly subject: string | null }>
-      }) => {
+      const automationLine = (one: AutomationSummary) => {
         const stands =
           one.state === 'on'
             ? `on${one.nextAt === null ? '' : `, next at ${one.nextAt}`}`
@@ -2495,7 +2488,12 @@ export class Coordinator extends Context.Service<
                 : 'paused by the person'
               : 'waiting for the person to turn it on'
         const last = one.latest[0]
-        return `- “${one.name}” (${one.id}): ${scheduleInLine(one.schedule)}, ${one.work === 'review' ? 'a review of each new pull request' : 'a task from its prompt'}; ${stands}${last === undefined ? '' : `; last run ${last.state}${last.reason === null ? '' : `: ${last.reason}`}`}`
+        const work = one.reviewRequested
+          ? 'reviews only pull requests asking for your review'
+          : one.work === 'review'
+            ? 'a review of each new pull request'
+            : 'a task from its prompt'
+        return `- “${one.name}” (${one.id}): ${scheduleInLine(one.schedule)}, ${work}; ${stands}${last === undefined ? '' : `; last run ${last.state}${last.reason === null ? '' : `: ${last.reason}`}`}`
       }
 
       const listAutomations = (access: ToolAccess) =>
@@ -2511,7 +2509,7 @@ export class Coordinator extends Context.Service<
           const name = yield* nameChecked(asked.name)
           const schedule = yield* scheduleOf(asked.when)
           const lead = yield* keptStep(access.projectId, asked.lead, 'its lead')
-          const work = yield* workOf(access.projectId, asked.ends_in, lead, asked.review ?? null)
+          const work = yield* workOf(access.projectId, asked.ends_in, asked.review ?? null, asked.review_requested)
           const definition: AutomationDefinition = {
             name,
             prompt: asked.prompt.trim(),
@@ -2556,9 +2554,15 @@ export class Coordinator extends Context.Service<
             schedule: asked.when === undefined ? now.definition.schedule : yield* scheduleOf(asked.when),
             lead,
             work:
-              asked.ends_in === undefined && asked.review === undefined && asked.lead === undefined
+              asked.ends_in === undefined && asked.review === undefined && asked.review_requested === undefined
                 ? now.definition.work
-                : yield* workOf(access.projectId, endsIn, lead, reviewer),
+                : yield* workOf(
+                    access.projectId,
+                    endsIn,
+                    reviewer,
+                    asked.review_requested ??
+                      (endsIn === 'reviews' && now.definition.work.kind === 'review' ? now.definition.work.reviewRequested : undefined),
+                  ),
             minutes: asked.minutes === undefined ? now.definition.minutes : yield* minutesOf(asked.minutes),
           }
           const { again } = yield* automations.changeFor({
@@ -3329,6 +3333,7 @@ export class Coordinator extends Context.Service<
                 required: ['model'],
               },
               ends_in: { type: 'string', enum: ['nothing', 'draft', 'ready', 'reviews'] },
+              review_requested: reviewRequested,
               minutes: { type: 'integer', minimum: 5, maximum: 240, description: 'How long a run may work at most; 45 when left out.' },
             },
             required: ['name', 'prompt', 'when', 'lead', 'ends_in'],
@@ -3355,6 +3360,7 @@ export class Coordinator extends Context.Service<
               lead: { type: 'object', properties: { model: { type: 'string' }, effort }, required: ['model'] },
               review: { type: ['object', 'null'], properties: { model: { type: 'string' }, effort }, required: ['model'] },
               ends_in: { type: 'string', enum: ['nothing', 'draft', 'ready', 'reviews'] },
+              review_requested: reviewRequested,
               minutes: { type: 'integer', minimum: 5, maximum: 240 },
             },
             required: ['automation'],

@@ -18,6 +18,7 @@ import {
   LATE,
   markOf,
   minuteChoices,
+  REVIEW_SCOPE,
   type Starter,
   STARTERS,
   standingOf,
@@ -69,6 +70,19 @@ const limitsOf = (
   change: (definition: AutomationDefinition) => void,
   posts?: { readonly on: boolean; readonly set: (on: boolean) => void },
 ): ReadonlyArray<AutomationLimit> => [
+  ...(definition.work.kind === 'review'
+    ? [
+        {
+          id: 'reviewScope',
+          kind: 'select' as const,
+          title: words.reviewScope,
+          value: definition.work.reviewRequested ? 'requested' : 'all',
+          options: REVIEW_SCOPE,
+          onChange: (value: string) =>
+            change({ ...definition, work: value === 'requested' ? { kind: 'review', reviewRequested: true } : { kind: 'review' } }),
+        },
+      ]
+    : []),
   {
     id: 'allow',
     kind: 'switch',

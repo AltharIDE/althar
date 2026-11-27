@@ -240,6 +240,7 @@ describe('what each run does', () => {
 
   it('says its limits in words, with its pull requests where it opens them', () => {
     expect(limitWords(definition()).map(([name]) => name)).toEqual([
+      'Pull requests to review',
       'Allow everything',
       'Stops after',
       'If the Mac is asleep',
@@ -255,7 +256,12 @@ describe('what each run does', () => {
       ['If it fails', text.failsWords],
       ['Open pull requests', 'Five at most'],
     ])
-    expect(limitWords(definition())[0]?.[1]).toBe(`On. ${text.allowEverythingNote}`)
+    expect(limitWords(definition())).toContainEqual(['Pull requests to review', 'Every pull request'])
+    expect(limitWords(definition({ work: { kind: 'review', reviewRequested: true } }))).toContainEqual([
+      'Pull requests to review',
+      'Only those that ask for my review',
+    ])
+    expect(limitWords(definition())).toContainEqual(['Allow everything', `On. ${text.allowEverythingNote}`])
   })
 
   it('offers how long a run may work, with the time it has where it is none of them', () => {

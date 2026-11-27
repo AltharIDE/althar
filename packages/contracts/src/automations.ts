@@ -32,7 +32,11 @@ export const AutomationWork = Schema.Union([
    * review task each, its review waiting for the person until they let this
    * automation's post themselves.
    */
-  Schema.Struct({ kind: Schema.Literal('review') }),
+  Schema.Struct({
+    kind: Schema.Literal('review'),
+    /** Only pull requests asking the connected account or its team for review. Omitted for every eligible pull request. */
+    reviewRequested: Schema.optional(Schema.Literal(true)),
+  }),
 ])
 export type AutomationWork = typeof AutomationWork.Type
 
@@ -102,6 +106,7 @@ export const AutomationSummary = Schema.Struct({
   prompt: Schema.String,
   schedule: Schedule,
   work: Schema.Literals(['task', 'review']),
+  reviewRequested: Schema.optional(Schema.Literal(true)),
   state: AutomationState,
   pausedBy: Schema.NullOr(Schema.Literals(['person', 'itself'])),
   /** Why it paused itself, in a sentence. */

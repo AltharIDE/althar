@@ -97,25 +97,39 @@ const REVIEW: AutomationDefinition = {
   work: { kind: 'review' },
 }
 
-/** A repository on the fake GitHub, with one pull request by a teammate, #1, whose head is there to review. */
-const withOneToReview = () => {
+/** A repository on a fake code host, with one pull request by a teammate, #1, whose head is there to review. */
+const withOneToReview = (product: 'github' | 'gitlab' | 'bitbucket_cloud' | 'bitbucket_dc' = 'github') => {
   const at = hosted()
-  const github = makeFakeService({ pushUrl: () => at.bare })
+  const github = makeFakeService({ product, pushUrl: () => at.bare })
   github.addRepository(['meridian', 'api'])
   const git = (...args: Array<string>) =>
     execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd: at.working })
       .toString()
       .trim()
   /** Another pull request by the teammate, its head there to review too. */
-  const byTeammate = (title: string, file: string, text: string) => {
+  const byTeammate = (title: string, file: string, text: string, reviewers?: ReadonlyArray<string>, draft?: boolean) => {
     git('checkout', '-q', '--detach', 'main')
     writeFileSync(join(at.working, file), text)
     git('add', '.')
     git('commit', '-q', '-m', title)
     const head = git('rev-parse', 'HEAD')
     git('checkout', '-q', 'main')
-    const opened = github.addPullRequest({ path: ['meridian', 'api'], title, author: 'ninemate', body: '', headSha: head })
-    git('push', '-q', at.bare, `${head}:refs/pull/${opened.number}/head`)
+    const opened = github.addPullRequest({
+      path: ['meridian', 'api'],
+      title,
+      author: 'ninemate',
+      body: '',
+      headSha: head,
+      ...(reviewers === undefined ? {} : { reviewers }),
+      ...(draft === undefined ? {} : { draft }),
+    })
+    const ref = {
+      github: `refs/pull/${opened.number}/head`,
+      gitlab: `refs/merge-requests/${opened.number}/head`,
+      bitbucket_cloud: `refs/heads/${opened.source}`,
+      bitbucket_dc: `refs/pull-requests/${opened.number}/from`,
+    }[product]
+    git('push', '-q', at.bare, `${head}:${ref}`)
   }
   byTeammate('Send back', 'send.ts', 'export const sendBack = () => 1\n')
   return { at, github, byTeammate }
@@ -469,9 +483,17 @@ describe('automations', () => {
             when: { at: '09:00' },
             lead: { agent: 'codex' },
             ends_in: 'reviews',
+            review_requested: true,
           }),
           /can't be held to reading only|can't lead a review/,
         )
+        const requested = yield* automations.find(projectId, 'Morning review on Codex')
+        assert.deepStrictEqual(requested.definition.work, { kind: 'review', reviewRequested: true })
+        assert.include(yield* callTool(coordinator, 'list_automations'), 'reviews only pull requests asking for your review')
+        yield* callTool(coordinator, 'change_automation', { automation: requested.id, prompt: 'Review requests for me.' })
+        assert.deepStrictEqual((yield* automations.read(requested.id)).definition.work, { kind: 'review', reviewRequested: true })
+        yield* callTool(coordinator, 'change_automation', { automation: requested.id, review_requested: false })
+        assert.deepStrictEqual((yield* automations.read(requested.id)).definition.work, { kind: 'review' })
         for (const one of yield* automations.list(projectId))
           if (one.id !== automationId) yield* automations.remove(one.id, instance.personId)
         yield* automations.remove(automationId, instance.personId)
@@ -695,6 +717,41 @@ describe('automations', () => {
       }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) }))))
     },
   )
+
+  for (const product of ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const) {
+    it.live(`reviews only pull requests asking for the account's review on ${product}`, () => {
+      const clock = clockAt('2026-10-21T07:59:00Z')
+      const { at, github: host, byTeammate } = withOneToReview(product)
+      byTeammate('For someone else', 'other.ts', 'export const other = 1\n', ['another-reviewer'])
+      const me = 'you'
+      byTeammate('Draft for me', 'draft.ts', 'export const draft = 1\n', [me], true)
+      return Effect.gen(function* () {
+        const automations = yield* Automations
+        const instance = yield* Instance
+        const projectId = yield* openedOn(at.working)
+        const automationId = yield* automations.make({
+          projectId,
+          definition: { ...REVIEW, work: { kind: 'review', reviewRequested: true } },
+          on: true,
+          actorId: instance.personId,
+        })
+        assert.deepStrictEqual((yield* automations.read(automationId)).definition.work, { kind: 'review', reviewRequested: true })
+        clock.set('2026-10-21T08:00:05Z')
+        const first = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state !== 'starting' && rows.length > 0)
+        assert.lengthOf(first, 1)
+        assert.deepInclude(first[0], { state: 'nothing', reason: 'No open pull request asks for your review', taskId: null })
+
+        byTeammate('Ready for me', 'ready.ts', 'export const ready = 1\n', [me])
+        clock.set('2026-10-22T08:00:05Z')
+        const next = yield* until(occurrencesOf(automationId), (rows) => rows.some((row) => row.taskId !== null))
+        assert.lengthOf(next, 3)
+        assert.match(next[2]?.subjectTitle ?? '', /Ready for me$/)
+        yield* leadStarted(next[2]?.taskId ?? '')
+      }).pipe(
+        Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github: host }) }))),
+      )
+    })
+  }
 
   it.live('run where the agent’s status can’t tell a plan from a key', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
